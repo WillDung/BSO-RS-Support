@@ -1,0 +1,80 @@
+# Implementation Plan
+
+Phase status is factual as of 18 October 2026. Phase 0 is the only phase in progress. Later phases are planned, not authorized or started. Provisioning requires explicit phase authorization and applicable organizational approvals.
+
+## Phase 0 — Repository Foundation and Blueprint
+
+- **Objective:** Establish product context, governance, proposed design, and verifiable next steps.
+- **Scope:** Markdown documentation and `.gitignore`; no Power Platform resources.
+- **Dependencies:** Supplied draft blueprint and product rules.
+- **Deliverables:** Repository guidance, architecture/business/security/integration proposals, plans, and acceptance criteria.
+- **Acceptance:** Required files exist and contain meaningful content; links/frontmatter checked; no fake resources, secrets, or false status claims.
+- **Validation:** File inventory, Markdown relative-link scan, YAML frontmatter parse, consistency/privacy/status review, Git diff/status.
+- **Risks:** Missing historical references; assumptions mistaken for approved decisions.
+- **Status:** In progress.
+
+## Phase 1 — Dataverse Foundation
+
+- **Objective:** Approve schema and establish governed data/business-operation foundation.
+- **Scope:** Phase 1A schema design review first; later, only if separately authorized, solution/publisher/environment and initial tables, roles, and server-enforced operations.
+- **Dependencies:** Environment/region/access, schema review, publisher prefix, ownership/security, keys, retention, approved roles, ALM approach.
+- **Deliverables:** Reviewed schema, approved solution foundation, core entities, authorization, and transition API design/implementation as authorized.
+- **Acceptance:** Schema and security approved; keys/relationships/audit verified; permitted/blocked transitions tested; no duplicate state/history on repeat action.
+- **Validation:** Design review plus targeted Dataverse/API, authorization, concurrency, and audit tests.
+- **Risks:** Unresolved ownership, privilege, identity, and legacy data semantics.
+- **Status:** Planned; not started. Phase 1A is recommended next, not authorized implementation.
+
+## Phase 2 — Core Recruitment App
+
+- **Objective:** Support candidate, calling, queue, status, and interview outcome operations.
+- **Scope:** Model-driven app and core workflows on approved schema.
+- **Dependencies:** Phase 1 acceptance, validated field/outcome definitions, BSO access model.
+- **Deliverables:** Candidate queues/details, call logs, status history, controlled interview results, admin/reference capability as approved.
+- **Acceptance:** BSO can complete authorized core tasks; transitions enforce rules; history and negative authorization cases pass.
+- **Validation:** Unit/integration/UAT/accessibility and authorization tests.
+- **Risks:** Unvalidated SLA/KPI and detailed business rules.
+- **Status:** Planned; not started.
+
+## Phase 3 — Email and Scheduling
+
+- **Objective:** Deliver controlled, auditable email and interview scheduling.
+- **Scope:** Approved templates/dispatch and online/offline availability, calendar/Teams event lifecycle.
+- **Dependencies:** Verified BSO connector identity, Outlook/calendar permissions, TA/room test accounts, DLP and provider semantics.
+- **Deliverables:** Idempotent dispatch and booking contracts, reconciliation/monitoring, audit.
+- **Acceptance:** Correct sender/organizer and recipients; availability fails closed and rechecks; duplicate/uncertain outcomes handled safely.
+- **Validation:** Synthetic recipient/calendar tests, concurrency, failure injection, reconciliation, identity negative tests.
+- **Risks:** Connector identity, external race conditions, uncertain outcomes.
+- **Status:** Planned; not started.
+
+## Phase 4 — CV, OCR and LEGO Careers
+
+- **Objective:** Provide controlled CV prerequisites, optional OCR, and Vietnam posting sync/matching.
+- **Scope:** CV URL validation; physical SharePoint storage only if approved; LEGO proxy integration; OCR only if approved.
+- **Dependencies:** Data/privacy/retention decisions, API contract/access, DLP, licensing/capacity and accuracy review.
+- **Deliverables:** Approved CV handling, idempotent career sync/manual resolution, optional OCR with human fallback.
+- **Acceptance:** Correct Vietnam-only visibility/matching; partial sync safe; CV access controlled; OCR errors/confidence handled.
+- **Validation:** Contract, privacy/access, partial failure, duplicate, and synthetic-document tests.
+- **Risks:** API changes/access, sensitive documents, capacity/accuracy.
+- **Status:** Planned; not started.
+
+## Phase 5 — Operations, Reporting and Hardening
+
+- **Objective:** Prepare supportable operations and security/performance posture.
+- **Scope:** Monitoring, reporting, operational controls, accessibility, performance, resilience, retention.
+- **Dependencies:** Prior feature stability; operations/security ownership; Power BI decision if applicable.
+- **Deliverables:** Runbooks, alerts, dashboards/reports, hardening evidence.
+- **Acceptance:** Operational owners can detect/respond to failures; least privilege, privacy, capacity, and recovery reviewed.
+- **Validation:** Security, load/performance, recovery, monitoring, accessibility, and UAT regression.
+- **Risks:** Unclear operational ownership and optional-service scope.
+- **Status:** Planned; not started.
+
+## Phase 6 — Migration, UAT and Production Cutover
+
+- **Objective:** Reconcile approved ATSugg data and transition with acceptance and rollback.
+- **Scope:** Staged migration, user acceptance, controlled cutover, ATSugg preservation until retirement criteria met.
+- **Dependencies:** Source inventory/live access approval, mappings, identity map, retention/legal review, production environment and change approval.
+- **Deliverables:** Rehearsed migration, reconciliation evidence, signed UAT, cutover and rollback plan, eventual retirement decision.
+- **Acceptance:** Agreed required records/relationships reconcile, exceptions approved, business signs off, rollback viable, production approvals recorded.
+- **Validation:** Test migration, count/field/history reconciliation, smoke tests, rollback rehearsal.
+- **Risks:** Source data quality, audit gaps, delta/freeze window, rollback divergence.
+- **Status:** Planned; not started.

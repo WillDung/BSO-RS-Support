@@ -20,7 +20,7 @@ This log separates explicit product rules from choices requiring confirmation. S
 | Item | Needed before | Current status |
 |---|---|---|
 | Approved Dev/Test/Production environment(s), region, owners, and access | Phase 1 provisioning | Unknown; do not assume they exist |
-| Publisher prefix; `brs_` is provisional | Schema/solution creation | Awaiting approval |
+| Required project namespace `os_sr`; confirm whether exact value is valid as Dataverse Publisher Prefix | Schema/solution creation | `os_sr` is five characters and meets the documented eight-character maximum; underscore acceptance is not stated in the published reference and remains unverified. Do not substitute another prefix without explicit decision. |
 | Dataverse entity ownership, relationships, keys, audit/retention, concurrency, security boundary | Schema approval | Design review required |
 | BSO M365 connection model; whether per-user Outlook connection is permitted and can reliably expose intended From | Email implementation | Tenant policy and technical verification required |
 | TA and room mailbox availability permissions; test accounts; organizer policy | Scheduling implementation | Unknown |

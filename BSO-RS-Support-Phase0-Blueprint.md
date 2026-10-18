@@ -34,7 +34,7 @@
 
 ## C. Proposed Dataverse data model (initial names, not deployed)
 
-Use publisher prefix `brs_` once the organization approves it; names below are provisional.
+The required project namespace is `os_sr` wherever Power Platform supports it. The table labels below are business names; proposed abbreviated technical names are mapped in [Data Model](docs/DATA_MODEL.md). The exact `os_sr` Dataverse Publisher Prefix remains unverified: the documented eight-character maximum is met, but underscore acceptance is not stated in the published reference. Do not silently substitute another prefix; names remain proposals until schema review and publisher validation.
 
 | Table | Business fields and relationships | Notes |
 |---|---|---|

@@ -14,7 +14,7 @@ Work on one named phase and bounded deliverable at a time. Do not provision envi
 
 ## Naming and terminology
 
-Use BSO-RS-Support for the product and ATSugg for the legacy application. Preserve business meanings from ATSugg without carrying over obsolete technical constraints by default. Publisher prefix `brs_` is provisional. Use English filenames and technical identifiers. Do not encode assumptions about roles, regions, tenant IDs, or connector identities into names.
+Use BSO-RS-Support for the product and ATSugg for the legacy application. Preserve business meanings from ATSugg without carrying over obsolete technical constraints by default. Use the approved project namespace `os_sr` for custom components wherever Power Platform supports it. Whether the exact string `os_sr` is permitted as the Dataverse Publisher Prefix remains unverified; do not silently replace it. Use the short, consistent technical abbreviations and object-specific patterns in [Data Model](docs/DATA_MODEL.md) for tables, custom columns, relationships, alternate keys, Custom APIs, plug-in components, and Cloud Flows where technically supported. Display labels may retain clear business wording. Names are proposals until schema review; after approval, keep them stable and do not rename or recreate objects without an explicit migration plan. Do not encode personal data, roles, regions, tenant IDs, or connector identities into names. Abbreviations are not a security boundary; retain required access controls, auditing, DLP, and least-privilege protections.
 
 ## Documentation standards
 

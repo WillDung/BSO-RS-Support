@@ -22,6 +22,10 @@ Need Call Candidate → Candidate Answered → Waiting Manual Scheduling → Rou
 
 Dataverse is production source of truth; critical state changes use an approved Dataverse operation. Online scheduling requires verified TA availability; offline also requires verified room availability. Unknown availability fails closed. Email must have verified intended sender, idempotency, immutable-enough content/recipient audit, and explicit Indeterminate outcomes. Candidate CV URL remains canonical booking prerequisite; physical SharePoint CV storage is unresolved. Vietnam-only LEGO postings; exactly one title match can auto-select. See [Product Decisions](PRODUCT_DECISIONS.md) and the [Master Production Rules](../MASTER_PRODUCTION_RULES.md).
 
+## Naming requirement and status
+
+The required project namespace is `os_sr` wherever Power Platform supports it. Technical identifiers use the abbreviated dictionary and patterns proposed in [Data Model](DATA_MODEL.md); no Dataverse components are deployed. Microsoft documents the Dataverse publisher customization prefix as a maximum of eight characters, which `os_sr` meets, but the published reference does not state whether an underscore is accepted. Acceptance of the exact value as the actual Publisher Prefix remains an open validation and approval item; do not silently replace it. See the [Microsoft Publisher reference](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/reference/entities/publisher#customizationprefix).
+
 ## Source confidence and open decisions
 
 The supplied blueprint is explicitly a draft and cites unavailable historical documents (`PROJECT_CONTEXT.md`, `PRODUCT_DECISIONS.md`, `CURRENT_IMPLEMENTATION_TASK.md`, `README.md`, `MASTER_PRODUCTION_RULES.md`, `DATA_MODEL.md`, `CLAUDE.md`). This foundation uses the prompt's mandatory rules and blueprint as its source basis; no missing document content is inferred. Business details needing validation and platform dependencies are tracked in [Product Decisions](PRODUCT_DECISIONS.md).

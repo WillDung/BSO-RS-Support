@@ -41,6 +41,13 @@ Canonical path: Need Call Candidate → Candidate Answered → Waiting Manual Sc
 - Never commit secrets, tokens, passwords, real tenant IDs, production connector URLs, real candidate data, real CVs, or connection credentials. Use synthetic examples.
 - Apply least privilege and organizational DLP/privacy policies. No permission grant is assumed.
 
+## Naming and information disclosure
+
+- Use the approved project namespace `os_sr` for BSO-RS-Support custom components wherever Power Platform supports it. This requirement does not establish that `os_sr` is accepted as the Dataverse Publisher Prefix; validate that exact value before creating metadata. Do not silently substitute another prefix.
+- Use short, consistent abbreviations for technical table names, custom columns, relationships, alternate keys, Custom APIs, plug-in components, and Cloud Flows where technically supported. The internal abbreviation dictionary and proposed patterns are maintained in [Data Model](docs/DATA_MODEL.md).
+- Treat all names as proposals until schema review and publisher validation. After approval, keep technical names stable. Do not rename or recreate existing objects without an explicit migration plan.
+- Abbreviated names reduce casual disclosure only; they are not a security boundary. Protect data with Dataverse security roles, record-level access control, column-level security where appropriate, auditing, DLP policies, and least-privilege connector access. Never place personal data in names, logs, fixtures, or repository documentation.
+
 ## Integrations and operations
 
 - Treat timeouts and partial/ambiguous external outcomes as uncertain, observable states. Use bounded retries only where idempotency and outcome semantics support them; reconcile before repeating non-idempotent actions.

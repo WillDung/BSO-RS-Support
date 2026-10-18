@@ -1,0 +1,30 @@
+# Local secrets and developer configuration
+.env
+.env.*
+!.env.example
+*.local.json
+*.secrets.json
+secrets/
+
+# Temporary and editor artifacts
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs, caches, and generated outputs
+*.log
+.cache/
+coverage/
+artifacts/
+bin/
+obj/
+
+# Local Power Platform tooling state; do not ignore exported/unpacked solution source
+.powerplatform/
+.pac/

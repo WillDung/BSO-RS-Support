@@ -1,5 +1,5 @@
 ---
-applyTo: "**/*security*"
+applyTo: "**/*[sS][eE][cC][uU][rR][iI][tT][yY]*"
 ---
 # Security Guidance
 

@@ -53,7 +53,7 @@ Abbreviations are a naming and information-disclosure reduction measure, not a s
 
 ## Proposed entities
 
-The per-table implementation proposal, including full column inventory, requiredness, defaults, validation, keys, relationships, delete behavior, ownership, auditing, security, dependencies, and migration mapping, is maintained in [Dataverse Schema Specification](DATAVERSE_SCHEMA_SPECIFICATION.md). This overview and its abbreviation dictionary remain authoritative for business abbreviations.
+The per-table implementation proposal, including full column inventory, requiredness, defaults, validation, keys, relationships, delete behavior, ownership, auditing, security, dependencies, and migration mapping, is maintained in [Dataverse Schema Specification](DATAVERSE_SCHEMA_SPECIFICATION.md). The exact first-four reference table sequence, Maker input stems, solution checks, and recovery plan are in [Phase 1D-B Reference Table Runbook](PHASE_1D_B_REFERENCE_TABLE_RUNBOOK.md). This overview and its abbreviation dictionary remain authoritative for business abbreviations.
 
 | Business entity | Proposed technical table name | Purpose and key relationships | Ownership / key considerations |
 |---|---|---|---|

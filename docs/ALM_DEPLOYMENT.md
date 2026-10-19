@@ -13,6 +13,10 @@
 
 These resource records do not authorize additional schema, application, flow, security, or deployment work. Follow-on phases require their own approval and production change controls.
 
+## Phase 1D-B Reference Table Readiness
+
+Read-only schema checks on 19 October 2026 found `os_sr_ta`, `os_sr_pos`, `os_sr_csrc`, and `os_sr_loc` absent, and no components currently in the project Solution. The Maker Portal runbook [Phase 1D-B Reference Table Runbook](PHASE_1D_B_REFERENCE_TABLE_RUNBOOK.md) specifies creation inside the existing Unmanaged Solution and the independent metadata read-back. This is a plan only; no tables or audit flags have been created/enabled. Environment audit activation remains blocked pending IT/Compliance policy approval; current retention is not an approved value.
+
 ## Audit Readiness Gate
 
 Read-only audit configuration assessment on 19 October 2026 found environment auditing off, a configured 30-day retention setting, and user-access auditing off. The 30-day value is not an approved retention policy. Do not enable environment/table/column auditing or user-access auditing until IT/Compliance approvals, capacity review, existing-table audit-flag inventory, audit-reader roles, retention/historic-log treatment, and change control are documented. See [Dataverse Audit Policy Proposal](DATAVERSE_AUDIT_POLICY.md) and [Audit Impact Assessment](AUDIT_IMPACT_ASSESSMENT.md). No audit or environment setting was changed.

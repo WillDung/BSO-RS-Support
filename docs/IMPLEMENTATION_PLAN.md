@@ -22,7 +22,7 @@ Phase status is factual as of 19 October 2026. Phase 0 repository foundation is 
 - **Acceptance:** Resolve design decisions; approve schema and security; verify keys/relationships/audit; then test permitted/blocked transitions and no duplicate status/history before implementation acceptance.
 - **Validation:** Static logical-name/key/relationship review; read-only solution component check; executable Dataverse/API, authorization, concurrency, and audit tests only after a separately approved implementation.
 - **Risks:** Candidate/TA identity and ownership, key value formats, field-level security vs keys, retention, external side effects, and legacy data semantics remain unresolved.
-- **Status:** Phase 1B completed; Phase 1C schema proposal prepared for review; Phase 1D not started or authorized.
+- **Status:** Phase 1B completed; Phase 1C schema proposal and Phase 1D-B reference-table readiness runbook prepared for review; no business tables created. Phase 1D implementation is not authorized. See [Phase 1D-B Reference Table Runbook](PHASE_1D_B_REFERENCE_TABLE_RUNBOOK.md).
 
 ## Phase 2 — Core Recruitment App
 

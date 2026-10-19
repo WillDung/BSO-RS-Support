@@ -11,6 +11,7 @@
 - VN LMV IT is a Production environment explicitly selected for this internal IT development scope. Its URL and environment/organization IDs were verified during execution but are not recorded in this repository.
 - No business tables, columns, relationships, Power Apps, Cloud Flows, integrations, connector permissions, solution exports/imports, or deployments were created or verified by this work.
 - Phase 1C schema proposal covers all 15 requested tables and their proposed columns, keys, relationships, ownership, delete behavior, auditing, security, usage, dependencies, and conceptual ATSugg mappings. Business choices remain pending review; no schema component is deployed.
+- Phase 1D-B reference-table readiness runbook is prepared. Read-only metadata describes confirmed `os_sr_ta`, `os_sr_pos`, `os_sr_csrc`, and `os_sr_loc` are absent; the project Solution remains empty. No table/schema/audit changes were made.
 - Read-only audit assessment on 19 October 2026: environment auditing is disabled, configured retention is 30 days (technical setting only; not approved policy), and user-access auditing is disabled. No audit settings were changed. Audit capacity, historical audit logs, current table/column audit flags, and other-application dependencies remain unknown; see [Audit Impact Assessment](AUDIT_IMPACT_ASSESSMENT.md).
 - Power Apps Premium and Dataverse usage in production are approved in principle, according to the supplied product context; detailed capabilities, identities, capacity, and permissions remain unverified.
 - Historical reference files cited by the blueprint and any ATSugg technical documentation were absent at inspection. Live ATSugg schema/data access is not established.
@@ -21,7 +22,7 @@ Schema owner approval and remaining field/choice decisions; dedicated Dev/Test a
 
 ## Next authorized action
 
-The next proposed step is schema-owner/security review and resolution of the decisions listed in [Dataverse Schema Specification](DATAVERSE_SCHEMA_SPECIFICATION.md). Phase 1D table implementation requires separate explicit approval; this design does not authorize provisioning.
+The next proposed step is review of [Phase 1D-B Reference Table Runbook](PHASE_1D_B_REFERENCE_TABLE_RUNBOOK.md), resolution of duplicate/identity and audit decisions, and explicit Phase 1D authorization. This runbook does not authorize provisioning.
 
 ## Completion evidence
 

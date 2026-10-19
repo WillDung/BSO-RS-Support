@@ -157,10 +157,15 @@ function Get-InteractiveAccessToken {
         throw 'Online mode requires PowerShell 7.4 or later per the Microsoft Dataverse PowerShell quickstart. -PlanOnly remains available in Windows PowerShell 5.1.'
     }
     $azAccounts = @(Get-Module -ListAvailable -Name Az.Accounts | Sort-Object Version -Descending)
-    if ($azAccounts.Count -eq 0 -or $azAccounts[0].Version -lt [Version]'11.1.0') {
-        throw 'Online mode requires Az.Accounts 11.1.0 or later. Review the official module source and IT policy before installing it.'
+    if ($azAccounts.Count -eq 0) {
+        throw 'Online mode requires Az.Accounts with Get-AzAccessToken -ResourceUrl -AsSecureString. The quickstart Az 11.1.0 minimum refers to the umbrella module, not Az.Accounts.'
     }
-    Import-Module Az.Accounts -MinimumVersion 11.1.0 -ErrorAction Stop
+    Import-Module Az.Accounts -ErrorAction Stop
+    $tokenCommand = Get-Command Az.Accounts\Get-AzAccessToken -ErrorAction Stop
+    if (-not $tokenCommand.Parameters.ContainsKey('ResourceUrl') -or
+        -not $tokenCommand.Parameters.ContainsKey('AsSecureString')) {
+        throw 'Installed Az.Accounts must support Get-AzAccessToken -ResourceUrl -AsSecureString.'
+    }
     $authorizedTenants = @(Get-AzTenant -ErrorAction SilentlyContinue)
     if ($authorizedTenants.Count -eq 0) { Connect-AzAccount -ErrorAction Stop | Out-Null }
 
@@ -206,6 +211,7 @@ function Invoke-DataverseRequest {
         Method = $Method
         Uri = $requestUri
         Headers = $headers
+        SkipHeaderValidation = $true
         TimeoutSec = 120
         ErrorAction = 'Stop'
     }
@@ -246,8 +252,8 @@ function Get-TableMetadataIfPresent {
 }
 
 function Get-ProjectEntityNames {
-    $path = "EntityDefinitions?`$select=LogicalName&`$filter=startswith(LogicalName,'os_sr_')"
-    @(Get-ODataList -Path $path | ForEach-Object { $_.LogicalName })
+    $path = "EntityDefinitions?`$select=LogicalName"
+    @(Get-ODataList -Path $path | Where-Object { $_.LogicalName -like 'os_sr_*' } | ForEach-Object { $_.LogicalName })
 }
 
 function Get-SolutionMembership {

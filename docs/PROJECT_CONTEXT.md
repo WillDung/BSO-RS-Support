@@ -1,6 +1,6 @@
 # Project Context
 
-**Status:** Current repository baseline, 18 October 2026. Source basis: supplied [Phase 0 Blueprint](../BSO-RS-Support-Phase0-Blueprint.md) (draft for design review) and the accompanying product rules. Historical references named by the blueprint are not present in this repository.
+**Status:** Current repository baseline, 19 October 2026. Source basis: supplied [Phase 0 Blueprint](../BSO-RS-Support-Phase0-Blueprint.md) (draft for design review), accompanying product rules, and verified Phase 1B Publisher/Solution metadata. Historical references named by the blueprint are not present in this repository.
 
 ## Purpose and legacy
 
@@ -8,7 +8,7 @@ BSO-RS-Support is an internal recruitment support and candidate operations appli
 
 ## Current implementation
 
-Documentation and repository foundation only. No Dataverse schema, Power Apps app, Cloud Flow, custom API, connector, environment, solution export, or production integration is claimed implemented. Premium and Dataverse production usage are approved in principle; specific environments, capabilities, identities, capacity, and permissions remain unverified.
+Documentation and repository foundation, plus the verified Phase 1B Publisher and empty unmanaged Solution in VN LMV IT Production, explicitly selected for internal IT development. No Dataverse business schema, Power Apps app, Cloud Flow, custom API, connector, solution export/import, or production integration is claimed implemented. Resource properties and IDs are recorded in [Current State](CURRENT_STATE.md). Premium and Dataverse production usage are approved in principle; specific capabilities, identities, capacity, and permissions remain unverified.
 
 ## Target architecture (proposed)
 
@@ -24,7 +24,7 @@ Dataverse is production source of truth; critical state changes use an approved 
 
 ## Naming requirement and status
 
-The recommended naming strategy, pending approval, is Dataverse Publisher Prefix `os` plus project namespace segment `sr_`, producing final technical names beginning `os_sr_`. Use the abbreviated dictionary and component-specific patterns in [Data Model](DATA_MODEL.md); no Dataverse components are deployed. Microsoft documents prefixes as 2–8 alphanumeric characters beginning with a letter and not starting with `mscrm`; `os` meets those rules. A read-only publisher check in VN LMV IT found no exact `os` prefix conflict on 19 October 2026. Do not use `os_sr` as the actual Publisher Prefix or enter a full final name in a field that automatically prepends `os_`.
+The selected naming strategy is Dataverse Publisher Prefix `os` plus project namespace segment `sr_`, producing final technical names beginning `os_sr_`. The project Publisher with prefix `os` is verified; technical components should use the abbreviated dictionary and component-specific patterns in [Data Model](DATA_MODEL.md). Where Power Apps prepends `os_`, enter only the `sr_<abbreviation>` stem; otherwise use the full final name exactly once. No business components are deployed. Do not use `os_sr` as the actual Publisher Prefix or allow double-prefixing.
 
 ## Source confidence and open decisions
 

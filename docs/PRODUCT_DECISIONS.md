@@ -1,6 +1,6 @@
 # Product Decisions and Open Items
 
-This log separates explicit product rules from choices requiring confirmation. Statuses reflect the supplied materials as of 18 October 2026; a design proposal is not approval.
+This log separates explicit product rules from choices requiring confirmation. Statuses reflect the supplied materials and verified Phase 1B resource metadata as of 19 October 2026; a design proposal is not approval.
 
 ## Established product rules
 
@@ -14,13 +14,13 @@ This log separates explicit product rules from choices requiring confirmation. S
 | CV and job | CV URL and valid linked LEGO career required for booking; Vietnam-only careers; exactly-one title match only. | Confirmed |
 | Email outcome | Preserve sender/recipients/content; idempotency; distinguish Sent, Failed, Indeterminate. | Confirmed |
 | Platform | Premium/Dataverse production use approved in principle. | Confirmed; detailed tenant configuration not confirmed |
+| Technical naming | Dataverse Publisher Prefix `os` plus project namespace segment `sr_`; final technical names begin `os_sr_` and use the abbreviated dictionary. | Selected and implemented for the project Publisher on 19 October 2026; component naming remains subject to schema review |
 
 ## Open decisions and external dependencies
 
 | Item | Needed before | Current status |
 |---|---|---|
-| Approved Dev/Test/Production environment(s), region, owners, and access | Phase 1 provisioning | Unknown; do not assume they exist |
-| Recommended Dataverse Publisher Prefix `os` plus project namespace segment `sr_` (final names begin `os_sr_`) | Schema/solution creation | Pending approval. Microsoft documents 2–8 alphanumeric characters, beginning with a letter, and excludes prefixes beginning with `mscrm`; `os` fits. Read-only metadata check in VN LMV IT on 19 October 2026 found no existing publisher using `os`. |
+| Dedicated Dev/Test environment(s), region, owners, and access; governance for continued development in Production | Further implementation | VN LMV IT is Production and was explicitly selected for Phase 1B internal IT development; existence/access of separate Dev/Test environments is unverified |
 | Dataverse entity ownership, relationships, keys, audit/retention, concurrency, security boundary | Schema approval | Design review required |
 | BSO M365 connection model; whether per-user Outlook connection is permitted and can reliably expose intended From | Email implementation | Tenant policy and technical verification required |
 | TA and room mailbox availability permissions; test accounts; organizer policy | Scheduling implementation | Unknown |

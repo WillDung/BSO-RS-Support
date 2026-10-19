@@ -1,6 +1,17 @@
 # ALM and Deployment
 
-**Status:** Proposed delivery approach. No environments, pipelines, Solutions, environment variables, or connection references have been verified or created.
+**Status:** Proposed delivery approach. On 19 October 2026, the project Publisher and an empty unmanaged Solution were created and independently verified in VN LMV IT Production, explicitly selected for internal IT development. No pipelines, environment variables, connection references, or business components have been created.
+
+## Phase 1B Resource Record
+
+| Resource | Verified properties |
+|---|---|
+| Environment | VN LMV IT; Production type; explicitly selected for internal IT development. Environment URL and environment/organization IDs are intentionally not stored in this repository. |
+| Publisher | BSO-RS-Support Publisher; unique name `os_bso_rs_support`; customization prefix `os`; option value prefix `10001`; ID `ee73e9f3-87cb-f111-a05a-000d3a64b349`. |
+| Solution | BSO-RS-Support; unique name `os_sr_bso_rs_support`; version `1.0.0.0`; Unmanaged; ID `63f48907-88cb-f111-a05a-000d3a64b349`; linked to the Publisher above. |
+| Verification | Read-only MCP read-back confirmed Publisher and Solution fields; `pac solution list` independently confirmed Solution name/version/unmanaged state; Solution Component query returned no rows. No tables, apps, or flows were created. |
+
+These resource records do not authorize additional schema, application, flow, security, or deployment work. Follow-on phases require their own approval and production change controls.
 
 ## Environments and solutions
 

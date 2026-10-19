@@ -1,10 +1,10 @@
 # Proposed Dataverse Data Model
 
-**Status:** Design proposal only. None of these tables, columns, relationships, keys, or publisher settings are deployed. Phase 1A must review schema, ownership, keys, retention, security, and naming before provisioning.
+**Status:** Business schema remains a design proposal only. No business tables, columns, relationships, or keys are deployed. The project Publisher and empty unmanaged Solution have been created; see [ALM and Deployment](ALM_DEPLOYMENT.md). Phase 1C planning must review schema, ownership, keys, retention, security, and naming before any table provisioning.
 
 ## Naming standard and private abbreviation dictionary
 
-The following internal dictionary maps business meanings to proposed technical abbreviations. Keep this mapping in this repository; do not publish it externally. The recommended naming strategy, pending approval, is Publisher Prefix `os` plus the project namespace segment `sr_`. Together they form the final technical-name prefix `os_sr_`; examples below show final names, not values to paste blindly into auto-prefixing name fields. No components are approved or deployed.
+The following internal dictionary maps business meanings to proposed technical abbreviations. Keep this mapping in this repository; do not publish it externally. The selected naming strategy is Publisher Prefix `os` plus the project namespace segment `sr_`. Together they form the final technical-name prefix `os_sr_`; examples below show final names, not values to paste blindly into auto-prefixing name fields. The names are proposals; no business schema components are deployed.
 
 | Business meaning | Abbreviation | Example proposed table name |
 |---|---|---|
@@ -44,7 +44,7 @@ The five table examples above use lowercase letters and underscores, begin with 
 
 Some names cannot or should not follow the final-name pattern. The Publisher `CustomizationPrefix` is `os` by design, not an `os_sr_` component name. Platform-assigned GUIDs, immutable IDs, and system-owned names are not custom names and cannot be forced to begin `os_sr_`. Some primary-column and relationship names may be generated or constrained by their parent metadata; inspect their resulting schema names instead of assuming a free-form suffix. Cloud Flow IDs are platform-assigned, while a user-settable Flow display name should use the full `os_sr_...` form because it does not rely on Dataverse publisher auto-prefixing. Plug-in assembly/type/step names also need component-specific handling; use the full final form where the registration/build tool permits a custom name, and do not assume `os_` will be inserted. Validate each component type's actual name field, allowed characters, length, reserved words, uniqueness, relationship/key constraints, and generated result before creation. If a platform-controlled name cannot follow the convention, document the exception rather than renaming a generated object or silently changing the namespace.
 
-Once technical names are approved, keep them stable. Do not rename or recreate an existing component without an explicit migration plan addressing dependencies, data, integrations, and deployment. No existing Dataverse components are claimed in this repository.
+Once technical names are approved, keep them stable. Do not rename or recreate an existing component without an explicit migration plan addressing dependencies, data, integrations, and deployment. The project Publisher and empty Solution are recorded in [ALM and Deployment](ALM_DEPLOYMENT.md); no business schema components are deployed.
 
 Abbreviations are a naming and information-disclosure reduction measure, not a security boundary. Protect sensitive data with Dataverse security roles, record-level access control, column-level security when appropriate, auditing, data loss prevention policies, and least-privilege connector access. Never expose personal data in names, logs, fixtures, or repository documentation.
 

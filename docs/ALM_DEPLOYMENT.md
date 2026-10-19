@@ -1,6 +1,6 @@
 # ALM and Deployment
 
-**Status:** Proposed delivery approach. On 19 October 2026, the project Publisher and an empty unmanaged Solution were created and independently verified in VN LMV IT Production, explicitly selected for internal IT development. No pipelines, environment variables, connection references, or business components have been created.
+**Status:** Proposed wider delivery approach. Phase 1B created the Publisher and initially empty unmanaged Solution in VN LMV IT Production for internal IT development. On 19 October 2026, separately approved Phase 1D-C created only `os_sr_ta`; independent metadata reads verified schema and Solution inclusion. See [Current State](CURRENT_STATE.md). No pipelines, environment variables, connection references, or other project tables were created.
 
 ## Phase 1B Resource Record
 

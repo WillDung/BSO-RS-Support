@@ -239,8 +239,11 @@ function Get-ODataList {
 }
 
 function Get-EntityMetadata {
-    $path = "EntityDefinitions(LogicalName='os_sr_ta')?`$select=LogicalName,SchemaName,MetadataId,OwnershipType,PrimaryIdAttribute,PrimaryNameAttribute,DisplayName,DisplayCollectionName,IsAuditEnabled,IsDuplicateDetectionEnabled&`$expand=Attributes(`$select=LogicalName,SchemaName,MetadataId,DisplayName,AttributeType,AttributeTypeName,IsPrimaryName,RequiredLevel,MaxLength,FormatName,IsCustomAttribute,IsAuditEnabled)"
-    Invoke-DataverseRequest -Method GET -Path $path
+    $path = "EntityDefinitions(LogicalName='os_sr_ta')?`$select=LogicalName,SchemaName,MetadataId,OwnershipType,PrimaryIdAttribute,PrimaryNameAttribute,DisplayName,DisplayCollectionName,IsAuditEnabled,IsDuplicateDetectionEnabled&`$expand=Attributes(`$select=LogicalName,SchemaName,MetadataId,DisplayName,AttributeType,AttributeTypeName,IsPrimaryName,IsPrimaryId,RequiredLevel,IsCustomAttribute,IsAuditEnabled)"
+    $metadata = Invoke-DataverseRequest -Method GET -Path $path
+    $stringAttributes = @(Get-ODataList -Path "EntityDefinitions(LogicalName='os_sr_ta')/Attributes/Microsoft.Dynamics.CRM.StringAttributeMetadata?`$select=LogicalName,SchemaName,MetadataId,DisplayName,AttributeType,AttributeTypeName,IsPrimaryName,IsPrimaryId,RequiredLevel,MaxLength,FormatName,IsCustomAttribute,IsAuditEnabled")
+    $metadata.Attributes = @($metadata.Attributes | Where-Object { $_.AttributeType -cne 'String' }) + $stringAttributes
+    $metadata
 }
 
 function Get-TableMetadataIfPresent {
@@ -259,7 +262,20 @@ function Get-ProjectEntityNames {
 function Get-SolutionMembership {
     param([string]$SolutionId, [string]$ObjectId, [int]$ComponentType)
     $filter = [Uri]::EscapeDataString("_solutionid_value eq $SolutionId and objectid eq $ObjectId and componenttype eq $ComponentType")
-    @(Get-ODataList -Path "solutioncomponents?`$select=solutioncomponentid,componenttype,objectid,_solutionid_value&`$filter=$filter")
+    @(Get-ODataList -Path "solutioncomponents?`$select=solutioncomponentid,componenttype,objectid,_solutionid_value,rootcomponentbehavior&`$filter=$filter")
+}
+
+function Assert-SolutionMembership {
+    param([Parameter(Mandatory = $true)][string]$SolutionId, [Parameter(Mandatory = $true)][object]$Metadata)
+    $entityMembership = @(Get-SolutionMembership -SolutionId $SolutionId -ObjectId $Metadata.MetadataId -ComponentType 1)
+    if ($entityMembership.Count -ne 1) { throw 'Table Solution membership verification failed.' }
+    if ($null -ne $entityMembership[0].rootcomponentbehavior -and $entityMembership[0].rootcomponentbehavior -eq 0) { return }
+    foreach ($columnName in @('os_sr_ta_nm', 'os_sr_ta_eml')) {
+        $column = @($Metadata.Attributes | Where-Object { $_.LogicalName -ceq $columnName })
+        if ($column.Count -ne 1) { throw 'Column metadata missing during Solution verification.' }
+        $membership = @(Get-SolutionMembership -SolutionId $SolutionId -ObjectId $column[0].MetadataId -ComponentType 2)
+        if ($membership.Count -ne 1) { throw "Solution does not include subcomponents or explicit column $columnName." }
+    }
 }
 
 function Get-AuditState {
@@ -330,8 +346,12 @@ function Assert-TableMetadata {
         if (@($attrs | Where-Object { $_.LogicalName -ceq $sys }).Count -ne 1) { throw "System field $sys missing." }
     }
     $custom = @($attrs | Where-Object { $_.IsCustomAttribute -eq $true } | ForEach-Object { $_.LogicalName })
-    $expected = @('os_sr_taid','os_sr_ta_nm','os_sr_ta_eml')
-    if (@($custom | Where-Object { $_ -notin $expected }).Count -gt 0 -or @($expected | Where-Object { $_ -notin $custom }).Count -gt 0) {
+    $expected = @('os_sr_ta_nm','os_sr_ta_eml')
+    $primaryId = @($attrs | Where-Object { $_.LogicalName -ceq 'os_sr_taid' })
+    if ($primaryId.Count -ne 1 -or $primaryId[0].AttributeType -cne 'Uniqueidentifier' -or $primaryId[0].IsPrimaryId -ne $true) {
+        throw 'Primary GUID attribute metadata mismatch.'
+    }
+    if (@($custom | Where-Object { $_ -notin ($expected + @('os_sr_taid')) }).Count -gt 0 -or @($expected | Where-Object { $_ -notin $custom }).Count -gt 0) {
         throw 'Unexpected or missing custom column metadata.'
     }
     if ($Metadata.IsAuditEnabled.Value -ne $false -or $Metadata.IsDuplicateDetectionEnabled.Value -ne $false) {
@@ -442,10 +462,7 @@ try {
 
     $finalMetadata = Get-EntityMetadata
     Assert-TableMetadata -Metadata $finalMetadata
-    $entityMembership = @(Get-SolutionMembership -SolutionId $preflight.SolutionId -ObjectId $finalMetadata.MetadataId -ComponentType 1)
-    $emailMetadata = @($finalMetadata.Attributes | Where-Object { $_.LogicalName -ceq 'os_sr_ta_eml' })[0]
-    $emailMembership = @(Get-SolutionMembership -SolutionId $preflight.SolutionId -ObjectId $emailMetadata.MetadataId -ComponentType 2)
-    if ($entityMembership.Count -ne 1 -or $emailMembership.Count -ne 1) { throw 'Solution membership verification failed.' }
+    Assert-SolutionMembership -SolutionId $preflight.SolutionId -Metadata $finalMetadata
     $auditAfter = Get-AuditState
     if (($auditAfter | ConvertTo-Json -Compress) -cne ($preflight.Audit | ConvertTo-Json -Compress)) { throw 'Environment audit settings changed during execution.' }
     $projectTablesAfter = @(Get-ProjectEntityNames)

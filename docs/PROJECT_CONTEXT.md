@@ -8,7 +8,7 @@ BSO-RS-Support is an internal recruitment support and candidate operations appli
 
 ## Current implementation
 
-Documentation and repository foundation, plus the verified Phase 1B Publisher and empty unmanaged Solution in VN LMV IT Production, explicitly selected for internal IT development. No Dataverse business schema, Power Apps app, Cloud Flow, custom API, connector, solution export/import, or production integration is claimed implemented. Resource properties and IDs are recorded in [Current State](CURRENT_STATE.md). Premium and Dataverse production usage are approved in principle; specific capabilities, identities, capacity, and permissions remain unverified.
+Documentation and repository foundation, the verified Phase 1B Publisher/unmanaged Solution, and the single owner-approved Phase 1D-C TA Directory table `os_sr_ta` in VN LMV IT Production, explicitly selected for internal IT development. Independent metadata reads verified its approved columns and Solution inclusion; all other tables and all apps, flows, custom APIs, connectors, solution exports/imports, and integrations remain unimplemented. Evidence and remaining gates are recorded in [Current State](CURRENT_STATE.md). Premium and Dataverse production usage are approved in principle; wider capabilities, identities, capacity, and permissions remain unverified.
 
 ## Target architecture (proposed)
 
@@ -24,7 +24,7 @@ Dataverse is production source of truth; critical state changes use an approved 
 
 ## Naming requirement and status
 
-The selected naming strategy is Dataverse Publisher Prefix `os` plus project namespace segment `sr_`, producing final technical names beginning `os_sr_`. The project Publisher with prefix `os` is verified; technical components should use the abbreviated dictionary and component-specific patterns in [Data Model](DATA_MODEL.md). Where Power Apps prepends `os_`, enter only the `sr_<abbreviation>` stem; otherwise use the full final name exactly once. No business components are deployed. Do not use `os_sr` as the actual Publisher Prefix or allow double-prefixing.
+The selected naming strategy is Dataverse Publisher Prefix `os` plus project namespace segment `sr_`, producing final technical names beginning `os_sr_`. The Publisher prefix and approved TA table/column names are verified; other components should follow [Data Model](DATA_MODEL.md). Where Power Apps prepends `os_`, enter only the `sr_<abbreviation>` stem; otherwise use the full final name exactly once. Do not use `os_sr` as the actual Publisher Prefix or allow double-prefixing.
 
 ## Source confidence and open decisions
 

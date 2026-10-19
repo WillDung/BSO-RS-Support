@@ -1,6 +1,6 @@
 # Proposed Dataverse Schema Specification
 
-**Status:** Phase 1C design proposal, 19 October 2026. Publisher `os` and the empty unmanaged Solution exist; none of the business tables or columns below exist. This specification is not authorization to provision them.
+**Status:** Wider Phase 1C design proposal, 19 October 2026. Phase 1D-C separately approved and created only `os_sr_ta` and its two specified name/email columns, with approved plural **TA Directories**. Independent metadata/Solution reads passed; see [Data Model](DATA_MODEL.md#verified-ta-implementation) and [Current State](CURRENT_STATE.md). Other tables, keys, and relationships below remain unprovisioned proposals. This specification does not authorize additional work.
 
 ## Evidence and Decision Labels
 

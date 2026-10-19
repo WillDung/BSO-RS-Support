@@ -4,7 +4,7 @@ Scripts here support reviewed build, validation, migration, and ALM tasks. They 
 
 ## TA Reference Table Provisioning
 
-[Provision-BsoRsTaTable.ps1](Provision-BsoRsTaTable.ps1) implements the reviewed metadata payload for only `os_sr_ta`; `TA Directories` remains a proposed collection label, not an approved requirement. It uses the official Dataverse Web API, verifies environment/Publisher/Solution before any write, associates metadata using `MSCRM.SolutionUniqueName`, and reads back the result. It does not access table rows or create records.
+[Provision-BsoRsTaTable.ps1](Provision-BsoRsTaTable.ps1) implements the owner-approved metadata payload for only `os_sr_ta`, including approved plural **TA Directories**. It uses the official Dataverse Web API, verifies environment/Publisher/Solution before any write, associates metadata using `MSCRM.SolutionUniqueName`, and reads back the result. It does not access table rows or create business records. The single authorized deployment and independent verification are recorded in [Current State](../docs/CURRENT_STATE.md); do not run Apply again against the existing table.
 
 The default mode is online **DryRun** (interactive auth plus read-only preflight). `-PlanOnly` prints and locally validates the payload without authentication or network calls. Only `-Apply` reaches metadata POST operations; it also requires a typed confirmation phrase. Never use Apply without separate explicit approval.
 
@@ -24,7 +24,7 @@ Keep URLs, environment/organization IDs, credentials, and tokens outside this re
 & (Join-Path $PWD 'scripts/Provision-BsoRsTaTable.ps1') -PlanOnly -EnvironmentName 'VN LMV IT' -OrganizationUrl '<approved-org-url>' -ExpectedEnvironmentId '<approved-environment-id>' -ExpectedOrganizationId '<approved-organization-id>'
 ```
 
-The API requires `DisplayCollectionName`, while the approved schema specifies only `TA Directory`. The preview derives `TA Directories` as a proposed plural label. This is not an approved business requirement; obtain owner confirmation before Apply.
+The API requires `DisplayCollectionName`. The owner explicitly approved `TA Directories` for Phase 1D-C. Supply `-DisplayCollectionName 'TA Directories'` to show that explicit value in the preview; the script retains its explicit-input gate for Apply.
 
 ### Online DryRun
 
@@ -50,14 +50,16 @@ Authenticated DryRun on 19 October 2026 passed using PowerShell 7.6.7 and Az.Acc
 - **Invalid header value `null`:** PowerShell 7 validates `If-None-Match` syntax locally. The request uses `SkipHeaderValidation` for Dataverse's `If-None-Match: null` header; HTTPS and verified-organization URL checks remain enforced.
 - **HTTP 501 for metadata `startswith`:** Dataverse does not support that function on metadata entities. The script retrieves table logical names only and applies the project-prefix filter locally, preserving continuation-page handling.
 
-### Apply Command (Not Authorized or Executed)
+### Apply Command (Executed Once; Do Not Repeat)
 
-Only after separate explicit approval and approval of the derived collection label:
+The owner approved exactly `os_sr_ta` and the plural label on 19 October 2026. The following invocation pattern was executed once with explicit verified target parameters; it is historical reference, not an instruction to rerun:
 
 ```powershell
 & (Join-Path $PWD 'scripts/Provision-BsoRsTaTable.ps1') -Apply -DisplayCollectionName 'TA Directories'
 ```
 
-Apply requires typing `CREATE os_sr_ta IN VN LMV IT WITH COLLECTION TA Directories`. It creates the table and primary name, creates TA Email, publishes only that table metadata, then verifies ownership, names/types/requiredness, standard state/status fields, keys, Solution membership, audit settings, and project-table inventory. An uncertain write triggers read-only reconciliation; the script never retries or deletes/recreates automatically. No Apply operation has been performed.
+Apply requires typing `CREATE os_sr_ta IN VN LMV IT WITH COLLECTION TA Directories`. The approved run created the table/primary name and TA Email and published only that table. It exited with `Solution membership verification failed` because it incorrectly required a separate attribute-component row. Independent GETs confirmed exact schema and whole-table inclusion through `rootcomponentbehavior=0` (**Include Subcomponents**). The local verifier now accepts this documented inclusion, or explicit membership of both approved columns when subcomponents are not included. Read-only verification passed; no write retry or membership repair occurred. Audit settings remained unchanged and only `os_sr_ta` exists in the project namespace.
+
+Read-back queries cast string columns to `Microsoft.Dynamics.CRM.StringAttributeMetadata` for format/length checks. The generated GUID is verified as a primary ID without assuming its `IsCustomAttribute` flag. See Microsoft's [Solution Component reference](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/reference/entities/solutioncomponent#rootcomponentbehavior) for root inclusion semantics. Future runs against an existing project table intentionally stop at preflight; any repair needs a separately approved recovery scope.
 
 See [Phase 1D-B runbook](../docs/PHASE_1D_B_REFERENCE_TABLE_RUNBOOK.md), [Dataverse Schema Specification](../docs/DATAVERSE_SCHEMA_SPECIFICATION.md), and [ALM and Deployment](../docs/ALM_DEPLOYMENT.md).

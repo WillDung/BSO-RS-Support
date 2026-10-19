@@ -2,6 +2,8 @@
 
 **Status:** Readiness plan only, 19 October 2026. No Dataverse resources were created or modified. Table creation requires separate explicit authorization.
 
+This is historical Phase 1D-B readiness evidence. Later Phase 1D-C created only TA. Phase 1D-D prepared a shared automated Web API provisioner and passed read-only checks for the remaining tables without creating them; current inventory and authority are in [Current State](CURRENT_STATE.md). Use [Scripts](../scripts/README.md) for automated commands. This runbook's earlier absence/empty-Solution observations are not current-state claims.
+
 ## Verified Target and Resources
 
 | Item | Verified value |
@@ -115,7 +117,7 @@ Run after each table save, before continuing. These are metadata queries only an
      AND e.logicalname = 'os_sr_ta'
    ```
 
-   Confirm all specified custom columns are represented. Repeat for each table.
+   Confirm all specified custom columns are represented explicitly, or that the table's root Solution component has `rootcomponentbehavior=0` (**Include Subcomponents**), which includes its columns without separate attribute rows. Never treat absence of explicit attribute rows alone as missing membership. Shell-only/excluded subcomponents require explicit column membership. Repeat for each table.
 5. Ownership and `PrimaryIdAttribute`/`PrimaryNameAttribute` must be independently verified through the Maker table properties or a read-only Dataverse Web API `EntityDefinitions(LogicalName='os_sr_ta')` metadata GET. The current MCP table/Entity schema views do not expose `OwnershipType` reliably. Verify expected generated GUID name `os_sr_taid`, and equivalent names for other tables; do not treat the metadata `entityid` as the row primary GUID column.
 6. Confirm table/column `IsAuditEnabled` remains false/unset using Maker metadata or an authorized metadata read-back. Do not read the Audit table.
 

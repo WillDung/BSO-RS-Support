@@ -2,6 +2,8 @@
 
 Phase status is factual as of 19 October 2026. Phase 0 foundation and Phase 1B Publisher/Solution setup are complete. Phase 1C's wider schema remains proposed. Explicit owner approval authorized Phase 1D-C for exactly `os_sr_ta`; creation and independent metadata verification are complete. Other tables and later app/flow implementation are not authorized by that approval.
 
+Phase 1D-D separately authorizes provisioning code, synthetic tests, and authenticated read-only DryRun for `os_sr_pos`, `os_sr_csrc`, and `os_sr_loc`, not Apply. That preparation is complete: 92 synthetic assertions and four read-only DryRuns (including default TA regression) passed. Declarative definitions, centralized preflight/authentication, typed String/Memo verification, and corrected Solution inclusion are shared by the existing script. TA remains unchanged and the only project table. Plurals and Phase 1D-D Apply require explicit approval; see [Current State](CURRENT_STATE.md) and [Scripts](../scripts/README.md).
+
 ## Phase 0 — Repository Foundation and Blueprint
 
 - **Objective:** Establish product context, governance, proposed design, and verifiable next steps.

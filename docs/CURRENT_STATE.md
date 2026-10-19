@@ -1,6 +1,6 @@
 # Current State
 
-**As of:** 19 October 2026. **Phase:** Phase 1D-C, approved `os_sr_ta` creation independently verified; all other business tables remain unprovisioned.
+**As of:** 19 October 2026. **Phase:** Phase 1D-D provisioning preparation and authenticated read-only DryRun complete; Apply pending approval. Phase 1D-C's `os_sr_ta` remains the only deployed project table.
 
 ## Facts
 
@@ -13,6 +13,8 @@
 - Independent metadata GETs verified **TA Directory / TA Directories**, `OrganizationOwned`, primary GUID `os_sr_taid` (`Uniqueidentifier`, primary ID), primary name `os_sr_ta_nm` (**TA Name**, String/Text, 200, `ApplicationRequired`, `IsPrimaryName=true`), and `os_sr_ta_eml` (**TA Email**, String/Email, 254, `ApplicationRequired`). Standard `statecode/statuscode` exist; no custom `is_active` or unintended custom columns/alternate keys exist. See [Data Model](DATA_MODEL.md).
 - Solution membership is verified through the table root component with `rootcomponentbehavior=0` (**Include Subcomponents**). Separate attribute-component rows are not present or required for this whole-table inclusion. The initial single Apply invocation exited with a false-negative membership-verifier error after both creates and table-scoped publication; only read-only reconciliation followed. The local verifier was corrected and independent read-back passed. No creation retry, deletion, recreation, or association repair was performed.
 - Phase 1C covers the wider 15-table design. Only the approved TA table slice is implemented; remaining schema choices and components stay proposed. Phase 1D-B's earlier absence/empty-Solution checks are historical pre-creation evidence. Current project-table inventory contains only `os_sr_ta`; `os_sr_pos`, `os_sr_csrc`, and `os_sr_loc` remain absent.
+- Phase 1D-D authorized local code/tests and read-only checks only. The existing TA script now uses shared declarative reference definitions and a single-table selector, retaining TA as the default. Synthetic tests passed 92 assertions. Authenticated DryRun passed for Position, Candidate Source, Location, and the default TA regression, each with 15 GET attempts and zero POST attempts. Full selected TA metadata snapshots, schema and Solution inclusion stayed unchanged; the three target tables remain absent. No Apply was invoked. See [Scripts](../scripts/README.md) for exact payloads, test command, approval boundaries, and proposed Apply commands.
+- Positions, Candidate Sources, and Locations are proposed plural labels pending approval. The Location email label is **Room/Resource Email**, as specified by the schema/runbook, rather than the request's proposed **Room Resource Email**. Its metadata is optional (`None`); the offline-booking requirement remains a future business-operation rule.
 - Read-only audit assessment on 19 October 2026: environment auditing is disabled, configured retention is 30 days (technical setting only; not approved policy), and user-access auditing is disabled. No audit settings were changed. Audit capacity, historical audit logs, current table/column audit flags, and other-application dependencies remain unknown; see [Audit Impact Assessment](AUDIT_IMPACT_ASSESSMENT.md).
 - Power Apps Premium and Dataverse usage in production are approved in principle, according to the supplied product context; detailed capabilities, identities, capacity, and permissions remain unverified.
 - Historical reference files cited by the blueprint and any ATSugg technical documentation were absent at inspection. Live ATSugg schema/data access is not established.
@@ -23,7 +25,7 @@ Schema owner approval and remaining field/choice decisions; dedicated Dev/Test a
 
 ## Next authorized action
 
-Phase 1D-C is complete for `os_sr_ta` only, based on independent post-creation verification. Stop here; additional tables, data population, audit activation, and security changes require separate authorization. Resolve directory identity/duplicate and audit-policy decisions before business use. The [Phase 1D-B Reference Table Runbook](PHASE_1D_B_REFERENCE_TABLE_RUNBOOK.md) remains a plan for later reference-table work, not authorization to proceed.
+Phase 1D-C is complete for `os_sr_ta` only. Phase 1D-D code/tests and read-only preparation are complete; stop after DryRun and await explicit Phase 1D-D Apply approval, including proposed plural labels. No additional table creation, TA modification, business-data population, audit activation, or security changes are authorized. Resolve directory identity/duplicate and audit-policy decisions before business use. The [Phase 1D-B Reference Table Runbook](PHASE_1D_B_REFERENCE_TABLE_RUNBOOK.md) remains a plan, not authorization to proceed.
 
 ## Completion evidence
 

@@ -2,9 +2,9 @@
 
 Scripts here support reviewed build, validation, migration, and ALM tasks. They must be safe by default, avoid embedded credentials and personal data, clearly identify environment effects, and include verification instructions.
 
-## TA Reference Table Provisioning
+## Reference Table Provisioning
 
-[Provision-BsoRsTaTable.ps1](Provision-BsoRsTaTable.ps1) implements the owner-approved metadata payload for only `os_sr_ta`, including approved plural **TA Directories**. It uses the official Dataverse Web API, verifies environment/Publisher/Solution before any write, associates metadata using `MSCRM.SolutionUniqueName`, and reads back the result. It does not access table rows or create business records. The single authorized deployment and independent verification are recorded in [Current State](../docs/CURRENT_STATE.md); do not run Apply again against the existing table.
+[Provision-BsoRsTaTable.ps1](Provision-BsoRsTaTable.ps1) is the shared reference-table provisioner; its filename and default `os_sr_ta` selection remain for backward compatibility. [ReferenceTableDefinitions.psd1](ReferenceTableDefinitions.psd1) declares TA and the three planned reference schemas. `-TableName` selects exactly one of `os_sr_ta`, `os_sr_pos`, `os_sr_csrc`, or `os_sr_loc`. The owner-approved TA deployment is recorded in [Current State](../docs/CURRENT_STATE.md); do not recreate or modify that table. Phase 1D-D authorizes code, tests, and authenticated read-only DryRun only, not creation of the remaining tables.
 
 The default mode is online **DryRun** (interactive auth plus read-only preflight). `-PlanOnly` prints and locally validates the payload without authentication or network calls. Only `-Apply` reaches metadata POST operations; it also requires a typed confirmation phrase. Never use Apply without separate explicit approval.
 
@@ -34,9 +34,51 @@ After installing the documented prerequisites through the approved IT process an
 & (Join-Path $PWD 'scripts/Provision-BsoRsTaTable.ps1')
 ```
 
-The script first validates the active environment, signs in interactively only when Az has no authorized tenant context, obtains a Dataverse-resource token as SecureString, and uses GET requests only. It verifies WhoAmI, Publisher, Solution, audit baseline, target/project table absence, and the proposed metadata payload. It performs no Web API write methods. Treat displayed environment URL and IDs as sensitive operational configuration; do not save output in this repository. Never add `-Apply` to this command.
+The script validates PAC environment/organization/user identity, requires the same authorized user in the Az context, obtains a Dataverse-resource token as SecureString, and uses GET requests only. It verifies WhoAmI, Publisher, Solution, audit baseline, project inventory, and the local payload. Every existing reference table must match its declaration and have valid Solution membership; unexpected project tables fail closed. Existing-table snapshots and audit settings are compared before/after the run. DryRun can verify an existing selected table; Apply always rejects an existing target. Treat displayed environment URL and IDs as sensitive operational configuration; do not save output in this repository.
 
-Authenticated DryRun on 19 October 2026 passed using PowerShell 7.6.7 and Az.Accounts 5.5.3. The authorized Az tenant/user and PAC environment matched; Dataverse accepted the organization-resource token. WhoAmI matched the expected organization and Dataverse user. The Publisher prefix was `os`; the unmanaged Solution was version `1.0.0.0` and linked to that Publisher. No `os_sr_*` table definitions existed, including `os_sr_ta`. The script returned `DryRunPassed` with `WritesPerformed: 0`; no business records were accessed and no audit setting was changed. This is read-only readiness evidence, not approval or validation of Apply. `TA Directories` remains a proposed label.
+Historical Phase 1D-C DryRun passed before TA creation. Phase 1D-D read-only checks on 19 October 2026 passed using PowerShell 7.6.7 and Az.Accounts 5.5.3: Position, Candidate Source, Location, and default TA invocation each returned `DryRunPassed`, 15 GET attempts, and zero POST attempts. The current project inventory is exactly `os_sr_ta`; all three targets remain absent. TA schema, Solution inclusion, and full selected metadata snapshots remained valid and unchanged. Environment auditing remained disabled, retention remained 30 days (technical setting, not approved policy), and user-access auditing remained disabled. No Apply was invoked in Phase 1D-D.
+
+### Declarative Payloads and Approval Boundary
+
+All tables use `Microsoft.Dynamics.CRM.EntityMetadata`, `OrganizationOwned`, `IsActivity=false`, `HasActivities=false`, and `HasNotes=false`. The primary name alone is embedded in `Attributes` during table creation. Additional columns have individual metadata POSTs only during separately authorized Apply. No keys, relationship definitions, data rows, or audit properties are supplied.
+
+| Table / display label | Plural / approval | Primary name: schema, label, type, limit, requiredness | Additional columns |
+|---|---|---|---|
+| `os_sr_pos` / Position | Positions / pending | `os_sr_pos_ttl`, Position Title, String/Text(200), ApplicationRequired, primary | None |
+| `os_sr_csrc` / Candidate Source | Candidate Sources / pending | `os_sr_csrc_nm`, Source Name, String/Text(100), ApplicationRequired, primary | None |
+| `os_sr_loc` / Location | Locations / pending | `os_sr_loc_nm`, Location Name, String/Text(150), ApplicationRequired, primary | `os_sr_loc_rmeml`, **Room/Resource Email**, String/Email(254), None; `os_sr_loc_det`, Location Details, Memo/Text(1000), None |
+
+The request proposed **Room Resource Email**, but the authoritative [schema](../docs/DATAVERSE_SCHEMA_SPECIFICATION.md) and [runbook](../docs/PHASE_1D_B_REFERENCE_TABLE_RUNBOOK.md) use **Room/Resource Email**; the definition retains that exact label. The email's conditional booking requirement is not create-time metadata requiredness. Location Details uses `MemoAttributeMetadata`, `AttributeTypeName=MemoType`, and `Format=Text`; String fields use `StringAttributeMetadata` and `FormatName.Value`. Expected primary GUIDs are `os_sr_posid`, `os_sr_csrcid`, and `os_sr_locid`.
+
+Generate the complete exact JSON payloads locally, without authentication:
+
+```powershell
+& ./scripts/Provision-BsoRsTaTable.ps1 -TableName os_sr_pos -PlanOnly
+& ./scripts/Provision-BsoRsTaTable.ps1 -TableName os_sr_csrc -PlanOnly
+& ./scripts/Provision-BsoRsTaTable.ps1 -TableName os_sr_loc -PlanOnly
+```
+
+For authenticated DryRun, omit `-PlanOnly` and leave `-Apply` absent, with the required process-scoped environment values set. Results are JSON on stdout with stage/status, inventory and verification flags, and GET/POST attempt counts. Tokens are never included. Do not persist live environment configuration or raw authentication output in the repository.
+
+The same code owns authentication, PAC/WhoAmI preflight, Publisher/Solution verification, typed String/Memo read-back, and Solution membership verification. Root behavior `0` includes subcomponents; otherwise every declared column must have explicit membership. It checks exact names/labels/types/lengths/requiredness, primary name/GUID, state/status, keys, custom columns/relationships, and existing-table snapshots. GET requests are restricted to metadata/configuration; continuation links must remain on the same HTTPS API origin and redirects are disabled. The transport rejects POST outside confirmed Apply and restricts metadata creates and publication to the single selected table. There are no retry, deletion, recreation, or business-row paths. An uncertain write emits stopped/reconciliation status and must not be retried automatically.
+
+**Proposed Apply commands, not authorized or executed in this phase:** run only after separate Phase 1D-D approval and approval of the corresponding plural, with verified process-scoped target configuration:
+
+```powershell
+& ./scripts/Provision-BsoRsTaTable.ps1 -TableName os_sr_pos -Apply -DisplayCollectionName 'Positions'
+& ./scripts/Provision-BsoRsTaTable.ps1 -TableName os_sr_csrc -Apply -DisplayCollectionName 'Candidate Sources'
+& ./scripts/Provision-BsoRsTaTable.ps1 -TableName os_sr_loc -Apply -DisplayCollectionName 'Locations'
+```
+
+Execute one approved table at a time and verify it before considering another. Explicit label input does not itself grant approval. Apply requires the exact phrase `CREATE <logical-name> IN VN LMV IT WITH COLLECTION <plural>`. Never execute these commands merely to test the path.
+
+Run the dependency-free synthetic suite in PowerShell 7.4+:
+
+```powershell
+& ./tests/ReferenceTableProvisioning.Tests.ps1
+```
+
+The plain assertion harness is run directly, not through VS Code test discovery. It covers exact four-table payloads, TA regression fixtures, metadata drift rejection, membership positive/negative cases, no-write and no-business-read guards, and same-origin/foreign OData pagination using mocked transport. Apply entry points and real HTTP requests are never invoked by the suite.
 
 ### Troubleshooting
 

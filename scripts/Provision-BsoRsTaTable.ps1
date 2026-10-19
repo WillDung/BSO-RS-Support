@@ -7,14 +7,20 @@ param(
     [string]$OrganizationUrl = $env:BSO_RS_ORG_URL,
     [string]$ExpectedEnvironmentId = $env:BSO_RS_EXPECTED_ENVIRONMENT_ID,
     [string]$ExpectedOrganizationId = $env:BSO_RS_EXPECTED_ORG_ID,
-    [string]$DisplayCollectionName
+    [string]$DisplayCollectionName,
+    [ValidateSet('os_sr_ta', 'os_sr_pos', 'os_sr_csrc', 'os_sr_loc')]
+    [string]$TableName = 'os_sr_ta'
 )
 
 $ErrorActionPreference = 'Stop'
 $script:AccessToken = $null
 $script:ApiRoot = $null
 $script:WritesStarted = $false
-$expectedCollectionName = 'TA Directories'
+$script:WritesAllowed = $false
+$script:RequestCounts = @{ GET = 0; POST = 0 }
+$script:Definitions = Import-PowerShellDataFile (Join-Path $PSScriptRoot 'ReferenceTableDefinitions.psd1')
+$script:Definition = $script:Definitions[$TableName]
+$expectedCollectionName = $script:Definition.DisplayCollectionName
 $collectionNameWasExplicit = -not [string]::IsNullOrWhiteSpace($DisplayCollectionName)
 if (-not $collectionNameWasExplicit) { $DisplayCollectionName = $expectedCollectionName }
 
@@ -31,67 +37,68 @@ function New-Label {
 }
 
 function New-RequiredLevel {
+    param([ValidateSet('None', 'ApplicationRequired')][string]$Value = 'ApplicationRequired')
     [ordered]@{
-        Value = 'ApplicationRequired'
+        Value = $Value
         CanBeChanged = $true
         ManagedPropertyLogicalName = 'canmodifyrequirementlevelsettings'
     }
 }
 
-function New-SchemaPayloads {
-    $primaryName = [ordered]@{
-        '@odata.type' = 'Microsoft.Dynamics.CRM.StringAttributeMetadata'
-        AttributeType = 'String'
-        AttributeTypeName = [ordered]@{ Value = 'StringType' }
-        SchemaName = 'os_sr_ta_nm'
-        DisplayName = New-Label 'TA Name'
-        RequiredLevel = New-RequiredLevel
-        MaxLength = 200
-        FormatName = [ordered]@{ Value = 'Text' }
-        IsPrimaryName = $true
+function New-ColumnPayload {
+    param([Parameter(Mandatory = $true)][System.Collections.IDictionary]$Column)
+    if ($Column.AttributeType -notin @('String', 'Memo')) { throw 'Unsupported reference column type.' }
+    $payload = [ordered]@{
+        '@odata.type' = "Microsoft.Dynamics.CRM.$($Column.AttributeType)AttributeMetadata"
+        AttributeType = $Column.AttributeType
+        AttributeTypeName = [ordered]@{ Value = "$($Column.AttributeType)Type" }
+        SchemaName = $Column.SchemaName
+        DisplayName = New-Label $Column.DisplayName
+        RequiredLevel = New-RequiredLevel $Column.RequiredLevel
+        MaxLength = $Column.MaxLength
+        IsPrimaryName = [bool]$Column.IsPrimaryName
     }
+    if ($Column.AttributeType -ceq 'String') { $payload.FormatName = [ordered]@{ Value = $Column.FormatName } }
+    else { $payload.Format = $Column.FormatName }
+    $payload
+}
+
+function New-SchemaPayloads {
     $table = [ordered]@{
         '@odata.type' = 'Microsoft.Dynamics.CRM.EntityMetadata'
-        SchemaName = 'os_sr_ta'
-        DisplayName = New-Label 'TA Directory'
+        SchemaName = $TableName
+        DisplayName = New-Label $script:Definition.DisplayName
         DisplayCollectionName = New-Label $DisplayCollectionName
-        OwnershipType = 'OrganizationOwned'
+        OwnershipType = $script:Definition.OwnershipType
         IsActivity = $false
         HasActivities = $false
         HasNotes = $false
-        Attributes = @($primaryName)
+        Attributes = @(New-ColumnPayload $script:Definition.PrimaryName)
     }
-    $email = [ordered]@{
-        '@odata.type' = 'Microsoft.Dynamics.CRM.StringAttributeMetadata'
-        AttributeType = 'String'
-        AttributeTypeName = [ordered]@{ Value = 'StringType' }
-        SchemaName = 'os_sr_ta_eml'
-        DisplayName = New-Label 'TA Email'
-        RequiredLevel = New-RequiredLevel
-        MaxLength = 254
-        FormatName = [ordered]@{ Value = 'Email' }
-    }
-    [pscustomobject]@{ Table = $table; EmailColumn = $email }
+    $columns = @($script:Definition.Columns | ForEach-Object { New-ColumnPayload $_ })
+    [pscustomobject]@{ Table = $table; Columns = $columns; EmailColumn = @($columns | Where-Object { $_.FormatName.Value -ceq 'Email' }) | Select-Object -First 1 }
 }
 
 function Assert-SchemaPayloads {
     param([Parameter(Mandatory = $true)][object]$Payloads)
-    $primary = @($Payloads.Table.Attributes)
-    if ($Payloads.Table.SchemaName -cne 'os_sr_ta' -or
+    if ($Payloads.Table.SchemaName -cne $TableName -or
+        $Payloads.Table.'@odata.type' -cne 'Microsoft.Dynamics.CRM.EntityMetadata' -or
         $Payloads.Table.OwnershipType -cne 'OrganizationOwned' -or
-        $Payloads.Table.DisplayName.LocalizedLabels[0].Label -cne 'TA Directory' -or
-        $Payloads.Table.DisplayCollectionName.LocalizedLabels[0].Label -cne $DisplayCollectionName -or
-        $primary.Count -ne 1 -or $primary[0].SchemaName -cne 'os_sr_ta_nm' -or
-        $primary[0].IsPrimaryName -ne $true -or $primary[0].MaxLength -ne 200 -or
-        $primary[0].FormatName.Value -cne 'Text' -or
-        $primary[0].RequiredLevel.Value -cne 'ApplicationRequired') {
-        throw 'Local table or primary-name payload validation failed.'
+        $Payloads.Table.DisplayName.LocalizedLabels[0].Label -cne $script:Definition.DisplayName -or
+        $Payloads.Table.DisplayCollectionName.LocalizedLabels[0].Label -cne $expectedCollectionName -or
+        $Payloads.Table.IsActivity -ne $false -or $Payloads.Table.HasActivities -ne $false -or $Payloads.Table.HasNotes -ne $false -or
+        @($Payloads.Table.Attributes).Count -ne 1 -or @($Payloads.Columns).Count -ne @($script:Definition.Columns).Count) {
+        throw 'Local table payload differs from the declared reference schema.'
     }
-    $email = $Payloads.EmailColumn
-    if ($email.SchemaName -cne 'os_sr_ta_eml' -or $email.DisplayName.LocalizedLabels[0].Label -cne 'TA Email' -or
-        $email.MaxLength -ne 254 -or $email.FormatName.Value -cne 'Email' -or
-        $email.RequiredLevel.Value -cne 'ApplicationRequired') {
-        throw 'Local TA Email payload validation failed.'
+    $tableKeys = @('@odata.type', 'SchemaName', 'DisplayName', 'DisplayCollectionName', 'OwnershipType', 'IsActivity', 'HasActivities', 'HasNotes', 'Attributes')
+    if (@($Payloads.Table.GetEnumerator() | Where-Object { $_.Key -notin $tableKeys }).Count) { throw 'Unintended table payload property.' }
+    $actual = @($Payloads.Table.Attributes) + @($Payloads.Columns)
+    $declared = @($script:Definition.PrimaryName) + @($script:Definition.Columns)
+    for ($index = 0; $index -lt $declared.Count; $index++) {
+        $expected = New-ColumnPayload $declared[$index]
+        if (($actual[$index] | ConvertTo-Json -Depth 20 -Compress) -cne ($expected | ConvertTo-Json -Depth 20 -Compress)) {
+            throw "Local column payload mismatch: $($declared[$index].SchemaName)."
+        }
     }
 }
 
@@ -140,7 +147,9 @@ function Assert-PacEnvironment {
     $url = [regex]::Match($pacText, '(?m)^\s*Org URL:\s*(\S+)')
     $orgId = [regex]::Match($pacText, '(?m)^\s*Org ID:\s*([0-9a-fA-F-]{36})')
     $envId = [regex]::Match($pacText, '(?m)^\s*Environment ID:\s*([0-9a-fA-F-]{36})')
-    if (-not $name.Success -or -not $url.Success -or -not $orgId.Success -or -not $envId.Success) {
+    $userId = [regex]::Match($pacText, '(?m)^\s*User ID:\s*([0-9a-fA-F-]{36})')
+    $userEmail = [regex]::Match($pacText, '(?m)^\s*User Email:\s*(\S+)')
+    if (-not $name.Success -or -not $url.Success -or -not $orgId.Success -or -not $envId.Success -or -not $userId.Success -or -not $userEmail.Success) {
         throw 'Could not parse PAC identity response; stop without switching environments.'
     }
     if ($name.Groups[1].Value -cne 'VN LMV IT' -or
@@ -149,6 +158,8 @@ function Assert-PacEnvironment {
         $envId.Groups[1].Value -cne $ExpectedEnvironmentId) {
         throw 'PAC active environment does not match the configured VN LMV IT target; stop without switching.'
     }
+    $script:PacUserId = $userId.Groups[1].Value
+    $script:PacUserEmail = $userEmail.Groups[1].Value
     $script:ApiRoot = $OrganizationUrl.TrimEnd('/') + '/api/data/v9.2/'
 }
 
@@ -168,6 +179,10 @@ function Get-InteractiveAccessToken {
     }
     $authorizedTenants = @(Get-AzTenant -ErrorAction SilentlyContinue)
     if ($authorizedTenants.Count -eq 0) { Connect-AzAccount -ErrorAction Stop | Out-Null }
+    $context = Get-AzContext -ErrorAction Stop
+    if ($null -eq $context -or $context.Account.Type -ne 'User' -or $context.Account.Id -ine $script:PacUserEmail) {
+        throw 'Az user context must match the verified PAC user; no context switching will be attempted.'
+    }
 
     $secureToken = $null
     $tokenText = $null
@@ -192,6 +207,15 @@ function Invoke-DataverseRequest {
         [object]$Body,
         [switch]$WithSolutionHeader
     )
+    if ($Method -eq 'POST') {
+        if (-not $Apply -or $PlanOnly -or -not $script:WritesAllowed) { throw 'POST blocked: confirmed Apply is required.' }
+        $attributePath = "EntityDefinitions(LogicalName='$TableName')/Attributes"
+        if ($Path -notin @('EntityDefinitions', $attributePath, 'PublishXml')) { throw 'Unapproved write path.' }
+        if ($Path -eq 'EntityDefinitions' -and $Body.SchemaName -cne $TableName) { throw 'Unapproved table payload.' }
+        if ($Path -eq $attributePath -and $Body.SchemaName -notin @($script:Definition.Columns | ForEach-Object { $_.SchemaName })) { throw 'Unapproved column payload.' }
+        if ($Path -ne 'PublishXml' -and -not $WithSolutionHeader) { throw 'Metadata creation requires the project Solution header.' }
+        if ($Path -eq 'PublishXml' -and $Body.ParameterXml -cne "<importexportxml><entities><entity>$TableName</entity></entities></importexportxml>") { throw 'Unapproved publish scope.' }
+    }
     $headers = @{
         Authorization = 'Bearer ' + $script:AccessToken
         Accept = 'application/json'
@@ -204,14 +228,19 @@ function Invoke-DataverseRequest {
     $parsedRequestUri = [Uri]$requestUri
     $organizationUri = [Uri]$OrganizationUrl
     if ($parsedRequestUri.Scheme -cne 'https' -or $parsedRequestUri.Authority -ine $organizationUri.Authority -or
-        $parsedRequestUri.AbsolutePath -notmatch '^/api/data/v9\.2/') {
+        $parsedRequestUri.AbsolutePath -notmatch '^/api/data/v9\.2/' -or $parsedRequestUri.UserInfo -or $parsedRequestUri.Fragment) {
         throw 'Dataverse request URL is outside the verified organization API origin.'
+    }
+    $resource = $parsedRequestUri.AbsolutePath.Substring('/api/data/v9.2/'.Length)
+    if ($Method -eq 'GET' -and $resource -notmatch '^(WhoAmI$|organizations\(|publishers$|solutions$|solutioncomponents$|EntityDefinitions($|\(|/))') {
+        throw 'GET blocked: only identity, configuration, and schema metadata reads are allowed.'
     }
     $request = @{
         Method = $Method
         Uri = $requestUri
         Headers = $headers
         SkipHeaderValidation = $true
+        MaximumRedirection = 0
         TimeoutSec = 120
         ErrorAction = 'Stop'
     }
@@ -219,6 +248,7 @@ function Invoke-DataverseRequest {
         $request.ContentType = 'application/json; charset=utf-8'
         $request.Body = ConvertTo-Json -InputObject $Body -Depth 40 -Compress
     }
+    $script:RequestCounts[$Method]++
     Invoke-RestMethod @request
 }
 
@@ -239,18 +269,28 @@ function Get-ODataList {
 }
 
 function Get-EntityMetadata {
-    $path = "EntityDefinitions(LogicalName='os_sr_ta')?`$select=LogicalName,SchemaName,MetadataId,OwnershipType,PrimaryIdAttribute,PrimaryNameAttribute,DisplayName,DisplayCollectionName,IsAuditEnabled,IsDuplicateDetectionEnabled&`$expand=Attributes(`$select=LogicalName,SchemaName,MetadataId,DisplayName,AttributeType,AttributeTypeName,IsPrimaryName,IsPrimaryId,RequiredLevel,IsCustomAttribute,IsAuditEnabled)"
+    param([string]$LogicalName = $TableName)
+    if ($LogicalName -notin $script:Definitions.Keys) { throw 'Undeclared reference table.' }
+    $basePath = "EntityDefinitions(LogicalName='$LogicalName')"
+    $common = 'LogicalName,SchemaName,MetadataId,DisplayName,AttributeType,AttributeTypeName,IsPrimaryName,IsPrimaryId,RequiredLevel,IsCustomAttribute,IsAuditEnabled'
+    $path = "$basePath`?`$select=LogicalName,SchemaName,MetadataId,OwnershipType,PrimaryIdAttribute,PrimaryNameAttribute,DisplayName,DisplayCollectionName,IsAuditEnabled,IsDuplicateDetectionEnabled&`$expand=Attributes(`$select=$common),ManyToOneRelationships(`$select=SchemaName,IsCustomRelationship),OneToManyRelationships(`$select=SchemaName,IsCustomRelationship),ManyToManyRelationships(`$select=SchemaName,IsCustomRelationship)"
     $metadata = Invoke-DataverseRequest -Method GET -Path $path
-    $stringAttributes = @(Get-ODataList -Path "EntityDefinitions(LogicalName='os_sr_ta')/Attributes/Microsoft.Dynamics.CRM.StringAttributeMetadata?`$select=LogicalName,SchemaName,MetadataId,DisplayName,AttributeType,AttributeTypeName,IsPrimaryName,IsPrimaryId,RequiredLevel,MaxLength,FormatName,IsCustomAttribute,IsAuditEnabled")
+    $stringAttributes = @(Get-ODataList -Path "$basePath/Attributes/Microsoft.Dynamics.CRM.StringAttributeMetadata?`$select=$common,MaxLength,FormatName")
     $metadata.Attributes = @($metadata.Attributes | Where-Object { $_.AttributeType -cne 'String' }) + $stringAttributes
+    if (@($metadata.Attributes | Where-Object { $_.AttributeType -ceq 'Memo' }).Count) {
+        $memoAttributes = @(Get-ODataList -Path "$basePath/Attributes/Microsoft.Dynamics.CRM.MemoAttributeMetadata?`$select=$common,MaxLength,Format")
+        $metadata.Attributes = @($metadata.Attributes | Where-Object { $_.AttributeType -cne 'Memo' }) + $memoAttributes
+    }
+    $metadata.Attributes = @($metadata.Attributes | Sort-Object LogicalName)
+    $metadata | Add-Member -NotePropertyName Keys -NotePropertyValue @(Get-ODataList -Path "$basePath/Keys?`$select=LogicalName,KeyAttributes")
     $metadata
 }
 
 function Get-TableMetadataIfPresent {
-    $filter = [Uri]::EscapeDataString("LogicalName eq 'os_sr_ta'")
-    $tableMatches = Get-ODataList -Path "EntityDefinitions?`$select=LogicalName,MetadataId&`$filter=$filter"
+    $filter = [Uri]::EscapeDataString("LogicalName eq '$TableName'")
+    $tableMatches = @(Get-ODataList -Path "EntityDefinitions?`$select=LogicalName,MetadataId&`$filter=$filter")
     if ($tableMatches.Count -eq 0) { return $null }
-    if ($tableMatches.Count -ne 1) { throw 'Multiple os_sr_ta table definitions found.' }
+    if ($tableMatches.Count -ne 1) { throw 'Multiple target table definitions found.' }
     Get-EntityMetadata
 }
 
@@ -266,11 +306,13 @@ function Get-SolutionMembership {
 }
 
 function Assert-SolutionMembership {
-    param([Parameter(Mandatory = $true)][string]$SolutionId, [Parameter(Mandatory = $true)][object]$Metadata)
+    param([Parameter(Mandatory = $true)][string]$SolutionId, [Parameter(Mandatory = $true)][object]$Metadata,
+        [System.Collections.IDictionary]$Definition = $script:Definitions[$Metadata.LogicalName])
+    if ($null -eq $Definition) { throw 'Missing declared schema for Solution verification.' }
     $entityMembership = @(Get-SolutionMembership -SolutionId $SolutionId -ObjectId $Metadata.MetadataId -ComponentType 1)
     if ($entityMembership.Count -ne 1) { throw 'Table Solution membership verification failed.' }
     if ($null -ne $entityMembership[0].rootcomponentbehavior -and $entityMembership[0].rootcomponentbehavior -eq 0) { return }
-    foreach ($columnName in @('os_sr_ta_nm', 'os_sr_ta_eml')) {
+    foreach ($columnName in @($Definition.PrimaryName.SchemaName) + @($Definition.Columns | ForEach-Object { $_.SchemaName })) {
         $column = @($Metadata.Attributes | Where-Object { $_.LogicalName -ceq $columnName })
         if ($column.Count -ne 1) { throw 'Column metadata missing during Solution verification.' }
         $membership = @(Get-SolutionMembership -SolutionId $SolutionId -ObjectId $column[0].MetadataId -ComponentType 2)
@@ -293,7 +335,7 @@ function Get-Preflight {
     Assert-PacEnvironment
     Get-InteractiveAccessToken
     $who = Invoke-DataverseRequest -Method GET -Path 'WhoAmI'
-    if ($who.OrganizationId -ne $ExpectedOrganizationId) { throw 'WhoAmI organization mismatch; stop without writes.' }
+    if ($who.OrganizationId -ne $ExpectedOrganizationId -or $who.UserId -ne $script:PacUserId) { throw 'WhoAmI organization/user mismatch; stop without writes.' }
     $org = Invoke-DataverseRequest -Method GET -Path "organizations($ExpectedOrganizationId)?`$select=organizationid"
     if ($org.organizationid -ne $ExpectedOrganizationId) { throw 'Organization metadata mismatch; stop without writes.' }
 
@@ -308,7 +350,15 @@ function Get-Preflight {
         $solutions[0]._publisherid_value -ne $publishers[0].publisherid) { throw 'Project Solution/Publisher linkage mismatch; stop without writes.' }
 
     $projectTables = @(Get-ProjectEntityNames)
-    if ($projectTables.Count -gt 0) { throw ('Project table metadata already exists: ' + ($projectTables -join ', ') + '. Stop for reconciliation.') }
+    if (@($projectTables | Where-Object { $_ -notin $script:Definitions.Keys }).Count) { throw 'Unexpected project table exists; stop for reconciliation.' }
+    $snapshots = @{}
+    foreach ($existingName in $projectTables) {
+        $existing = Get-EntityMetadata -LogicalName $existingName
+        Assert-TableMetadata -Metadata $existing -Definition $script:Definitions[$existingName]
+        Assert-SolutionMembership -SolutionId $solutions[0].solutionid -Metadata $existing
+        $snapshots[$existingName] = $existing | ConvertTo-Json -Depth 40 -Compress
+    }
+    if ($Apply -and $TableName -in $projectTables) { throw 'Target already exists; Apply will not update, delete, or recreate it.' }
     $audit = Get-AuditState
     if ($audit.AuditingEnabled -ne $false -or $audit.UserAccessAuditingEnabled -ne $false) {
         throw 'Audit state differs from the documented baseline; this script will not modify audit settings.'
@@ -320,60 +370,86 @@ function Get-Preflight {
         SolutionId = [string]$solutions[0].solutionid
         SolutionUniqueName = [string]$solutions[0].uniquename
         Audit = $audit
+        ProjectTables = $projectTables
+        ExistingSnapshots = $snapshots
+        TargetExists = ($TableName -in $projectTables)
     }
 }
 
 function Assert-TableMetadata {
-    param([Parameter(Mandatory = $true)][object]$Metadata)
-    if ($Metadata.LogicalName -cne 'os_sr_ta' -or $Metadata.SchemaName -cne 'os_sr_ta' -or
-        $Metadata.OwnershipType -cne 'OrganizationOwned' -or $Metadata.PrimaryNameAttribute -cne 'os_sr_ta_nm' -or
-        $Metadata.PrimaryIdAttribute -cne 'os_sr_taid' -or
-        $Metadata.DisplayName.UserLocalizedLabel.Label -cne 'TA Directory' -or
-        $Metadata.DisplayCollectionName.UserLocalizedLabel.Label -cne $DisplayCollectionName) {
+    param([Parameter(Mandatory = $true)][object]$Metadata,
+        [System.Collections.IDictionary]$Definition = $script:Definitions[$Metadata.LogicalName])
+    if ($null -eq $Definition) { throw 'Missing declared reference schema.' }
+    $logicalName = $Metadata.LogicalName
+    if ($logicalName -notin $script:Definitions.Keys -or $Metadata.SchemaName -cne $logicalName -or
+        $Metadata.OwnershipType -cne 'OrganizationOwned' -or $Metadata.PrimaryNameAttribute -cne $Definition.PrimaryName.SchemaName -or
+        $Metadata.PrimaryIdAttribute -cne ($logicalName + 'id') -or
+        $Metadata.DisplayName.UserLocalizedLabel.Label -cne $Definition.DisplayName -or
+        $Metadata.DisplayCollectionName.UserLocalizedLabel.Label -cne $Definition.DisplayCollectionName) {
         throw 'Table schema, display labels, ownership, primary-name, or primary-GUID validation failed.'
     }
     $attrs = @($Metadata.Attributes)
-    $primary = @($attrs | Where-Object { $_.LogicalName -ceq 'os_sr_ta_nm' })
-    $email = @($attrs | Where-Object { $_.LogicalName -ceq 'os_sr_ta_eml' })
-    if ($primary.Count -ne 1 -or $primary[0].DisplayName.UserLocalizedLabel.Label -cne 'TA Name' -or
-        $primary[0].IsPrimaryName -ne $true -or $primary[0].AttributeType -cne 'String' -or
-        $primary[0].FormatName.Value -cne 'Text' -or $primary[0].MaxLength -ne 200 -or
-        $primary[0].RequiredLevel.Value -cne 'ApplicationRequired') { throw 'TA Name metadata mismatch.' }
-    if ($email.Count -ne 1 -or $email[0].DisplayName.UserLocalizedLabel.Label -cne 'TA Email' -or
-        $email[0].AttributeType -cne 'String' -or $email[0].FormatName.Value -cne 'Email' -or
-        $email[0].MaxLength -ne 254 -or $email[0].RequiredLevel.Value -cne 'ApplicationRequired') { throw 'TA Email metadata mismatch.' }
+    foreach ($column in @($Definition.PrimaryName) + @($Definition.Columns)) {
+        $actual = @($attrs | Where-Object { $_.LogicalName -ceq $column.SchemaName })
+        if ($actual.Count -ne 1) { throw "Missing declared column $($column.SchemaName)." }
+        $format = if ($column.AttributeType -ceq 'Memo') { $actual[0].Format } else { $actual[0].FormatName.Value }
+        if ($actual[0].SchemaName -cne $column.SchemaName -or $actual[0].DisplayName.UserLocalizedLabel.Label -cne $column.DisplayName -or
+            $actual[0].AttributeType -cne $column.AttributeType -or $actual[0].AttributeTypeName.Value -cne "$($column.AttributeType)Type" -or
+            $actual[0].MaxLength -ne $column.MaxLength -or $format -cne $column.FormatName -or
+            $actual[0].RequiredLevel.Value -cne $column.RequiredLevel -or $actual[0].IsPrimaryName -ne [bool]$column.IsPrimaryName) {
+            throw "Column metadata mismatch: $($column.SchemaName)."
+        }
+    }
     foreach ($sys in @('statecode','statuscode')) {
         if (@($attrs | Where-Object { $_.LogicalName -ceq $sys }).Count -ne 1) { throw "System field $sys missing." }
     }
     $custom = @($attrs | Where-Object { $_.IsCustomAttribute -eq $true } | ForEach-Object { $_.LogicalName })
-    $expected = @('os_sr_ta_nm','os_sr_ta_eml')
-    $primaryId = @($attrs | Where-Object { $_.LogicalName -ceq 'os_sr_taid' })
+    $expected = @($Definition.PrimaryName.SchemaName) + @($Definition.Columns | ForEach-Object { $_.SchemaName })
+    $primaryId = @($attrs | Where-Object { $_.LogicalName -ceq ($logicalName + 'id') })
     if ($primaryId.Count -ne 1 -or $primaryId[0].AttributeType -cne 'Uniqueidentifier' -or $primaryId[0].IsPrimaryId -ne $true) {
         throw 'Primary GUID attribute metadata mismatch.'
     }
-    if (@($custom | Where-Object { $_ -notin ($expected + @('os_sr_taid')) }).Count -gt 0 -or @($expected | Where-Object { $_ -notin $custom }).Count -gt 0) {
+    if (@($custom | Where-Object { $_ -notin ($expected + @($logicalName + 'id')) }).Count -gt 0 -or @($expected | Where-Object { $_ -notin $custom }).Count -gt 0) {
         throw 'Unexpected or missing custom column metadata.'
     }
     if ($Metadata.IsAuditEnabled.Value -ne $false -or $Metadata.IsDuplicateDetectionEnabled.Value -ne $false) {
         throw 'Audit or duplicate-detection option is enabled unexpectedly.'
     }
-    if (@(Get-ODataList -Path "EntityDefinitions(LogicalName='os_sr_ta')/Keys?`$select=LogicalName,KeyAttributes").Count -ne 0) {
+    if ($null -eq $Metadata.Keys -or @($Metadata.Keys).Count -ne 0) {
         throw 'Alternate key exists unexpectedly.'
+    }
+    foreach ($navigation in @('ManyToOneRelationships', 'OneToManyRelationships', 'ManyToManyRelationships')) {
+        if ($null -eq $Metadata.$navigation -or @($Metadata.$navigation | Where-Object { $_.IsCustomRelationship -eq $true }).Count) {
+            throw 'Custom relationship exists or relationship inventory is incomplete.'
+        }
+    }
+}
+
+function Assert-UnchangedState {
+    param([Parameter(Mandatory = $true)][object]$Preflight, [switch]$Created)
+    $auditAfter = Get-AuditState
+    if (($auditAfter | ConvertTo-Json -Compress) -cne ($Preflight.Audit | ConvertTo-Json -Compress)) { throw 'Environment audit settings changed during execution.' }
+    $after = @(Get-ProjectEntityNames | Sort-Object)
+    $expected = @($Preflight.ProjectTables)
+    if ($Created) { $expected += $TableName }
+    if (($after -join ',') -cne ((@($expected | Sort-Object)) -join ',')) { throw 'Project table inventory changed unexpectedly.' }
+    foreach ($existingName in $Preflight.ExistingSnapshots.Keys) {
+        $snapshot = Get-EntityMetadata -LogicalName $existingName | ConvertTo-Json -Depth 40 -Compress
+        if ($snapshot -cne $Preflight.ExistingSnapshots[$existingName]) { throw "Existing table metadata changed: $existingName." }
     }
 }
 
 function Get-ReconciliationSummary {
     try {
         $table = Get-TableMetadataIfPresent
-        if (-not $table) { return 'No os_sr_ta table metadata found by read-only reconciliation. Do not retry automatically.' }
-        $emailFound = @($table.Attributes | Where-Object { $_.LogicalName -ceq 'os_sr_ta_eml' }).Count -eq 1
+        if (-not $table) { return 'No target table metadata found by read-only reconciliation. Do not retry automatically.' }
         return [ordered]@{
             TableFound = $true
             LogicalName = $table.LogicalName
             OwnershipType = $table.OwnershipType
             PrimaryName = $table.PrimaryNameAttribute
             PrimaryGuid = $table.PrimaryIdAttribute
-            EmailColumnFound = $emailFound
+            ColumnsFound = @($table.Attributes | Where-Object { $_.LogicalName -like 'os_sr_*' } | ForEach-Object { $_.LogicalName })
             Recovery = 'Stop; do not retry, delete, rename, or recreate. Inspect metadata and obtain explicit recovery approval.'
         }
     }
@@ -393,18 +469,18 @@ function Show-Plan {
         PublisherPrefix = 'os'
         TableSchemaName = $Payloads.Table.SchemaName
         OwnershipType = $Payloads.Table.OwnershipType
-        TableDisplayName = 'TA Directory'
+        TableDisplayName = $script:Definition.DisplayName
         DisplayCollectionName = $DisplayCollectionName
-        DisplayCollectionNameStatus = if ($collectionNameWasExplicit) { 'Explicit input' } else { 'Derived proposal; explicitly approve before Apply' }
+        DisplayCollectionNameStatus = if ($script:Definition.PluralApproved) { 'Owner-approved Phase 1D-C' } else { 'Pending owner approval; explicit input does not grant authorization' }
         PrimaryNameSchemaName = $Payloads.Table.Attributes[0].SchemaName
         PrimaryNameDataType = 'String/Text'
-        PrimaryNameMaxLength = 200
+        PrimaryNameMaxLength = $script:Definition.PrimaryName.MaxLength
         PrimaryNameRequiredLevel = 'ApplicationRequired'
-        PrimaryGuidLogicalName = 'os_sr_taid (expected from platform)'
+        PrimaryGuidLogicalName = $TableName + 'id'
         AdditionalColumnSchemaName = $Payloads.EmailColumn.SchemaName
-        AdditionalColumnFormatName = 'Email'
-        AdditionalColumnMaxLength = 254
-        AdditionalColumnRequiredLevel = 'ApplicationRequired'
+        AdditionalColumnFormatName = $Payloads.EmailColumn.FormatName.Value
+        AdditionalColumnMaxLength = $Payloads.EmailColumn.MaxLength
+        AdditionalColumnRequiredLevel = $Payloads.EmailColumn.RequiredLevel.Value
         AlternateKeys = 'None'
         DuplicateDetection = 'None'
         AuditChanges = 'None; do not set audit properties and compare environment flags after Apply.'
@@ -412,19 +488,21 @@ function Show-Plan {
         ApiOperations = @(
             'GET WhoAmI, Organization, Publisher, Solution, EntityDefinitions, audit flags',
             'POST EntityDefinitions with MSCRM.SolutionUniqueName: table and primary name',
-            'POST EntityDefinitions(...)/Attributes with MSCRM.SolutionUniqueName: TA Email',
-            'POST PublishXml: publish only os_sr_ta metadata',
+            'POST EntityDefinitions(...)/Attributes with MSCRM.SolutionUniqueName: each declared additional column, if any',
+            "POST PublishXml: publish only $TableName metadata",
             'GET EntityDefinitions, Keys, solutioncomponents, Organization: independent read-back'
         )
         TablePayload = $Payloads.Table
         EmailColumnPayload = $Payloads.EmailColumn
+        AdditionalColumnPayloads = @($Payloads.Columns)
     }
     Write-Output ($preview | ConvertTo-Json -Depth 40 -Compress)
 }
 
 try {
     if ($Apply -and $PlanOnly) { throw 'Use either -Apply or -PlanOnly, not both.' }
-    if ($Apply -and -not $collectionNameWasExplicit) { throw 'Apply requires explicit -DisplayCollectionName because the schema does not specify a plural label.' }
+    if ($Apply -and -not $collectionNameWasExplicit) { throw 'Apply requires explicit -DisplayCollectionName and separate owner authorization.' }
+    if ($DisplayCollectionName -cne $expectedCollectionName) { throw 'Collection label differs from the declared reference schema; stop for review.' }
     $payloads = New-SchemaPayloads
     Assert-SchemaPayloads -Payloads $payloads
     Show-Plan -Payloads $payloads
@@ -432,52 +510,58 @@ try {
 
     $preflight = Get-Preflight
     if (-not $Apply) {
+        Assert-UnchangedState -Preflight $preflight
         Write-Result -Stage 'Preflight' -Status 'DryRunPassed' -Details ([ordered]@{
             OrganizationId = $preflight.OrganizationId
             PublisherUniqueName = 'os_bso_rs_support'
             PublisherPrefix = $preflight.PublisherPrefix
             SolutionUniqueName = $preflight.SolutionUniqueName
-            TableAbsent = $true
-            ProjectTablesAbsent = $true
+            TableLogicalName = $TableName
+            TargetExists = $preflight.TargetExists
+            TableAbsent = -not $preflight.TargetExists
+            ExistingProjectTablesVerified = $preflight.ProjectTables
+            ExistingMetadataUnchanged = $true
             AuditStateUnchanged = $true
             WritesPerformed = 0
+            RequestsAttempted = $script:RequestCounts
         })
         return
     }
 
-    $confirmationPhrase = "CREATE os_sr_ta IN VN LMV IT WITH COLLECTION $DisplayCollectionName"
+    $confirmationPhrase = "CREATE $TableName IN VN LMV IT WITH COLLECTION $DisplayCollectionName"
     $confirmation = Read-Host "Type '$confirmationPhrase' to authorize metadata writes"
     if ($confirmation -cne $confirmationPhrase) { throw 'Apply confirmation did not match; no writes performed.' }
 
+    $script:WritesAllowed = $true
     $script:WritesStarted = $true
     Invoke-DataverseRequest -Method POST -Path 'EntityDefinitions' -Body $payloads.Table -WithSolutionHeader | Out-Null
     $tableAfterCreate = Get-EntityMetadata
-    if ($tableAfterCreate.OwnershipType -cne 'OrganizationOwned' -or $tableAfterCreate.PrimaryNameAttribute -cne 'os_sr_ta_nm' -or
-        $tableAfterCreate.PrimaryIdAttribute -cne 'os_sr_taid') { throw 'Table metadata mismatch after create; stop without repair.' }
+    $partialDefinition = $script:Definition.Clone()
+    $partialDefinition.Columns = @()
+    Assert-TableMetadata -Metadata $tableAfterCreate -Definition $partialDefinition
 
-    $script:WritesStarted = $true
-    Invoke-DataverseRequest -Method POST -Path "EntityDefinitions(LogicalName='os_sr_ta')/Attributes" -Body $payloads.EmailColumn -WithSolutionHeader | Out-Null
-    $script:WritesStarted = $true
-    Invoke-DataverseRequest -Method POST -Path 'PublishXml' -Body ([ordered]@{ ParameterXml = '<importexportxml><entities><entity>os_sr_ta</entity></entities></importexportxml>' }) | Out-Null
+    foreach ($columnPayload in $payloads.Columns) {
+        Invoke-DataverseRequest -Method POST -Path "EntityDefinitions(LogicalName='$TableName')/Attributes" -Body $columnPayload -WithSolutionHeader | Out-Null
+    }
+    Invoke-DataverseRequest -Method POST -Path 'PublishXml' -Body ([ordered]@{ ParameterXml = "<importexportxml><entities><entity>$TableName</entity></entities></importexportxml>" }) | Out-Null
 
     $finalMetadata = Get-EntityMetadata
     Assert-TableMetadata -Metadata $finalMetadata
     Assert-SolutionMembership -SolutionId $preflight.SolutionId -Metadata $finalMetadata
-    $auditAfter = Get-AuditState
-    if (($auditAfter | ConvertTo-Json -Compress) -cne ($preflight.Audit | ConvertTo-Json -Compress)) { throw 'Environment audit settings changed during execution.' }
-    $projectTablesAfter = @(Get-ProjectEntityNames)
-    if ($projectTablesAfter.Count -ne 1 -or $projectTablesAfter[0] -cne 'os_sr_ta') { throw 'Unexpected project table metadata exists.' }
+    Assert-UnchangedState -Preflight $preflight -Created
     Write-Result -Stage 'Complete' -Status 'Verified' -Details ([ordered]@{
         TableLogicalName = $finalMetadata.LogicalName
         OwnershipType = $finalMetadata.OwnershipType
         PrimaryName = $finalMetadata.PrimaryNameAttribute
         PrimaryGuid = $finalMetadata.PrimaryIdAttribute
-        CustomColumns = @('os_sr_ta_nm', 'os_sr_ta_eml')
-        TableAndEmailSolutionMembershipVerified = $true
+        CustomColumns = @($script:Definition.PrimaryName.SchemaName) + @($script:Definition.Columns | ForEach-Object { $_.SchemaName })
+        TableAndColumnsSolutionMembershipVerified = $true
         AlternateKeys = 0
-        ProjectTables = $projectTablesAfter
+        ProjectTables = @($preflight.ProjectTables) + @($TableName)
         DataRowsCreated = 0
         AuditSettingsUnchanged = $true
+        ExistingMetadataUnchanged = $true
+        RequestsAttempted = $script:RequestCounts
     })
 }
 catch {
@@ -486,9 +570,11 @@ catch {
         Error = Get-SafeErrorMessage $_
         WritesMayHaveOccurred = $script:WritesStarted
         Reconciliation = $reconciliation
+        RequestsAttempted = $script:RequestCounts
     })
     exit 1
 }
 finally {
     $script:AccessToken = $null
+    $script:WritesAllowed = $false
 }

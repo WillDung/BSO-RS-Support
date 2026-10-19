@@ -13,6 +13,10 @@
 
 These resource records do not authorize additional schema, application, flow, security, or deployment work. Follow-on phases require their own approval and production change controls.
 
+## Audit Readiness Gate
+
+Read-only audit configuration assessment on 19 October 2026 found environment auditing off, a configured 30-day retention setting, and user-access auditing off. The 30-day value is not an approved retention policy. Do not enable environment/table/column auditing or user-access auditing until IT/Compliance approvals, capacity review, existing-table audit-flag inventory, audit-reader roles, retention/historic-log treatment, and change control are documented. See [Dataverse Audit Policy Proposal](DATAVERSE_AUDIT_POLICY.md) and [Audit Impact Assessment](AUDIT_IMPACT_ASSESSMENT.md). No audit or environment setting was changed.
+
 ## Environments and solutions
 
 Use dedicated Dev, Test, and Production environments where approved. Confirm region, access, capacity, DLP, ownership, backup, and data policies before use. Develop in a solution-aware environment. Export and unpack solution source through supported Power Platform tooling for version control; do not commit generated packages or credentials. Promote managed Solutions downstream, with controlled versioning and release approvals.

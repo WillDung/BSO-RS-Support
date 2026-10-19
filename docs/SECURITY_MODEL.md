@@ -29,7 +29,9 @@ Define table privileges, row ownership/sharing, team model, and field-level secu
 
 The Candidate primary name is proposed as Candidate Number rather than personal name because Dataverse exposes a related row's primary name through lookups. Candidate Number is still an internal identifier and must be access-controlled. Alternate-key columns cannot have field-level security; protect their disclosure using row/table privileges. No policy or role assignment is configured by this proposal.
 
-Enable environment auditing only under an approved retention policy; then enable table and selected-column auditing for status, ownership, contact changes, interviews/results, dispatch metadata/outcomes, and reference changes. Candidate Status History remains a separate append-only business record, written atomically with the status update. Audit retention, audit readers, DSR/deletion behavior, and legal holds remain open decisions.
+Read-only assessment on 19 October 2026 found environment auditing off, configured retention of 30 days (not an approved policy), and user-access auditing off. Capacity, historic audit-log presence, existing table audit flags, and effects on other applications remain unknown. Do not change these settings until IT/Compliance approves retention, scope, audit readers, legal hold/DSR, capacity ownership, and change control. The proposed scope and impact are documented in [Dataverse Audit Policy Proposal](DATAVERSE_AUDIT_POLICY.md) and [Audit Impact Assessment](AUDIT_IMPACT_ASSESSMENT.md).
+
+Dataverse auditing is distinct from `os_sr_csh`, the proposed application-owned append-only status history. `os_sr_csh` must capture accepted business transitions through an approved atomic server operation; Dataverse auditing supplements it. Do not audit sensitive email snapshots, candidate PII, salary, or CV links without an approved column-level decision and data-minimization review.
 
 ## Connector identity
 

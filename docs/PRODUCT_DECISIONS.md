@@ -15,6 +15,7 @@ This log separates explicit product rules from choices requiring confirmation. S
 | Email outcome | Preserve sender/recipients/content; idempotency; distinguish Sent, Failed, Indeterminate. | Confirmed |
 | Platform | Premium/Dataverse production use approved in principle. | Confirmed; detailed tenant configuration not confirmed |
 | Technical naming | Dataverse Publisher Prefix `os` plus project namespace segment `sr_`; final technical names begin `os_sr_` and use the abbreviated dictionary. | Selected and implemented for the project Publisher on 19 October 2026; component naming remains subject to schema review |
+| Dataverse audit retention | Follow approved organizational IT/Compliance policy; current environment setting is not policy. | Confirmed decision; required retention value and audit scope remain unresolved. Current technical setting is 30 days. |
 
 ## Open decisions and external dependencies
 
@@ -34,6 +35,7 @@ This log separates explicit product rules from choices requiring confirmation. S
 | Historical status and email/calendar audit availability | Migration acceptance | Requires source inventory |
 | Visitor workflow, admin responsibilities, SLA/KPI definitions, interview-result details | Detailed requirements | Validate with business owner |
 | Production retention, backup/recovery, monitoring ownership and incident process | Production readiness | Organizational decision required |
+| Audit policy: retention period/categories, historic-log effect, authorized readers, export/preservation, legal hold/DSR, user-access auditing, log capacity/owner, sensitive-field data minimization, approval owner/change control | Before audit activation | Required IT/Compliance approval; see [Dataverse Audit Policy Proposal](DATAVERSE_AUDIT_POLICY.md) and [Audit Impact Assessment](AUDIT_IMPACT_ASSESSMENT.md). Do not treat current 30-day setting as approval. |
 
 ## Approval boundary
 

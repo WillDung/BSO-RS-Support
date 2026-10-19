@@ -4,22 +4,25 @@ Scripts here support reviewed build, validation, migration, and ALM tasks. They 
 
 ## TA Reference Table Provisioning
 
-[Provision-BsoRsTaTable.ps1](Provision-BsoRsTaTable.ps1) implements the approved metadata payload for only `os_sr_ta`. It uses the official Dataverse Web API, verifies environment/Publisher/Solution before any write, associates metadata using `MSCRM.SolutionUniqueName`, and reads back the result. It does not access table rows or create records.
+[Provision-BsoRsTaTable.ps1](Provision-BsoRsTaTable.ps1) implements the reviewed metadata payload for only `os_sr_ta`; `TA Directories` remains a proposed collection label, not an approved requirement. It uses the official Dataverse Web API, verifies environment/Publisher/Solution before any write, associates metadata using `MSCRM.SolutionUniqueName`, and reads back the result. It does not access table rows or create records.
 
 The default mode is online **DryRun** (interactive auth plus read-only preflight). `-PlanOnly` prints and locally validates the payload without authentication or network calls. Only `-Apply` reaches metadata POST operations; it also requires a typed confirmation phrase. Never use Apply without separate explicit approval.
 
 ### Interactive Authentication Prerequisites
 
-The script uses Microsoft.Identity.Client (MSAL) interactive delegated authentication; it does not read PAC token-cache files, scrape browser sessions, or use a client secret. IT must provide:
+The script uses Microsoft.Identity.Client (MSAL) interactive delegated authentication; it does not read PAC token-cache files, scrape browser sessions, or use a client secret. PAC's documented `pac auth token` command was checked, but its token audience is `https://api.powerplatform.com`, not the Dataverse organization URL. Do not pass that token to the Dataverse Web API. `pac env who` is used only to verify the active environment identity.
 
-- An approved Entra public-client app registration with delegated Dataverse `user_impersonation` permission and required consent.
-- A registered loopback redirect URI `http://localhost`, matching the script configuration. MFA and Conditional Access remain enforced.
-- An IT-approved `Microsoft.Identity.Client.dll` compatible with the installed PowerShell/.NET runtime. Set `BSO_RS_MSAL_ASSEMBLY` to its local path; the script does not install or download packages.
+Request this configuration from IT:
+
+- An approved Microsoft Entra public-client/native desktop app registration for interactive delegated sign-in, with the Client ID. No client secret or certificate is needed or accepted by this script.
+- The Dataverse delegated permission `user_impersonation` (shown in Entra as **Access Dynamics 365 as organization users**) and any tenant-required consent.
+- The loopback redirect URI `http://localhost`, matching the script configuration. MFA and Conditional Access remain enforced.
+- An IT-approved Microsoft.Identity.Client NuGet assembly distribution compatible with Windows PowerShell 5.1/.NET Framework 4.8, including its required dependency DLLs. Set `BSO_RS_MSAL_ASSEMBLY` to the local `Microsoft.Identity.Client.dll` path; keep the assembly outside the repository. The script does not install or download packages.
 - The app registration Client ID in process environment variable `BSO_RS_DATAVERSE_CLIENT_ID`.
 - Process-scoped `BSO_RS_ENVIRONMENT_NAME`, `BSO_RS_ORG_URL`, `BSO_RS_EXPECTED_ENVIRONMENT_ID`, and `BSO_RS_EXPECTED_ORG_ID` values. The script independently checks `pac env who` and Dataverse `WhoAmI`; it does not switch environments.
 - A caller identity with the required Dataverse metadata customization and Solution privileges, typically System Customizer or equivalent. The script does not elevate roles.
 
-Do not store the app Client ID, live URL, environment/org IDs, or credentials in this repository. The Client ID is configuration, not a secret; tokens remain in process memory only. If the app registration or MSAL assembly is not available, use `-PlanOnly` and stop before online DryRun/Apply.
+Do not store the app Client ID, live URL, environment/org IDs, or credentials in this repository. The Client ID is configuration, not a secret; tokens remain in process memory only and are not persisted by the script. If the app registration or MSAL assembly is not available, use `-PlanOnly` and stop before online DryRun/Apply.
 
 ### Offline Preview
 
@@ -37,7 +40,15 @@ After setting the required process-scoped environment variables and MSAL assembl
 & (Join-Path $PWD 'scripts/Provision-BsoRsTaTable.ps1')
 ```
 
-DryRun performs only GET requests and prints a sanitized plan. It stops on any environment, Publisher, Solution, audit-baseline, table-existence, or unexpected `os_sr_*` metadata mismatch.
+DryRun performs only GET requests and prints the plan and preflight result. It stops on any environment, Publisher, Solution, audit-baseline, table-existence, or unexpected `os_sr_*` metadata mismatch. Treat the displayed environment URL and IDs as sensitive operational configuration; do not save the output in this repository.
+
+The authenticated read-only DryRun command is:
+
+```powershell
+& (Join-Path $PWD 'scripts/Provision-BsoRsTaTable.ps1')
+```
+
+Run it only after the IT-provided app and assembly are available and the process-scoped variables above are set. Do not add `-Apply`.
 
 ### Apply Command (Not Authorized or Executed)
 

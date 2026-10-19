@@ -186,6 +186,12 @@ function Invoke-DataverseRequest {
     }
     if ($WithSolutionHeader) { $headers['MSCRM.SolutionUniqueName'] = 'os_sr_bso_rs_support' }
     $requestUri = if ([Uri]::IsWellFormedUriString($Path, [UriKind]::Absolute)) { $Path } else { $script:ApiRoot + $Path }
+    $parsedRequestUri = [Uri]$requestUri
+    $organizationUri = [Uri]$OrganizationUrl
+    if ($parsedRequestUri.Scheme -cne 'https' -or $parsedRequestUri.Authority -ine $organizationUri.Authority -or
+        $parsedRequestUri.AbsolutePath -notmatch '^/api/data/v9\.2/') {
+        throw 'Dataverse request URL is outside the verified organization API origin.'
+    }
     $request = @{
         Method = $Method
         Uri = $requestUri

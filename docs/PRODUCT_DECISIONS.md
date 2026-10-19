@@ -20,7 +20,7 @@ This log separates explicit product rules from choices requiring confirmation. S
 | Item | Needed before | Current status |
 |---|---|---|
 | Approved Dev/Test/Production environment(s), region, owners, and access | Phase 1 provisioning | Unknown; do not assume they exist |
-| Required project namespace `os_sr`; confirm whether exact value is valid as Dataverse Publisher Prefix | Schema/solution creation | `os_sr` is five characters and meets the documented eight-character maximum; underscore acceptance is not stated in the published reference and remains unverified. Do not substitute another prefix without explicit decision. |
+| Recommended Dataverse Publisher Prefix `os` plus project namespace segment `sr_` (final names begin `os_sr_`) | Schema/solution creation | Pending approval. Microsoft documents 2–8 alphanumeric characters, beginning with a letter, and excludes prefixes beginning with `mscrm`; `os` fits. Read-only metadata check in VN LMV IT on 19 October 2026 found no existing publisher using `os`. |
 | Dataverse entity ownership, relationships, keys, audit/retention, concurrency, security boundary | Schema approval | Design review required |
 | BSO M365 connection model; whether per-user Outlook connection is permitted and can reliably expose intended From | Email implementation | Tenant policy and technical verification required |
 | TA and room mailbox availability permissions; test accounts; organizer policy | Scheduling implementation | Unknown |

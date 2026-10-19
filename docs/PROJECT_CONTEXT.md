@@ -24,7 +24,7 @@ Dataverse is production source of truth; critical state changes use an approved 
 
 ## Naming requirement and status
 
-The required project namespace is `os_sr` wherever Power Platform supports it. Technical identifiers use the abbreviated dictionary and patterns proposed in [Data Model](DATA_MODEL.md); no Dataverse components are deployed. Microsoft documents the Dataverse publisher customization prefix as a maximum of eight characters, which `os_sr` meets, but the published reference does not state whether an underscore is accepted. Acceptance of the exact value as the actual Publisher Prefix remains an open validation and approval item; do not silently replace it. See the [Microsoft Publisher reference](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/reference/entities/publisher#customizationprefix).
+The recommended naming strategy, pending approval, is Dataverse Publisher Prefix `os` plus project namespace segment `sr_`, producing final technical names beginning `os_sr_`. Use the abbreviated dictionary and component-specific patterns in [Data Model](DATA_MODEL.md); no Dataverse components are deployed. Microsoft documents prefixes as 2–8 alphanumeric characters beginning with a letter and not starting with `mscrm`; `os` meets those rules. A read-only publisher check in VN LMV IT found no exact `os` prefix conflict on 19 October 2026. Do not use `os_sr` as the actual Publisher Prefix or enter a full final name in a field that automatically prepends `os_`.
 
 ## Source confidence and open decisions
 

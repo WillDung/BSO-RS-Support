@@ -4,7 +4,7 @@
 
 ## Naming standard and private abbreviation dictionary
 
-The following internal dictionary maps business meanings to proposed technical abbreviations. Keep this mapping in this repository; do not publish it externally. The project namespace is `os_sr`, and proposed logical names use it as shown below wherever the platform supports it. These names are not approved or deployed.
+The following internal dictionary maps business meanings to proposed technical abbreviations. Keep this mapping in this repository; do not publish it externally. The recommended naming strategy, pending approval, is Publisher Prefix `os` plus the project namespace segment `sr_`. Together they form the final technical-name prefix `os_sr_`; examples below show final names, not values to paste blindly into auto-prefixing name fields. No components are approved or deployed.
 
 | Business meaning | Abbreviation | Example proposed table name |
 |---|---|---|
@@ -28,7 +28,7 @@ Additional reusable tokens: `cnum` = Candidate Number; `cnak` = Candidate Number
 
 Apply the convention consistently to Dataverse tables, custom columns, relationships, alternate keys, Custom APIs, plug-in assemblies/types/steps, and Cloud Flows wherever each platform component supports custom naming. Use lowercase abbreviations and the patterns below; keep user-facing display labels readable business terms.
 
-| Component | Proposed pattern | Example |
+| Component | Proposed final technical-name pattern | Example final name |
 |---|---|---|
 | Table | `os_sr_<table-abbreviation>` | `os_sr_cand` |
 | Custom column | `os_sr_<table-abbreviation>_<field-abbreviation>` | `os_sr_cand_cnum` |
@@ -38,7 +38,11 @@ Apply the convention consistently to Dataverse tables, custom columns, relations
 | Plug-in component | `os_sr_<operation-abbreviation>[_<component-role-abbreviation>]` | `os_sr_bkint_stp` |
 | Cloud Flow | `os_sr_<process-abbreviation>` | `os_sr_calbk` (calendar booking) |
 
-Platform-generated names, required formats, and system components may not permit these patterns. Validate supported names, length limits, reserved words, uniqueness, relationship/key constraints, and solution publisher behavior in an approved design/validation step before creation; do not invent a substitute namespace. Microsoft documents the Publisher `CustomizationPrefix` field as having a maximum length of eight characters, so `os_sr` meets that length limit. The published reference does not specify whether underscores are accepted in the prefix. Confirm the exact value through the supported publisher validation before schema approval; no tenant validation was performed for this documentation-only change. See [Publisher table reference](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/reference/entities/publisher#customizationprefix) and [solution publisher guidance](https://learn.microsoft.com/en-us/power-platform/alm/solution-concepts-alm#solution-publisher).
+For Dataverse components whose Maker experience automatically applies the solution publisher prefix `os`, use only the `sr_<abbreviation>` stem in the name input so the resulting persisted name is `os_sr_<abbreviation>`. For programmatic metadata or other component fields that require a complete logical/schema/unique name, supply the final `os_sr_<abbreviation>` once. Inspect the resulting name before saving; do not enter the full final name into a field that will prepend `os_` and create `os_os_sr_...`.
+
+The five table examples above use lowercase letters and underscores, begin with a letter, and are final names rather than publisher-prefix values. Microsoft documents the customization prefix as 2–8 alphanumeric characters, beginning with a letter; it also says the prefix cannot start with `mscrm`. `os` meets these documented character and length rules. A read-only publisher metadata check in VN LMV IT on 19 October 2026 found no publisher using prefix `os`; this is a time-bound conflict check, not approval or creation evidence. See [Customize Table Definitions](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/customize-entity-metadata), [Publisher table reference](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/reference/entities/publisher), and [solution publisher guidance](https://learn.microsoft.com/en-us/power-platform/alm/solution-concepts-alm#solution-publisher).
+
+Some names cannot or should not follow the final-name pattern. The Publisher `CustomizationPrefix` is `os` by design, not an `os_sr_` component name. Platform-assigned GUIDs, immutable IDs, and system-owned names are not custom names and cannot be forced to begin `os_sr_`. Some primary-column and relationship names may be generated or constrained by their parent metadata; inspect their resulting schema names instead of assuming a free-form suffix. Cloud Flow IDs are platform-assigned, while a user-settable Flow display name should use the full `os_sr_...` form because it does not rely on Dataverse publisher auto-prefixing. Plug-in assembly/type/step names also need component-specific handling; use the full final form where the registration/build tool permits a custom name, and do not assume `os_` will be inserted. Validate each component type's actual name field, allowed characters, length, reserved words, uniqueness, relationship/key constraints, and generated result before creation. If a platform-controlled name cannot follow the convention, document the exception rather than renaming a generated object or silently changing the namespace.
 
 Once technical names are approved, keep them stable. Do not rename or recreate an existing component without an explicit migration plan addressing dependencies, data, integrations, and deployment. No existing Dataverse components are claimed in this repository.
 

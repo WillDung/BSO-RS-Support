@@ -34,7 +34,7 @@
 
 ## C. Proposed Dataverse data model (initial names, not deployed)
 
-The required project namespace is `os_sr` wherever Power Platform supports it. The table labels below are business names; proposed abbreviated technical names are mapped in [Data Model](docs/DATA_MODEL.md). The exact `os_sr` Dataverse Publisher Prefix remains unverified: the documented eight-character maximum is met, but underscore acceptance is not stated in the published reference. Do not silently substitute another prefix; names remain proposals until schema review and publisher validation.
+The recommended naming strategy, pending approval, is Dataverse Publisher Prefix `os` plus project namespace segment `sr_`, producing final technical names beginning `os_sr_`. The table labels below are business names; proposed abbreviated technical names are mapped in [Data Model](docs/DATA_MODEL.md). Microsoft documents a 2–8 character alphanumeric prefix that begins with a letter and does not begin with `mscrm`; `os` meets those rules. When a Maker field prepends `os_` automatically, enter only the `sr_<abbreviation>` stem to avoid double-prefixing. Names remain proposals until schema review and approval.
 
 | Table | Business fields and relationships | Notes |
 |---|---|---|

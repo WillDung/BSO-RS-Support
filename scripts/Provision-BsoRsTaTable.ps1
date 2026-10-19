@@ -7,8 +7,6 @@ param(
     [string]$OrganizationUrl = $env:BSO_RS_ORG_URL,
     [string]$ExpectedEnvironmentId = $env:BSO_RS_EXPECTED_ENVIRONMENT_ID,
     [string]$ExpectedOrganizationId = $env:BSO_RS_EXPECTED_ORG_ID,
-    [string]$ClientId = $env:BSO_RS_DATAVERSE_CLIENT_ID,
-    [string]$MsalAssemblyPath = $env:BSO_RS_MSAL_ASSEMBLY,
     [string]$DisplayCollectionName
 )
 
@@ -16,7 +14,6 @@ $ErrorActionPreference = 'Stop'
 $script:AccessToken = $null
 $script:ApiRoot = $null
 $script:WritesStarted = $false
-$script:MsalResolver = $null
 $expectedCollectionName = 'TA Directories'
 $collectionNameWasExplicit = -not [string]::IsNullOrWhiteSpace($DisplayCollectionName)
 if (-not $collectionNameWasExplicit) { $DisplayCollectionName = $expectedCollectionName }
@@ -77,6 +74,27 @@ function New-SchemaPayloads {
     [pscustomobject]@{ Table = $table; EmailColumn = $email }
 }
 
+function Assert-SchemaPayloads {
+    param([Parameter(Mandatory = $true)][object]$Payloads)
+    $primary = @($Payloads.Table.Attributes)
+    if ($Payloads.Table.SchemaName -cne 'os_sr_ta' -or
+        $Payloads.Table.OwnershipType -cne 'OrganizationOwned' -or
+        $Payloads.Table.DisplayName.LocalizedLabels[0].Label -cne 'TA Directory' -or
+        $Payloads.Table.DisplayCollectionName.LocalizedLabels[0].Label -cne $DisplayCollectionName -or
+        $primary.Count -ne 1 -or $primary[0].SchemaName -cne 'os_sr_ta_nm' -or
+        $primary[0].IsPrimaryName -ne $true -or $primary[0].MaxLength -ne 200 -or
+        $primary[0].FormatName.Value -cne 'Text' -or
+        $primary[0].RequiredLevel.Value -cne 'ApplicationRequired') {
+        throw 'Local table or primary-name payload validation failed.'
+    }
+    $email = $Payloads.EmailColumn
+    if ($email.SchemaName -cne 'os_sr_ta_eml' -or $email.DisplayName.LocalizedLabels[0].Label -cne 'TA Email' -or
+        $email.MaxLength -ne 254 -or $email.FormatName.Value -cne 'Email' -or
+        $email.RequiredLevel.Value -cne 'ApplicationRequired') {
+        throw 'Local TA Email payload validation failed.'
+    }
+}
+
 function Write-Result {
     param(
         [Parameter(Mandatory = $true)][string]$Stage,
@@ -134,40 +152,32 @@ function Assert-PacEnvironment {
     $script:ApiRoot = $OrganizationUrl.TrimEnd('/') + '/api/data/v9.2/'
 }
 
-function Import-MsalAssembly {
-    if ([string]::IsNullOrWhiteSpace($MsalAssemblyPath) -or
-        -not (Test-Path -LiteralPath $MsalAssemblyPath -PathType Leaf)) {
-        throw 'Set BSO_RS_MSAL_ASSEMBLY to an IT-approved Microsoft.Identity.Client.dll. No PAC token cache or browser session is used.'
-    }
-    $script:MsalDirectory = Split-Path -Parent $MsalAssemblyPath
-    $script:MsalResolver = [System.ResolveEventHandler]{
-        param($resolveSender, $resolveEventArgs)
-        $fileName = (($resolveEventArgs.Name -split ',')[0]) + '.dll'
-        $candidatePath = Join-Path $script:MsalDirectory $fileName
-        if (Test-Path -LiteralPath $candidatePath -PathType Leaf) {
-            return [System.Reflection.Assembly]::LoadFrom($candidatePath)
-        }
-        return $null
-    }
-    [AppDomain]::CurrentDomain.add_AssemblyResolve($script:MsalResolver)
-    Add-Type -Path $MsalAssemblyPath
-}
-
 function Get-InteractiveAccessToken {
-    if ([string]::IsNullOrWhiteSpace($ClientId)) {
-        throw 'Set BSO_RS_DATAVERSE_CLIENT_ID to the IT-approved public-client app registration Client ID.'
+    if ($PSVersionTable.PSVersion -lt [Version]'7.4') {
+        throw 'Online mode requires PowerShell 7.4 or later per the Microsoft Dataverse PowerShell quickstart. -PlanOnly remains available in Windows PowerShell 5.1.'
     }
-    Import-MsalAssembly
-    $builder = [Microsoft.Identity.Client.PublicClientApplicationBuilder]::Create($ClientId)
-    $builder = $builder.WithAuthority('https://login.microsoftonline.com/organizations')
-    $builder = $builder.WithRedirectUri('http://localhost')
-    $application = $builder.Build()
-    $scope = $OrganizationUrl.TrimEnd('/') + '/user_impersonation'
-    $request = $application.AcquireTokenInteractive([string[]]@($scope))
-    $request = $request.WithPrompt([Microsoft.Identity.Client.Prompt]::SelectAccount)
-    # MSAL's default cache is process-memory only here; the script configures no persistence.
-    $result = $request.ExecuteAsync().GetAwaiter().GetResult()
-    $script:AccessToken = $result.AccessToken
+    $azAccounts = @(Get-Module -ListAvailable -Name Az.Accounts | Sort-Object Version -Descending)
+    if ($azAccounts.Count -eq 0 -or $azAccounts[0].Version -lt [Version]'11.1.0') {
+        throw 'Online mode requires Az.Accounts 11.1.0 or later. Review the official module source and IT policy before installing it.'
+    }
+    Import-Module Az.Accounts -MinimumVersion 11.1.0 -ErrorAction Stop
+    $authorizedTenants = @(Get-AzTenant -ErrorAction SilentlyContinue)
+    if ($authorizedTenants.Count -eq 0) { Connect-AzAccount -ErrorAction Stop | Out-Null }
+
+    $secureToken = $null
+    $tokenText = $null
+    try {
+        $secureToken = (Get-AzAccessToken -ResourceUrl $OrganizationUrl -AsSecureString -ErrorAction Stop).Token
+        if ($secureToken -isnot [Security.SecureString]) {
+            throw 'Get-AzAccessToken did not return a SecureString. Verify Az.Accounts version and -AsSecureString support.'
+        }
+        $tokenText = ConvertFrom-SecureString -SecureString $secureToken -AsPlainText
+        $script:AccessToken = $tokenText
+    }
+    finally {
+        $tokenText = $null
+        $secureToken = $null
+    }
 }
 
 function Invoke-DataverseRequest {
@@ -390,6 +400,7 @@ try {
     if ($Apply -and $PlanOnly) { throw 'Use either -Apply or -PlanOnly, not both.' }
     if ($Apply -and -not $collectionNameWasExplicit) { throw 'Apply requires explicit -DisplayCollectionName because the schema does not specify a plural label.' }
     $payloads = New-SchemaPayloads
+    Assert-SchemaPayloads -Payloads $payloads
     Show-Plan -Payloads $payloads
     if ($PlanOnly) { return }
 
@@ -457,5 +468,4 @@ catch {
 }
 finally {
     $script:AccessToken = $null
-    if ($script:MsalResolver) { [AppDomain]::CurrentDomain.remove_AssemblyResolve($script:MsalResolver) }
 }

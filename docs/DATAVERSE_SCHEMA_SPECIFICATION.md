@@ -16,6 +16,7 @@ Microsoft constraints applied here:
 - For custom tables, ownership is `UserOwned` or `OrgOwned`. Relationship delete behavior supports Restrict, RemoveLink, or Cascade; this proposal uses Restrict for business references and no cascade assignment/sharing. See [Customize Table Definitions](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/customize-entity-metadata) and [Configure relationship cascading behavior](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/configure-entity-relationship-cascading-behavior).
 - Text column maximums are 4,000 characters for Text/Text Area and 1,048,576 for Multiline Text. Date/time event fields use User Local (stored as UTC). Autonumber values can have gaps and seeds are environment-specific, not solution-imported. See [Column data types](https://learn.microsoft.com/en-us/power-apps/maker/data-platform/types-of-fields) and [Autonumber columns](https://learn.microsoft.com/en-us/power-apps/maker/data-platform/autonumber-fields).
 - Auditing must be enabled at environment, table, and selected-column levels; audit retention remains an organizational decision. See [Manage Dataverse auditing](https://learn.microsoft.com/en-us/power-platform/admin/manage-dataverse-auditing).
+- Microsoft documents AutoNumber as supported, but the currently available Dataverse MCP `create_table` tool schema does not offer AutoNumber as a column type. Phase 1D must use a supported Maker/metadata creation path for these primary names or approve a text primary-name alternative; do not silently change the schema.
 
 ### Requirement and Default Notation
 
@@ -28,6 +29,14 @@ Microsoft constraints applied here:
 | None | No default. |
 
 For Choice columns, option labels are specified below; numeric option values are assigned by Dataverse under the Publisher option-value prefix `10001` and must be recorded/frozen in the solution before release. Do not renumber values after deployment. The system `statecode/statuscode` (Active/Inactive) is separate from business workflow choices.
+
+## Confirmed Business Invariants
+
+- Candidate workflow values are Need Call Candidate, Candidate Answered, Waiting Manual Scheduling, Round 1 Scheduled, Offer Extended, and Candidate Failed. Every accepted change after initial row creation creates exactly one Candidate Status History row through the same approved server-side operation. No TA approval stage is part of the workflow.
+- BSO coordinates; TA is an interviewer/directory contact, not automatically an app user or approver. Online booking requires verified TA availability. Offline booking requires verified TA and room availability. Unknown, failed, stale, or conflicting availability is not free.
+- Booking is blocked without a valid Candidate CV URL and a valid linked LEGO Career. Only Vietnam postings are visible for this workflow; exactly one title match may auto-select, while zero/multiple require manual resolution.
+- Email dispatch preserves intended sender, logical To/CC, subject/body snapshot, and outcome. Idempotency is required; Sent, Failed, and Indeterminate are distinct. Never blindly retry an uncertain send or equate Flow invocation success with delivery.
+- These are confirmed business constraints, not proof of implementation. Choice option IDs, operation contracts, provider evidence, and detailed field requirements remain proposed or open as noted below.
 
 ## Shared Platform Columns
 
@@ -129,7 +138,7 @@ The table is `UserOwned`; `ownerid` is the BSO or approved team. Initial status 
 | `os_sr_call_cand` | Candidate | Lookup → `os_sr_cand` | R | None | Parent candidate; delete restricted. |
 | `os_sr_call_out` | Call Outcome | Text, 100 | R | None | Outcome taxonomy is pending; do not invent a fixed choice list. |
 | `os_sr_call_ctat` | Contacted At | Date/Time, User Local | R | None | Store event time; do not substitute import time. |
-| `os_sr_call_ctby` | Contacted By | Lookup → systemuser | R | Current caller only if verified | Actual Dataverse actor; do not infer TA or connector identity. |
+| `os_sr_call_ctby` | Contacted By | Lookup → systemuser | R | None | Initiating BSO/business actor, not TA or fixed Flow owner; server operation must resolve authenticated actor. |
 | `os_sr_call_nts` | Notes | Multiline Text, 4,000 | O | None | Minimize PII; restrict read/write. |
 | `os_sr_call_corid` | Correlation ID | Text, 100 | O | None | Shared operation correlation, not a secret. |
 | `os_sr_call_actkey` | Action Idempotency Key | Text, 100 | R for operation writes | None | URL-safe opaque token; proposed alternate-key component with Candidate lookup to prevent duplicate submissions. |
@@ -144,7 +153,7 @@ UserOwned; append-only through an approved operation. Migration source: ATSugg c
 | `os_sr_csh_cand` | Candidate | Lookup → `os_sr_cand` | R | None | Parent candidate; delete restricted. |
 | `os_sr_csh_prevstat` | Previous Status | Global Choice `os_sr_candstat` | R | None | Required for a transition row. |
 | `os_sr_csh_newstat` | New Status | Global Choice `os_sr_candstat` | R | None | Must differ from previous status and be allowed by the transition matrix. |
-| `os_sr_csh_actr` | Actor | Lookup → systemuser | R | None | Actual Dataverse caller; preserve source identity separately if legacy actor cannot resolve. |
+| `os_sr_csh_actr` | Actor | Lookup → systemuser | R | None | Initiating BSO/business actor, not a fixed Flow/service owner; legacy unresolved actors need a documented migration exception/crosswalk. |
 | `os_sr_csh_chg` | Changed At | Date/Time, User Local | R | None | Business transition timestamp. |
 | `os_sr_csh_rsn` | Reason | Multiline Text, 1,000 | O | None | Required only for transitions whose approved rules require a reason. |
 | `os_sr_csh_corid` | Correlation ID | Text, 100 | O | None | Required when an external operation applies. |
@@ -318,7 +327,7 @@ Sensitive columns: `cand_nm`, `cand_eml`, `cand_phn`, `cand_cvurl`; `ires_fb`, `
 
 The Candidate, Call Log, and Status History operations must not trust client-side or Flow-only enforcement. A reviewed synchronous Dataverse business operation must validate transitions, update Candidate, and create the Status History row atomically. Call/transition/booking/dispatch keys must be checked before external effects. Email snapshot columns are immutable after queueing; only trusted operations may update status/result fields. `Indeterminate` is persisted, reconciled, and never blindly retried.
 
-Dataverse audit is supplemental to purpose-built status/dispatch history, not a replacement. Retention duration, audit visibility, deletion/DSR procedures, and access to audit logs are organizational decisions. Enable auditing only after environment-level audit and retention policy approval.
+Dataverse audit is supplemental to purpose-built status/dispatch history, not a replacement. Audit-history display can truncate large attribute values; the immutable Email Dispatch body snapshot is the authoritative full content, not the audit log rendering. Retention duration, audit visibility, deletion/DSR procedures, and access to audit logs are organizational decisions. Enable auditing only after environment-level audit and retention policy approval.
 
 ## Migration Mapping
 

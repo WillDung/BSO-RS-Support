@@ -1,6 +1,6 @@
 # Proposed Dataverse Data Model
 
-**Status:** Business schema remains a design proposal only. No business tables, columns, relationships, or keys are deployed. The project Publisher and empty unmanaged Solution have been created; see [ALM and Deployment](ALM_DEPLOYMENT.md). Phase 1C planning must review schema, ownership, keys, retention, security, and naming before any table provisioning.
+**Status:** Phase 1C business schema proposal is detailed in [Dataverse Schema Specification](DATAVERSE_SCHEMA_SPECIFICATION.md). No business tables, columns, relationships, or keys are deployed. The project Publisher and empty unmanaged Solution have been created; see [ALM and Deployment](ALM_DEPLOYMENT.md). Schema-owner/security review and resolution of open decisions are required before Phase 1D table provisioning.
 
 ## Naming standard and private abbreviation dictionary
 

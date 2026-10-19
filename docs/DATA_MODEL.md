@@ -26,6 +26,8 @@ The following internal dictionary maps business meanings to proposed technical a
 
 Additional reusable tokens: `cnum` = Candidate Number; `cnak` = Candidate Number alternate key; `stat` = workflow status; `hist` = history; `res` = result; `loc` = location; `cfg` = configuration; `bk` = booking; `int` = interview; `bkint` = book interview; `cal` = calendar; `calbk` = calendar booking; `eml` = email; `sch` = scheduling; `idem` = idempotency; `corid` = correlation ID; `extid` = external ID; `stp` = plug-in step. Use these only where they describe the field or operation precisely; add new abbreviations to this dictionary before use. Avoid personal values or identifying data in every technical name.
 
+The detailed proposal extends the dictionary with `candstat` = shared Candidate Workflow Status choice; `ak` = alternate key; `nm` = name; `ttl` = title; `phn` = phone; `det` = details; `key` = configuration key; `val` = value; `dsc` = description; `out` = outcome; `ctat` = contacted at; `ctby` = contacted by; `nts` = notes; `actr` = actor; `actkey` = action key; `prevstat`/`newstat` = previous/new status; `chg` = changed at; `rsn` = reason; `mod` = mode; `strt`/`end` = start/end; `orgeml` = organizer email; `evt` = provider event; `fb` = feedback; `sal` = salary; `recby`/`recat` = recorded by/at; `ver`/`tplver` = version/template version; `subj`/`body` = subject/body; `tosn`/`ccsn` = To/CC snapshots; `sndr`/`sndas` = intended/observed sender; `sentat`/`tryat` = sent/last-attempt time; `prvid` = provider ID; `err` = sanitized error; `reqby` = requested by; `visat` = visit at; `ctry` = country; `lsync` = last sync; `knd` = kind; `stgat`/`cmpat` = started/completed at; `rowcnt` = row count; `ref` = nonpersonal autonumber reference. These remain technical tokens, not business requirements.
+
 Apply the convention consistently to Dataverse tables, custom columns, relationships, alternate keys, Custom APIs, plug-in assemblies/types/steps, and Cloud Flows wherever each platform component supports custom naming. Use lowercase abbreviations and the patterns below; keep user-facing display labels readable business terms.
 
 | Component | Proposed final technical-name pattern | Example final name |
@@ -37,6 +39,7 @@ Apply the convention consistently to Dataverse tables, custom columns, relations
 | Custom API | `os_sr_<operation-abbreviation>` | `os_sr_bkint` (book interview) |
 | Plug-in component | `os_sr_<operation-abbreviation>[_<component-role-abbreviation>]` | `os_sr_bkint_stp` |
 | Cloud Flow | `os_sr_<process-abbreviation>` | `os_sr_calbk` (calendar booking) |
+| Global Choice | `os_sr_<choice-abbreviation>` | `os_sr_candstat` |
 
 For Dataverse components whose Maker experience automatically applies the solution publisher prefix `os`, use only the `sr_<abbreviation>` stem in the name input so the resulting persisted name is `os_sr_<abbreviation>`. For programmatic metadata or other component fields that require a complete logical/schema/unique name, supply the final `os_sr_<abbreviation>` once. Inspect the resulting name before saving; do not enter the full final name into a field that will prepend `os_` and create `os_os_sr_...`.
 
@@ -49,6 +52,8 @@ Once technical names are approved, keep them stable. Do not rename or recreate a
 Abbreviations are a naming and information-disclosure reduction measure, not a security boundary. Protect sensitive data with Dataverse security roles, record-level access control, column-level security when appropriate, auditing, data loss prevention policies, and least-privilege connector access. Never expose personal data in names, logs, fixtures, or repository documentation.
 
 ## Proposed entities
+
+The per-table implementation proposal, including full column inventory, requiredness, defaults, validation, keys, relationships, delete behavior, ownership, auditing, security, dependencies, and migration mapping, is maintained in [Dataverse Schema Specification](DATAVERSE_SCHEMA_SPECIFICATION.md). This overview and its abbreviation dictionary remain authoritative for business abbreviations.
 
 | Business entity | Proposed technical table name | Purpose and key relationships | Ownership / key considerations |
 |---|---|---|---|

@@ -1,6 +1,6 @@
 # Security Model
 
-**Status:** Security design proposal and constraints. No tenant settings, roles, permissions, connector grants, or DLP configuration have been verified.
+**Status:** Security design proposal and constraints. No tenant settings, roles, permissions, connector grants, or DLP configuration have been verified. Proposed table ownership and sensitive-field treatment are in [Dataverse Schema Specification](DATAVERSE_SCHEMA_SPECIFICATION.md).
 
 ## Identity and authentication
 
@@ -14,6 +14,22 @@ Microsoft Entra ID is the target authentication authority. Authentication does n
 - Candidate/visitor access is not assumed.
 
 Define table privileges, row ownership/sharing, team model, and field-level security after stakeholder review. Restrict salary, contact details, CV links/documents, email snapshots, and integration diagnostics as appropriate. Validate access with positive and negative tests.
+
+### Proposed schema access boundaries
+
+| Data area | Proposed Dataverse boundary | Sensitive columns/data |
+|---|---|---|
+| Candidate and child activity records | UserOwned; BSO owner or approved team; child owner aligned by server-side operation; no implicit access from a lookup | Candidate name, email, phone, CV URL; call notes; interview feedback; visit details |
+| Interview results | UserOwned under Candidate owner; only approved BSO/roles | Feedback and salary; field-level security proposed, subject to role design |
+| Email dispatch | UserOwned under Candidate owner; narrow table and column privileges; immutable content snapshot after queue | Sender, To/CC snapshots, subject/body, provider IDs; field-level security and explicit retention |
+| TA, Position, Candidate Source, Location, Email Template | OrgOwned reference data; BSO read only as needed; restricted admin/integration write | TA email and room resource addresses remain directory/contact information |
+| App Configuration | OrgOwned, restricted admin read/write | Nonsecret approved values only; no credentials, tokens, connector URLs, or secrets |
+| LEGO Career | OrgOwned, BSO read and integration write | External posting fields; Vietnam filter; no candidate payload |
+| Integration Run | OrgOwned, operational-admin/integration-only | Sanitized diagnostics only; no raw payload or candidate PII column |
+
+The Candidate primary name is proposed as Candidate Number rather than personal name because Dataverse exposes a related row's primary name through lookups. Candidate Number is still an internal identifier and must be access-controlled. Alternate-key columns cannot have field-level security; protect their disclosure using row/table privileges. No policy or role assignment is configured by this proposal.
+
+Enable environment auditing only under an approved retention policy; then enable table and selected-column auditing for status, ownership, contact changes, interviews/results, dispatch metadata/outcomes, and reference changes. Candidate Status History remains a separate append-only business record, written atomically with the status update. Audit retention, audit readers, DSR/deletion behavior, and legal holds remain open decisions.
 
 ## Connector identity
 

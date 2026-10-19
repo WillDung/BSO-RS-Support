@@ -21,7 +21,8 @@ This log separates explicit product rules from choices requiring confirmation. S
 | Item | Needed before | Current status |
 |---|---|---|
 | Dedicated Dev/Test environment(s), region, owners, and access; governance for continued development in Production | Further implementation | VN LMV IT is Production and was explicitly selected for Phase 1B internal IT development; existence/access of separate Dev/Test environments is unverified |
-| Dataverse entity ownership, relationships, keys, audit/retention, concurrency, security boundary | Schema approval | Design review required |
+| Dataverse entity ownership, relationships, keys, audit/retention, concurrency, security boundary | Schema approval | Proposed in [Dataverse Schema Specification](DATAVERSE_SCHEMA_SPECIFICATION.md); owner/security review required |
+| Candidate number generation/format; candidate field requiredness; call outcome taxonomy; duplicate positions/sources; TA stable identity; room identity; interview result versioning/salary currency; visitor lifecycle; config table vs environment variables | Phase 1D schema implementation | Open; do not turn proposed defaults into business rules without approval |
 | BSO M365 connection model; whether per-user Outlook connection is permitted and can reliably expose intended From | Email implementation | Tenant policy and technical verification required |
 | TA and room mailbox availability permissions; test accounts; organizer policy | Scheduling implementation | Unknown |
 | DLP treatment of Outlook, Teams, HTTP/custom connector, SharePoint, AI Builder, Power BI | Integration design | Tenant review required |
@@ -36,4 +37,4 @@ This log separates explicit product rules from choices requiring confirmation. S
 
 ## Approval boundary
 
-Next recommended step is **Phase 1A — Dataverse schema design review, before provisioning tables.** It is not authorization to provision resources. A new explicit instruction is required before Phase 1A begins. See [Current State](CURRENT_STATE.md).
+Next recommended step is schema-owner/security review of the proposed Phase 1C design and resolution of the listed open decisions. Phase 1D implementation and table provisioning require separate explicit approval. See [Current State](CURRENT_STATE.md).

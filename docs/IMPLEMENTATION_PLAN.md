@@ -1,6 +1,6 @@
 # Implementation Plan
 
-Phase status is factual as of 18 October 2026. Phase 0 is the only phase in progress. Later phases are planned, not authorized or started. Provisioning requires explicit phase authorization and applicable organizational approvals.
+Phase status is factual as of 19 October 2026. Phase 0 repository foundation is complete; Phase 1B Publisher/empty Solution setup is complete; Phase 1C schema specification is proposed for review. Business tables and later app/flow implementation are not authorized. Provisioning requires explicit phase authorization and applicable organizational approvals.
 
 ## Phase 0 — Repository Foundation and Blueprint
 
@@ -11,18 +11,18 @@ Phase status is factual as of 18 October 2026. Phase 0 is the only phase in prog
 - **Acceptance:** Required files exist and contain meaningful content; links/frontmatter checked; no fake resources, secrets, or false status claims.
 - **Validation:** File inventory, Markdown relative-link scan, YAML frontmatter parse, consistency/privacy/status review, Git diff/status.
 - **Risks:** Missing historical references; assumptions mistaken for approved decisions.
-- **Status:** In progress.
+- **Status:** Completed.
 
 ## Phase 1 — Dataverse Foundation
 
 - **Objective:** Approve schema and establish governed data/business-operation foundation.
-- **Scope:** Phase 1A schema design review first; later, only if separately authorized, solution/publisher/environment and initial tables, roles, and server-enforced operations.
-- **Dependencies:** Environment/region/access, schema review, publisher prefix, ownership/security, keys, retention, approved roles, ALM approach.
-- **Deliverables:** Reviewed schema, approved solution foundation, core entities, authorization, and transition API design/implementation as authorized.
-- **Acceptance:** Schema and security approved; keys/relationships/audit verified; permitted/blocked transitions tested; no duplicate state/history on repeat action.
-- **Validation:** Design review plus targeted Dataverse/API, authorization, concurrency, and audit tests.
-- **Risks:** Unresolved ownership, privilege, identity, and legacy data semantics.
-- **Status:** Planned; not started. Phase 1A is recommended next, not authorized implementation.
+- **Scope:** Phase 1A naming/publisher preflight and Phase 1B Publisher/empty Solution setup are complete. Phase 1C is the proposed schema design review; Phase 1D table creation, roles, and server-enforced operations require separate explicit approval.
+- **Dependencies:** Schema and security approval, ownership, keys, retention, call/visitor/result decisions, environment governance, connector identities, source mapping, and ALM approach.
+- **Deliverables:** Detailed proposal in [Dataverse Schema Specification](DATAVERSE_SCHEMA_SPECIFICATION.md); Publisher and empty Solution verified; no business tables, roles, APIs, apps, or flows created.
+- **Acceptance:** Resolve design decisions; approve schema and security; verify keys/relationships/audit; then test permitted/blocked transitions and no duplicate status/history before implementation acceptance.
+- **Validation:** Static logical-name/key/relationship review; read-only solution component check; executable Dataverse/API, authorization, concurrency, and audit tests only after a separately approved implementation.
+- **Risks:** Candidate/TA identity and ownership, key value formats, field-level security vs keys, retention, external side effects, and legacy data semantics remain unresolved.
+- **Status:** Phase 1B completed; Phase 1C schema proposal prepared for review; Phase 1D not started or authorized.
 
 ## Phase 2 — Core Recruitment App
 

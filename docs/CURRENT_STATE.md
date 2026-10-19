@@ -1,6 +1,6 @@
 # Current State
 
-**As of:** 19 October 2026. **Phase:** Phase 1B, Publisher and unmanaged Solution setup completed; business schema remains unprovisioned.
+**As of:** 19 October 2026. **Phase:** Phase 1C, proposed Dataverse schema specification prepared for review; business schema remains unprovisioned.
 
 ## Facts
 
@@ -10,16 +10,17 @@
 - Verified Solution: **BSO-RS-Support**, unique name `os_sr_bso_rs_support`, version `1.0.0.0`, unmanaged, ID `63f48907-88cb-f111-a05a-000d3a64b349`, linked to the project Publisher.
 - VN LMV IT is a Production environment explicitly selected for this internal IT development scope. Its URL and environment/organization IDs were verified during execution but are not recorded in this repository.
 - No business tables, columns, relationships, Power Apps, Cloud Flows, integrations, connector permissions, solution exports/imports, or deployments were created or verified by this work.
+- Phase 1C schema proposal covers all 15 requested tables and their proposed columns, keys, relationships, ownership, delete behavior, auditing, security, usage, dependencies, and conceptual ATSugg mappings. Business choices remain pending review; no schema component is deployed.
 - Power Apps Premium and Dataverse usage in production are approved in principle, according to the supplied product context; detailed capabilities, identities, capacity, and permissions remain unverified.
 - Historical reference files cited by the blueprint and any ATSugg technical documentation were absent at inspection. Live ATSugg schema/data access is not established.
 
 ## Blockers and decisions
 
-Dedicated Dev/Test environment availability, region and access; production-environment governance for future work; BSO connector identity and mailbox authorization; TA and room calendar permissions; DLP; storage/retention and privacy; LEGO API access/contract; AI Builder and Power BI capacity; schema ownership/relationships/keys; ATSugg mapping, volume, and migration data quality. Details are in [Product Decisions](PRODUCT_DECISIONS.md).
+Schema owner approval and remaining field/choice decisions; dedicated Dev/Test availability and production-environment governance; BSO connector identity and mailbox authorization; TA and room calendar permissions; DLP; storage/retention and privacy; LEGO API contract; ATSugg schema/data quality; capacity and production operations. Details are in [Product Decisions](PRODUCT_DECISIONS.md) and [Dataverse Schema Specification](DATAVERSE_SCHEMA_SPECIFICATION.md).
 
 ## Next authorized action
 
-The next proposed step is **Phase 1C — Dataverse Table Schema Implementation Planning**. This is planning only and does not authorize table creation. Obtain separate explicit approval before provisioning business tables or beginning any later implementation phase.
+The next proposed step is schema-owner/security review and resolution of the decisions listed in [Dataverse Schema Specification](DATAVERSE_SCHEMA_SPECIFICATION.md). Phase 1D table implementation requires separate explicit approval; this design does not authorize provisioning.
 
 ## Completion evidence
 

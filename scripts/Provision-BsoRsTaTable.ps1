@@ -118,18 +118,12 @@ function Write-Result {
 
 function Get-SafeErrorMessage {
     param([Parameter(Mandatory = $true)][System.Management.Automation.ErrorRecord]$Record)
-    Get-SafeDiagnosticText ([string]$Record.Exception.Message)
+    'Operation stopped; raw exception details omitted. Review the safe diagnostic and reconcile before any recovery.'
 }
 
 function Get-SafeDiagnosticText {
     param([AllowEmptyString()][string]$Text)
-    $message = $Text
-    $message = $message -replace '(?i)Bearer\s+[^\s"'']+', 'Bearer [REDACTED]'
-    $message = $message -replace '(?i)access[_ -]?token\s*[:=]\s*[^\s,;]+', 'access_token=[REDACTED]'
-    $message = $message -replace '(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b', '[EMAIL REDACTED]'
-    $message = $message -replace '(?i)\b[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\b', '[GUID REDACTED]'
-    if ($message.Length -gt 1000) { $message = $message.Substring(0, 1000) }
-    $message
+    'Untrusted text omitted.'
 }
 
 function Get-SafeResponseHeader {
@@ -138,30 +132,82 @@ function Get-SafeResponseHeader {
     foreach ($key in $Headers.Keys) {
         if ([string]$key -ieq $Name) {
             $value = [string](@($Headers[$key]) -join ', ')
-            if ($value.Length -le 128 -and $value -match '^[A-Za-z0-9._:-]+$') { return $value }
+            if ($value -cmatch '^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$') { return $value.ToLowerInvariant() }
             return $null
         }
     }
     return $null
 }
 
-function Get-WwwAuthenticateDetails {
-    param([object]$Headers)
-    $challenge = $null
-    if ($null -ne $Headers) {
-        foreach ($key in $Headers.Keys) {
-            if ([string]$key -ieq 'WWW-Authenticate') {
-                $challenge = [string](@($Headers[$key]) -join ', ')
-                break
-            }
-        }
+function New-SafeHttpFailure {
+    param([string]$Method, [string]$Resource, [DateTimeOffset]$Timestamp,
+        [int]$StatusCode, [object]$Response, [object]$Headers)
+    $endpoint = switch -Regex ($Resource) {
+        '^EntityDefinitions' { '/api/data/v9.2/EntityDefinitions'; break }
+        '^PublishXml$' { '/api/data/v9.2/PublishXml'; break }
+        '^WhoAmI$' { '/api/data/v9.2/WhoAmI'; break }
+        '^organizations\(' { '/api/data/v9.2/organizations'; break }
+        '^publishers$' { '/api/data/v9.2/publishers'; break }
+        '^solutions$' { '/api/data/v9.2/solutions'; break }
+        '^solutioncomponents$' { '/api/data/v9.2/solutioncomponents'; break }
+        default { '/api/data/v9.2/[omitted]' }
     }
-    if ([string]::IsNullOrWhiteSpace($challenge) -or $challenge.Length -gt 4096) {
-        return [pscustomobject]@{ Scheme = $null; Error = $null }
+    $operation = if ($Method -eq 'POST') {
+        if ($Resource -ceq 'PublishXml') { 'PublishTable' }
+        elseif ($Resource -ceq 'EntityDefinitions') { 'CreateTable' }
+        else { 'CreateAttribute' }
+    } else { 'ReadMetadata' }
+    $summary = switch ($StatusCode) {
+        0 { 'Transport failure or timeout; response unavailable.' }
+        400 { 'Request construction or metadata validation rejected.' }
+        401 { 'Authentication/token failure; challenge and body omitted.' }
+        403 { 'Authorization/privilege failure.' }
+        429 { 'Rate limited; no automatic retry.' }
+        default { if ($StatusCode -ge 500) { 'Server failure; outcome uncertain.' } else { 'Unexpected HTTP response; operation stopped.' } }
     }
-    $scheme = [regex]::Match($challenge, '^\s*([A-Za-z][A-Za-z0-9_-]*)').Groups[1].Value
-    $errorCode = [regex]::Match($challenge, '(?i)(?:^|[,\s])error="?([^",\s]+)').Groups[1].Value
-    [pscustomobject]@{ Scheme = $scheme; Error = $errorCode }
+    $code = $null
+    if ($null -ne $Response -and [string]$Response.error.code -cmatch '^0x[0-9a-fA-F]{8}$') { $code = ([string]$Response.error.code).ToLowerInvariant() }
+    $requestId = Get-SafeResponseHeader -Headers $Headers -Name 'x-ms-service-request-id'
+    if (-not $requestId) { $requestId = Get-SafeResponseHeader -Headers $Headers -Name 'x-ms-request-id' }
+    $correlationId = Get-SafeResponseHeader -Headers $Headers -Name 'x-ms-correlation-request-id'
+    if (-not $correlationId) { $correlationId = Get-SafeResponseHeader -Headers $Headers -Name 'request-id' }
+    [ordered]@{
+        Operation = $operation
+        Method = if ($Method -in @('GET','POST')) { $Method } else { 'UNKNOWN' }
+        ApiPath = $endpoint
+        TimestampUtc = $Timestamp.ToUniversalTime().ToString('o')
+        StatusCode = if ($StatusCode -ge 100 -and $StatusCode -le 599) { $StatusCode } else { $null }
+        DataverseErrorCode = $code
+        ErrorSummary = $summary
+        RequestId = $requestId
+        CorrelationId = $correlationId
+        WritesMayHaveOccurred = [bool]$script:WritesStarted
+        ReconciliationCompleted = $false
+        ReconciliationOutcome = 'UNKNOWN'
+    }
+}
+
+function Get-StoppedDetails {
+    $originalFailure = if ($null -ne $script:LastHttpFailure) { [ordered]@{} + $script:LastHttpFailure } else { $null }
+    $reconciliation = [ordered]@{ Completed = $false; Outcome = 'UNKNOWN' }
+    try {
+        if ($script:WritesStarted) { $reconciliation = Get-ReconciliationSummary }
+    }
+    catch { $reconciliation = [ordered]@{ Completed = $false; Outcome = 'UNKNOWN' } }
+    finally { $script:LastHttpFailure = $originalFailure }
+    if ($null -ne $originalFailure) {
+        $originalFailure.WritesMayHaveOccurred = [bool]$script:WritesStarted
+        $originalFailure.ReconciliationCompleted = $reconciliation.Completed
+        $originalFailure.ReconciliationOutcome = $reconciliation.Outcome
+    }
+    [ordered]@{
+        Error = 'Operation stopped; raw exception details omitted. Do not retry automatically.'
+        WritesMayHaveOccurred = [bool]$script:WritesStarted
+        Reconciliation = $reconciliation
+        RequestsAttempted = $script:RequestCounts
+        WriteResults = $script:WriteResults.ToArray()
+        HttpFailure = $originalFailure
+    }
 }
 
 function Assert-PacEnvironment {
@@ -205,7 +251,27 @@ function Assert-PacEnvironment {
     $script:ApiRoot = $OrganizationUrl.TrimEnd('/') + '/api/data/v9.2/'
 }
 
-function Get-InteractiveAccessToken {
+function New-PrivatePipeline {
+    [System.Management.Automation.PowerShell]::Create()
+}
+
+function Invoke-PrivateOperation {
+    param([scriptblock]$Action, [object[]]$Arguments)
+    $pipeline = New-PrivatePipeline
+    try {
+        $null = $pipeline.AddScript({
+            param($operation, $parameters)
+            try { & ([scriptblock]::Create($operation)) @parameters }
+            catch { [pscustomobject]@{ Succeeded = $false } }
+        }).AddArgument($Action.ToString()).AddArgument($Arguments)
+        $records = @($pipeline.Invoke())
+        if ($pipeline.HadErrors -or $records.Count -ne 1) { return [pscustomobject]@{ Succeeded = $false } }
+        $records[0]
+    }
+    finally { $pipeline.Dispose() }
+}
+
+function Get-ValidatedAccessToken {
     if ($PSVersionTable.PSVersion -lt [Version]'7.4') {
         throw 'Online mode requires PowerShell 7.4 or later per the Microsoft Dataverse PowerShell quickstart. -PlanOnly remains available in Windows PowerShell 5.1.'
     }
@@ -265,6 +331,29 @@ function Get-InteractiveAccessToken {
         $secureToken = $null
         $tokenResult = $null
     }
+}
+
+function Get-InteractiveAccessToken {
+    $material = $null
+    try {
+        $material = Invoke-PrivateOperation -Arguments @(${function:Get-ValidatedAccessToken}.ToString(), $OrganizationUrl, $script:PacUserEmail) -Action {
+            param($definition, $organizationUrl, $pacUserEmail)
+            $OrganizationUrl = $organizationUrl
+            $script:PacUserEmail = $pacUserEmail
+            . ([scriptblock]::Create($definition)) *> $null
+            [pscustomobject]@{
+                Succeeded = $true
+                Token = $script:AccessToken
+                IssuedAt = $script:AccessTokenIssuedAt
+                ExpiresOn = $script:AccessTokenExpiresOn
+            }
+        }
+        if (-not $material.Succeeded) { throw 'Dataverse authentication failed; raw authentication details omitted. Review sign-in policy with the administrator.' }
+        $script:AccessToken = $material.Token
+        $script:AccessTokenIssuedAt = $material.IssuedAt
+        $script:AccessTokenExpiresOn = $material.ExpiresOn
+    }
+    finally { $material = $null }
 }
 
 function Ensure-DataverseAccessToken {
@@ -334,42 +423,25 @@ function Invoke-DataverseRequest {
     $script:RequestCounts[$Method]++
     $responseStatusCode = 0
     $responseHeaders = $null
-    $response = Invoke-RestMethod @request
-    $statusCode = [int]$responseStatusCode
+    if ($Method -eq 'POST') { $script:WritesStarted = $true }
+    $transport = Invoke-PrivateOperation -Arguments @($request) -Action {
+        param($parameters)
+        $response = Invoke-RestMethod @parameters -Verbose:$false -Debug:$false -WarningAction SilentlyContinue -InformationAction SilentlyContinue 2>$null 3>$null 4>$null 5>$null 6>$null
+        [pscustomobject]@{ Succeeded = $true; Response = $response; Status = $responseStatusCode; Headers = $responseHeaders }
+    }
+    if (-not $transport.Succeeded) {
+        $script:LastHttpFailure = New-SafeHttpFailure -Method $Method -Resource $resource -Timestamp $requestStartedUtc -StatusCode 0
+        throw 'Dataverse transport failed; raw exception details omitted. Reconcile before recovery.'
+    }
+    $response = $transport.Response
+    $responseHeaders = $transport.Headers
+    $statusCode = [int]$transport.Status
     if ($Method -eq 'POST') {
         $script:WriteResults.Add([ordered]@{ Method = $Method; Path = $Path; StatusCode = $statusCode })
     }
-    if ($statusCode -ge 400) {
-        $serverError = $response.error
-        $challengeDetails = Get-WwwAuthenticateDetails -Headers $responseHeaders
-        $requestId = Get-SafeResponseHeader -Headers $responseHeaders -Name 'x-ms-service-request-id'
-        if (-not $requestId) { $requestId = Get-SafeResponseHeader -Headers $responseHeaders -Name 'x-ms-request-id' }
-        $correlationId = Get-SafeResponseHeader -Headers $responseHeaders -Name 'x-ms-correlation-request-id'
-        if (-not $correlationId) { $correlationId = Get-SafeResponseHeader -Headers $responseHeaders -Name 'request-id' }
-        $failureClass = switch ($statusCode) {
-            401 { 'Authentication/token failure' }
-            403 { 'Permission/privilege failure' }
-            default { 'Unknown' }
-        }
-        $safeBodyCode = if ($serverError.code) { Get-SafeDiagnosticText ([string]$serverError.code) } else { $null }
-        $safeBodyMessage = if ($serverError.message) { Get-SafeDiagnosticText ([string]$serverError.message) } else { $null }
-        $script:LastHttpFailure = [ordered]@{
-            TimestampUtc = $requestStartedUtc.ToUniversalTime().ToString('o')
-            StatusCode = $statusCode
-            Classification = $failureClass
-            Method = $Method
-            ApiPath = $resource
-            DataverseErrorCode = $safeBodyCode
-            DataverseErrorMessage = $safeBodyMessage
-            WwwAuthenticateScheme = $challengeDetails.Scheme
-            WwwAuthenticateError = $challengeDetails.Error
-            RequestId = $requestId
-            CorrelationId = $correlationId
-            TokenIssuedUtc = if ($script:AccessTokenIssuedAt -ne [DateTimeOffset]::MinValue) { $script:AccessTokenIssuedAt.ToUniversalTime().ToString('o') } else { $null }
-            TokenExpiresUtc = if ($script:AccessTokenExpiresOn -ne [DateTimeOffset]::MinValue) { $script:AccessTokenExpiresOn.ToUniversalTime().ToString('o') } else { $null }
-            TokenSecondsRemainingAtRequest = [math]::Floor(($script:AccessTokenExpiresOn - $requestStartedUtc).TotalSeconds)
-        }
-        throw "Dataverse HTTP $statusCode ($failureClass) for $Method /api/data/v9.2/$resource."
+    if ($statusCode -lt 200 -or $statusCode -ge 300) {
+        $script:LastHttpFailure = New-SafeHttpFailure -Method $Method -Resource $resource -Timestamp $requestStartedUtc -StatusCode $statusCode -Response $response -Headers $responseHeaders
+        throw "Dataverse HTTP $statusCode; raw response details omitted. Review the safe diagnostic."
     }
     $response
 }
@@ -564,18 +636,15 @@ function Assert-UnchangedState {
 function Get-ReconciliationSummary {
     try {
         $table = Get-TableMetadataIfPresent
-        if (-not $table) { return 'No target table metadata found by read-only reconciliation. Do not retry automatically.' }
-        return [ordered]@{
-            TableFound = $true
-            LogicalName = $table.LogicalName
-            OwnershipType = $table.OwnershipType
-            PrimaryName = $table.PrimaryNameAttribute
-            PrimaryGuid = $table.PrimaryIdAttribute
-            ColumnsFound = @($table.Attributes | Where-Object { $_.LogicalName -like 'os_sr_*' } | ForEach-Object { $_.LogicalName })
-            Recovery = 'Stop; do not retry, delete, rename, or recreate. Inspect metadata and obtain explicit recovery approval.'
+        if (-not $table) { return [ordered]@{ Completed = $true; Outcome = 'ABSENT' } }
+        try {
+            Assert-TableMetadata -Metadata $table
+            Assert-SolutionMembership -SolutionId $script:ReconciliationSolutionId -Metadata $table
         }
+        catch { return [ordered]@{ Completed = $true; Outcome = 'PARTIAL' } }
+        return [ordered]@{ Completed = $true; Outcome = 'PRESENT' }
     }
-    catch { return 'Read-only reconciliation failed; state is uncertain. Do not retry, delete, or recreate.' }
+    catch { return [ordered]@{ Completed = $false; Outcome = 'UNKNOWN' } }
 }
 
 function Show-Plan {
@@ -631,6 +700,7 @@ try {
     if ($PlanOnly) { return }
 
     $preflight = Get-Preflight
+    $script:ReconciliationSolutionId = $preflight.SolutionId
     if (-not $Apply) {
         Assert-UnchangedState -Preflight $preflight
         Write-Result -Stage 'Preflight' -Status 'DryRunPassed' -Details ([ordered]@{
@@ -658,7 +728,6 @@ try {
     Ensure-DataverseAccessToken
 
     $script:WritesAllowed = $true
-    $script:WritesStarted = $true
     Invoke-DataverseRequest -Method POST -Path 'EntityDefinitions' -Body $payloads.Table -WithSolutionHeader | Out-Null
     $tableAfterCreate = Get-EntityMetadata
     $partialDefinition = $script:Definition.Clone()
@@ -692,14 +761,7 @@ try {
     })
 }
 catch {
-    $reconciliation = if ($script:WritesStarted) { Get-ReconciliationSummary } else { 'No metadata write was started.' }
-    Write-Result -Stage 'PreflightOrExecution' -Status 'Stopped' -Details ([ordered]@{
-        Error = Get-SafeErrorMessage $_
-        WritesMayHaveOccurred = $script:WritesStarted
-        Reconciliation = $reconciliation
-        RequestsAttempted = $script:RequestCounts
-        WriteResults = $script:WriteResults.ToArray()
-    })
+    Write-Result -Stage 'PreflightOrExecution' -Status 'Stopped' -Details (Get-StoppedDetails)
     exit 1
 }
 finally {

@@ -1,0 +1,27 @@
+{
+  "kit": "BSO-RS-Support VS Code Power Platform integration overlay",
+  "version": "2026-10-20",
+  "files": [
+    {
+      "path": ".github/prompts/bso-powerplatform-bootstrap.prompt.md",
+      "sha256": "18226308f607892af65eadf013eff7fbc9a53f8c7da0d21eb6f8f2363a15f544"
+    },
+    {
+      "path": ".github/prompts/bso-powerplatform-build-next.prompt.md",
+      "sha256": "0f60b1a8557851864b8d679ed4adbe7935169a54a81b4f755d329f9d98e6e040"
+    },
+    {
+      "path": "INSTALL.md",
+      "sha256": "26bd9da087f54f31bdcdf028b3ae7c4f03351d6afddffad5946a9927583f85e1"
+    },
+    {
+      "path": "docs/VS_CODE_POWER_PLATFORM_AUTOBUILD.md",
+      "sha256": "ef060469777c1acd6e828b468b223994a520aaf9339e7e751eab2cc99e5e74ee"
+    },
+    {
+      "path": "scripts/Test-BsoVsCodeReadiness.ps1",
+      "sha256": "500fa54f8a553546a80a53bb431106000b5f7451a9bdea4c62e297fc7b5dcb97"
+    }
+  ],
+  "note": "The kit does not install skills or modify Dataverse. It is not applied to the user's private local repository."
+}

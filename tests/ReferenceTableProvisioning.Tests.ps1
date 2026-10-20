@@ -87,53 +87,147 @@ Assert-Rejected {Assert-TableMetadata $fixture} 'Custom active column' 'Unexpect
 $sourceAst=[System.Management.Automation.Language.Parser]::ParseFile($provisioner,[ref]$null,[ref]$null)
 $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList $sourceAst -ScriptBlock {
     param($sourceAst)
-    foreach ($functionName in @('Ensure-DataverseAccessToken','Get-SafeDiagnosticText','Get-SafeResponseHeader','Get-WwwAuthenticateDetails','Invoke-DataverseRequest')) {
+    foreach ($functionName in @('Ensure-DataverseAccessToken','Invoke-PrivateOperation','Get-SafeDiagnosticText','Get-SafeErrorMessage','Get-SafeResponseHeader','New-SafeHttpFailure','Get-StoppedDetails','Get-ReconciliationSummary','Write-Result','Invoke-DataverseRequest')) {
         $functionAst=$sourceAst.Find({param($node)$node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName},$true)
         Invoke-Expression $functionAst.Extent.Text
     }
-    $script:Refreshes=0;$script:Status=204;$script:Headers=@{};$script:Response=$null;$script:Request=$null
-    $script:AccessToken='expired-synthetic';$script:AccessTokenExpiresOn=[DateTimeOffset]::UtcNow.AddMinutes(-1)
-    $script:RequestCounts=@{GET=0;POST=0};$script:WriteResults=[System.Collections.Generic.List[object]]::new()
     $script:OrganizationUrl='https://synthetic.crm.dynamics.com/';$script:ApiRoot=$script:OrganizationUrl+'api/data/v9.2/'
-    $script:TableName='os_sr_ta';$script:Apply=$true;$script:PlanOnly=$false;$script:WritesAllowed=$true;$script:Definition=@{Columns=@()}
-    function Invoke-RestMethod {
-        param($Method,$Uri,$Headers,$SkipHeaderValidation,$MaximumRedirection,$SkipHttpErrorCheck,$StatusCodeVariable,$ResponseHeadersVariable,$TimeoutSec,$ErrorAction,$ContentType,$Body)
-        $script:Request=[ordered]@{Method=$Method;Uri=[string]$Uri;HasAuthorization=$Headers.ContainsKey('Authorization');Bearer=([string]$Headers.Authorization).StartsWith('Bearer ');Solution=$Headers['MSCRM.SolutionUniqueName'];ContentType=$ContentType;Redirects=$MaximumRedirection;SkipHttpErrorCheck=$SkipHttpErrorCheck;Body=(ConvertFrom-Json $Body)}
-        Set-Variable -Name $StatusCodeVariable -Value $script:Status -Scope 1
-        Set-Variable -Name $ResponseHeadersVariable -Value $script:Headers -Scope 1
-        $script:Response
+    $script:TableName='os_sr_pos';$script:Apply=$true;$script:PlanOnly=$false;$script:Definition=@{Columns=@()}
+    $script:Secrets=@('synthetic.access.token-marker','synthetic-refresh-marker','synthetic-client-secret','synthetic-auth-code','synthetic-cookie-marker','synthetic-basic-marker')
+    $script:UnsafeText='Authorization: Bearer '+$script:Secrets[0]+'; refresh_token='+$script:Secrets[1]+'; client_secret='+$script:Secrets[2]+'; code='+$script:Secrets[3]+'; Cookie: session='+$script:Secrets[4]+'; Basic '+$script:Secrets[5]
+    function Get-InteractiveAccessToken {
+        $script:Refreshes++
+        $script:AccessToken=$script:Secrets[0]
+        $script:AccessTokenIssuedAt=[DateTimeOffset]::UtcNow
+        $script:AccessTokenExpiresOn=[DateTimeOffset]::UtcNow.AddHours(1)
+        $script:TransportState.ExpiresOn=$script:AccessTokenExpiresOn
+    }
+    function New-PrivatePipeline {
+        $pipeline=[System.Management.Automation.PowerShell]::Create()
+        $null=$pipeline.AddScript({
+            param($state)
+            $script:State=$state
+            function Invoke-RestMethod {
+                [CmdletBinding()]
+                param($Method,$Uri,$Headers,$SkipHeaderValidation,$MaximumRedirection,$SkipHttpErrorCheck,$StatusCodeVariable,$ResponseHeadersVariable,$TimeoutSec,$ContentType,$Body)
+                $script:State.Calls++
+                if ($Method -eq 'POST') {
+                    $script:State.PostCalls++
+                    $script:State.Request=[ordered]@{Method=$Method;Uri=[string]$Uri;ExactBearer=($Headers.Authorization -ceq ('Bearer '+$script:State.Secrets[0]));Fresh=($script:State.ExpiresOn -gt [DateTimeOffset]::UtcNow.AddMinutes(5));Solution=$Headers['MSCRM.SolutionUniqueName'];ContentType=$ContentType;Redirects=$MaximumRedirection;SkipHttpErrorCheck=$SkipHttpErrorCheck;Body=(ConvertFrom-Json $Body)}
+                }
+                Write-Warning $script:State.UnsafeText
+                Write-Information $script:State.UnsafeText
+                Write-Verbose $script:State.UnsafeText
+                if ($script:State.Timeout) { throw [TimeoutException]::new($script:State.UnsafeText) }
+                Set-Variable -Name $StatusCodeVariable -Value $script:State.Status -Scope 1
+                Set-Variable -Name $ResponseHeadersVariable -Value @{
+                    'WWW-Authenticate'=('Bearer error="'+$script:State.Secrets[0]+'", error_description="'+$script:State.UnsafeText+'"')
+                    'Authorization'=$script:State.UnsafeText;'Set-Cookie'=$script:State.UnsafeText
+                    'x-ms-service-request-id'='11111111-1111-4111-8111-111111111111'
+                    'x-ms-correlation-request-id'='22222222-2222-4222-8222-222222222222'
+                } -Scope 1
+                [pscustomobject]@{error=[pscustomobject]@{code='0x80040220';message=$script:State.UnsafeText};rawAuthentication=$script:State.UnsafeText}
+            }
+        }).AddArgument($script:TransportState)
+        $null=$pipeline.Invoke()
+        $pipeline.Commands.Clear()
+        $pipeline
+    }
+    function Get-TableMetadataIfPresent {
+        if ($script:Outcome -eq 'UNKNOWN') {
+            $script:TransportState.Timeout=$true
+            Invoke-DataverseRequest -Method GET -Path EntityDefinitions | Out-Null
+        }
+        if ($script:Outcome -eq 'ABSENT') { return $null }
+        [pscustomobject]@{LogicalName='os_sr_pos'}
+    }
+    function Assert-TableMetadata {
+        param($Metadata)
+        if ($script:Outcome -eq 'PARTIAL') { throw 'Synthetic metadata is incomplete.' }
+    }
+    function Assert-SolutionMembership { param($SolutionId,$Metadata) }
+    function Reset-SyntheticState {
+        $script:Refreshes=0;$script:LastHttpFailure=$null
+        $script:AccessToken='expired-synthetic';$script:AccessTokenExpiresOn=[DateTimeOffset]::UtcNow.AddMinutes(-1)
+        $script:RequestCounts=@{GET=0;POST=0};$script:WriteResults=[System.Collections.Generic.List[object]]::new()
+        $script:WritesAllowed=$true;$script:WritesStarted=$false
+        $script:TransportState=@{Calls=0;PostCalls=0;Request=$null;Status=0;Timeout=$false;Secrets=$script:Secrets;UnsafeText=$script:UnsafeText;ExpiresOn=[DateTimeOffset]::MinValue}
     }
     function Test-SyntheticHttpChecks {
-        Ensure-DataverseAccessToken -RefreshAction {$script:Refreshes++;$script:AccessToken='fresh-synthetic';$script:AccessTokenIssuedAt=[DateTimeOffset]::UtcNow;$script:AccessTokenExpiresOn=[DateTimeOffset]::UtcNow.AddHours(1)}
-        $table=[ordered]@{SchemaName='os_sr_ta'}
-        Invoke-DataverseRequest -Method POST -Path 'EntityDefinitions' -Body $table -WithSolutionHeader | Out-Null
-        $success=$script:Request
-        $script:Status=401
-        $script:Headers=@{'WWW-Authenticate'='Bearer error="invalid_token", error_description="do not expose"';'x-ms-service-request-id'='synthetic-request';'x-ms-correlation-request-id'='synthetic-correlation'}
-        $script:Response=[pscustomobject]@{error=[pscustomobject]@{code='synthetic-code';message='test@example.invalid auth failure'}}
-        $failed=$false;try {Invoke-DataverseRequest -Method POST -Path 'EntityDefinitions' -Body $table -WithSolutionHeader | Out-Null}catch{$failed=$true}
-        $failure=$script:LastHttpFailure
-        $script:Status=403
-        $script:Headers=@{}
-        $script:Response=[pscustomobject]@{error=[pscustomobject]@{code='forbidden';message='privilege denied'}}
-        try {Invoke-DataverseRequest -Method POST -Path 'EntityDefinitions' -Body $table -WithSolutionHeader | Out-Null}catch{}
-        [pscustomobject]@{Refreshes=$script:Refreshes;SuccessRequest=$success;Failed=$failed;Failure=$failure;Failure403=$script:LastHttpFailure;PostCount=$script:RequestCounts.POST}
+        $results=[System.Collections.Generic.List[object]]::new()
+        foreach ($status in @(401,403,400,429,500,0,302)) {
+            foreach ($outcome in @('PRESENT','ABSENT','PARTIAL','UNKNOWN')) {
+                Reset-SyntheticState
+                $script:TransportState.Status=$status;$script:TransportState.Timeout=($status -eq 0);$script:Outcome=$outcome
+                $script:SafeException=$null
+                $capture=@(& {
+                    try { Invoke-DataverseRequest -Method POST -Path EntityDefinitions -Body @{SchemaName='os_sr_pos'} -WithSolutionHeader | Out-Null }
+                    catch { $script:SafeException=$_.Exception.Message }
+                    Write-Result -Stage PreflightOrExecution -Status Stopped -Details (Get-StoppedDetails)
+                } *>&1)
+                $text=$capture | Out-String
+                $diagnostic=$text | ConvertFrom-Json
+                $file=[IO.Path]::GetTempFileName()
+                try {
+                    Set-Content -LiteralPath $file -Value $text
+                    $persisted=Get-Content -LiteralPath $file -Raw
+                    $secretFound=$false
+                    foreach ($secret in $script:Secrets) {
+                        if ($text.Contains($secret) -or $persisted.Contains($secret) -or $script:SafeException.Contains($secret)) { $secretFound=$true }
+                    }
+                    $results.Add([pscustomobject]@{Status=$status;Outcome=$outcome;Diagnostic=$diagnostic;SecretFound=$secretFound;Request=$script:TransportState.Request;Calls=$script:TransportState.PostCalls;Refreshes=$script:Refreshes;Exception=$script:SafeException})
+                }
+                finally { Remove-Item -LiteralPath $file -Force }
+            }
+        }
+        Reset-SyntheticState
+        $guardResults=[ordered]@{}
+        $script:WritesAllowed=$false
+        try { Invoke-DataverseRequest -Method POST -Path EntityDefinitions -Body @{SchemaName='os_sr_pos'} -WithSolutionHeader | Out-Null } catch { $guardResults.Unconfirmed=($script:TransportState.Calls -eq 0) }
+        $script:WritesAllowed=$true
+        try { Invoke-DataverseRequest -Method GET -Path 'https://unapproved.invalid/api/data/v9.2/WhoAmI' | Out-Null } catch { $guardResults.ForeignOrigin=($script:TransportState.Calls -eq 0) }
+        try { Invoke-DataverseRequest -Method POST -Path 'os_sr_pos' -Body @{} | Out-Null } catch { $guardResults.BusinessWrite=($script:TransportState.Calls -eq 0) }
+        $script:AccessTokenExpiresOn=[DateTimeOffset]::UtcNow.AddMinutes(-1)
+        try { Ensure-DataverseAccessToken -RefreshAction {} } catch { $guardResults.InvalidRefresh=($script:TransportState.Calls -eq 0) }
+        $unsafeCode=New-SafeHttpFailure -Method POST -Resource ('EntityDefinitions/'+$script:Secrets[0]) -Timestamp ([DateTimeOffset]::UtcNow) -StatusCode 400 -Response ([pscustomobject]@{error=[pscustomobject]@{code=$script:UnsafeText}}) -Headers @{'x-ms-request-id'=$script:Secrets[0]}
+        [pscustomobject]@{Cases=$results.ToArray();Guards=$guardResults;UnsafeCode=$unsafeCode;OmittedText=(Get-SafeDiagnosticText $script:UnsafeText);OmittedException=(Get-SafeErrorMessage ([System.Management.Automation.ErrorRecord]::new([Exception]::new($script:UnsafeText),'Synthetic',[System.Management.Automation.ErrorCategory]::NotSpecified,$null)))}
     }
     Export-ModuleMember -Function Test-SyntheticHttpChecks
 }
 Import-Module $httpModule -Force
-$http=Test-SyntheticHttpChecks
-Assert-Test ($http.Refreshes -eq 1) 'Expired token refresh callback called once'
-Assert-Test ($http.SuccessRequest.HasAuthorization -and $http.SuccessRequest.Bearer) 'Bearer header present'
-Assert-Test ($http.SuccessRequest.Solution -ceq 'os_sr_bso_rs_support') 'Solution header present'
-Assert-Test ($http.SuccessRequest.ContentType -ceq 'application/json; charset=utf-8' -and $http.SuccessRequest.Body.SchemaName -ceq 'os_sr_ta') 'POST construction and content type'
-Assert-Test ($http.SuccessRequest.Redirects -eq 0 -and $http.SuccessRequest.SkipHttpErrorCheck) 'Redirect disabled and status capture enabled'
-Assert-Test ($http.Failed -and $http.Failure.StatusCode -eq 401 -and $http.Failure.Classification -ceq 'Authentication/token failure') '401 safely classified'
-Assert-Test ($http.Failure.WwwAuthenticateScheme -ceq 'Bearer' -and $http.Failure.WwwAuthenticateError -ceq 'invalid_token') 'WWW-Authenticate parsed safely'
-Assert-Test ($http.Failure.RequestId -ceq 'synthetic-request' -and $http.Failure.CorrelationId -ceq 'synthetic-correlation') 'Request identifiers captured'
-Assert-Test ($http.Failure.DataverseErrorMessage -notmatch 'test@example.invalid|do not expose') 'Sensitive 401 fields redacted'
-Assert-Test ($http.Failure.TokenSecondsRemainingAtRequest -gt 0) 'Request-time token expiry captured'
-Assert-Test ($http.Failure403.StatusCode -eq 403 -and $http.Failure403.Classification -ceq 'Permission/privilege failure') '403 permission classification'
-Assert-Test ($http.PostCount -eq 3) '401 and 403 are not retried'
-Remove-Module $httpModule
+$transcript=[IO.Path]::GetTempFileName()
+try {
+    Start-Transcript -LiteralPath $transcript -Force | Out-Null
+    try { $http=Test-SyntheticHttpChecks } finally { Stop-Transcript | Out-Null }
+    $transcriptText=Get-Content -LiteralPath $transcript -Raw
+    Assert-Test ($transcriptText -notmatch 'synthetic\.(access\.token-marker)|synthetic-(refresh-marker|client-secret|auth-code|cookie-marker|basic-marker)') 'Transcript excludes synthetic secrets'
+}
+finally { Remove-Item -LiteralPath $transcript -Force; Remove-Module $httpModule }
+$diagnosticKeys=@('Operation','Method','ApiPath','TimestampUtc','StatusCode','DataverseErrorCode','ErrorSummary','RequestId','CorrelationId','WritesMayHaveOccurred','ReconciliationCompleted','ReconciliationOutcome') | Sort-Object
+foreach ($case in $http.Cases) {
+    $failure=$case.Diagnostic.Details.HttpFailure
+    $name="HTTP $($case.Status) / $($case.Outcome)"
+    Assert-Test (-not $case.SecretFound) "$name stdout, stderr, exception and persisted diagnostics exclude secrets"
+    Assert-Test ($case.Calls -eq 1 -and $case.Diagnostic.Details.RequestsAttempted.POST -eq 1) "$name no automatic retry"
+    Assert-Test ($case.Refreshes -eq 1 -and $case.Request.Fresh -and $case.Request.ExactBearer) "$name expired token refreshed before exact bearer construction"
+    Assert-Test ($case.Request.Solution -ceq 'os_sr_bso_rs_support' -and $case.Request.ContentType -ceq 'application/json; charset=utf-8' -and $case.Request.Body.SchemaName -ceq 'os_sr_pos') "$name Position POST construction"
+    Assert-Test ($case.Request.Redirects -eq 0 -and $case.Request.SkipHttpErrorCheck) "$name redirects disabled"
+    Assert-Test ((@($failure.PSObject.Properties.Name | Sort-Object) -join ',') -ceq ($diagnosticKeys -join ',')) "$name diagnostic schema allowlist"
+    Assert-Test ($failure.Method -ceq 'POST' -and $failure.Operation -ceq 'CreateTable' -and $failure.ApiPath -ceq '/api/data/v9.2/EntityDefinitions') "$name original operation preserved"
+    Assert-Test ($failure.WritesMayHaveOccurred -and $case.Diagnostic.Details.WritesMayHaveOccurred) "$name uncertain write retained"
+    Assert-Test ($failure.ReconciliationOutcome -ceq $case.Outcome -and $failure.ReconciliationCompleted -eq ($case.Outcome -ne 'UNKNOWN')) "$name reconciliation outcome"
+    Assert-Test ($failure.StatusCode -eq $(if ($case.Status -eq 0) { $null } else { $case.Status })) "$name original status survives secondary error"
+    Assert-Test ([DateTimeOffset]::Parse($failure.TimestampUtc).Offset -eq [TimeSpan]::Zero) "$name UTC request timestamp"
+    if ($case.Status -ne 0) {
+        Assert-Test ($failure.RequestId -ceq '11111111-1111-4111-8111-111111111111' -and $failure.CorrelationId -ceq '22222222-2222-4222-8222-222222222222' -and $failure.DataverseErrorCode -ceq '0x80040220') "$name safe IDs and Dataverse code"
+    }
+    $summaryPattern=switch ($case.Status) { 401 {'Authentication/token'} 403 {'Authorization/privilege'} 400 {'metadata validation'} 429 {'Rate limited'} 500 {'Server failure'} 0 {'Transport failure or timeout'} default {'Unexpected HTTP response'} }
+    Assert-Test ($failure.ErrorSummary -match $summaryPattern) "$name trusted status summary"
+    Assert-Test (($case.Diagnostic | ConvertTo-Json -Depth 20) -notmatch '"Authorization"\s*:|WWW-Authenticate|Cookie|rawAuthentication|Bearer') "$name sensitive headers and bodies omitted"
+}
+foreach ($guard in $http.Guards.GetEnumerator()) { Assert-Test $guard.Value "$($guard.Key) guard" }
+Assert-Test ($null -eq $http.UnsafeCode.DataverseErrorCode -and $null -eq $http.UnsafeCode.RequestId -and $http.UnsafeCode.ApiPath -ceq '/api/data/v9.2/EntityDefinitions') 'Risky code, ID and endpoint values omitted'
+Assert-Test ($http.OmittedText -ceq 'Untrusted text omitted.' -and $http.OmittedException -notmatch 'synthetic-') 'Untrusted local text and exceptions omitted'
+$sourceText=$sourceAst.Extent.Text
+Assert-Test ($sourceText.IndexOf('$confirmation = Read-Host') -lt $sourceText.IndexOf('$script:WritesAllowed = $true') -and $sourceText -match 'Ensure-DataverseAccessToken\s+\$script:WritesAllowed = \$true') 'Interactive confirmation and final token check retained'
 Write-Output "PASS: $script:Passed synthetic provisioning assertions; no authentication, API calls, or Apply invocation."

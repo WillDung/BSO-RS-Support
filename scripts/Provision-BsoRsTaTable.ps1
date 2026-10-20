@@ -18,6 +18,7 @@ $script:ApiRoot = $null
 $script:WritesStarted = $false
 $script:WritesAllowed = $false
 $script:RequestCounts = @{ GET = 0; POST = 0 }
+$script:WriteResults = [System.Collections.Generic.List[object]]::new()
 $script:Definitions = Import-PowerShellDataFile (Join-Path $PSScriptRoot 'ReferenceTableDefinitions.psd1')
 $script:Definition = $script:Definitions[$TableName]
 $expectedCollectionName = $script:Definition.DisplayCollectionName
@@ -249,7 +250,12 @@ function Invoke-DataverseRequest {
         $request.Body = ConvertTo-Json -InputObject $Body -Depth 40 -Compress
     }
     $script:RequestCounts[$Method]++
-    Invoke-RestMethod @request
+    if ($Method -eq 'POST') { $request.StatusCodeVariable = 'responseStatusCode' }
+    $response = Invoke-RestMethod @request
+    if ($Method -eq 'POST') {
+        $script:WriteResults.Add([ordered]@{ Method = $Method; Path = $Path; StatusCode = [int]$responseStatusCode })
+    }
+    $response
 }
 
 function Get-ODataList {
@@ -471,7 +477,7 @@ function Show-Plan {
         OwnershipType = $Payloads.Table.OwnershipType
         TableDisplayName = $script:Definition.DisplayName
         DisplayCollectionName = $DisplayCollectionName
-        DisplayCollectionNameStatus = if ($script:Definition.PluralApproved) { 'Owner-approved Phase 1D-C' } else { 'Pending owner approval; explicit input does not grant authorization' }
+        DisplayCollectionNameStatus = if ($script:Definition.PluralApproved) { if ($TableName -ceq 'os_sr_ta') { 'Owner-approved Phase 1D-C' } else { 'Owner-approved Phase 1D-D' } } else { 'Pending owner approval; explicit input does not grant authorization' }
         PrimaryNameSchemaName = $Payloads.Table.Attributes[0].SchemaName
         PrimaryNameDataType = 'String/Text'
         PrimaryNameMaxLength = $script:Definition.PrimaryName.MaxLength
@@ -562,6 +568,7 @@ try {
         AuditSettingsUnchanged = $true
         ExistingMetadataUnchanged = $true
         RequestsAttempted = $script:RequestCounts
+        WriteResults = $script:WriteResults.ToArray()
     })
 }
 catch {
@@ -571,6 +578,7 @@ catch {
         WritesMayHaveOccurred = $script:WritesStarted
         Reconciliation = $reconciliation
         RequestsAttempted = $script:RequestCounts
+        WriteResults = $script:WriteResults.ToArray()
     })
     exit 1
 }

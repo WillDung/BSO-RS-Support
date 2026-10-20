@@ -2,6 +2,8 @@
 
 **Status:** Proposed wider delivery approach. Phase 1B created the Publisher and initially empty unmanaged Solution in VN LMV IT Production for internal IT development. On 19 October 2026, separately approved Phase 1D-C created only `os_sr_ta`; independent metadata reads verified schema and Solution inclusion. See [Current State](CURRENT_STATE.md). No pipelines, environment variables, connection references, or other project tables were created.
 
+Phase 1D-D Apply was explicitly approved on 20 October 2026 for Position, Candidate Source, and Location. The first `os_sr_pos` creation POST returned HTTP 401. Read-only reconciliation found no Position metadata and verified that only TA remains in the project inventory. The sequence stopped; no further Apply calls, retries, role changes, audit changes, or data writes occurred. Do not attempt recovery until the cause of the 401 is resolved and an operator-approved retry plan is recorded.
+
 ## Phase 1B Resource Record
 
 | Resource | Verified properties |

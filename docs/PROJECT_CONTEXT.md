@@ -8,7 +8,7 @@ BSO-RS-Support is an internal recruitment support and candidate operations appli
 
 ## Current implementation
 
-Documentation and repository foundation, the verified Phase 1B Publisher/unmanaged Solution, and the single owner-approved Phase 1D-C TA Directory table `os_sr_ta` in VN LMV IT Production, explicitly selected for internal IT development. Independent metadata reads verified its approved columns and Solution inclusion; all other tables and all apps, flows, custom APIs, connectors, solution exports/imports, and integrations remain unimplemented. Evidence and remaining gates are recorded in [Current State](CURRENT_STATE.md). Premium and Dataverse production usage are approved in principle; wider capabilities, identities, capacity, and permissions remain unverified.
+Documentation and repository foundation, the verified Phase 1B Publisher/unmanaged Solution, and the Phase 1D-C TA Directory table `os_sr_ta` in VN LMV IT Production, explicitly selected for internal IT development. On 20 October 2026 the first Phase 1D-D Position Apply was owner-approved but blocked by HTTP 401; read-only reconciliation confirms TA remains the sole business table. Position, Candidate Source, Location, apps, flows, custom APIs, connectors, exports/imports, and integrations are not verified as implemented. Evidence and recovery gate are recorded in [Current State](CURRENT_STATE.md). Premium and Dataverse production usage are approved in principle; wider capabilities, identities, capacity, and permissions remain unverified.
 
 ## Target architecture (proposed)
 

@@ -48,7 +48,7 @@ foreach ($logicalName in @('os_sr_ta', 'os_sr_pos', 'os_sr_csrc', 'os_sr_loc')) 
     Assert-Test (@($plan.AdditionalColumnPayloads).Count -eq $expected[5]) "$logicalName exact extra column count"
     Assert-Test ($plan.PrimaryGuidLogicalName -ceq ($logicalName + 'id')) "$logicalName generated GUID name"
     if ($logicalName -cne 'os_sr_ta') {
-        Assert-Test ($plan.DisplayCollectionNameStatus -like 'Pending owner approval*') "$logicalName plural pending"
+        Assert-Test ($plan.DisplayCollectionNameStatus -ceq 'Owner-approved Phase 1D-D') "$logicalName approved Phase 1D-D plural"
     }
 }
 $location = (& $provisioner -TableName os_sr_loc -PlanOnly) | ConvertFrom-Json

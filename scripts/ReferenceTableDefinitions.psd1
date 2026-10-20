@@ -20,7 +20,7 @@
     os_sr_pos = @{
         DisplayName = 'Position'
         DisplayCollectionName = 'Positions'
-        PluralApproved = $false
+        PluralApproved = $true
         OwnershipType = 'OrganizationOwned'
         PrimaryName = @{
             SchemaName = 'os_sr_pos_ttl'; DisplayName = 'Position Title'
@@ -32,7 +32,7 @@
     os_sr_csrc = @{
         DisplayName = 'Candidate Source'
         DisplayCollectionName = 'Candidate Sources'
-        PluralApproved = $false
+        PluralApproved = $true
         OwnershipType = 'OrganizationOwned'
         PrimaryName = @{
             SchemaName = 'os_sr_csrc_nm'; DisplayName = 'Source Name'
@@ -44,7 +44,7 @@
     os_sr_loc = @{
         DisplayName = 'Location'
         DisplayCollectionName = 'Locations'
-        PluralApproved = $false
+        PluralApproved = $true
         OwnershipType = 'OrganizationOwned'
         PrimaryName = @{
             SchemaName = 'os_sr_loc_nm'; DisplayName = 'Location Name'

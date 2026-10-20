@@ -14,6 +14,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $script:AccessToken = $null
+$script:AccessTokenIssuedAt = [DateTimeOffset]::MinValue
+$script:AccessTokenExpiresOn = [DateTimeOffset]::MinValue
+$script:LastHttpFailure = $null
 $script:ApiRoot = $null
 $script:WritesStarted = $false
 $script:WritesAllowed = $false
@@ -115,12 +118,50 @@ function Write-Result {
 
 function Get-SafeErrorMessage {
     param([Parameter(Mandatory = $true)][System.Management.Automation.ErrorRecord]$Record)
-    $message = [string]$Record.Exception.Message
+    Get-SafeDiagnosticText ([string]$Record.Exception.Message)
+}
+
+function Get-SafeDiagnosticText {
+    param([AllowEmptyString()][string]$Text)
+    $message = $Text
     $message = $message -replace '(?i)Bearer\s+[^\s"'']+', 'Bearer [REDACTED]'
     $message = $message -replace '(?i)access[_ -]?token\s*[:=]\s*[^\s,;]+', 'access_token=[REDACTED]'
     $message = $message -replace '(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b', '[EMAIL REDACTED]'
+    $message = $message -replace '(?i)\b[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\b', '[GUID REDACTED]'
     if ($message.Length -gt 1000) { $message = $message.Substring(0, 1000) }
     $message
+}
+
+function Get-SafeResponseHeader {
+    param([object]$Headers, [Parameter(Mandatory = $true)][string]$Name)
+    if ($null -eq $Headers) { return $null }
+    foreach ($key in $Headers.Keys) {
+        if ([string]$key -ieq $Name) {
+            $value = [string](@($Headers[$key]) -join ', ')
+            if ($value.Length -le 128 -and $value -match '^[A-Za-z0-9._:-]+$') { return $value }
+            return $null
+        }
+    }
+    return $null
+}
+
+function Get-WwwAuthenticateDetails {
+    param([object]$Headers)
+    $challenge = $null
+    if ($null -ne $Headers) {
+        foreach ($key in $Headers.Keys) {
+            if ([string]$key -ieq 'WWW-Authenticate') {
+                $challenge = [string](@($Headers[$key]) -join ', ')
+                break
+            }
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($challenge) -or $challenge.Length -gt 4096) {
+        return [pscustomobject]@{ Scheme = $null; Error = $null }
+    }
+    $scheme = [regex]::Match($challenge, '^\s*([A-Za-z][A-Za-z0-9_-]*)').Groups[1].Value
+    $errorCode = [regex]::Match($challenge, '(?i)(?:^|[,\s])error="?([^",\s]+)').Groups[1].Value
+    [pscustomobject]@{ Scheme = $scheme; Error = $errorCode }
 }
 
 function Assert-PacEnvironment {
@@ -187,17 +228,53 @@ function Get-InteractiveAccessToken {
 
     $secureToken = $null
     $tokenText = $null
+    $tokenResult = $null
+    $claims = $null
     try {
-        $secureToken = (Get-AzAccessToken -ResourceUrl $OrganizationUrl -AsSecureString -ErrorAction Stop).Token
+        $tokenResult = Get-AzAccessToken -ResourceUrl $OrganizationUrl -AsSecureString -ErrorAction Stop
+        $secureToken = $tokenResult.Token
         if ($secureToken -isnot [Security.SecureString]) {
             throw 'Get-AzAccessToken did not return a SecureString. Verify Az.Accounts version and -AsSecureString support.'
         }
         $tokenText = ConvertFrom-SecureString -SecureString $secureToken -AsPlainText
+        $parts = $tokenText.Split('.')
+        if ($parts.Count -ne 3) { throw 'Dataverse access token is not a JWT; stop without an API request.' }
+        $encodedPayload = $parts[1].Replace('-', '+').Replace('_', '/')
+        switch ($encodedPayload.Length % 4) { 2 { $encodedPayload += '==' } 3 { $encodedPayload += '=' } }
+        $claims = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($encodedPayload)) | ConvertFrom-Json
+        $context = Get-AzContext -ErrorAction Stop
+        $audience = [Uri]([string]$claims.aud)
+        $organization = [Uri]$OrganizationUrl
+        $scopes = @(([string]$claims.scp) -split '\s+')
+        $issuedAt = [DateTimeOffset]::FromUnixTimeSeconds([long]$claims.iat)
+        $expiresAt = [DateTimeOffset]::FromUnixTimeSeconds([long]$claims.exp)
+        if ($claims.tid -cne $context.Tenant.Id -or $audience.Authority -ine $organization.Authority -or
+            'user_impersonation' -notin $scopes -or $expiresAt -le [DateTimeOffset]::UtcNow -or
+            [math]::Abs(($expiresAt - [DateTimeOffset]$tokenResult.ExpiresOn).TotalMinutes) -gt 2) {
+            throw 'Dataverse token tenant, audience, delegated scope, or expiry validation failed; no API request sent.'
+        }
         $script:AccessToken = $tokenText
+        $script:AccessTokenIssuedAt = $issuedAt
+        $script:AccessTokenExpiresOn = [DateTimeOffset]$tokenResult.ExpiresOn
     }
     finally {
         $tokenText = $null
+        $encodedPayload = $null
+        $parts = $null
+        $claims = $null
         $secureToken = $null
+        $tokenResult = $null
+    }
+}
+
+function Ensure-DataverseAccessToken {
+    param([scriptblock]$RefreshAction = { Get-InteractiveAccessToken })
+    $refreshBefore = [DateTimeOffset]::UtcNow.AddMinutes(5)
+    if ([string]::IsNullOrWhiteSpace($script:AccessToken) -or $script:AccessTokenExpiresOn -le $refreshBefore) {
+        & $RefreshAction
+    }
+    if ([string]::IsNullOrWhiteSpace($script:AccessToken) -or $script:AccessTokenExpiresOn -le [DateTimeOffset]::UtcNow) {
+        throw 'A valid Dataverse token is unavailable; no Web API request was sent.'
     }
 }
 
@@ -217,6 +294,7 @@ function Invoke-DataverseRequest {
         if ($Path -ne 'PublishXml' -and -not $WithSolutionHeader) { throw 'Metadata creation requires the project Solution header.' }
         if ($Path -eq 'PublishXml' -and $Body.ParameterXml -cne "<importexportxml><entities><entity>$TableName</entity></entities></importexportxml>") { throw 'Unapproved publish scope.' }
     }
+    Ensure-DataverseAccessToken
     $headers = @{
         Authorization = 'Bearer ' + $script:AccessToken
         Accept = 'application/json'
@@ -242,6 +320,9 @@ function Invoke-DataverseRequest {
         Headers = $headers
         SkipHeaderValidation = $true
         MaximumRedirection = 0
+        SkipHttpErrorCheck = $true
+        StatusCodeVariable = 'responseStatusCode'
+        ResponseHeadersVariable = 'responseHeaders'
         TimeoutSec = 120
         ErrorAction = 'Stop'
     }
@@ -249,11 +330,46 @@ function Invoke-DataverseRequest {
         $request.ContentType = 'application/json; charset=utf-8'
         $request.Body = ConvertTo-Json -InputObject $Body -Depth 40 -Compress
     }
+    $requestStartedUtc = [DateTimeOffset]::UtcNow
     $script:RequestCounts[$Method]++
-    if ($Method -eq 'POST') { $request.StatusCodeVariable = 'responseStatusCode' }
+    $responseStatusCode = 0
+    $responseHeaders = $null
     $response = Invoke-RestMethod @request
+    $statusCode = [int]$responseStatusCode
     if ($Method -eq 'POST') {
-        $script:WriteResults.Add([ordered]@{ Method = $Method; Path = $Path; StatusCode = [int]$responseStatusCode })
+        $script:WriteResults.Add([ordered]@{ Method = $Method; Path = $Path; StatusCode = $statusCode })
+    }
+    if ($statusCode -ge 400) {
+        $serverError = $response.error
+        $challengeDetails = Get-WwwAuthenticateDetails -Headers $responseHeaders
+        $requestId = Get-SafeResponseHeader -Headers $responseHeaders -Name 'x-ms-service-request-id'
+        if (-not $requestId) { $requestId = Get-SafeResponseHeader -Headers $responseHeaders -Name 'x-ms-request-id' }
+        $correlationId = Get-SafeResponseHeader -Headers $responseHeaders -Name 'x-ms-correlation-request-id'
+        if (-not $correlationId) { $correlationId = Get-SafeResponseHeader -Headers $responseHeaders -Name 'request-id' }
+        $failureClass = switch ($statusCode) {
+            401 { 'Authentication/token failure' }
+            403 { 'Permission/privilege failure' }
+            default { 'Unknown' }
+        }
+        $safeBodyCode = if ($serverError.code) { Get-SafeDiagnosticText ([string]$serverError.code) } else { $null }
+        $safeBodyMessage = if ($serverError.message) { Get-SafeDiagnosticText ([string]$serverError.message) } else { $null }
+        $script:LastHttpFailure = [ordered]@{
+            TimestampUtc = $requestStartedUtc.ToUniversalTime().ToString('o')
+            StatusCode = $statusCode
+            Classification = $failureClass
+            Method = $Method
+            ApiPath = $resource
+            DataverseErrorCode = $safeBodyCode
+            DataverseErrorMessage = $safeBodyMessage
+            WwwAuthenticateScheme = $challengeDetails.Scheme
+            WwwAuthenticateError = $challengeDetails.Error
+            RequestId = $requestId
+            CorrelationId = $correlationId
+            TokenIssuedUtc = if ($script:AccessTokenIssuedAt -ne [DateTimeOffset]::MinValue) { $script:AccessTokenIssuedAt.ToUniversalTime().ToString('o') } else { $null }
+            TokenExpiresUtc = if ($script:AccessTokenExpiresOn -ne [DateTimeOffset]::MinValue) { $script:AccessTokenExpiresOn.ToUniversalTime().ToString('o') } else { $null }
+            TokenSecondsRemainingAtRequest = [math]::Floor(($script:AccessTokenExpiresOn - $requestStartedUtc).TotalSeconds)
+        }
+        throw "Dataverse HTTP $statusCode ($failureClass) for $Method /api/data/v9.2/$resource."
     }
     $response
 }
@@ -538,6 +654,9 @@ try {
     $confirmation = Read-Host "Type '$confirmationPhrase' to authorize metadata writes"
     if ($confirmation -cne $confirmationPhrase) { throw 'Apply confirmation did not match; no writes performed.' }
 
+    # The operator may take time to review and enter the typed confirmation.
+    Ensure-DataverseAccessToken
+
     $script:WritesAllowed = $true
     $script:WritesStarted = $true
     Invoke-DataverseRequest -Method POST -Path 'EntityDefinitions' -Body $payloads.Table -WithSolutionHeader | Out-Null
@@ -569,6 +688,7 @@ try {
         ExistingMetadataUnchanged = $true
         RequestsAttempted = $script:RequestCounts
         WriteResults = $script:WriteResults.ToArray()
+        HttpFailure = $script:LastHttpFailure
     })
 }
 catch {
@@ -584,5 +704,7 @@ catch {
 }
 finally {
     $script:AccessToken = $null
+    $script:AccessTokenIssuedAt = [DateTimeOffset]::MinValue
+    $script:AccessTokenExpiresOn = [DateTimeOffset]::MinValue
     $script:WritesAllowed = $false
 }

@@ -1,12 +1,12 @@
 # Architecture
 
-**Status:** Proposed target architecture, based on the draft blueprint. The project Publisher, unmanaged Solution, and TA Directory table are verified. A BSO-RS-Support Model-driven App exists in the environment with actual unique name `srapp`, Saved - Not Published; it is not the approved expected `os_srapp`. Phase 2C authorization to create one app shell was not executed because it would create a second same-display-name app. Reconcile the existing app before further work. Sitemap composition, app security, and publication remain gated. Material design decisions require review and appropriate organizational approval.
+**Status:** Proposed target architecture, based on the draft blueprint. The project Publisher, unmanaged Solution, and TA Directory table are verified. The project owner officially adopted existing BSO-RS-Support AppModule `srapp` (ID `3709bb7c-28cd-f111-a05c-70a8a581cbfa`) on 21 October 2026. This app-only name exception supersedes the prior `os_srapp` proposal; normal Dataverse table naming remains `os_sr_*`. The AppModule Publisher lookup is unknown. App composition/navigation, security changes, and publication are not authorized; current app state remains Active but Unpublished.
 
 ## Logical components
 
 | Concern | Target component | Boundary / status |
 |---|---|---|
-| Interactive operations | Power Apps Model-driven App | Default UI; proposed. An existing BSO-RS-Support app has unique name `srapp` (Saved - Not Published), conflicting with the owner-approved target `os_srapp`. Phase 2C did not create a second app. Type 80 is identified as the existing AppModule; type 10091 is linked to its sitemap context but lacks an authoritative direct type mapping. See [Model-driven App Manifest](MODEL_DRIVEN_APP_MANIFEST.md) and [Automation Runbook](MODEL_DRIVEN_APP_AUTOMATION_RUNBOOK.md). |
+| Interactive operations | Power Apps Model-driven App | Officially adopted existing AppModule `srapp`; currently Active but Unpublished and not composed. `os_srapp` was a superseded naming proposal. R2 found no app components and only a placeholder Site Map. Type 80 is the AppModule, type 62 the Site Map, and type 10091 remains unidentified and is not the Site Map object. See [Model-driven App Manifest](MODEL_DRIVEN_APP_MANIFEST.md) and [Automation Runbook](MODEL_DRIVEN_APP_AUTOMATION_RUNBOOK.md). |
 | Complex interaction | Power Apps Custom Pages | Use only when justified; proposed |
 | Authoritative data | Microsoft Dataverse | Sole production source for candidate workflow/business state; production use approved in principle, no schema provisioned |
 | Critical business operations | Dataverse Custom APIs and synchronous plug-ins | Proposed enforcement for critical transitions |
@@ -28,7 +28,7 @@ The UI requests a business action. Dataverse validates and commits critical cand
 
 ## Model-driven App composition (proposed)
 
-The initial app design targets the existing `os_sr_ta` table, its Main `Information` form, and default public `Active TA Directories` view, under Recruitment Support > Administration > TA Directory. The owner approved `os_srapp`, but a same-display-name AppModule already exists as `srapp`; Phase 2C did not create a duplicate. Type 10091 is dependency-linked to the existing app; its exact component identity is unresolved. Component selection, sitemap changes, validation, role associations, and publication remain separate steps. See the app manifest, runbook, and [Product Decisions](PRODUCT_DECISIONS.md).
+The adopted app is prepared for a Phase 2D composition proposal using `os_sr_ta`, Main `Information` form `e076f089-e35b-46f3-b123-9cf0463759e5`, and public `Active TA Directories` view `2cb98672-8176-4337-af5e-d6aabcac8f2d`, under Recruitment Support > Administration > TA Directory. The Main form and view are in the exported project Solution under the TA table root; they are not yet selected in the app. The existing Site Map is `srapp` and currently placeholder-only. No composition, role change, or publication is authorized by adoption. See the app manifest, runbook, and [Product Decisions](PRODUCT_DECISIONS.md).
 
 ## Trust boundaries
 

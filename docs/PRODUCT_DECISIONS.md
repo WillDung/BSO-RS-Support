@@ -1,6 +1,6 @@
 # Product Decisions and Open Items
 
-This log separates explicit product rules from choices requiring confirmation. Statuses reflect the supplied materials and verified Phase 1B resource metadata as of 19 October 2026; a design proposal is not approval.
+This log separates explicit product rules from choices requiring confirmation. Statuses reflect the supplied materials, verified environment metadata, and the owner-approved Phase 2C-R3 adoption decision as of 21 October 2026; a design proposal is not approval.
 
 ## Established product rules
 
@@ -15,6 +15,7 @@ This log separates explicit product rules from choices requiring confirmation. S
 | Email outcome | Preserve sender/recipients/content; idempotency; distinguish Sent, Failed, Indeterminate. | Confirmed |
 | Platform | Premium/Dataverse production use approved in principle. | Confirmed; detailed tenant configuration not confirmed |
 | Technical naming | Dataverse Publisher Prefix `os` plus project namespace segment `sr_`; final technical names begin `os_sr_` and use the abbreviated dictionary. | Selected and implemented for the project Publisher on 19 October 2026; component naming remains subject to schema review |
+| Official model-driven app identity | Adopt the existing AppModule BSO-RS-Support, unique name `srapp`, ID `3709bb7c-28cd-f111-a05c-70a8a581cbfa`, in `os_sr_bso_rs_support`. | Project owner approved 21 October 2026. `srapp` is an app-only naming exception; the earlier `os_srapp` proposal is superseded for this app only. Do not rename or recreate it. Adoption does not imply composition, access grant, or publication. AppModule Publisher lookup remains unknown. |
 | Dataverse audit retention | Follow approved organizational IT/Compliance policy; current environment setting is not policy. | Confirmed decision; required retention value and audit scope remain unresolved. Current technical setting is 30 days. |
 
 ## Open decisions and external dependencies
@@ -22,7 +23,7 @@ This log separates explicit product rules from choices requiring confirmation. S
 | Item | Needed before | Current status |
 |---|---|---|
 | Dedicated Dev/Test environment(s), region, owners, and access; governance for continued development in Production | Further implementation | VN LMV IT is Production and was explicitly selected for Phase 1B internal IT development; existence/access of separate Dev/Test environments is unverified |
-| Model-driven App identity, naming exception, and adoption | Official app adoption | Owner previously approved expected final AppModule name `os_srapp` with caller suffix `srapp`. Phase 2C-R2 verified an existing active but unpublished BSO-RS-Support AppModule named `srapp`; its own Publisher lookup was not returned. It has no app components or usable navigation found and only System Administrator/System Customizer role associations. Classification is B: suitable only after approved changes. Owner must explicitly ratify `srapp` as the adopted name, verify its Publisher, approve app composition and least-privilege role design, resolve type 10091 (not the type-62 Site Map object), and authorize adoption. Do not rename, create, or publish in this phase. |
+| Phase 2D composition, app Publisher provenance, and end-user access | Composition implementation | Adoption of `srapp` is approved. The AppModule's own Publisher lookup remains unverified; do not infer it from the containing Solution Publisher. R2 found the App active but unpublished, no app components, a placeholder-only Site Map, and System Administrator/System Customizer roles only. Exact TA Main form and public Active view IDs are in the manifest. Phase 2D composition and any role/security changes require separate explicit authorization. Type 10091 remains identity-unknown and must be preserved; no publish or role changes are authorized by the adoption decision. |
 | Dataverse entity ownership, relationships, keys, audit/retention, concurrency, security boundary | Schema approval | Proposed in [Dataverse Schema Specification](DATAVERSE_SCHEMA_SPECIFICATION.md); owner/security review required |
 | Candidate number generation/format; candidate field requiredness; call outcome taxonomy; duplicate positions/sources; TA stable identity; room identity; interview result versioning/salary currency; visitor lifecycle; config table vs environment variables | Phase 1D schema implementation | Open; do not turn proposed defaults into business rules without approval |
 | TA, Position, Candidate Source, and Location duplicate/identity policies | Phase 1D-B reference table creation | No alternate keys proposed. TA email uniqueness, position title identity, source normalization/uniqueness, and room/location stable identity remain unresolved; see [Phase 1D-B Reference Table Runbook](PHASE_1D_B_REFERENCE_TABLE_RUNBOOK.md). |

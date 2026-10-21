@@ -1,8 +1,97 @@
 # BSO-RS-Support Model-driven App Manifest
 
-**Status:** Phase 2C-R2 adoption assessment, 21 October 2026. An existing BSO-RS-Support AppModule with unique name `srapp` is verified. It is active but unpublished and has no app components or usable navigation verified. Adoption classification is **B: suitable only after approved changes**; adoption itself is not authorized. The previously approved expected name `os_srapp` differs from the actual name; do not rename, create, or publish. The separate Phase 1D-D `os_sr_pos` HTTP 401 incident remains **UNKNOWN** and is not resolved by this app work.
+**Status:** Phase 2C-R3 official adoption recorded, 21 October 2026. The owner adopted the existing BSO-RS-Support AppModule with actual unique name `srapp`; Phase 2C is closed by adoption, not by a successful Create. Composition and publication remain unconfigured and are not authorized by this decision. The AppModule Publisher lookup and component type 10091 identity remain unknown.
 
-## Manifest
+## Current Adopted App Manifest
+
+```yaml
+apiVersion: bso-rs-support/v1
+kind: adoptedModelDrivenApp
+status: adopted-unconfigured
+asOf: 2026-10-21
+adoption:
+  ownerApproved: true
+  phase2cDisposition: closed-by-adoption-no-create
+  phase2dAuthorized: false
+  renameAllowed: false
+  recreateAllowed: false
+app:
+  displayName: BSO-RS-Support
+  uniqueName: srapp
+  appModuleId: 3709bb7c-28cd-f111-a05c-70a8a581cbfa
+  namingException: actual-srapp-supersedes-os_srapp-proposal
+  appState: Active
+  componentState: Unpublished
+  publishedOn: not-returned
+  publisherUniqueName: unknown-not-independently-verified
+  solutionUniqueName: os_sr_bso_rs_support
+  solutionMembership: verified-type-80-root
+  solutionPublisherUniqueName: os_bso_rs_support
+  solutionPublisherStatus: verified
+  appPublisherStatus: unknown
+currentSiteMap:
+  name: BSO-RS-Support
+  uniqueName: srapp
+  siteMapId: 6a02d640-2ccd-f111-a05a-000d3a64b349
+  solutionComponentType: 62
+  publicationState: Published
+  appModuleAssociation: not-found-in-appmodulecomponents
+  content: placeholder-area-group-subarea-only
+  subareaTarget: none
+proposedComposition:
+  status: planned-not-authorized
+  navigation:
+    area: Recruitment Support
+    group: Administration
+    subarea: TA Directory
+    targetEntity: os_sr_ta
+  components:
+    table:
+      logicalName: os_sr_ta
+      metadataId: f248212e-b5cb-f111-a05a-7c1e52376817
+      objectTypeCode: 11005
+      solutionMembership: verified-table-root-includes-subcomponents
+      appSelection: not-yet-added
+    mainForm:
+      name: Information
+      formId: e076f089-e35b-46f3-b123-9cf0463759e5
+      formType: 2
+      entityObjectTypeCode: 11005
+      activationState: Active
+      componentState: Published
+      solutionInclusion: verified-in-target-solution-export
+      appSelection: not-yet-added
+    publicView:
+      name: Active TA Directories
+      savedQueryId: 2cb98672-8176-4337-af5e-d6aabcac8f2d
+      queryType: 0
+      isPrivate: false
+      state: Active
+      componentState: Published
+      solutionInclusion: verified-in-target-solution-export
+      appSelection: not-yet-added
+security:
+  currentAppRoles:
+    - System Administrator
+    - System Customizer
+  projectEndUserRole: unknown-not-verified
+  changesAuthorized: false
+publication:
+  currentAppState: Unpublished
+  publishAllowed: false
+  publishRequiresSeparateApproval: true
+unresolved:
+  - appmodule-publisher-lookup
+  - solution-component-type-10091-exact-identity
+  - addappcomponents-entity-and-sitemap-payload-shape
+  - addappcomponents-action-in-atomic-changeset-compatibility
+```
+
+The Solution Publisher `os_bso_rs_support` is verified; the AppModule's Publisher lookup was not returned and is not inferred from Solution membership. R2 observations are the last verified live-state snapshot. Form/view IDs above were read from a read-only unmanaged Solution export and then queried as metadata; the IDs are not app associations. `componentstate=Unpublished` is distinct from `statecode=Active` and from the Published Site Map state.
+
+The former `os_srapp` YAML proposal and all following Phase 2C-R2 environment, naming, and component-plan sections are retained as historical decision evidence only. Their app-name target and “not adopted” status are superseded by the R3 owner decision; do not treat those sections as the current manifest.
+
+## Historical Phase 2C-R2 Manifest (superseded)
 
 ```yaml
 apiVersion: bso-rs-support/v1
@@ -106,7 +195,7 @@ Read-only checks on 21 October 2026 confirmed:
 - Both Web API and MCP queries returned zero `appmodulecomponent` rows for the app's unique component ID. The draft `appgraph` and `configxml` are empty. The supported `RetrieveAppComponents` function did not retrieve this unpublished draft. No app-linked form, view, or page association was found; the TA forms/views in the Solution are definitions, not verified app selections.
 - The app-role intersection contains two active managed associations: System Administrator and System Customizer. No project-specific end-user role was found. The AppModule's actual name `srapp` differs from the previously expected `os_srapp`; accepting it requires an explicit owner naming-exception decision. No adoption, create, edit, or publish operation occurred in Phase 2C-R2.
 - Type 10091 is a non-metadata child of type 80 (`rootsolutioncomponentid` points to the type-80 solutioncomponentid; `rootcomponentbehavior=0`). Live dependency rows show a Published dependency on the type-80 AppModule and an Unpublished dependency on type 10094. The type-10094 object exists in Default and managed `msdyn_AppFrameworkInfraExtensions`; it is distinct from the visible sitemap ID. Type 10091's exact public identity remains **UNKNOWN** and it is **not the Site Map record itself**. No corruption is established, but owner/admin review is required before adoption.
-## Naming Proposal and Verification
+## Historical Phase 2C-R2 Naming Proposal and Verification (superseded)
 
 Installed PAC 2.13.1 `pac model create` exposes display name, description, environment, Solution, and optional publish, but **no technical-name parameter**. It cannot guarantee `os_srapp`; the proposed AppModule API path is required if the technical name is accepted.
 
@@ -118,7 +207,7 @@ The owner has approved this component-specific exception for the app only. The p
 
 The AppModule Create API accepts a unique-name property, and the documented `SolutionUniqueName` parameter can associate a supported Create request with the existing Solution. Any future approved path must independently read back the final `appmodule.uniquename`, Publisher, Solution, and unpublished state before configuring components.
 
-## Component Dependencies
+## Historical R2 Component Plan (superseded by the current manifest above)
 
 | Component | Current evidence | Dependency for initial app |
 |---|---|---|

@@ -1,6 +1,6 @@
 # Security Model
 
-**Status:** Security design proposal and constraints. No tenant settings, roles, permissions, connector grants, or DLP configuration have been verified. Proposed table ownership and sensitive-field treatment are in [Dataverse Schema Specification](DATAVERSE_SCHEMA_SPECIFICATION.md).
+**Status:** Security design proposal and constraints. Phase 2C-R2 read-only inspection found the adopted AppModule associated with System Administrator and System Customizer roles; no project-specific end-user app role was verified. No role assignment/change, tenant setting, connector grant, or DLP configuration was performed by Phase 2C-R3. Proposed table ownership and sensitive-field treatment are in [Dataverse Schema Specification](DATAVERSE_SCHEMA_SPECIFICATION.md).
 
 ## Identity and authentication
 

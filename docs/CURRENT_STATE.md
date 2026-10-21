@@ -1,6 +1,6 @@
 # Current State
 
-**As of:** 21 October 2026. **Phase:** Phase 1D-D Apply remains blocked after the first Position metadata POST returned HTTP 401. Phase 1D-C's `os_sr_ta` remains the only deployed project table; no Phase 1D-D target or correctly named `os_srapp` AppModule exists. An existing BSO-RS-Support AppModule with unique name `srapp` is verified but not adopted; it is active and unpublished, and its app composition is incomplete.
+**As of:** 21 October 2026. **Phase:** Phase 1D-D Apply remains blocked after the first Position metadata POST returned HTTP 401. Phase 1D-C's `os_sr_ta` remains the only deployed project table; no Phase 1D-D target exists. The owner has officially adopted the existing BSO-RS-Support AppModule with actual unique name `srapp`; it remains active but unpublished and unconfigured.
 
 ## Facts
 
@@ -24,12 +24,13 @@
 - Historical reference files cited by the blueprint and any ATSugg technical documentation were absent at inspection. Live ATSugg schema/data access is not established.
 
 ## Blockers and decisions
+- Phase 2C-R3 owner decision, 21 October 2026: officially adopt existing AppModule **BSO-RS-Support**, actual unique name `srapp`, ID `3709bb7c-28cd-f111-a05c-70a8a581cbfa`, in Solution `os_sr_bso_rs_support` in VN LMV IT. This is an app-only naming exception; `srapp` supersedes the prior `os_srapp` proposal. No additional AppModule, rename, or recreation is needed or authorized. Phase 2C is closed by adoption, not by a successful Create. Solution membership is verified by the type-80 root; the AppModule's own Publisher lookup remains **UNKNOWN** and is not inferred from the Solution Publisher. Phase 2D plan is in the [Automation Runbook](MODEL_DRIVEN_APP_AUTOMATION_RUNBOOK.md) and is **not authorized**. Phase 2C-R2 remains the last verified live state: Active/Unpublished AppModule; Published placeholder-only `srapp` Site Map; no appmodulecomponent rows; empty appgraph/configxml; no verified app-linked forms/views/pages; app roles System Administrator and System Customizer only; no project-specific end-user role; type 80=AppModule, type 62=Site Map, type 10091 exact identity UNKNOWN. Exact TA Main form and Active public view IDs are documented in the [App Manifest](MODEL_DRIVEN_APP_MANIFEST.md). No Phase 2D operation occurred.
 
 Schema owner approval and remaining field/choice decisions; dedicated Dev/Test availability and production-environment governance; BSO connector identity and mailbox authorization; TA and room calendar permissions; DLP; storage/retention and privacy; LEGO API contract; ATSugg schema/data quality; capacity and production operations. Details are in [Product Decisions](PRODUCT_DECISIONS.md) and [Dataverse Schema Specification](DATAVERSE_SCHEMA_SPECIFICATION.md).
 
 ## Next authorized action
 
-Phase 1D-C is complete for `os_sr_ta` only. Phase 1D-D remains blocked on HTTP 401; its cause is **UNKNOWN**, and no retry is authorized. No Position, Candidate Source, or Location table exists. Phase 2C-R2 found the existing `srapp` AppModule active but unpublished, with no app components or usable sitemap navigation found and only System Administrator/System Customizer role associations. Do not create, rename, delete, recreate, publish, modify, or adopt it in this phase. Before adoption, obtain owner approval for the naming exception and app composition/security changes, and resolve the type-10091 identity. No business-data population, audit activation, security changes, or Git operations occurred. Resolve directory identity/duplicate and audit-policy decisions before business use. The [Phase 1D-B Reference Table Runbook](PHASE_1D_B_REFERENCE_TABLE_RUNBOOK.md) remains a plan, not additional table authorization.
+Phase 1D-C is complete for `os_sr_ta` only. Phase 1D-D remains blocked on HTTP 401; its cause is **UNKNOWN**, and no retry is authorized. No Position, Candidate Source, or Location table exists. Phase 2C is closed by owner-approved adoption of existing AppModule `srapp`; no AppModule Create, rename, or recreation occurred. Phase 2D composition planning is documented in the runbook but execution is **not authorized**. Do not alter navigation, components, roles, or publication without Phase 2D approval. No business-data population, audit activation, security changes, or Git operations occurred. Resolve directory identity/duplicate and audit-policy decisions before business use. The [Phase 1D-B Reference Table Runbook](PHASE_1D_B_REFERENCE_TABLE_RUNBOOK.md) remains a plan, not additional table authorization.
 
 ## Completion evidence
 

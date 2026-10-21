@@ -15,7 +15,7 @@ Phase 1D-D Apply was explicitly approved on 20 October 2026 for Position, Candid
 
 These resource records do not authorize additional schema, application, flow, security, or deployment work. Follow-on phases require their own approval and production change controls.
 
-Phase 2C owner authorization on 21 October 2026 covered one unpublished AppModule in `os_sr_bso_rs_support`, caller suffix `srapp`, expected final name `os_srapp`. No Create request was executed. Read-only PAC now shows an existing BSO-RS-Support app with actual unique name `srapp`, Saved - Not Published, and the matching type-80 Solution root; this is a confirmed conflict with creating a second same-display-name app. Type 10091 is linked to that app through dependency and AppModuleSiteMaps evidence, but its exact public component identity remains unknown. Reconcile existing app ownership/history with the owner/admin before any new creation direction. No app components were added by Phase 2C.
+Phase 2C-R3 owner decision on 21 October 2026 officially adopted the existing BSO-RS-Support AppModule (`srapp`, ID `3709bb7c-28cd-f111-a05c-70a8a581cbfa`) in `os_sr_bso_rs_support`. The name `srapp` is the approved component-specific exception; prior expected name `os_srapp` is superseded. Phase 2C closed by adoption, not a successful Create; no AppModule was created, renamed, or recreated. Solution membership is verified by its type-80 root. The AppModule Publisher lookup remains unknown. R2 live state remains Active/Unpublished, with no app components and placeholder-only Published Site Map. Phase 2D composition planning is documented but Phase 2D is not authorized.
 
 ## Phase 1D-B Reference Table Readiness
 

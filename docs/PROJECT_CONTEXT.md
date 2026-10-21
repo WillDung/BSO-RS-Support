@@ -1,6 +1,6 @@
 # Project Context
 
-**Status:** Current repository baseline, 19 October 2026. Source basis: supplied [Phase 0 Blueprint](../BSO-RS-Support-Phase0-Blueprint.md) (draft for design review), accompanying product rules, and verified Phase 1B Publisher/Solution metadata. Historical references named by the blueprint are not present in this repository.
+**Status:** Current repository baseline, updated 21 October 2026. Source basis: supplied [Phase 0 Blueprint](../BSO-RS-Support-Phase0-Blueprint.md) (draft for design review), accompanying product rules, and read-only verified environment metadata. Historical references named by the blueprint are not present in this repository.
 
 ## Purpose and legacy
 
@@ -8,7 +8,7 @@ BSO-RS-Support is an internal recruitment support and candidate operations appli
 
 ## Current implementation
 
-Documentation and repository foundation, the verified Phase 1B Publisher/unmanaged Solution, and the Phase 1D-C TA Directory table `os_sr_ta` in VN LMV IT Production, explicitly selected for internal IT development. On 20 October 2026 the first Phase 1D-D Position Apply was owner-approved but returned HTTP 401; its root cause is unknown. Effective Entity/Attribute create and customization privileges were later verified Global, but historical request/token diagnostics are unavailable. Fresh authenticated read-only DryRuns confirm TA remains the sole business table and all three targets are absent. Position, Candidate Source, Location, apps, flows, custom APIs, connectors, exports/imports, and integrations are not verified as implemented. Evidence and recovery gate are recorded in [Current State](CURRENT_STATE.md). Premium and Dataverse production usage are approved in principle; wider capabilities, identities, capacity, and permissions remain unverified.
+Documentation and repository foundation, the verified Phase 1B Publisher/unmanaged Solution, and the Phase 1D-C TA Directory table `os_sr_ta` in VN LMV IT Production, explicitly selected for internal IT development. On 20 October 2026 the first Phase 1D-D Position Apply returned HTTP 401; its root cause is unknown and no retry is authorized. Read-only reconciliation on 21 October confirms TA remains the sole project table and all three Phase 1D-D targets are absent. The environment has four Model-driven Apps, but no BSO-RS-Support app. Phase 2A adds a proposed app manifest and automation runbook only; `os_sr_app` is not yet verified. Apps, flows, custom APIs, connectors, and integrations are not implemented for this project. Evidence and recovery gates are recorded in [Current State](CURRENT_STATE.md), [Model-driven App Manifest](MODEL_DRIVEN_APP_MANIFEST.md), and [Automation Runbook](MODEL_DRIVEN_APP_AUTOMATION_RUNBOOK.md). Premium and Dataverse production usage are approved in principle; wider capabilities, identities, capacity, and permissions remain unverified.
 
 ## Target architecture (proposed)
 

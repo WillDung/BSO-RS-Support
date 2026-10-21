@@ -16,7 +16,7 @@ References:
 | --- | --- | --- |
 | Tables, columns, relationships, keys | Dataverse Skills `dv-metadata` using supported SDK/MetadataService/Web API; existing provenance-aware provisioning scripts | exact `os_sr_*` names, Organization/User ownership, primary name, attributes, solution membership, no duplicate objects |
 | Dataverse forms and views | `dv-metadata`, SDK metadata and approved supported tools | opened/published UI metadata and solution inclusion |
-| Model-driven app | `pac model create` if present; supported maker/SDK fallback; app must be in target Solution | `pac model list`, app ID, correct sitemap/form/view and security |
+| Model-driven app | PAC `model create` for an unpublished shell in the target Solution; AppModule SDK/Web API when exact technical-name control is required; `AddAppComponents`, sitemap/app designer, `ValidateApp` | Exact app unique name, Publisher/Solution linkage, table/form/view selection, sitemap, role dependencies, and unpublished state; follow [Phase 2A manifest](MODEL_DRIVEN_APP_MANIFEST.md) and [runbook](MODEL_DRIVEN_APP_AUTOMATION_RUNBOOK.md) |
 | Custom Pages and UI | Power Apps-supported tooling and component build workflow; interactive designer only when unavoidable | deployed pages, navigation, device/BSO UAT |
 | Custom APIs / plug-ins | supported SDK/PAC plug-in tooling with tests | server-side workflow state guard, idempotency, trace/recovery |
 | Cloud Flows | solution-aware Power Automate tools/definitions and connection references | owner/connection, DLP, no live sends/bookings without tests and authorization |
@@ -52,3 +52,5 @@ At last verified report, a one-time EntityDefinitions POST for `os_sr_pos` retur
 ## Known limitation
 
 No complete all-in-one tool was verified for automatically generating and deploying every app feature. Copilot can automate most supported authoring, packaging and checking, but custom pages, flows and security may require tenant permissions, approved connectors, external identities, or interactive UI operations. A task must report those blockers rather than claiming a completed application.
+
+PAC CLI 2.13.1 `pac model create` has no unique-name option, so it does not guarantee the proposed final `os_sr_app` name. AppModule creation automatically applies the Solution Publisher prefix; confirm the exact suffix and underscore behavior in a disposable nonproduction environment before creating an app. `pac model genpage` manages generated pages only; it is not a substitute for configuring ordinary entity navigation. Standard forms/views use supported Dataverse records and app-component APIs. Keep the app unpublished until separately approved.

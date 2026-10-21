@@ -1,12 +1,12 @@
 # Architecture
 
-**Status:** Proposed target architecture, based on the draft blueprint. The project Publisher and empty unmanaged Solution are verified; no business schema or application component is deployed. Material design decisions require review and appropriate organizational approval.
+**Status:** Proposed target architecture, based on the draft blueprint. The project Publisher, unmanaged Solution, and TA Directory table are verified. No BSO-RS-Support Model-driven App is deployed. Phase 2A has a read-only app manifest and automation plan; app unique-name behavior, sitemap composition, app security, and publication remain gated. Material design decisions require review and appropriate organizational approval.
 
 ## Logical components
 
 | Concern | Target component | Boundary / status |
 |---|---|---|
-| Interactive operations | Power Apps Model-driven App | Default UI; proposed |
+| Interactive operations | Power Apps Model-driven App | Default UI; proposed. Initial `BSO-RS-Support` / `os_sr_app` manifest and unpublished build plan are documented in [Model-driven App Manifest](MODEL_DRIVEN_APP_MANIFEST.md) and [Automation Runbook](MODEL_DRIVEN_APP_AUTOMATION_RUNBOOK.md). Neither the app nor its navigation is deployed. |
 | Complex interaction | Power Apps Custom Pages | Use only when justified; proposed |
 | Authoritative data | Microsoft Dataverse | Sole production source for candidate workflow/business state; production use approved in principle, no schema provisioned |
 | Critical business operations | Dataverse Custom APIs and synchronous plug-ins | Proposed enforcement for critical transitions |
@@ -25,6 +25,10 @@ The proposed table inventory is grouped into reference, candidate/history, inter
 ## Interaction and data flow
 
 The UI requests a business action. Dataverse validates and commits critical candidate state and history through an approved server-side operation. Flows may orchestrate external side effects such as email/calendar calls, but do not bypass transition rules. External operations require correlation, idempotency where possible, explicit outcome states, and reconciliation for uncertain results. Dataverse remains business authority; SharePoint holds approved document binaries only.
+
+## Model-driven App composition (proposed)
+
+The initial app proposal contains only the existing `os_sr_ta` table, its Main `Information` form, and default public `Active TA Directories` view, under Recruitment Support > Administration > TA Directory. PAC 2.13.1 can create an app in the existing Solution but cannot set its unique name; exact `os_sr_app` naming remains unverified and must pass a supported nonproduction naming test before any creation. Component selection, sitemap creation, validation, role associations, and publication are separate steps; publication and security changes require separate approvals. See the app manifest and runbook for the evidence-backed sequence and limitations.
 
 ## Trust boundaries
 

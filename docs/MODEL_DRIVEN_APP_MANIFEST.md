@@ -1,6 +1,6 @@
 # BSO-RS-Support Model-driven App Manifest
 
-**Status:** Phase 2C naming approved; creation preflight blocked, 21 October 2026. The project owner explicitly approved exactly one unpublished AppModule with caller suffix `srapp`, expected final `os_srapp`, as an app-only exception to `os_sr_*`. No app resource was created. Two unexplained Solution-component root types block the write. The separate Phase 1D-D `os_sr_pos` HTTP 401 incident remains **UNKNOWN** and is not resolved by this app work.
+**Status:** Phase 2C creation blocked, 21 October 2026. The project owner approved exactly one unpublished AppModule with caller suffix `srapp`, expected final `os_srapp`, as an app-only exception to `os_sr_*`. Read-only discovery found an existing BSO-RS-Support app with unique name `srapp`, so creating a second same-display-name app is blocked. No app resource was created in Phase 2C. The separate Phase 1D-D `os_sr_pos` HTTP 401 incident remains **UNKNOWN** and is not resolved by this app work.
 
 ## Manifest
 
@@ -96,22 +96,23 @@ The manifest separates deployed metadata from planned app composition. `appSelec
 
 Read-only checks on 21 October 2026 confirmed:
 
-- PAC active organization is VN LMV IT at the requested organization URL; its environment and organization identity matched the project baseline.
+- PAC identity matches VN LMV IT at the approved organization URL and environment/organization IDs.
 - Publisher `os_bso_rs_support` has prefix `os`; Solution `os_sr_bso_rs_support` is unmanaged version `1.0.0.0` and linked to that Publisher.
-- Four model-driven apps exist: Power Pages Management, Power Platform Environment Settings, Recruitment Candidate Pipeline, and Solution Health Hub. No BSO-RS-Support app or `os_srapp` unique name appeared in the inventory. A direct read-only AppModule query for `os_srapp` returned no rows. The Recruitment Candidate Pipeline app is associated with another Solution.
+- Five model-driven apps appear in PAC inventory. BSO-RS-Support exists with actual unique name `srapp` and status **Saved - Not Published**; no `os_srapp` unique name exists. The existing app's App ID matches the type-80 root component in both the project Solution and Default Solution. This is a pre-existing app, not one created by Phase 2C.
 - The only project custom table is `os_sr_ta`. Position, Candidate Source, and Location remain absent. No business rows were read.
-- The project Solution has one table root component for TA with `rootcomponentbehavior=0` (Include Subcomponents). A temporary PAC unmanaged Solution export contained the TA entity metadata, 3 form components, and 7 saved-query components; the archive was inspected for display/type metadata only and removed.
-- TA forms exported: Information (`main`), Information (`card`), and Information (`quick`). TA view inventory: Active TA Directories (public view, query type 0, default); Inactive TA Directories (type 0); Quick Find Active TA Directories (type 4); TA Directories (type 8192); TA Directory Advanced Find View (type 1); TA Directory Associated View (type 2); TA Directory Lookup View (type 64).
-- No app-specific sitemap, component selection, role assignment, or publication exists for the proposed app. Existing environment security settings and grants were not changed or evaluated in this app-design phase.
-- Phase 2C preflight found two additional root rows in the target Solution component query with component types `80` and `10091`. These values are absent from the published `solutioncomponent.componenttype` choices. Direct AppModule/AppModuleComponent lookups did not identify their object IDs, and a temporary read-only Solution export contained zero AppModule sections. Their origin and meaning are **UNKNOWN**. The AppModule Create request was not issued.
-
+- The project Solution includes the TA Entity root with `rootcomponentbehavior=0` (Include Subcomponents). A temporary read-only Solution export contained TA metadata, three forms, and seven views; the archive was inspected for selected labels/types only and removed.
+- TA forms exported: Information (`main`), Information (`card`), and Information (`quick`). TA views include Active TA Directories (public type 0, default), Inactive TA Directories (type 0), Quick Find Active TA Directories (type 4), TA Directories (type 8192), Advanced Find (type 1), Associated (type 2), and Lookup (type 64).
+- No app components were added by Phase 2C. The live sitemap table and exported `AppModuleSiteMaps` section identify an app-aware BSO-RS-Support sitemap with unique name `srapp` in Default Solution. No sitemap for an `os_srapp` app is verified. No role assignment or publication change was performed.
+- Live `solutioncomponent.componenttype` choice metadata returned 180 options and no entries for `80` or `10091`. The type-80 component row is a root (`rootsolutioncomponentid=null`, `rootcomponentbehavior=0`, `ismetadata=false`) whose `objectid` matches the existing PAC-listed BSO-RS-Support AppModule ID. It is **identified and a confirmed creation conflict**.
+- The type-10091 row is a non-metadata child of type 80 (`rootsolutioncomponentid` equals the type-80 solutioncomponentid; `rootcomponentbehavior=0`, `ismetadata=false`). Supported dependency functions show it requires type 80 and type 10094; no dependent components were returned. Type 10094 exists in Default and managed `msdyn_AppFrameworkInfraExtensions` Solution component inventories. `AppModuleSiteMaps` export and live sitemap metadata both reference unique name `srapp`, but the type-10091 object ID does not equal the sitemap ID and no public type mapping was found. Its exact identity is **UNKNOWN**; it is dependency-linked to the existing app, with no separate conflict/corruption demonstrated.
+- Microsoft's documented AppModule creation sequence does not require resolving every unrelated Solution component. However, the existing same-display-name AppModule independently conflicts with creation of the approved app shell. No AppModule Create request was sent.
 ## Naming Proposal and Verification
 
 Installed PAC 2.13.1 `pac model create` exposes display name, description, environment, Solution, and optional publish, but **no technical-name parameter**. It cannot guarantee `os_srapp`; the proposed AppModule API path is required if the technical name is accepted.
 
 Microsoft's [AppModule creation guidance](https://learn.microsoft.com/en-us/power-apps/developer/model-driven-apps/create-manage-model-driven-apps-using-code) says the supplied `uniquename` uses English letters and numbers and that Dataverse automatically prepends the Solution Publisher prefix. The AppModule table reference exposes `uniquename` as a writable string (maximum length 100). Thus `srapp` meets the documented input character rule; with prefix `os`, the documented expected final value is `os_srapp`. The Web API/SDK path permits the caller to supply `uniquename`, unlike PAC `model create`.
 
-The live app inventory contains four apps and no `os_srapp`; a direct read-only `appmodule.uniquename` query for `os_srapp` returned no rows. The target Solution and Publisher were independently verified. This is an absence/collision check only; no create request was sent. After any separately authorized creation, read back `appmodule.uniquename`, Publisher, Solution, and publication state. If the final name differs from `os_srapp`, stop; do not rename, delete, recreate, or accept a substitute automatically.
+The live app inventory contains five apps; a direct read-only `appmodule.uniquename` query for `os_srapp` returned no rows, but PAC lists a BSO-RS-Support app with unique name `srapp`. This existing same-display-name app is a confirmed creation conflict even though its unique name differs. The target Solution and Publisher were independently verified. Do not create a second app under the same display name. After owner/admin reconciliation and new direction, any authorized creation must independently read back `appmodule.uniquename`, Publisher, Solution, and publication state. If the final name differs from `os_srapp`, stop; do not rename, delete, recreate, or accept a substitute automatically.
 
 The owner has approved this component-specific exception for the app only. The project-wide `os_sr_*` convention remains unchanged for every other component. This exception does not alter table names, Solution names, or Publisher settings. Actual prefix behavior and final name still require post-create read-back.
 
@@ -126,8 +127,8 @@ The AppModule Create API accepts a unique-name property, and the documented `Sol
 | Card and Quick forms | `Information`, types `card` and `quick` | Excluded from initial app unless separately requested |
 | Public views | Active and Inactive TA Directories, query type 0 | Select Active as initial default; resolve current IDs and verify default/active state |
 | System views | Quick Find, advanced-find, associated, lookup, and type-8192 TA Directories views | Do not include explicitly in initial app without a documented need; some views serve platform lookup/search behavior and are not normal sitemap pages |
-| Sitemap | No app-specific sitemap exists for the proposed app | Create/configure Area > Group > SubArea, attach to app, then read back and validate |
-| App access | No app-specific role association exists | Requires a later security review and separate approval; do not assign roles in Phase 2A |
+| Sitemap | Existing app-aware BSO-RS-Support/`srapp` sitemap exists in Default Solution; no `os_srapp` app sitemap is verified | Do not edit or reuse it until app identity/ownership is reconciled; future sitemap attachment is separately approved |
+| App access | No role assignment was changed in Phase 2C; existing app access association is not verified | Requires a later security review and separate approval; do not assign roles in Phase 2C |
 
 The existing solution export confirms form/view component definitions, but not which will be selected in a new app. App-specific selection and deployment membership must be verified after configuration.
 

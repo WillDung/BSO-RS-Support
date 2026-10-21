@@ -7,7 +7,7 @@
 BSO-RS-Support is an internal recruitment support and candidate operations application intended to replace ATSugg over time. ATSugg is described by the blueprint as React, FastAPI, and PostgreSQL. It must remain intact as business reference and rollback option until migration and acceptance are completed. No source code or live production state has been inspected here.
 
 ## Current implementation
-**Current R3 decision, 21 October 2026:** The owner officially adopted existing BSO-RS-Support AppModule `srapp` (ID `3709bb7c-28cd-f111-a05c-70a8a581cbfa`) in `os_sr_bso_rs_support`. The app-specific `srapp` name supersedes the earlier `os_srapp` proposal; do not rename or recreate it. The AppModule Publisher lookup remains unknown. Adoption does not mean composition or publication: R2's last verified state is Active but Unpublished, with no app-component associations and placeholder-only Site Map. Phase 2D planning is in the runbook; Phase 2D is not authorized.
+**Current R3 decision, 21 October 2026:** The owner officially adopted existing BSO-RS-Support AppModule `srapp` (ID `3709bb7c-28cd-f111-a05c-70a8a581cbfa`) in `os_sr_bso_rs_support`. The app-specific `srapp` name supersedes the earlier `os_srapp` proposal; do not rename or recreate it. The AppModule Publisher lookup remains unknown. Adoption does not mean composition or publication. The R3-P GET-only DryRun reconfirmed Active/Unpublished state, the placeholder-only Published Site Map, the existing package-level `AppModuleSiteMap.SiteMapUniqueName=srapp` binding, and zero direct appmodulecomponent rows. Phase 2D planning is in the runbook; Phase 2D is not authorized.
 
 The following Phase 2C-R2 paragraph is retained as the historical assessment and is superseded by the R3 owner decision above:
 

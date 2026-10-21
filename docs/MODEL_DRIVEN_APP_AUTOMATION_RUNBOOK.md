@@ -8,7 +8,7 @@
 - App: BSO-RS-Support, unique name `srapp`, AppModule ID `3709bb7c-28cd-f111-a05c-70a8a581cbfa`.
 - Solution: `os_sr_bso_rs_support`; the AppModule is verified as a type-80 root. The Solution Publisher is `os_bso_rs_support`; the AppModule Publisher lookup remains **UNKNOWN**.
 - Phase 2C closed by owner-approved adoption, not by a successful AppModule Create. No additional AppModule is required. Do not create, rename, or recreate the app.
-- R2 last verified state: `statecode=0` Active, `componentstate=1` Unpublished. The existing `srapp` Site Map is Published but placeholder-only. No appmodulecomponent rows, no verified app-linked forms/views/pages, and no project-specific end-user role were found. System Administrator and System Customizer are the only verified app-role associations. Type 10091 remains unidentified and is not the type-62 Site Map object.
+- R3-P GET-only DryRun reconfirmed `statecode=0` Active and `componentstate=1` Unpublished. The `srapp` Site Map remains Published with placeholder-only XML; the Site Map unpublished query returned `componentstate=0`, so no distinct draft layer was observed. The target Solution export contains one `AppModuleSiteMap.SiteMapUniqueName=srapp` binding; direct appmodulecomponents remains empty. No verified app-linked forms/views/pages or project-specific end-user role were found. System Administrator and System Customizer are the only verified app-role associations. Type 10091 remains unidentified and is not the type-62 Site Map object.
 
 ## Phase 2D Plan (Prepared, Not Authorized)
 
@@ -17,7 +17,7 @@
 1. Verify `pac org who` still matches VN LMV IT and the specified URL; never switch environments.
 2. Read the AppModule and require the exact ID, display name, and unique name above. Use the documented `RetrieveUnpublished` function for the draft; distinguish `statecode` from `componentstate`. Do not infer the AppModule Publisher from the Solution Publisher.
 3. Read `solutioncomponent` and verify AppModule type 80, Site Map type 62, TA Entity type 1, and the existing type-10091 child. Preserve type 10091 and its dependencies; do not remove or reinterpret it.
-4. Verify existing Site Map ID `6a02d640-2ccd-f111-a05a-000d3a64b349`, unique name `srapp`, app-aware flag, current XML, and componentstate. The type-62 Solution component object ID matches this Site Map; the prior `appmodulecomponent` query returned no rows, so no app-to-Site-Map association is currently verified.
+4. Verify existing Site Map ID `6a02d640-2ccd-f111-a05a-000d3a64b349`, unique name `srapp`, app-aware flag, current XML, and componentstate. The read-only target Solution export contains exactly one `<AppModuleSiteMap>` entry with `SiteMapUniqueName=srapp`, matching the adopted AppModule and live Site Map. This is the exact Solution-package-level binding. The standard `appmodulecomponent` query returned zero rows, so no separate type-62 AppModuleComponent association was observed. Preserve the special export binding and do not add a duplicate Site Map component.
 5. Verify TA table `os_sr_ta`, MetadataId `f248212e-b5cb-f111-a05a-7c1e52376817`, ObjectTypeCode `11005`, and its project Solution root with Include Subcomponents.
 6. Verify Main Information form `e076f089-e35b-46f3-b123-9cf0463759e5` (type 2/Main, ObjectTypeCode 11005, Active, Published) and public Active TA Directories view `2cb98672-8176-4337-af5e-d6aabcac8f2d` (query type 0, not private, ObjectTypeCode 11005, Active, Published). Both occur in the target unmanaged Solution export under the TA table root; do not treat that as app selection.
 7. Re-read app-role links. Do not add/remove roles or change the two observed associations.
@@ -25,11 +25,33 @@
 
 ### Supported Composition Route
 
-Microsoft documents `AddAppComponents` (`POST /api/data/v9.2/AddAppComponents`) with `AppId` and a typed `Components` collection; its model-driven-app guide demonstrates `savedquery` and `systemform` objects and documents table, sitemap, view, and form components. The equivalent .NET request is `AddAppComponentsRequest` with `AppId` and `Components`. `ValidateApp(AppModuleId=...)` is a read-only dependency validation function. `RetrieveAppComponents(AppModuleId=...)` is documented for published apps; it failed against this unpublished draft in R2, so direct `appmodulecomponents` queries plus `RetrieveUnpublished` are required for draft read-back.
+Microsoft documents `AddAppComponents` (`POST /api/data/v9.2/AddAppComponents`) with non-null `AppId: Edm.Guid` and non-null `Components: Collection(mscrm.crmbaseentity)`; its guide demonstrates typed `savedquery` and `systemform` records and lists table, sitemap, view, and form components. The equivalent .NET request is `AddAppComponentsRequest` with `AppId` and `Components`. A target-organization `$metadata` GET verified the component entity types and primary keys: `Microsoft.Dynamics.CRM.entity/entityid`, `systemform/formid`, `savedquery/savedqueryid`, and `sitemap/sitemapid`. The candidate table/form/view JSON below is therefore schema-validated, but no AddAppComponents request has been sent, so runtime acceptance remains unverified. `ValidateApp(AppModuleId=...)` is a read-only dependency validation function. `RetrieveAppComponents(AppModuleId=...)` did not retrieve this unpublished draft; direct `appmodulecomponents` queries plus `RetrieveUnpublished` are required for draft read-back.
 
-For navigation, update the existing `sitemapxml` on Site Map `6a02d640-2ccd-f111-a05a-000d3a64b349` using a schema-valid Site Map generated by the Power Apps Site Map Designer or confirmed against the live `$metadata`/supported XML schema. Preserve the existing Site Map record ID and unique name `srapp`; add only Area **Recruitment Support**, Group **Administration**, and an Entity SubArea **TA Directory** targeting `os_sr_ta`. Then associate that same Site Map with the adopted app using `AddAppComponents` component type 62. `pac model genpage add` is for generated pages and is not a standard entity-navigation mechanism.
+For navigation, update the existing `sitemapxml` on Site Map `6a02d640-2ccd-f111-a05a-000d3a64b349`. The read-only DryRun inspected the live XML: one Area, one Group, and one SubArea with IDs `area_918af8a3`, `group_8b0502d1`, and `subarea_9787e9c1`; titles are placeholder values. The proposed XML transformation changes only those LCID 1033 title strings and adds `Entity="os_sr_ta"` to the existing SubArea, preserving all node IDs and other attributes. Do not create a new Site Map. The Solution export's existing `AppModuleSiteMap.SiteMapUniqueName=srapp` binding is preserved; therefore no Site Map object is included in the AddAppComponents payload. `pac model genpage add` is for generated pages and is not a standard entity-navigation mechanism.
 
-The exact `AddAppComponents` wrappers for the Entity Metadata and Site Map objects are not shown in the Microsoft example inspected. The form/view wrappers are documented (`systemform` with `formid`; `savedquery` with `savedqueryid`). Before implementation, resolve the Entity and Site Map typed object property names from the live Web API `$metadata` or supported SDK and prove the request shape without sending it. Do not guess keys or use undocumented `appmodulecomponent` CRUD as a substitute for `AddAppComponents`.
+The AddAppComponents candidate payload is:
+
+```json
+{
+  "AppId": "3709bb7c-28cd-f111-a05c-70a8a581cbfa",
+  "Components": [
+    {
+      "entityid": "f248212e-b5cb-f111-a05a-7c1e52376817",
+      "@odata.type": "Microsoft.Dynamics.CRM.entity"
+    },
+    {
+      "formid": "e076f089-e35b-46f3-b123-9cf0463759e5",
+      "@odata.type": "Microsoft.Dynamics.CRM.systemform"
+    },
+    {
+      "savedqueryid": "2cb98672-8176-4337-af5e-d6aabcac8f2d",
+      "@odata.type": "Microsoft.Dynamics.CRM.savedquery"
+    }
+  ]
+}
+```
+
+The entity and Site Map keys/types were verified against target `$metadata`; the API guide provides concrete form/view payload examples and documents those supported component classes. The existing Site Map is deliberately omitted because the Solution package already has the unique-name binding. No AddAppComponents call was executed, so acceptance of this combined payload on the unpublished app remains unverified. Do not use undocumented `appmodulecomponent` CRUD as a substitute.
 
 ### Exact Write Plan
 
@@ -38,19 +60,24 @@ The following operations are proposals for a separately authorized Phase 2D Appl
 **Write 1: Update the existing Site Map navigation XML.**
 
 - API: Web API `PATCH /api/data/v9.2/sitemaps(6a02d640-2ccd-f111-a05a-000d3a64b349)`; the `sitemap` table reference documents Update and writable `sitemapxml`. Use `If-Match` with the preflight ETag and send only the intended XML field.
-- Target/payload: retain Site Map identity `srapp`; XML contains only Recruitment Support > Administration > TA Directory, with subarea type Entity and entity `os_sr_ta`. Preserve generated unique node IDs and localization structure. Do not create a second Site Map or add nonexistent tables/pages.
-- Expected/read-back: a draft sitemap layer containing the intended nodes; immediately read the normal Site Map and `RetrieveUnpublished` result, compare XML and componentstate. Verify AppModule remains `componentstate=1`.
+- Target/payload: retain Site Map identity `srapp`; transform the live XML to Recruitment Support > Administration > TA Directory, with subarea entity `os_sr_ta`. The offline-tested transformation preserves existing node IDs and all unrelated attributes/localized titles. Do not create a second Site Map or add nonexistent tables/pages.
+- Proposed `sitemapxml` value from the current live source (not sent):
+
+```xml
+<SiteMap IntroducedVersion="7.0.0.0"><Area Id="area_918af8a3" ResourceId="SitemapDesigner.NewTitle" DescriptionResourceId="SitemapDesigner.NewTitle" ShowGroups="true" IntroducedVersion="7.0.0.0"><Titles><Title LCID="1033" Title="Recruitment Support" /></Titles><Group Id="group_8b0502d1" ResourceId="SitemapDesigner.NewGroup" DescriptionResourceId="SitemapDesigner.NewGroup" IntroducedVersion="7.0.0.0" IsProfile="false" ToolTipResourseId="SitemapDesigner.Unknown"><Titles><Title LCID="1033" Title="Administration" /></Titles><SubArea Id="subarea_9787e9c1" ResourceId="SitemapDesigner.NewSubArea" Icon="/_imgs/imagestrips/transparent_spacer.gif" Client="All,Outlook,OutlookLaptopClient,OutlookWorkstationClient,Web" AvailableOffline="true" PassParams="false" Sku="All,OnPremise,Live,SPLA" Entity="os_sr_ta"><Titles><Title LCID="1033" Title="TA Directory" /></Titles></SubArea></Group></Area></SiteMap>
+```
+- Expected/read-back: a draft Sitemap layer containing the intended nodes; immediately read the normal Site Map and `RetrieveUnpublishedMultiple` result, compare XML and componentstate. The current query returns the Published row (`componentstate=0`); behavior after PATCH is not tested. Require an Unpublished Site Map layer (`componentstate=1`) and verify AppModule remains `componentstate=1`; otherwise stop before Write 2.
 - Failure/uncertain write: stop; read both published and unpublished Site Map representations and compare ETag/XML before any retry. Do not send a compensating overwrite automatically.
 - Publication/separate approval: standard PATCH is not the documented publish action; Microsoft documents `PublishXml` separately. Still verify the write did not publish. This write requires explicit Phase 2D authorization and must not be followed by `PublishXml`.
 
-**Write 2: Associate the existing table, Main form, public view, and Site Map with the AppModule.**
+**Write 2: Add the existing table, Main form, and public view to the AppModule.**
 
-- API: Web API `POST /api/data/v9.2/AddAppComponents` (or .NET `AddAppComponentsRequest`), `AppId=3709bb7c-28cd-f111-a05c-70a8a581cbfa`, `Components` containing existing objects only: Entity metadata ID `f248212e-b5cb-f111-a05a-7c1e52376817` (type 1), form ID `e076f089-e35b-46f3-b123-9cf0463759e5` (type 60), saved query ID `2cb98672-8176-4337-af5e-d6aabcac8f2d` (type 26), and Site Map ID `6a02d640-2ccd-f111-a05a-000d3a64b349` (type 62). Form/view typed-object examples are in Microsoft's app guide. Resolve and validate the Entity/Site Map typed wrapper before Apply.
-- Expected/read-back: corresponding `appmodulecomponent` associations; read the app component list directly using AppModule unique component ID `81d8d848-2e00-470c-8899-2f55f560e018`, plus `RetrieveAppComponents` if supported for the draft. Verify table/form/view/site map IDs and types, and that no other component was added.
+- API: Web API `POST /api/data/v9.2/AddAppComponents` (or .NET `AddAppComponentsRequest`), `AppId=3709bb7c-28cd-f111-a05c-70a8a581cbfa`, and the exact typed table/form/view payload above. Component types are Entity `1`, Form `60`, and View `26`. Do not include a Sitemap component because the existing `AppModuleSiteMap` package binding by unique name is verified.
+- Expected/read-back: corresponding `appmodulecomponent` associations; read the app component list directly using AppModule unique component ID `81d8d848-2e00-470c-8899-2f55f560e018`, plus `RetrieveAppComponents` if supported for the draft. Verify table/form/view IDs and types, confirm the existing `AppModuleSiteMap.SiteMapUniqueName=srapp` export binding remains, and verify no other component was added.
 - Failure/uncertain write: stop; query all intended component IDs and types before retrying. If only some appear, preserve them and get a new recovery decision; do not automatically remove/re-add.
 - Publication/separate approval: Microsoft documents app publication as a later, separate `PublishXml` step. Confirm app remains Unpublished after association. This write requires explicit Phase 2D authorization; do not change app-role associations.
 
-**Smallest safe atomic boundary:** Microsoft documents OData `$batch` change sets as all-or-nothing transactions. The candidate boundary is one change set containing Write 1 and the single `AddAppComponents` action in Write 2, so sitemap XML and app associations either both persist or roll back. The documentation does not specifically demonstrate `AddAppComponents` inside a change set; verify support/behavior in an approved nonproduction test before relying on this guarantee. Until verified, do not claim atomicity across the two writes. If unsupported, execute as separate approved writes with read-back and stop/reconcile after each; there is no automatic cross-request rollback.
+**Atomicity and bounded sequence:** No change set is used. Microsoft documents general OData change-set atomicity, but no evidence here establishes that AddAppComponents is supported inside one. The script executes at most two independent write requests: (1) Site Map PATCH, then immediate GET read-back; (2) AddAppComponents, then independent component/AppModule/Site Map GET read-back and ValidateApp. These requests are **not transactional**. If Write 1 succeeds and Write 2 fails, preserve the partial Sitemap draft and stop; do not retry, delete, or roll back automatically.
 
 ### Post-Write Read-Back and Gates
 
@@ -62,7 +89,7 @@ The following operations are proposals for a separately authorized Phase 2D Appl
 6. Do not call `PublishXml`, Publish All Customizations, Site Map Publish, solution import, or any publication operation. The app must remain Unpublished. If an operation publishes automatically, stop and treat the route as unsuitable.
 7. On any timeout or ambiguous result, reconcile with GETs before retrying. Do not assume rollback unless the entire operation was inside a verified supported change set.
 
-**Phase 2D readiness: PARTIAL.** Identity, app state, Solution membership, TA table, form, view, and Site Map IDs are known. Phase 2D is not authorized. The exact Entity/Site Map AddAppComponents wrappers, action-in-change-set compatibility, AppModule Publisher, and type-10091 identity remain unresolved. No execution is permitted from this preparation.
+**Phase 2D execution readiness: BLOCKED.** Identity, Solution membership, live Site Map binding/XML, TA table, form, view, AddAppComponents parameter contract, and typed payload keys are verified. The runtime AddAppComponents call has not been authorized or tested; Site Map PATCH layer/publication behavior is not verified; the AppModule Publisher and type-10091 identity remain unknown. The script therefore remains guarded and no Apply is permitted.
 
 ## Historical Phase 2C Target (superseded)
 

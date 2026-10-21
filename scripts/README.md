@@ -107,3 +107,33 @@ Apply requires typing `CREATE os_sr_ta IN VN LMV IT WITH COLLECTION TA Directori
 Read-back queries cast string columns to `Microsoft.Dynamics.CRM.StringAttributeMetadata` for format/length checks. The generated GUID is verified as a primary ID without assuming its `IsCustomAttribute` flag. See Microsoft's [Solution Component reference](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/reference/entities/solutioncomponent#rootcomponentbehavior) for root inclusion semantics. Future runs against an existing project table intentionally stop at preflight; any repair needs a separately approved recovery scope.
 
 See [Phase 1D-B runbook](../docs/PHASE_1D_B_REFERENCE_TABLE_RUNBOOK.md), [Dataverse Schema Specification](../docs/DATAVERSE_SCHEMA_SPECIFICATION.md), and [ALM and Deployment](../docs/ALM_DEPLOYMENT.md).
+
+## Phase 2D Adopted App Composition
+
+[Configure-BsoRsModelDrivenApp.ps1](Configure-BsoRsModelDrivenApp.ps1) targets only the adopted `srapp` AppModule. No switches means **PlanOnly**: local payload preview with no authentication, PAC call, or network request. `-DryRun` verifies PAC/Az identity, AppModule/Solution/Site Map/table/form/view metadata, the Solution `AppModuleSiteMap` binding, live AddAppComponents OData metadata, and Solution-export form/view membership using GETs and a temporary export ZIP that is deleted in `finally`.
+
+The maximum sequence is two independent requests: PATCH only `sitemapxml` on the existing Site Map, then POST AddAppComponents for the existing TA table, Main form, and public view. The Site Map is not re-added because the Solution export already binds unique name `srapp`. The script does not call PublishXml/PublishAllXml, change role/audit records, delete components, or read business rows. Each write is followed by independent GET read-back; no retry, transaction, or rollback is assumed. If a write is ambiguous or read-back fails, stop and reconcile.
+
+Only a separately approved future Apply may use `-Apply`, the exact confirmation phrase, a nonempty authorization reference, and the process-scoped identity values below. **Do not execute Apply under Phase 2D-P.**
+
+```powershell
+& ./scripts/Configure-BsoRsModelDrivenApp.ps1
+& ./scripts/Configure-BsoRsModelDrivenApp.ps1 -DryRun
+```
+
+DryRun requires `BSO_RS_ENVIRONMENT_NAME`, `BSO_RS_ORG_URL`, `BSO_RS_EXPECTED_ENVIRONMENT_ID`, and `BSO_RS_EXPECTED_ORG_ID` in the current process; never save their values in the repository. Runtime AddAppComponents acceptance on this unpublished app and whether Site Map PATCH creates the expected unpublished layer remain unverified. See the [Phase 2D runbook](../docs/MODEL_DRIVEN_APP_AUTOMATION_RUNBOOK.md).
+
+## Phase 2D Adopted App Composition (Prepared, Not Authorized)
+
+[Configure-BsoRsModelDrivenApp.ps1](Configure-BsoRsModelDrivenApp.ps1) targets only the owner-adopted AppModule `srapp`. Running it with no switches is **PlanOnly**: it prints the planned operations and typed `AddAppComponents` payloads without authentication, PAC, or network calls. `-DryRun` performs PAC identity checks and GET-only verification of the AppModule, Solution, Site Map, TA table/form/view, AppModuleSiteMaps export binding, and live OData action/component metadata. It also exports the target Solution to a temporary ZIP and deletes it in `finally`.
+
+The maximum sequence is two independent writes: PATCH only `sitemapxml` on the existing Site Map, then POST `AddAppComponents` for the existing table, Main form, and public view. The Site Map is omitted from that action because the target Solution export already contains `AppModuleSiteMap.SiteMapUniqueName=srapp`. There is no `$batch`, transaction, rollback, retry, delete, PublishXml, PublishAllXml, role, audit, or business-data operation. Each write has an independent read-back; an uncertain or partial result stops without compensating writes. The script requires `-Apply`, the exact confirmation phrase, a nonempty authorization reference, and process-scoped VN LMV IT identity variables. **Do not use Apply until a separate Phase 2D authorization exists.**
+
+Run PlanOnly and GET-only DryRun:
+
+```powershell
+& ./scripts/Configure-BsoRsModelDrivenApp.ps1
+& ./scripts/Configure-BsoRsModelDrivenApp.ps1 -DryRun
+```
+
+DryRun requires `BSO_RS_ENVIRONMENT_NAME`, `BSO_RS_ORG_URL`, `BSO_RS_EXPECTED_ENVIRONMENT_ID`, and `BSO_RS_EXPECTED_ORG_ID` in the current process. Do not persist their values in the repository. Runtime acceptance of the AddAppComponents action on this unpublished app and the Site Map PATCH's draft-layer behavior remain unverified; see the [Phase 2D Runbook](../docs/MODEL_DRIVEN_APP_AUTOMATION_RUNBOOK.md).

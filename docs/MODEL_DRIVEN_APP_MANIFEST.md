@@ -35,9 +35,11 @@ currentSiteMap:
   siteMapId: 6a02d640-2ccd-f111-a05a-000d3a64b349
   solutionComponentType: 62
   publicationState: Published
-  appModuleAssociation: not-found-in-appmodulecomponents
+  solutionPackageBinding: AppModuleSiteMap.SiteMapUniqueName=srapp
+  standardAppModuleComponentRow: not-observed
   content: placeholder-area-group-subarea-only
   subareaTarget: none
+  unpublishedLayerQuery: returned-componentstate-0-no-distinct-draft-observed
 proposedComposition:
   status: planned-not-authorized
   navigation:
@@ -83,11 +85,19 @@ publication:
 unresolved:
   - appmodule-publisher-lookup
   - solution-component-type-10091-exact-identity
-  - addappcomponents-entity-and-sitemap-payload-shape
-  - addappcomponents-action-in-atomic-changeset-compatibility
+  - AddAppComponents-runtime-acceptance-not-tested
+  - sitemap-PATCH-unpublished-layer-behavior-not-tested
 ```
 
-The Solution Publisher `os_bso_rs_support` is verified; the AppModule's Publisher lookup was not returned and is not inferred from Solution membership. R2 observations are the last verified live-state snapshot. Form/view IDs above were read from a read-only unmanaged Solution export and then queried as metadata; the IDs are not app associations. `componentstate=Unpublished` is distinct from `statecode=Active` and from the Published Site Map state.
+The Solution Publisher `os_bso_rs_support` is verified; the AppModule's Publisher lookup was not returned and is not inferred from Solution membership. R2 remains the detailed adoption baseline; the R3-P GET-only DryRun subsequently reconfirmed the AppModule state, Site Map XML/state, solution membership, form/view metadata, and package-level unique-name binding. Form/view IDs above are verified metadata/Solution-export records, not app associations. `componentstate=Unpublished` is distinct from `statecode=Active` and from the Published Site Map state.
+
+## Phase 2D-P Read-Only Verification
+
+The GET-only DryRun on 21 October 2026 reconfirmed AppModule `srapp` as Active (`statecode=0`) and Unpublished (`componentstate=1`), with no AppModule Publisher lookup. The Site Map `srapp` is app-aware and Published (`componentstate=0`); its live XML contains only the placeholder Area/Group/SubArea and the same IDs recorded above. `RetrieveUnpublishedMultiple` returned the Site Map with `componentstate=0`; no distinct Unpublished Site Map layer was observed. The unmanaged Solution export has exactly one `AppModuleSiteMap` entry with `SiteMapUniqueName=srapp`, matching the AppModule and live Site Map unique names. Direct `appmodulecomponents` remains empty. This is the exact package-level Sitemap binding; it is not a direct standard AppModuleComponent row.
+
+The target OData `$metadata` GET verified `AddAppComponents(AppId: Edm.Guid, Components: Collection(mscrm.crmbaseentity))` and primary keys/types `entity/entityid`, `systemform/formid`, `savedquery/savedqueryid`, and `sitemap/sitemapid`. The proposed request uses the table, Main form, and public view only; it omits the Site Map because the existing `AppModuleSiteMap` binding is present. Microsoft documents the action and typed form/view examples, but no action request was sent, so runtime acceptance remains untested. The runbook's Site Map change preserves all three node IDs and unrelated XML attributes while changing titles and adding the TA entity target.
+
+The same DryRun reverified the TA Main form and Active TA public view identities/states, target Solution roots (type 80 AppModule, 62 Site Map, 1 TA table, plus type 10091 child), and the two app-role associations (System Administrator/System Customizer). No app composition, publication, role/audit change, business-row read, or Dataverse write occurred. See the [local script](../scripts/Configure-BsoRsModelDrivenApp.ps1), [offline tests](../tests/ModelDrivenAppComposition.Tests.ps1), and [Phase 2D runbook](MODEL_DRIVEN_APP_AUTOMATION_RUNBOOK.md).
 
 The former `os_srapp` YAML proposal and all following Phase 2C-R2 environment, naming, and component-plan sections are retained as historical decision evidence only. Their app-name target and “not adopted” status are superseded by the R3 owner decision; do not treat those sections as the current manifest.
 

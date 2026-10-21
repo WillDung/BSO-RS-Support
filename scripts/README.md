@@ -44,6 +44,42 @@ Historical Phase 1D-C and Phase 1D-D read-only checks passed using PowerShell 7.
 
 The successful TA flow and failed Position flow used the same token-before-preflight / typed-prompt / POST ordering, bearer Authorization construction, JSON Content-Type, `If-None-Match`, and `MSCRM.SolutionUniqueName` header. Transcript timing puts confirmation and the returned failure within seconds; the historical token expiry is unavailable, so expiry cannot be conclusively ruled in or out, though no evidence supports expiry. The current helper validates Dataverse audience/tenant/scope/expiry and refreshes through Az.Accounts before a request when under five minutes remain, including after confirmation. It records only sanitized status, error code/message, allowlisted challenge scheme/error, request/correlation IDs, path, request start, and token timestamps. It never logs a token or full headers. This is preventive hardening, not a confirmed fix for the historical 401. See [Current State](../docs/CURRENT_STATE.md). Do not retry or bypass policy.
 
+### Controlled Position Recovery (Proposed; Not Authorized)
+
+This is a recovery proposal only. The 20 October 2026 Position POST must not be repeated under the prior batch approval. Obtain a new, written recovery authorization after reviewing the historical failure. No step below permits switching environments, identities, authentication mechanisms, or APIs to work around a failure.
+
+**Preconditions**
+
+1. The project owner and the responsible VN LMV IT environment/Dataverse administrator approve one controlled recovery attempt in writing, including the Production-class development target and the exact `os_sr_pos` operation. If the failure requires a privilege or policy change, stop for its own formal security approval; this procedure does not authorize such a change.
+2. Verify the active PAC target is still VN LMV IT and the same approved user identity is used by PAC and the existing Az user context. Use the existing process-scoped expected environment/organization configuration; do not print it, alter it, switch profiles, or trigger sign-in.
+3. Read-only preflight independently confirms `os_sr_pos` is absent from `EntityDefinitions` and the project Solution has no Position component. Reconfirm the `os_bso_rs_support` Publisher (`os` prefix), unmanaged `os_sr_bso_rs_support` Solution, current project inventory, and relevant metadata privileges. The prior effective-privilege result is historical and is not a substitute for this preflight.
+4. Check that the local payload still matches the declared schema: OrganizationOwned `os_sr_pos`, primary name `os_sr_pos_ttl` / Position Title / String-Text length 200 / ApplicationRequired, approved plural Positions, with no additional columns, keys, relationships, audit flags, or data rows.
+5. Confirm that the current provisioner has no retry path and that its safe diagnostic output is available. A typed confirmation in the script is an additional guard, not a substitute for the new operational authorization.
+
+**Single intended request**
+
+- Method and target: one `POST` to the configured, verified organization's `/api/data/v9.2/EntityDefinitions` endpoint. Do not substitute MCP `create_table`, PAC, another endpoint, or another identity.
+- Body: the exact PlanOnly-validated `Microsoft.Dynamics.CRM.EntityMetadata` payload for `os_sr_pos`, including only the approved table metadata and primary-name attribute.
+- Authentication: the existing Az.Accounts user token requested for the configured Dataverse organization resource. The same user must match PAC. Validate tenant, audience, delegated `user_impersonation` scope, and expiry in memory; never output or persist the token or raw claims.
+- Headers: bearer credential header (never logged), JSON content type, Accept JSON, OData 4.0 version headers, `If-None-Match: null`, and `MSCRM.SolutionUniqueName: os_sr_bso_rs_support`. Require HTTPS, the verified organization API origin, and redirects disabled.
+- Privileges: the metadata operation requires the applicable Dataverse metadata/customization privileges; the later table-scoped publish requires publish-customization authority. Prior read-only checks reported Global depth for `prvCreateEntity`, `prvCreateAttribute`, `prvCreateCustomization`, and `prvPublishCustomization`, but did not explain the historical 401. Do not grant privileges as a diagnostic shortcut.
+- Response: treat only a 2xx response as transport success, not proof of a complete deployment. The exact historical response code and body are unavailable. Independently read back the table and Solution membership before any next operation.
+
+**Sanitized evidence to retain for this one attempt**
+
+Record UTC request start/end timestamps; HTTP method and allowlisted API path; status; approved/sanitized Dataverse error code and safe summary; allowlisted authentication challenge scheme/error only; validated request/correlation GUIDs; token issuance/expiry timestamps and Boolean tenant/audience/scope/expiry checks; expected-environment match; Solution unique name; and whether a write may have occurred. Never retain Authorization or other full headers, raw token/claims, full response body, credentials, user email, or unfiltered exception text.
+
+**Stop, outcome handling, and reconciliation**
+
+- **401:** stop immediately. Preserve only sanitized diagnostics. Have the authorized administrator investigate identity membership, Conditional Access, token audience/scope/expiry, and the challenge using approved logs. Do not refresh into a different identity, switch auth surface, or retry.
+- **403:** stop. Request an administrator review of effective privileges and policy; do not self-elevate or retry after a privilege change without a separately approved plan.
+- **400 or other 4xx:** stop and inspect the sanitized error. Do not assume the metadata write did not occur; reconcile by GET before any recovery decision.
+- **429, 5xx, transport error, or timeout:** treat the write outcome as uncertain. Do not automatically retry. Reconcile table metadata and Solution membership using GET-only reads, including whether the table, primary column, or Solution component partially exists.
+- **Any 2xx:** issue no subsequent write until independent read-back verifies the exact table schema, generated primary ID/name, absence of unintended metadata, and project Solution root membership. Only a separate authorization may proceed to the next table.
+- **Partial or uncertain state:** the provisioner intentionally has no resume, delete, recreate, or automatic repair route. Preserve observed state and prepare a separately reviewed recovery plan. Do not delete or recreate the table; its name and ownership are durable creation-time decisions.
+
+The later `os_sr_csrc` and `os_sr_loc` tasks are independent schemas but remain serialized behind Position recovery by the approved runbook sequence. They require their own fresh preflight and explicit authorization; neither is implicitly authorized by a successful Position recovery. See [Current State](../docs/CURRENT_STATE.md) and [Phase 1D-B Reference Table Runbook](../docs/PHASE_1D_B_REFERENCE_TABLE_RUNBOOK.md).
+
 ### Declarative Payloads and Approval Boundary
 
 All tables use `Microsoft.Dynamics.CRM.EntityMetadata`, `OrganizationOwned`, `IsActivity=false`, `HasActivities=false`, and `HasNotes=false`. The primary name alone is embedded in `Attributes` during table creation. Additional columns have individual metadata POSTs only during separately authorized Apply. No keys, relationship definitions, data rows, or audit properties are supplied.

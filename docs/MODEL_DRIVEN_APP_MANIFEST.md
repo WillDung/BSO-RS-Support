@@ -1,6 +1,6 @@
 # BSO-RS-Support Model-driven App Manifest
 
-**Status:** Phase 2B naming assessment, 21 October 2026. Documentation only; no app resources were created or modified. The display name and navigation are requested design. The proposed technical name `os_sr_app` is **not supported by the documented AppModule auto-prefix input contract**; no replacement is selected. Runtime rejection/transformation behavior for an underscore-containing suffix is **UNKNOWN**. The separate Phase 1D-D `os_sr_pos` HTTP 401 incident remains **UNKNOWN** and is not resolved by these checks.
+**Status:** Phase 2B naming proposal for owner approval, 21 October 2026. Documentation only; no app resources were created or modified. The proposed component-specific technical name is `os_srapp`, using caller-supplied suffix `srapp` with Publisher prefix `os`. This is an exception to the usual `os_sr_*` convention and is **not yet approved**. Microsoft documents automatic prefixing and alphanumeric caller input. The expected final value is `os_srapp`; production runtime confirmation remains a post-creation read-back requirement. The separate Phase 1D-D `os_sr_pos` HTTP 401 incident remains **UNKNOWN** and is not resolved by these checks.
 
 ## Manifest
 
@@ -10,8 +10,10 @@ kind: modelDrivenApp
 status: proposed
 app:
   displayName: BSO-RS-Support
-  uniqueName: os_sr_app
-  uniqueNameStatus: blocked-by-documented-input-contract
+  uniqueName: os_srapp
+  callerSuppliedUniqueName: srapp
+  uniqueNameStatus: proposed-component-specific-exception-pending-owner-approval
+  namingConventionException: true
   description: >-
     Internal recruitment support application for authorized BSO candidate
     operations, backed by Dataverse.
@@ -39,7 +41,8 @@ components:
   planned:
     - kind: appmodule
       displayName: BSO-RS-Support
-      uniqueName: os_sr_app
+      uniqueName: os_srapp
+      callerSuppliedUniqueName: srapp
       publicationState: unpublished
     - kind: table
       logicalName: os_sr_ta
@@ -95,21 +98,23 @@ Read-only checks on 21 October 2026 confirmed:
 
 - PAC active organization is VN LMV IT at the requested organization URL; its environment and organization identity matched the project baseline.
 - Publisher `os_bso_rs_support` has prefix `os`; Solution `os_sr_bso_rs_support` is unmanaged version `1.0.0.0` and linked to that Publisher.
-- Four model-driven apps exist: Power Pages Management, Power Platform Environment Settings, Recruitment Candidate Pipeline, and Solution Health Hub. No BSO-RS-Support app and no `os_sr_app` unique name appeared in the inventory. The Recruitment Candidate Pipeline app is associated with another Solution.
+- Four model-driven apps exist: Power Pages Management, Power Platform Environment Settings, Recruitment Candidate Pipeline, and Solution Health Hub. No BSO-RS-Support app or `os_srapp` unique name appeared in the inventory. A direct read-only AppModule query for `os_srapp` returned no rows. The Recruitment Candidate Pipeline app is associated with another Solution.
 - The only project custom table is `os_sr_ta`. Position, Candidate Source, and Location remain absent. No business rows were read.
 - The project Solution has one table root component for TA with `rootcomponentbehavior=0` (Include Subcomponents). A temporary PAC unmanaged Solution export contained the TA entity metadata, 3 form components, and 7 saved-query components; the archive was inspected for display/type metadata only and removed.
 - TA forms exported: Information (`main`), Information (`card`), and Information (`quick`). TA view inventory: Active TA Directories (public view, query type 0, default); Inactive TA Directories (type 0); Quick Find Active TA Directories (type 4); TA Directories (type 8192); TA Directory Advanced Find View (type 1); TA Directory Associated View (type 2); TA Directory Lookup View (type 64).
 - No app-specific sitemap, component selection, role assignment, or publication exists for the proposed app. Existing environment security settings and grants were not changed or evaluated in this app-design phase.
 
-## Naming Decision Gate
+## Naming Proposal and Verification
 
-Installed PAC 2.13.1 `pac model create` exposes display name, description, environment, Solution, and optional publish, but **no technical-name parameter**. It cannot guarantee `os_sr_app`.
+Installed PAC 2.13.1 `pac model create` exposes display name, description, environment, Solution, and optional publish, but **no technical-name parameter**. It cannot guarantee `os_srapp`; the proposed AppModule API path is required if the technical name is accepted.
 
-Microsoft's [AppModule creation guidance](https://learn.microsoft.com/en-us/power-apps/developer/model-driven-apps/create-manage-model-driven-apps-using-code) says the supplied `uniquename` uses English letters and numbers and that Dataverse automatically prepends the Solution Publisher prefix. The AppModule table reference separately exposes `uniquename` as a writable string (maximum length 100); this confirms the caller supplies a value, not that it can bypass prefixing or naming validation.
+Microsoft's [AppModule creation guidance](https://learn.microsoft.com/en-us/power-apps/developer/model-driven-apps/create-manage-model-driven-apps-using-code) says the supplied `uniquename` uses English letters and numbers and that Dataverse automatically prepends the Solution Publisher prefix. The AppModule table reference exposes `uniquename` as a writable string (maximum length 100). Thus `srapp` meets the documented input character rule; with prefix `os`, the documented expected final value is `os_srapp`. The Web API/SDK path permits the caller to supply `uniquename`, unlike PAC `model create`.
 
-With Publisher prefix `os`, producing the exact final `os_sr_app` through the documented behavior would require the caller-supplied suffix `sr_app`. That suffix includes an underscore and does not meet the documented letters-and-numbers input rule. Supplying the full `os_sr_app` to a prefix-aware creation path risks double-prefixing; supplying another stem would silently change the requested name. Therefore `os_sr_app` is **not a supported/guaranteed name under the documented creation contract**. Whether the service accepts or rewrites the underscore is **UNKNOWN**; this phase does not test by creating an app. There is no safe executable exact-name payload until Microsoft documents an exception or the owner explicitly approves a different technical name. Do not substitute one automatically.
+The live app inventory contains four apps and no `os_srapp`; a direct read-only `appmodule.uniquename` query for `os_srapp` returned no rows. The target Solution and Publisher were independently verified. This is an absence/collision check only; no create request was sent. After any separately authorized creation, read back `appmodule.uniquename`, Publisher, Solution, and publication state. If the final name differs from `os_srapp`, stop; do not rename, delete, recreate, or accept a substitute automatically.
 
-The AppModule Create API can accept a unique-name property and the documented `SolutionUniqueName` parameter can associate a supported Create request with the existing Solution. Those capabilities do not override prefixing or the input constraint. Any future approved path must independently read back the final `appmodule.uniquename`, Publisher, Solution, and unpublished state before configuring components.
+This name is a **proposal for owner approval**, not an approved naming decision. Until approval, the project-wide `os_sr_*` convention remains unchanged for every other component. The naming proposal does not alter table names, Solution names, or Publisher settings.
+
+The AppModule Create API accepts a unique-name property, and the documented `SolutionUniqueName` parameter can associate a supported Create request with the existing Solution. Any future approved path must independently read back the final `appmodule.uniquename`, Publisher, Solution, and unpublished state before configuring components.
 
 ## Component Dependencies
 

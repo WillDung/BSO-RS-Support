@@ -6,7 +6,7 @@
 
 | Concern | Target component | Boundary / status |
 |---|---|---|
-| Interactive operations | Power Apps Model-driven App | Default UI; proposed. Initial `BSO-RS-Support` / `os_sr_app` manifest and unpublished build plan are documented in [Model-driven App Manifest](MODEL_DRIVEN_APP_MANIFEST.md) and [Automation Runbook](MODEL_DRIVEN_APP_AUTOMATION_RUNBOOK.md). Neither the app nor its navigation is deployed. |
+| Interactive operations | Power Apps Model-driven App | Default UI; proposed. Initial `BSO-RS-Support` / `os_srapp` naming proposal, manifest, and unpublished build plan are documented in [Model-driven App Manifest](MODEL_DRIVEN_APP_MANIFEST.md) and [Automation Runbook](MODEL_DRIVEN_APP_AUTOMATION_RUNBOOK.md). The exception is pending owner approval; neither the app nor its navigation is deployed. |
 | Complex interaction | Power Apps Custom Pages | Use only when justified; proposed |
 | Authoritative data | Microsoft Dataverse | Sole production source for candidate workflow/business state; production use approved in principle, no schema provisioned |
 | Critical business operations | Dataverse Custom APIs and synchronous plug-ins | Proposed enforcement for critical transitions |
@@ -28,7 +28,7 @@ The UI requests a business action. Dataverse validates and commits critical cand
 
 ## Model-driven App composition (proposed)
 
-The initial app proposal contains only the existing `os_sr_ta` table, its Main `Information` form, and default public `Active TA Directories` view, under Recruitment Support > Administration > TA Directory. PAC 2.13.1 cannot set a unique name. Microsoft documents AppModule unique names as publisher-prefixed and caller input as alphanumeric; the exact proposed final name `os_sr_app` would require suffix `sr_app`, which conflicts with that documented input rule. Thus exact-name creation is not supported/guaranteed by the documented contract; runtime behavior is unknown. Do not create a test app or substitute another name. Component selection, sitemap creation, validation, role associations, and publication remain separate steps. See the app manifest and runbook for the verified constraints and approval gates.
+The initial app proposal contains only the existing `os_sr_ta` table, its Main `Information` form, and default public `Active TA Directories` view, under Recruitment Support > Administration > TA Directory. The proposed app unique name is `os_srapp`, using caller suffix `srapp`, as a component-specific exception pending owner approval. Microsoft documents automatic Publisher prefixing and alphanumeric caller input; a read-only query found no current name conflict. PAC 2.13.1 cannot set a unique name. Final name and Solution/Publisher linkage must be independently verified after separately authorized creation. Component selection, sitemap creation, validation, role associations, and publication remain separate steps. See the app manifest, runbook, and [Product Decisions](PRODUCT_DECISIONS.md).
 
 ## Trust boundaries
 

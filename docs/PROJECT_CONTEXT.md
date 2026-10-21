@@ -8,7 +8,7 @@ BSO-RS-Support is an internal recruitment support and candidate operations appli
 
 ## Current implementation
 
-Documentation and repository foundation, the verified Phase 1B Publisher/unmanaged Solution, and the Phase 1D-C TA Directory table `os_sr_ta` in VN LMV IT Production, explicitly selected for internal IT development. On 20 October 2026 the first Phase 1D-D Position Apply returned HTTP 401; its root cause is unknown and no retry is authorized. Read-only reconciliation confirms TA remains the sole project table and all Phase 1D-D targets are absent. The environment has four Model-driven Apps, but no BSO-RS-Support app. Phase 2A/2B produced a proposed app manifest and automation runbook only. The requested `os_sr_app` final name is unsupported/unguaranteed under Microsoft's documented publisher-prefix plus alphanumeric unique-name contract; runtime behavior is unknown and no replacement is approved. Apps, flows, custom APIs, connectors, and integrations are not implemented for this project. Evidence and gates are recorded in [Current State](CURRENT_STATE.md), [Model-driven App Manifest](MODEL_DRIVEN_APP_MANIFEST.md), and [Automation Runbook](MODEL_DRIVEN_APP_AUTOMATION_RUNBOOK.md). Premium and Dataverse production usage are approved in principle; wider capabilities, identities, capacity, and permissions remain unverified.
+Documentation and repository foundation, the verified Phase 1B Publisher/unmanaged Solution, and the Phase 1D-C TA Directory table `os_sr_ta` in VN LMV IT Production, explicitly selected for internal IT development. On 20 October 2026 the first Phase 1D-D Position Apply returned HTTP 401; its root cause is unknown and no retry is authorized. Read-only reconciliation confirms TA remains the sole project table and all Phase 1D-D targets are absent. The environment has four Model-driven Apps, but no BSO-RS-Support app. Phase 2A/2B produced a proposed app manifest and automation runbook only. The proposed AppModule final name is `os_srapp` (caller suffix `srapp`), a component-specific exception to the normal `os_sr_*` naming pattern pending owner approval; no resource-creation authorization is granted. Apps, flows, custom APIs, connectors, and integrations are not implemented for this project. Evidence and gates are recorded in [Current State](CURRENT_STATE.md), [Model-driven App Manifest](MODEL_DRIVEN_APP_MANIFEST.md), [Automation Runbook](MODEL_DRIVEN_APP_AUTOMATION_RUNBOOK.md), and [Product Decisions](PRODUCT_DECISIONS.md). Premium and Dataverse production usage are approved in principle; wider capabilities, identities, capacity, and permissions remain unverified.
 
 ## Target architecture (proposed)
 
@@ -25,6 +25,8 @@ Dataverse is production source of truth; critical state changes use an approved 
 ## Naming requirement and status
 
 The selected naming strategy is Dataverse Publisher Prefix `os` plus project namespace segment `sr_`, producing final technical names beginning `os_sr_`. The Publisher prefix and approved TA table/column names are verified; other components should follow [Data Model](DATA_MODEL.md). Where Power Apps prepends `os_`, enter only the `sr_<abbreviation>` stem; otherwise use the full final name exactly once. Do not use `os_sr` as the actual Publisher Prefix or allow double-prefixing.
+
+The proposed AppModule final name `os_srapp` is a component-specific exception pending owner approval; it does not change the project naming convention for any other component. See [Product Decisions](PRODUCT_DECISIONS.md).
 
 ## Source confidence and open decisions
 

@@ -35,7 +35,7 @@ On 20 October 2026 the owner explicitly approved applying `os_sr_pos`, `os_sr_cs
 - **Acceptance:** BSO can complete authorized core tasks; transitions enforce rules; history and negative authorization cases pass.
 - **Validation:** Unit/integration/UAT/accessibility and authorization tests.
 - **Risks:** Unvalidated SLA/KPI and detailed business rules.
-- **Status:** Planned; not started.
+- **Status:** App manifest and automation design documented. Phase 2C owner authorization covers one unpublished AppModule with caller suffix `srapp` and expected final name `os_srapp`. Execution preflight is blocked by unexplained Solution-component roots with types `80` and `10091`; no AppModule Create POST was sent. Reconcile those existing rows before resuming. No navigation, forms/views, role assignments, or publication occurred.
 
 ## Phase 3 — Email and Scheduling
 

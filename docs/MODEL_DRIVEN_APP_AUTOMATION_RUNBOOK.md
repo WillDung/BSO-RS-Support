@@ -1,12 +1,12 @@
 # Model-driven App and Sitemap Automation Runbook
 
-**Status:** Phase 2B naming proposal for owner approval, 21 October 2026. No Power Platform resources were changed. Target is the verified VN LMV IT organization and existing unmanaged Solution `os_sr_bso_rs_support`. Proposed caller suffix is `srapp`; expected final unique name is `os_srapp`, a component-specific exception to the usual `os_sr_*` pattern. A read-only inventory found no conflict. This naming proposal and the exact request below are not resource-creation authorization.
+**Status:** Phase 2C preflight blocked, 21 October 2026. The owner explicitly authorized exactly one unpublished AppModule with caller suffix `srapp` and expected final name `os_srapp`. Read-only preflight found unexplained Solution-component roots; the request below was not sent. No Dataverse write occurred.
 
 ## Target
 
 - App display name: **BSO-RS-Support**.
-- Proposed caller-supplied unique-name suffix: **srapp**.
-- Expected final unique name: **os_srapp**, pending owner approval and post-create read-back.
+- Owner-approved caller-supplied unique-name suffix: **srapp**.
+- Expected final unique name: **os_srapp**; independently verify after creation.
 - Solution: **os_sr_bso_rs_support**; Publisher: **os_bso_rs_support**, prefix **os**.
 - Initial publication state: **Unpublished**.
 - Initial table/navigation: `os_sr_ta` at **Recruitment Support > Administration > TA Directory**.
@@ -19,7 +19,7 @@
 | Surface | Supported here | Limitation / guard |
 |---|---|---|
 | PAC CLI 2.13.1 | `pac model create`, `list`, `list-tables`; genpage management; Solution export | `model create` cannot set the app unique name. Omitting `--publish` is required for the unpublished shell. It cannot configure the Area/Group/entity SubArea in this initial command. |
-| AppModule SDK/Web API | Create `appmodule` with name, unique name, description and default web resource; use `SolutionUniqueName` on supported Create request/header | Caller-supplied `srapp` is alphanumeric; documented prefix behavior predicts `os_srapp`. A read-only AppModule query found no collision. Actual final name, Publisher, Solution, and unpublished state must be independently read back after separate creation authorization. |
+| AppModule SDK/Web API | Create `appmodule` with name, unique name, description and default web resource; use `SolutionUniqueName` on supported Create request/header | Caller-supplied `srapp` is alphanumeric; documented prefix behavior predicts `os_srapp`. A read-only AppModule query found no name collision. Actual final name, Publisher, Solution, and unpublished state require independent read-back. Creation remains blocked until unexplained Solution components are reconciled. |
 | Model-driven app APIs | `AddAppComponents`, `RetrieveAppComponents`, `ValidateApp`, and `PublishXml` | Use typed components/IDs from read-only metadata. Add forms/views only after explicit selection. Validation and publication are separate. |
 | AppModuleComponent metadata | Component type values include Entity `1`, View `26`, Form `60`, Sitemap `62` | Use supported app APIs/designer rather than directly creating internal app-module component rows. |
 | Forms and views | Dataverse SDK CRUD on `systemform` and `savedquery`; AddAppComponents binds existing components to the app | Do not change approved TA layout/query metadata in this phase. Form XML and FetchXML are not required to add existing components. |
@@ -43,7 +43,7 @@ The expected identity is VN LMV IT and the URL above. Verify Publisher prefix `o
 
 For Solution membership, use PAC `solution list`, read-only `solutioncomponent` queries, `RetrieveAppComponents` for the app after it exists, and an export read-back. A TA table root component with `rootcomponentbehavior=0` includes its table subcomponents in the Solution; the app’s own component selection is separate.
 
-## Naming Proposal and Future Request
+## Approved Name and Held Request
 
 Installed command help:
 
@@ -55,9 +55,9 @@ There is no `--unique-name` option. This command can associate the app with the 
 
 Microsoft's [AppModule creation guidance](https://learn.microsoft.com/en-us/power-apps/developer/model-driven-apps/create-manage-model-driven-apps-using-code) states that caller-supplied `uniquename` uses English letters and numbers and Dataverse automatically prepends the Solution Publisher prefix. With prefix `os`, caller value `srapp` is compliant and the documented expected final name is `os_srapp`. The AppModule reference lists `uniquename` as a writable string of maximum length 100. The [optional-parameter guidance](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/optional-parameters) documents associating a Create request with a Solution by `SolutionUniqueName` (SDK request parameter) or `MSCRM.SolutionUniqueName` (Web API header).
 
-Read-only PAC and AppModule checks on 21 October found four existing apps and no `os_srapp` collision. The existing project Solution and Publisher linkage are verified. This is not evidence of a successful create; no request was sent.
+Read-only PAC and AppModule checks on 21 October found four existing apps and no `os_srapp` or BSO-RS-Support display-name collision. The existing project Solution and Publisher linkage are verified. A later `solutioncomponent` query returned the TA Entity root plus two additional root rows with types `80` and `10091`, absent from the published `componenttype` choices. Direct AppModule and AppModuleComponent lookups did not identify those objects, and a temporary Solution export contained zero AppModule sections. Their origin is **UNKNOWN**. This discrepancy blocks the request; no Create request was sent.
 
-The following is the precise proposed request for review only. **Do not send it until the owner explicitly approves this component-specific naming exception and separately authorizes app creation.** It is expected to create an unpublished AppModule in the existing Solution; it does not configure the sitemap, add components, or publish the app.
+The following is the precise request authorized for this phase, held pending resolution of the preflight discrepancy. It would create one AppModule in the existing Solution; it does not request a sitemap, app components, or publication. Do not send until reconciliation confirms the existing Solution inventory and all pre-write checks pass.
 
 ```http
 POST <verified-organization-url>/api/data/v9.2/appmodules
@@ -81,8 +81,8 @@ Expected final `uniquename`: `os_srapp`. The request leaves out `PublishXml` and
 
 Every write step below is a future phase requiring its own explicit authorization. The automation should default to plan/read-only mode and require an explicit Apply switch plus typed confirmation for each authorized change batch.
 
-1. **Approve naming proposal.** Obtain explicit owner approval for `os_srapp` as a component-specific exception to `os_sr_*`; do not change table names, Solution name, or Publisher settings.
-2. **Create unpublished AppModule only after separate explicit authorization.** Use the proposed AppModule request above with caller value `srapp` and Solution association. PAC `model create` cannot set the desired name. Omit publication and stop on any failure.
+1. **Reconcile unexpected existing Solution components.** Identify component types `80` and `10091` using an authoritative Microsoft/PAC/Dataverse metadata source. Do not remove, edit, or reinterpret them in this phase. Repeat read-only preflight after reconciliation.
+2. **Create the single approved unpublished AppModule only after the blocker clears.** Use the request above with caller value `srapp` and Solution association. PAC `model create` cannot set the desired name. Omit publication and stop on any failure.
 3. **Verify app identity and Solution.** Independently read the AppModule row and Solution component membership. Confirm exact display/unique names, Publisher, Solution, app state, and unpublished component state. Do not proceed on mismatch.
 4. **Add TA table component.** Resolve the TA metadata ID with a GET and use `AddAppComponents` or app designer for the `os_sr_ta` table. Read back `RetrieveAppComponents`; access no table rows.
 5. **Configure sitemap.** Add Recruitment Support > Administration > TA Directory using supported SiteMap/app APIs or app designer and read back. Generated-page commands do not create ordinary table SubAreas.
@@ -109,6 +109,7 @@ For standard forms/views, the `dv-metadata` skill documents `systemform` and `sa
 - If an object exists but is incomplete, preserve it and report the partial state. No automatic delete, rename, recreate, or publish.
 - No table creation, business-row access, security-role changes, audit changes, environment switch, or Git operation is part of this app phase.
 - Keep the Phase 1D-D Position 401 separate. Its cause remains **UNKNOWN**; successful GETs or app creation do not resolve it. Do not retry Position.
+- Phase 2C preflight stopped before terminal confirmation, token acquisition, and POST. The initial temporary script attempted to invoke MCP tools as PowerShell commands and exited; it was removed. Subsequent direct MCP reads found two unexplained Solution-component roots (types `80` and `10091`); no AppModule Create was attempted. Do not resume the write request until those roots are reconciled and fresh preflight passes.
 
 ## References
 

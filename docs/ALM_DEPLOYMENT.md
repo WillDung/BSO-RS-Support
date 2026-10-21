@@ -15,6 +15,8 @@ Phase 1D-D Apply was explicitly approved on 20 October 2026 for Position, Candid
 
 These resource records do not authorize additional schema, application, flow, security, or deployment work. Follow-on phases require their own approval and production change controls.
 
+Phase 2C owner authorization on 21 October 2026 is limited to one unpublished AppModule in `os_sr_bso_rs_support`, caller suffix `srapp`, expected final name `os_srapp`. The write was not executed: read-only Solution-component inspection surfaced two root rows with component types `80` and `10091`, absent from the documented `componenttype` choices; direct AppModule lookups and Solution export did not identify them. Reconcile this inventory before any AppModule Create request. No app, navigation, role association, or published component was added by Phase 2C.
+
 ## Phase 1D-B Reference Table Readiness
 
 Read-only schema checks on 19 October 2026 found `os_sr_ta`, `os_sr_pos`, `os_sr_csrc`, and `os_sr_loc` absent, and no components currently in the project Solution. The Maker Portal runbook [Phase 1D-B Reference Table Runbook](PHASE_1D_B_REFERENCE_TABLE_RUNBOOK.md) specifies creation inside the existing Unmanaged Solution and the independent metadata read-back. This is a plan only; no tables or audit flags have been created/enabled. Environment audit activation remains blocked pending IT/Compliance policy approval; current retention is not an approved value.

@@ -1,6 +1,6 @@
 # BSO-RS-Support Model-driven App Manifest
 
-**Status:** Phase 2B naming proposal for owner approval, 21 October 2026. Documentation only; no app resources were created or modified. The proposed component-specific technical name is `os_srapp`, using caller-supplied suffix `srapp` with Publisher prefix `os`. This is an exception to the usual `os_sr_*` convention and is **not yet approved**. Microsoft documents automatic prefixing and alphanumeric caller input. The expected final value is `os_srapp`; production runtime confirmation remains a post-creation read-back requirement. The separate Phase 1D-D `os_sr_pos` HTTP 401 incident remains **UNKNOWN** and is not resolved by these checks.
+**Status:** Phase 2C naming approved; creation preflight blocked, 21 October 2026. The project owner explicitly approved exactly one unpublished AppModule with caller suffix `srapp`, expected final `os_srapp`, as an app-only exception to `os_sr_*`. No app resource was created. Two unexplained Solution-component root types block the write. The separate Phase 1D-D `os_sr_pos` HTTP 401 incident remains **UNKNOWN** and is not resolved by this app work.
 
 ## Manifest
 
@@ -12,7 +12,7 @@ app:
   displayName: BSO-RS-Support
   uniqueName: os_srapp
   callerSuppliedUniqueName: srapp
-  uniqueNameStatus: proposed-component-specific-exception-pending-owner-approval
+  uniqueNameStatus: owner-approved-not-created
   namingConventionException: true
   description: >-
     Internal recruitment support application for authorized BSO candidate
@@ -103,6 +103,7 @@ Read-only checks on 21 October 2026 confirmed:
 - The project Solution has one table root component for TA with `rootcomponentbehavior=0` (Include Subcomponents). A temporary PAC unmanaged Solution export contained the TA entity metadata, 3 form components, and 7 saved-query components; the archive was inspected for display/type metadata only and removed.
 - TA forms exported: Information (`main`), Information (`card`), and Information (`quick`). TA view inventory: Active TA Directories (public view, query type 0, default); Inactive TA Directories (type 0); Quick Find Active TA Directories (type 4); TA Directories (type 8192); TA Directory Advanced Find View (type 1); TA Directory Associated View (type 2); TA Directory Lookup View (type 64).
 - No app-specific sitemap, component selection, role assignment, or publication exists for the proposed app. Existing environment security settings and grants were not changed or evaluated in this app-design phase.
+- Phase 2C preflight found two additional root rows in the target Solution component query with component types `80` and `10091`. These values are absent from the published `solutioncomponent.componenttype` choices. Direct AppModule/AppModuleComponent lookups did not identify their object IDs, and a temporary read-only Solution export contained zero AppModule sections. Their origin and meaning are **UNKNOWN**. The AppModule Create request was not issued.
 
 ## Naming Proposal and Verification
 
@@ -112,7 +113,7 @@ Microsoft's [AppModule creation guidance](https://learn.microsoft.com/en-us/powe
 
 The live app inventory contains four apps and no `os_srapp`; a direct read-only `appmodule.uniquename` query for `os_srapp` returned no rows. The target Solution and Publisher were independently verified. This is an absence/collision check only; no create request was sent. After any separately authorized creation, read back `appmodule.uniquename`, Publisher, Solution, and publication state. If the final name differs from `os_srapp`, stop; do not rename, delete, recreate, or accept a substitute automatically.
 
-This name is a **proposal for owner approval**, not an approved naming decision. Until approval, the project-wide `os_sr_*` convention remains unchanged for every other component. The naming proposal does not alter table names, Solution names, or Publisher settings.
+The owner has approved this component-specific exception for the app only. The project-wide `os_sr_*` convention remains unchanged for every other component. This exception does not alter table names, Solution names, or Publisher settings. Actual prefix behavior and final name still require post-create read-back.
 
 The AppModule Create API accepts a unique-name property, and the documented `SolutionUniqueName` parameter can associate a supported Create request with the existing Solution. Any future approved path must independently read back the final `appmodule.uniquename`, Publisher, Solution, and unpublished state before configuring components.
 

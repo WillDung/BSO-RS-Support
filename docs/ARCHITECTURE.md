@@ -1,12 +1,12 @@
 # Architecture
 
-**Status:** Proposed target architecture, based on the draft blueprint. The project Publisher, unmanaged Solution, and TA Directory table are verified. No BSO-RS-Support Model-driven App is deployed. Phase 2A has a read-only app manifest and automation plan; app unique-name behavior, sitemap composition, app security, and publication remain gated. Material design decisions require review and appropriate organizational approval.
+**Status:** Proposed target architecture, based on the draft blueprint. The project Publisher, unmanaged Solution, and TA Directory table are verified. No BSO-RS-Support Model-driven App is deployed. Phase 2A/2B documented the app; Phase 2C authorization is blocked before Create by two unexplained Solution-component roots. The approved `os_srapp` exception remains unimplemented. Sitemap composition, app security, and publication remain gated. Material design decisions require review and appropriate organizational approval.
 
 ## Logical components
 
 | Concern | Target component | Boundary / status |
 |---|---|---|
-| Interactive operations | Power Apps Model-driven App | Default UI; proposed. Initial `BSO-RS-Support` / `os_srapp` naming proposal, manifest, and unpublished build plan are documented in [Model-driven App Manifest](MODEL_DRIVEN_APP_MANIFEST.md) and [Automation Runbook](MODEL_DRIVEN_APP_AUTOMATION_RUNBOOK.md). The exception is pending owner approval; neither the app nor its navigation is deployed. |
+| Interactive operations | Power Apps Model-driven App | Default UI; proposed. The owner approved `BSO-RS-Support` / caller suffix `srapp` / expected final `os_srapp` as an app-only naming exception. Phase 2C preflight is blocked by unexplained Solution-component root types `80` and `10091`; no app or navigation is deployed. See [Model-driven App Manifest](MODEL_DRIVEN_APP_MANIFEST.md) and [Automation Runbook](MODEL_DRIVEN_APP_AUTOMATION_RUNBOOK.md). |
 | Complex interaction | Power Apps Custom Pages | Use only when justified; proposed |
 | Authoritative data | Microsoft Dataverse | Sole production source for candidate workflow/business state; production use approved in principle, no schema provisioned |
 | Critical business operations | Dataverse Custom APIs and synchronous plug-ins | Proposed enforcement for critical transitions |
@@ -28,7 +28,7 @@ The UI requests a business action. Dataverse validates and commits critical cand
 
 ## Model-driven App composition (proposed)
 
-The initial app proposal contains only the existing `os_sr_ta` table, its Main `Information` form, and default public `Active TA Directories` view, under Recruitment Support > Administration > TA Directory. The proposed app unique name is `os_srapp`, using caller suffix `srapp`, as a component-specific exception pending owner approval. Microsoft documents automatic Publisher prefixing and alphanumeric caller input; a read-only query found no current name conflict. PAC 2.13.1 cannot set a unique name. Final name and Solution/Publisher linkage must be independently verified after separately authorized creation. Component selection, sitemap creation, validation, role associations, and publication remain separate steps. See the app manifest, runbook, and [Product Decisions](PRODUCT_DECISIONS.md).
+The initial app proposal contains only the existing `os_sr_ta` table, its Main `Information` form, and default public `Active TA Directories` view, under Recruitment Support > Administration > TA Directory. The owner approved the `os_srapp` app-only exception. Read-only name checks found no conflict. Phase 2C remains blocked by unexplained Solution-component roots of types `80` and `10091`; no app shell was created. Component selection, sitemap creation, validation, role associations, and publication remain separate steps. See the app manifest, runbook, and [Product Decisions](PRODUCT_DECISIONS.md).
 
 ## Trust boundaries
 

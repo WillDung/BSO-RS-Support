@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "skills": {
+    "dv-admin": {
+      "source": "microsoft/Dataverse-skills",
+      "sourceType": "github",
+      "skillPath": ".github/plugins/dataverse/skills/dv-admin/SKILL.md",
+      "computedHash": "c60dfac68cfeb3464a5e1cbd901b5ba97cf6a82ba571369d10be20d22f886bf1"
+    },
+    "dv-connect": {
+      "source": "microsoft/Dataverse-skills",
+      "sourceType": "github",
+      "skillPath": ".github/plugins/dataverse/skills/dv-connect/SKILL.md",
+      "computedHash": "fca944dacfa0dbaefef730e821133a8504424035fca65f3f10f047ba72550e6f"
+    },
+    "dv-data": {
+      "source": "microsoft/Dataverse-skills",
+      "sourceType": "github",
+      "skillPath": ".github/plugins/dataverse/skills/dv-data/SKILL.md",
+      "computedHash": "813702c9b8be0553a2aad16998e5ee4a15905c2d0052b17899bc8541f1b3bda6"
+    },
+    "dv-metadata": {
+      "source": "microsoft/Dataverse-skills",
+      "sourceType": "github",
+      "skillPath": ".github/plugins/dataverse/skills/dv-metadata/SKILL.md",
+      "computedHash": "0ec68796cc9e2f50e0484a72ba7e5d7c0509ac1ae4d39b845409209f943bc1fb"
+    },
+    "dv-overview": {
+      "source": "microsoft/Dataverse-skills",
+      "sourceType": "github",
+      "skillPath": ".github/plugins/dataverse/skills/dv-overview/SKILL.md",
+      "computedHash": "3f870b5262b0b9db63a9c6f3a7b53e84dfff23267935b653acfacc048983f842"
+    },
+    "dv-query": {
+      "source": "microsoft/Dataverse-skills",
+      "sourceType": "github",
+      "skillPath": ".github/plugins/dataverse/skills/dv-query/SKILL.md",
+      "computedHash": "beff6e78cb702d83807b3dc9f2132fdceaa2c4d8be78a802e9eed3b0acdb8e56"
+    },
+    "dv-security": {
+      "source": "microsoft/Dataverse-skills",
+      "sourceType": "github",
+      "skillPath": ".github/plugins/dataverse/skills/dv-security/SKILL.md",
+      "computedHash": "071a1ef91de175ac8da87d2f340cd143a6857da9ee0742761e631e57b212c0bf"
+    },
+    "dv-solution": {
+      "source": "microsoft/Dataverse-skills",
+      "sourceType": "github",
+      "skillPath": ".github/plugins/dataverse/skills/dv-solution/SKILL.md",
+      "computedHash": "c8ac4d7c1935707afd9477bde267489318348f81486705480e4d15342a62153f"
+    },
+    "erp-xpp": {
+      "source": "microsoft/Dataverse-skills",
+      "sourceType": "github",
+      "skillPath": ".github/plugins/dataverse/skills/erp-xpp/SKILL.md",
+      "computedHash": "7fa6c77f05c5d8d4521d02f04e31bd4f096d4987f0bd78aefff11a70e2fbeb90"
+    }
+  }
+}

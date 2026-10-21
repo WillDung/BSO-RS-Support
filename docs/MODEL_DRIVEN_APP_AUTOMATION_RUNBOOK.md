@@ -1,6 +1,6 @@
 # Model-driven App and Sitemap Automation Runbook
 
-**Status:** Phase 2A implementation design only, 21 October 2026. No Power Platform resources were changed. Target is the verified VN LMV IT organization and the existing unmanaged Solution `os_sr_bso_rs_support`. The desired app unique name `os_sr_app` remains proposed pending a nonproduction naming check. Do not execute the write templates below as part of this phase.
+**Status:** Phase 2B readiness update, 21 October 2026. No Power Platform resources were changed. Target is the verified VN LMV IT organization and the existing unmanaged Solution `os_sr_bso_rs_support`. Exact app unique name `os_sr_app` is blocked by the documented AppModule naming contract. Runtime behavior for the requested underscore-containing suffix is **UNKNOWN**. No test App may be created under this phase.
 
 ## Target
 
@@ -18,7 +18,7 @@
 | Surface | Supported here | Limitation / guard |
 |---|---|---|
 | PAC CLI 2.13.1 | `pac model create`, `list`, `list-tables`; genpage management; Solution export | `model create` cannot set the app unique name. Omitting `--publish` is required for the unpublished shell. It cannot configure the Area/Group/entity SubArea in this initial command. |
-| AppModule SDK/Web API | Create `appmodule` with name, unique name, description and default web resource; use `SolutionUniqueName` on supported Create request/header | AppModule unique name is publisher-prefixed on create. Exact `os_sr_app` behavior is not proven; verify only in approved nonproduction before use. |
+| AppModule SDK/Web API | Create `appmodule` with name, unique name, description and default web resource; use `SolutionUniqueName` on supported Create request/header | Caller can supply `uniquename`, but publisher prefixing still applies. The required `sr_app` suffix conflicts with documented alphanumeric-only input; exact final-name creation is not supported/guaranteed, and runtime handling is UNKNOWN. No test App is authorized. |
 | Model-driven app APIs | `AddAppComponents`, `RetrieveAppComponents`, `ValidateApp`, and `PublishXml` | Use typed components/IDs from read-only metadata. Add forms/views only after explicit selection. Validation and publication are separate. |
 | AppModuleComponent metadata | Component type values include Entity `1`, View `26`, Form `60`, Sitemap `62` | Use supported app APIs/designer rather than directly creating internal app-module component rows. |
 | Forms and views | Dataverse SDK CRUD on `systemform` and `savedquery`; AddAppComponents binds existing components to the app | Do not change approved TA layout/query metadata in this phase. Form XML and FetchXML are not required to add existing components. |
@@ -42,7 +42,7 @@ The expected identity is VN LMV IT and the URL above. Verify Publisher prefix `o
 
 For Solution membership, use PAC `solution list`, read-only `solutioncomponent` queries, `RetrieveAppComponents` for the app after it exists, and an export read-back. A TA table root component with `rootcomponentbehavior=0` includes its table subcomponents in the Solution; the app’s own component selection is separate.
 
-## Naming Gate
+## Naming Resolution
 
 Installed command help:
 
@@ -52,11 +52,13 @@ pac model create [--environment] --name [--description] [--solution] [--publish]
 
 There is no `--unique-name` option. This command can associate the app with the Solution but cannot guarantee `os_sr_app`.
 
-Microsoft documents AppModule `uniquename` as publisher-prefixed at creation and the supplied unique-name text as English letters and numbers. The desired suffix `sr_app` contains an underscore. Do not guess that the service accepts it, supply `os_sr_app` to an auto-prefixing input, or infer a name from the display name. First obtain an approved disposable nonproduction environment and run a controlled create/read-back naming test there, or verify an exact supported naming pattern with Microsoft. Do not perform this experiment in VN LMV IT Production.
+Microsoft's [AppModule creation guidance](https://learn.microsoft.com/en-us/power-apps/developer/model-driven-apps/create-manage-model-driven-apps-using-code) states that the caller-supplied unique name uses English letters and numbers and that Dataverse automatically prepends the Solution Publisher prefix. The AppModule reference lists `uniquename` as a writable string of maximum length 100 but does not document a prefix bypass or underscore exception.
 
-After the naming test, use the supported AppModule `Create` request with the verified prefix-free value and `SolutionUniqueName: os_sr_bso_rs_support` (SDK request parameter or Web API optional-parameter header). The documented default icon web resource is `953b9fac-1e5e-e611-80d6-00155ded156f`; confirm availability or use an approved existing icon. Read back `appmoduleid`, `name`, `uniquename`, `publisherid`, `solutionid`, `statecode`, and `componentstate`. Continue only if final `uniquename` is exactly `os_sr_app`, publisher and Solution are exact, and the app is unpublished. If unexpected, stop; do not rename, delete, or recreate.
+To produce final `os_sr_app` with prefix `os`, the supplied suffix would need to be `sr_app`, which contains an underscore and conflicts with the documented alphanumeric input rule. Supplying `os_sr_app` as the caller value to a prefix-aware create path risks `os_os_sr_app`. The docs do not establish a supported way for either SDK or Web API to suppress publisher-prefixing or independently force the final value. Exact runtime reject/transform behavior is **UNKNOWN**. The exact requested name is therefore not supported/guaranteed by the documented creation contract. Do not submit either value, create a temporary app, accept a transformed name, or automatically choose a replacement.
 
-Review-only PAC command (creates an app if executed; not run and not guaranteed to produce the proposed unique name):
+There is no safe executable AppModule payload for the requested exact name under the documented contract. The normal AppModule Create payload shape is not authorization to call it. Resolve the blocker by obtaining a Microsoft-documented supported naming exception or an explicit owner decision approving a revised technical name that satisfies the prefix and character rules. No app test or creation occurred in this phase.
+
+Non-executable PAC shape for future review only (do not run while the approved exact name remains unresolved):
 
 ```powershell
 pac model create `
@@ -66,20 +68,20 @@ pac model create `
   --solution 'os_sr_bso_rs_support'
 ```
 
-Do not add `--publish`. PAC is suitable only if the owner accepts the generated unique name after read-back; otherwise use the verified AppModule path after the naming gate.
+Do not add `--publish`. Even without that switch, this command is **not authorized or ready to run** because it cannot guarantee the requested unique name. A future creation command must not be prepared as executable until the naming decision is resolved.
 
 ## App Composition Sequence
 
 Every write step below is a future phase requiring its own explicit authorization. The automation should default to plan/read-only mode and require an explicit Apply switch plus typed confirmation for each authorized change batch.
 
-1. **Create unpublished AppModule.** Use PAC only if its generated technical name is acceptable and confirmed. For exact-name control, use the supported AppModule Create API after the naming gate. Set the target `SolutionUniqueName`; omit publishing. Stop on any failure.
-2. **Verify app identity and Solution.** Independently read the AppModule row and Solution component membership. Confirm exact display/unique names, Publisher, Solution, app state, and unpublished component state. Do not proceed on mismatch.
-3. **Add TA table component.** Resolve the TA metadata ID with a GET and use the documented `AddAppComponents` action (or app designer) for the `os_sr_ta` table component. Read back `RetrieveAppComponents` and app component membership. No record/table data access.
-4. **Configure sitemap.** Build an app sitemap with Area `Recruitment Support`, Group `Administration`, and entity SubArea `TA Directory` targeting `os_sr_ta`. Use the supported SiteMap component/app APIs or Power Apps app designer and a schema-valid sitemap generated from a supported template. Associate the sitemap with the app (Sitemap component type `62`) and read it back. `pac model genpage add` only attaches a generated page and cannot create this ordinary table SubArea.
-5. **Select existing UI components.** Resolve current TA form/view GUIDs and published status using read-only metadata. Add only the Main form (`Information`) and default public view (`Active TA Directories`) through `AddAppComponents`; the documented app component types are Form `60` and View `26`. Verify the actual app component list. Do not modify the form, views, TA metadata, or application-wide defaults.
-6. **Validate dependencies.** Call `ValidateApp(AppModuleId=<verified app GUID>)` and review the full `ValidationIssueList`. Confirm required sitemap, table, form, view, and Solution membership. Verify security dependencies without changing roles; app access remains unavailable until a separate security approval and assignment.
-7. **Pause unpublished.** Keep the app unpublished until a separate release approval. After approval only, publish with the app-scoped `PublishXml` action, read back published state/components, and complete user/accessibility/UAT checks.
-8. **ALM read-back.** Export/unpack the Solution using PAC to an approved local path, compare the app, sitemap, table reference, selected forms/views, and dependencies against this manifest. Do not commit/push/sync; Git remains owner-controlled.
+1. **Resolve technical name before creation.** Current requested `os_sr_app` is not supported/guaranteed under the documented prefix-plus-alphanumeric contract. Obtain Microsoft documentation for an exception or explicit owner approval for a compliant replacement. No test app is permitted by this readiness task.
+2. **Create unpublished AppModule only after naming approval.** Use PAC `model create` only if its generated technical name is approved; otherwise use supported AppModule Create with explicit `uniquename` and `SolutionUniqueName`. Omit publish and stop on any failure.
+3. **Verify app identity and Solution.** Independently read the AppModule row and Solution component membership. Confirm exact display/unique names, Publisher, Solution, app state, and unpublished component state. Do not proceed on mismatch.
+4. **Add TA table component.** Resolve the TA metadata ID with a GET and use `AddAppComponents` or app designer for the `os_sr_ta` table. Read back `RetrieveAppComponents`; access no table rows.
+5. **Configure sitemap.** Add Recruitment Support > Administration > TA Directory using supported SiteMap/app APIs or app designer and read back. Generated-page commands do not create ordinary table SubAreas.
+6. **Select UI components.** Add only the existing Main `Information` form and `Active TA Directories` public view after resolving current IDs and state. Do not change the form/view metadata.
+7. **Validate.** Call `ValidateApp`, inspect the complete `ValidationIssueList`, and verify Solution/app component membership. Do not change role assignments.
+8. **Remain unpublished.** Publication requires separate approval. Only then may scoped `PublishXml` be considered. Export for ALM read-back; do not alter Git.
 
 ## API Operation References
 

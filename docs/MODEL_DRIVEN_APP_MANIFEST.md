@@ -1,6 +1,6 @@
 # BSO-RS-Support Model-driven App Manifest
 
-**Status:** Phase 2A proposal, 21 October 2026. Documentation only; no app resources were created or modified. The display name and navigation are requested design. The technical name is proposed and blocked pending supported AppModule naming verification. The separate Phase 1D-D `os_sr_pos` HTTP 401 incident remains **UNKNOWN** and is not resolved by these checks.
+**Status:** Phase 2B naming assessment, 21 October 2026. Documentation only; no app resources were created or modified. The display name and navigation are requested design. The proposed technical name `os_sr_app` is **not supported by the documented AppModule auto-prefix input contract**; no replacement is selected. Runtime rejection/transformation behavior for an underscore-containing suffix is **UNKNOWN**. The separate Phase 1D-D `os_sr_pos` HTTP 401 incident remains **UNKNOWN** and is not resolved by these checks.
 
 ## Manifest
 
@@ -11,7 +11,7 @@ status: proposed
 app:
   displayName: BSO-RS-Support
   uniqueName: os_sr_app
-  uniqueNameStatus: proposed-unverified
+  uniqueNameStatus: blocked-by-documented-input-contract
   description: >-
     Internal recruitment support application for authorized BSO candidate
     operations, backed by Dataverse.
@@ -103,11 +103,13 @@ Read-only checks on 21 October 2026 confirmed:
 
 ## Naming Decision Gate
 
-The exact proposed final AppModule unique name is `os_sr_app`; it is not verified or deployed. Installed PAC 2.13.1 `pac model create` exposes display name, description, environment, solution, and optional publish, but **no technical-name parameter**. It cannot guarantee `os_sr_app`.
+Installed PAC 2.13.1 `pac model create` exposes display name, description, environment, Solution, and optional publish, but **no technical-name parameter**. It cannot guarantee `os_sr_app`.
 
-Microsoft documents the AppModule `uniquename` field as publisher-prefixed on creation, and says the supplied unique-name value uses English letters and numbers. The desired `os_sr_app` contains an internal underscore after `sr`, while the selected Publisher prefix itself contributes `os_`. The supplied `os` prefix therefore does not by itself prove that a suffix-only API input will produce exactly `os_sr_app`. Do not guess a stem, pass the final value through an auto-prefixing surface, or accept a double prefix. Verify this naming behavior with a disposable supported test in an approved nonproduction environment, or obtain a Microsoft-supported naming pattern that returns exactly `os_sr_app`; read back `appmodule.uniquename` before any later app configuration. No suitable test environment is verified here.
+Microsoft's [AppModule creation guidance](https://learn.microsoft.com/en-us/power-apps/developer/model-driven-apps/create-manage-model-driven-apps-using-code) says the supplied `uniquename` uses English letters and numbers and that Dataverse automatically prepends the Solution Publisher prefix. The AppModule table reference separately exposes `uniquename` as a writable string (maximum length 100); this confirms the caller supplies a value, not that it can bypass prefixing or naming validation.
 
-The supported AppModule create API and the PAC app-create command both associate an app with a Solution. The AppModule request must use the existing project Solution context; independent read-back must show the expected unique name, Publisher, Solution, and unpublished state. Technical-name verification is a hard implementation gate.
+With Publisher prefix `os`, producing the exact final `os_sr_app` through the documented behavior would require the caller-supplied suffix `sr_app`. That suffix includes an underscore and does not meet the documented letters-and-numbers input rule. Supplying the full `os_sr_app` to a prefix-aware creation path risks double-prefixing; supplying another stem would silently change the requested name. Therefore `os_sr_app` is **not a supported/guaranteed name under the documented creation contract**. Whether the service accepts or rewrites the underscore is **UNKNOWN**; this phase does not test by creating an app. There is no safe executable exact-name payload until Microsoft documents an exception or the owner explicitly approves a different technical name. Do not substitute one automatically.
+
+The AppModule Create API can accept a unique-name property and the documented `SolutionUniqueName` parameter can associate a supported Create request with the existing Solution. Those capabilities do not override prefixing or the input constraint. Any future approved path must independently read back the final `appmodule.uniquename`, Publisher, Solution, and unpublished state before configuring components.
 
 ## Component Dependencies
 

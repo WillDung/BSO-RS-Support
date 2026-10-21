@@ -28,7 +28,7 @@ The UI requests a business action. Dataverse validates and commits critical cand
 
 ## Model-driven App composition (proposed)
 
-The initial app proposal contains only the existing `os_sr_ta` table, its Main `Information` form, and default public `Active TA Directories` view, under Recruitment Support > Administration > TA Directory. PAC 2.13.1 can create an app in the existing Solution but cannot set its unique name; exact `os_sr_app` naming remains unverified and must pass a supported nonproduction naming test before any creation. Component selection, sitemap creation, validation, role associations, and publication are separate steps; publication and security changes require separate approvals. See the app manifest and runbook for the evidence-backed sequence and limitations.
+The initial app proposal contains only the existing `os_sr_ta` table, its Main `Information` form, and default public `Active TA Directories` view, under Recruitment Support > Administration > TA Directory. PAC 2.13.1 cannot set a unique name. Microsoft documents AppModule unique names as publisher-prefixed and caller input as alphanumeric; the exact proposed final name `os_sr_app` would require suffix `sr_app`, which conflicts with that documented input rule. Thus exact-name creation is not supported/guaranteed by the documented contract; runtime behavior is unknown. Do not create a test app or substitute another name. Component selection, sitemap creation, validation, role associations, and publication remain separate steps. See the app manifest and runbook for the verified constraints and approval gates.
 
 ## Trust boundaries
 

@@ -85,7 +85,7 @@ publication:
 unresolved:
   - appmodule-publisher-lookup
   - solution-component-type-10091-exact-identity
-  - AddAppComponents-runtime-acceptance-not-tested
+  - AddAppComponents-server-acceptance-requires-authorized-action
   - sitemap-PATCH-unpublished-layer-behavior-not-tested
 ```
 

@@ -39,6 +39,7 @@ Assert-Test ($script:ExternalCalls -eq 0) 'PlanOnly makes no auth, PAC, or netwo
 
 . $scriptPath -PlanOnly
 $syntheticTarget = [pscustomobject]@{
+    AppModuleId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
     TableMetadataId = '11111111-1111-4111-8111-111111111111'
     MainFormId = '22222222-2222-4222-8222-222222222222'
     ActiveViewId = '33333333-3333-4333-8333-333333333333'
@@ -49,6 +50,22 @@ Assert-Test ($payloads[0].'@odata.type' -ceq 'Microsoft.Dynamics.CRM.entity' -an
 Assert-Test ($payloads[1].'@odata.type' -ceq 'Microsoft.Dynamics.CRM.systemform' -and $payloads[1].formid -ceq $syntheticTarget.MainFormId) 'Form component uses primary-key property and OData type'
 Assert-Test ($payloads[2].'@odata.type' -ceq 'Microsoft.Dynamics.CRM.savedquery' -and $payloads[2].savedqueryid -ceq $syntheticTarget.ActiveViewId) 'View component uses primary-key property and OData type'
 Assert-Test (@($payloads | Where-Object { $_.'@odata.type' -ceq 'Microsoft.Dynamics.CRM.sitemap' }).Count -eq 0) 'Existing SiteMap binding is not duplicated in AddAppComponents'
+$syntheticBody = [ordered]@{ AppId = $syntheticTarget.AppModuleId; Components = $payloads }
+Assert-AppComponentsPayload -Body $syntheticBody -Target $syntheticTarget
+Assert-Test $true 'Allow exact synthetic AppId and three approved component payloads'
+$wrongAppBody = [ordered]@{ AppId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'; Components = $payloads }
+Assert-Rejected { Assert-AppComponentsPayload -Body $wrongAppBody -Target $syntheticTarget } 'Reject wrong AppId' 'fixed AppId'
+$extraComponentBody = [ordered]@{ AppId = $syntheticTarget.AppModuleId; Components = @($payloads) + @($payloads[0]) }
+Assert-Rejected { Assert-AppComponentsPayload -Body $extraComponentBody -Target $syntheticTarget } 'Reject extra component' 'component count'
+
+Assert-Rejected { Assert-ApplyAuthorization -Phrase 'wrong phrase' -Reference 'synthetic-approval' } 'Reject incorrect Apply phrase' 'confirmation phrase'
+Assert-Rejected { Assert-ApplyAuthorization -Phrase 'APPLY PHASE 2D IN VN LMV IT' -Reference '' } 'Reject missing Apply reference' 'authorization reference'
+$authorizationAccepted = $true
+try { Assert-ApplyAuthorization -Phrase 'APPLY PHASE 2D IN VN LMV IT' -Reference 'synthetic-approval' } catch { $authorizationAccepted = $false }
+Assert-Test $authorizationAccepted 'Accept only explicit phrase plus recorded synthetic authorization reference'
+Assert-Rejected { Invoke-DataverseRequest -Method PATCH -Path 'sitemaps(synthetic-id)' -Body ([ordered]@{ sitemapxml = '<SiteMap />' }) } 'Block SiteMap PATCH without Apply' 'Write blocked'
+Assert-Rejected { Invoke-DataverseRequest -Method POST -Path AddAppComponents -Body ([ordered]@{}) } 'Block AddAppComponents without Apply' 'Write blocked'
+Assert-Test ($script:ExternalCalls -eq 0) 'Blocked write routes never call authentication or network'
 
 $fixtureXml = '<SiteMap IntroducedVersion="7.0.0.0"><Area Id="area_test" ResourceId="resource_area" ShowGroups="true"><Titles><Title LCID="1033" Title="Area1"/><Title LCID="1041" Title="Area Localized"/></Titles><Group Id="group_test" ResourceId="resource_group" IsProfile="false"><Titles><Title LCID="1033" Title="Group1"/></Titles><SubArea Id="subarea_test" Client="Web" AvailableOffline="true"><Titles><Title LCID="1033" Title="Subarea1"/></Titles></SubArea></Group></Area></SiteMap>'
 $testIds = @{ Area = 'area_test'; Group = 'group_test'; SubArea = 'subarea_test' }

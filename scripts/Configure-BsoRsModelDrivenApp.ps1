@@ -80,6 +80,37 @@ function Get-AppComponentPayloads {
     )
 }
 
+function Assert-ApplyAuthorization {
+    param([string]$Phrase, [string]$Reference)
+    if ($Phrase -cne 'APPLY PHASE 2D IN VN LMV IT' -or [string]::IsNullOrWhiteSpace($Reference)) {
+        throw 'Apply requires the exact Phase 2D confirmation phrase and a recorded authorization reference; no request was sent.'
+    }
+}
+
+function Assert-AppComponentsPayload {
+    param(
+        [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Body,
+        [object]$Target = $script:Target
+    )
+    if ([string]$Body['AppId'] -cne $Target.AppModuleId -or @($Body.Keys).Count -ne 2 -or 'Components' -notin @($Body.Keys)) {
+        throw 'AddAppComponents payload does not match the fixed AppId/Components contract.'
+    }
+    $expected = @(Get-AppComponentPayloads -Target $Target)
+    $actual = @($Body['Components'])
+    if ($actual.Count -ne $expected.Count) { throw 'AddAppComponents component count differs from the approved plan.' }
+    for ($index = 0; $index -lt $expected.Count; $index++) {
+        $item = $actual[$index]
+        $expectedItem = $expected[$index]
+        $keys = @($item.Keys | ForEach-Object { [string]$_ })
+        if ($keys.Count -ne 2 -or '@odata.type' -notin $keys) { throw 'AddAppComponents component contains an unexpected property.' }
+        foreach ($key in $expectedItem.Keys) {
+            if (-not $item.Contains($key) -or [string]$item[$key] -cne [string]$expectedItem[$key]) {
+                throw 'AddAppComponents component identity/type differs from the approved plan.'
+            }
+        }
+    }
+}
+
 function Get-AppCompositionPlan {
     $components = @(Get-AppComponentPayloads)
     [ordered]@{
@@ -278,7 +309,18 @@ function Get-HttpStatusCode {
     try { return [int]$ErrorRecord.Exception.Response.StatusCode } catch { return $null }
 }
 
+function Ensure-DataverseAccessToken {
+    $refreshBefore = [DateTimeOffset]::UtcNow.AddMinutes(5)
+    if ([string]::IsNullOrWhiteSpace($script:AccessToken) -or $script:AccessTokenExpiresOn -le $refreshBefore) {
+        $script:AccessToken = Get-ValidatedAccessToken
+    }
+    if ([string]::IsNullOrWhiteSpace($script:AccessToken) -or $script:AccessTokenExpiresOn -le [DateTimeOffset]::UtcNow) {
+        throw 'A valid Dataverse token is unavailable; no request was sent.'
+    }
+}
+
 function Get-DataverseMetadataDocument {
+    Ensure-DataverseAccessToken
     $uri = [Uri]::new([Uri]$script:ApiRoot, '$metadata')
     if ($uri.Scheme -cne 'https' -or $uri.Authority -ine ([Uri]$OrganizationUrl).Authority) {
         throw 'Metadata request is outside the verified organization origin.'
@@ -363,6 +405,8 @@ function Invoke-DataverseRequest {
     if ($Method -eq 'POST' -and $resource -cne 'AddAppComponents') {
         throw 'POST blocked: only AddAppComponents is allowed; no create, publish, or role endpoint is allowed.'
     }
+    if ($Method -eq 'POST') { Assert-AppComponentsPayload -Body $Body }
+    Ensure-DataverseAccessToken
     $headers = @{
         Authorization = 'Bearer ' + $script:AccessToken
         Accept = 'application/json'
@@ -380,6 +424,8 @@ function Invoke-DataverseRequest {
         Headers = $headers
         MaximumRedirection = 0
         SkipHeaderValidation = $true
+        SkipHttpErrorCheck = $true
+        StatusCodeVariable = 'responseStatusCode'
         TimeoutSec = 90
         ErrorAction = 'Stop'
     }
@@ -387,34 +433,33 @@ function Invoke-DataverseRequest {
         $request.ContentType = 'application/json; charset=utf-8'
         $request.Body = ConvertTo-Json -InputObject $Body -Depth 30 -Compress
     }
+    $responseStatusCode = 0
+    $script:LastHttpStatus = $null
+    $script:LastErrorCode = $null
+    $script:LastSafeError = $null
     $script:RequestCounts[$Method]++
     $script:LastPath = $resource
     if ($Method -ne 'GET') { $script:WritesStarted = $true }
     try {
         $response = Invoke-RestMethod @request
+        $status = [int]$responseStatusCode
+        $script:LastHttpStatus = if ($status -ge 100 -and $status -le 599) { $status } else { $null }
+        if ($status -lt 200 -or $status -ge 300) {
+            $errorObject = Get-PropertyValue -Object $response -Name 'error'
+            $errorCode = [string](Get-PropertyValue -Object $errorObject -Name 'code')
+            if ($errorCode -match '^0x[0-9a-fA-F]{8}$') { $script:LastErrorCode = $errorCode.ToLowerInvariant() }
+            $script:LastSafeError = "Dataverse returned HTTP $status; response body omitted."
+            throw 'Dataverse request returned a non-success status.'
+        }
         if ($Method -ne 'GET') {
-            $script:WriteResults.Add([pscustomobject]@{ Method = $Method; ApiPath = $resource; HttpStatus = 204 })
+            $script:WriteResults.Add([pscustomobject]@{ Method = $Method; ApiPath = $resource; HttpStatus = $status })
         }
         return $response
     }
     catch {
         $status = Get-HttpStatusCode -ErrorRecord $_
-        $script:LastHttpStatus = $status
-        $script:LastErrorCode = $null
-        $script:LastSafeError = 'Dataverse rejected the request; response details omitted.'
-        try {
-            $errorPayload = $_.ErrorDetails.Message | ConvertFrom-Json
-            $candidateCode = [string]$errorPayload.error.code
-            if ($candidateCode -match '^0x[0-9a-fA-F]{8}$') { $script:LastErrorCode = $candidateCode.ToLowerInvariant() }
-            $candidateMessage = [string]$errorPayload.error.message
-            if ($candidateMessage -match "(?i)Could not find a property named '([A-Za-z0-9_]+)'") {
-                $script:LastSafeError = "Unknown metadata property: $($Matches[1])."
-            }
-            elseif ($candidateMessage -match "(?i)Resource not found for the segment '([A-Za-z0-9_]+)'") {
-                $script:LastSafeError = "Unknown Web API segment: $($Matches[1])."
-            }
-        }
-        catch { }
+        if ($status) { $script:LastHttpStatus = $status }
+        if (-not $script:LastSafeError) { $script:LastSafeError = 'Dataverse request failed; response details omitted.' }
         if ($Method -ne 'GET') { $script:WritesStarted = $true }
         throw "Dataverse $Method failed at approved metadata path (HTTP $status); reconcile with GET before any retry. Raw response omitted."
     }

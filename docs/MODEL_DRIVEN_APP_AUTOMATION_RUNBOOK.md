@@ -51,7 +51,9 @@ The AddAppComponents candidate payload is:
 }
 ```
 
-The entity and Site Map keys/types were verified against target `$metadata`; the API guide provides concrete form/view payload examples and documents those supported component classes. The existing Site Map is deliberately omitted because the Solution package already has the unique-name binding. No AddAppComponents call was executed, so acceptance of this combined payload on the unpublished app remains unverified. Do not use undocumented `appmodulecomponent` CRUD as a substitute.
+The Entity, Site Map, Form, and View keys/types were verified against target `$metadata`; the API guide provides concrete form/view payload examples and documents those supported component classes. The existing Site Map is deliberately omitted because the Solution package already has the unique-name binding. No documented AddAppComponents dry-run/preview accepts proposed components without applying them. `ValidateApp` takes only AppModuleId and validates the App's existing graph; it cannot pre-validate this unsubmitted Components collection. Therefore metadata validates the candidate request shape, not server acceptance. Runtime acceptance on this unpublished App remains UNKNOWN until a separately authorized AddAppComponents execution. Do not use undocumented `appmodulecomponent` CRUD as a substitute.
+
+No dependency evidence shows type 10091 or its type-10094 dependency is required by the TA table, Main form, or public view. Preserve these components and their existing dependency graph; their exact identity does not block this TA composition plan absent a concrete dependency result.
 
 ### Exact Write Plan
 

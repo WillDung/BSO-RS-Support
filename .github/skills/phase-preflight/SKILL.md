@@ -1,6 +1,7 @@
 ---
-mode: agent
+name: phase-preflight
 description: Inspect project status and propose a bounded implementation step without modifying files.
+disable-model-invocation: true
 ---
 # Phase Preflight
 

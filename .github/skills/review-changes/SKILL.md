@@ -1,6 +1,7 @@
 ---
-mode: agent
-description: Review changed files for business, architecture, security, ALM, audit, and testing problems.
+name: review-changes
+description: "Review changed files for business, architecture, security, ALM, audit, and testing problems."
+disable-model-invocation: true
 ---
 # Review Changes
 

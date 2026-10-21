@@ -1,5 +1,7 @@
 ---
+name: bso-powerplatform-bootstrap
 description: Prepare GitHub Copilot and Dataverse Skills to build BSO-RS-Support from VS Code (read-only).
+disable-model-invocation: true
 ---
 # BSO-RS-Support — Bootstrap Power Platform Auto-build
 

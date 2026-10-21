@@ -1,6 +1,7 @@
 ---
-mode: agent
+name: implement-phase
 description: Implement one explicitly approved BSO-RS-Support phase with focused validation and documentation.
+disable-model-invocation: true
 ---
 # Implement Phase
 

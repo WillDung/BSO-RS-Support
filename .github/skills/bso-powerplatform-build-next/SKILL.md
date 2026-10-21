@@ -1,5 +1,7 @@
 ---
+name: bso-powerplatform-build-next
 description: Implement one authorized BSO-RS-Support Power Platform app slice from VS Code with verification.
+disable-model-invocation: true
 ---
 # BSO-RS-Support — Build Next Approved App Slice
 

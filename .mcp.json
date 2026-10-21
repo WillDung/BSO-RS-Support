@@ -1,0 +1,23 @@
+{
+	"mcpServers": {
+		"bso-dataverse": {
+			"type": "http",
+			"url": "https://org14938ec2.crm4.dynamics.com/api/mcp",
+			"tools": [
+				"*"
+			]
+		},
+		"bso-power-platform-cli": {
+			"type": "local",
+			"command": "pac",
+			"args": [
+				"copilot",
+				"mcp",
+				"--run"
+			],
+			"tools": [
+				"*"
+			]
+		}
+	}
+}

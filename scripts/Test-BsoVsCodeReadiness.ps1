@@ -15,6 +15,8 @@ function Test-Executable([string] $CommandName) {
     return $null -ne (Get-Command -Name $CommandName -ErrorAction SilentlyContinue)
 }
 
+. (Join-Path $PSScriptRoot 'ReadinessChecks.ps1')
+
 Write-Check 'PowerShell' $PSVersionTable.PSVersion.ToString()
 $hasPac = Test-Executable 'pac'
 Write-Check 'PAC CLI' $(if ($hasPac) { 'Found' } else { 'MISSING' })
@@ -52,9 +54,9 @@ if ($solOutput -notmatch ('(?im)^\s*' + $escapedSolName + '\s+')) {
 }
 Write-Check 'Project Solution' 'Found in PAC list (publisher/membership still require independent read-back)'
 
-# Model authoring capability is VERSION/INSTALLATION-DEPENDENT; do not assume PAC support.
+# Match PAC's command-list entry; its help does not contain the literal phrase "model create".
 $helpText = (& pac model help 2>&1 | Out-String)
-if (($LASTEXITCODE -eq 0) -and ($helpText -match 'model create')) {
+if (Test-PacModelCreateCapability -HelpText $helpText -ExitCode $LASTEXITCODE) {
     Write-Check 'PAC model-driven app authoring' 'pac model create advertised'
 } else {
     Write-Check 'PAC model-driven app authoring' 'Unverified/unavailable; review installed CLI help'

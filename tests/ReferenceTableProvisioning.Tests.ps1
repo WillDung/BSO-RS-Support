@@ -19,6 +19,23 @@ function Assert-Rejected {
     Assert-Test $rejected $Name
 }
 
+function Get-UtcTimestampFromJson {
+    param([Parameter(Mandatory = $true)][string]$Json)
+    $document = [System.Text.Json.JsonDocument]::Parse($Json)
+    try {
+        $value = $document.RootElement.GetProperty('Details').GetProperty('HttpFailure').GetProperty('TimestampUtc').GetString()
+        $timestamp = [DateTimeOffset]::ParseExact(
+            $value,
+            'o',
+            [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::None
+        )
+        if ($timestamp.Offset -ne [TimeSpan]::Zero) { throw 'TimestampUtc must have a zero UTC offset.' }
+        $timestamp
+    }
+    finally { $document.Dispose() }
+}
+
 function Connect-AzAccount { throw 'Synthetic tests must not authenticate.' }
 function Get-AzAccessToken { throw 'Synthetic tests must not acquire tokens.' }
 function Invoke-RestMethod { throw 'Synthetic tests must not access the network.' }
@@ -175,7 +192,7 @@ $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList $sou
                     foreach ($secret in $script:Secrets) {
                         if ($text.Contains($secret) -or $persisted.Contains($secret) -or $script:SafeException.Contains($secret)) { $secretFound=$true }
                     }
-                    $results.Add([pscustomobject]@{Status=$status;Outcome=$outcome;Diagnostic=$diagnostic;SecretFound=$secretFound;Request=$script:TransportState.Request;Calls=$script:TransportState.PostCalls;Refreshes=$script:Refreshes;Exception=$script:SafeException})
+                    $results.Add([pscustomobject]@{Status=$status;Outcome=$outcome;Diagnostic=$diagnostic;Json=$text;SecretFound=$secretFound;Request=$script:TransportState.Request;Calls=$script:TransportState.PostCalls;Refreshes=$script:Refreshes;Exception=$script:SafeException})
                 }
                 finally { Remove-Item -LiteralPath $file -Force }
             }
@@ -195,6 +212,21 @@ $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList $sou
     Export-ModuleMember -Function Test-SyntheticHttpChecks
 }
 Import-Module $httpModule -Force
+$originalCulture = [System.Threading.Thread]::CurrentThread.CurrentCulture
+$originalUiCulture = [System.Threading.Thread]::CurrentThread.CurrentUICulture
+try {
+    [System.Threading.Thread]::CurrentThread.CurrentCulture = [Globalization.CultureInfo]::GetCultureInfo('fr-FR')
+    [System.Threading.Thread]::CurrentThread.CurrentUICulture = [Globalization.CultureInfo]::GetCultureInfo('fr-FR')
+    $utcFixture = '{"Details":{"HttpFailure":{"TimestampUtc":"2026-10-21T20:55:06.1234567+00:00"}}}'
+    $parsedUtcFixture = Get-UtcTimestampFromJson -Json $utcFixture
+    Assert-Test ($parsedUtcFixture.Offset -eq [TimeSpan]::Zero) 'Round-trip UTC timestamp parsing is culture invariant'
+    $nonUtcFixture = '{"Details":{"HttpFailure":{"TimestampUtc":"2026-10-21T20:55:06.1234567+07:00"}}}'
+    Assert-Rejected { Get-UtcTimestampFromJson -Json $nonUtcFixture } 'Reject non-UTC timestamp offset' 'zero UTC offset'
+}
+finally {
+    [System.Threading.Thread]::CurrentThread.CurrentCulture = $originalCulture
+    [System.Threading.Thread]::CurrentThread.CurrentUICulture = $originalUiCulture
+}
 $transcript=[IO.Path]::GetTempFileName()
 try {
     Start-Transcript -LiteralPath $transcript -Force | Out-Null
@@ -217,7 +249,8 @@ foreach ($case in $http.Cases) {
     Assert-Test ($failure.WritesMayHaveOccurred -and $case.Diagnostic.Details.WritesMayHaveOccurred) "$name uncertain write retained"
     Assert-Test ($failure.ReconciliationOutcome -ceq $case.Outcome -and $failure.ReconciliationCompleted -eq ($case.Outcome -ne 'UNKNOWN')) "$name reconciliation outcome"
     Assert-Test ($failure.StatusCode -eq $(if ($case.Status -eq 0) { $null } else { $case.Status })) "$name original status survives secondary error"
-    Assert-Test ([DateTimeOffset]::Parse($failure.TimestampUtc).Offset -eq [TimeSpan]::Zero) "$name UTC request timestamp"
+    $timestamp = Get-UtcTimestampFromJson -Json $case.Json
+    Assert-Test ($timestamp.Offset -eq [TimeSpan]::Zero) "$name UTC request timestamp"
     if ($case.Status -ne 0) {
         Assert-Test ($failure.RequestId -ceq '11111111-1111-4111-8111-111111111111' -and $failure.CorrelationId -ceq '22222222-2222-4222-8222-222222222222' -and $failure.DataverseErrorCode -ceq '0x80040220') "$name safe IDs and Dataverse code"
     }

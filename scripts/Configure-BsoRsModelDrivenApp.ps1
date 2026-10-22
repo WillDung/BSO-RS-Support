@@ -622,6 +622,10 @@ function Get-PacIdentity {
     }
 }
 
+function Test-AllowsProcessExpectedUserPin {
+    [bool]($SiteMapAssociationOnly -or $ReferenceUiCompositionOnly)
+}
+
 function Assert-TargetInputs {
     if ($EnvironmentName -cne $script:Target.EnvironmentName -or
         [string]::IsNullOrWhiteSpace($OrganizationUrl) -or
@@ -642,7 +646,7 @@ function Assert-TargetInputs {
     }
     $expectedUserId = [Environment]::GetEnvironmentVariable('BSO_RS_EXPECTED_USER_ID', 'Process')
     $expectedUserGuid = [guid]::Empty
-    if ([string]::IsNullOrWhiteSpace($expectedUserId) -and $SiteMapAssociationOnly) {
+    if ([string]::IsNullOrWhiteSpace($expectedUserId) -and (Test-AllowsProcessExpectedUserPin)) {
         $script:ExpectedUserGuardNeedsPin = $true
     }
     elseif (-not [guid]::TryParse($expectedUserId, [ref]$expectedUserGuid) -or
@@ -926,7 +930,6 @@ function Get-SolutionExportSummary {
             }
             [pscustomobject]@{
                 AppModuleSiteMapEntries = $siteMapNames.ToArray()
-                TableIds = @(Get-ExportGuidIds -Document $document -ParentName 'Entity' -IdName 'MetadataId')
                 MainFormIds = @(Get-ExportGuidIds -Document $document -ParentName 'systemform' -IdName 'formid')
                 ActiveViewIds = @(Get-ExportGuidIds -Document $document -ParentName 'savedquery' -IdName 'savedqueryid')
             }
@@ -986,6 +989,43 @@ function Get-ReferenceComponentInventory {
         })
     }
     $inventory.ToArray()
+}
+
+function Assert-SingleAppModuleSolutionRoot {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$SolutionComponents,
+        [Parameter(Mandatory = $true)][string]$AppModuleId
+    )
+    $appRoots = @($SolutionComponents | Where-Object { [int]$_.componenttype -eq 80 })
+    $matchingRoots = @($appRoots | Where-Object { ([string]$_.objectid).Trim('{}') -ieq $AppModuleId.Trim('{}') })
+    if ($appRoots.Count -ne 1 -or $matchingRoots.Count -ne 1) {
+        throw 'The target Solution must contain exactly one AppModule root, matching the adopted srapp.'
+    }
+    $matchingRoots[0]
+}
+
+function Assert-ReferenceTableSolutionMembership {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$SolutionComponents,
+        [Parameter(Mandatory = $true)][object[]]$ReferenceComponents
+    )
+    $membership = [System.Collections.Generic.List[object]]::new()
+    foreach ($reference in $ReferenceComponents) {
+        $matches = @($SolutionComponents | Where-Object {
+            [int]$_.componenttype -eq 1 -and
+            ([string]$_.objectid).Trim('{}') -ieq ([string]$reference.TableMetadataId).Trim('{}')
+        })
+        if ($matches.Count -ne 1) {
+            throw "Reference table $($reference.LogicalName) lacks exactly one table Solution component."
+        }
+        $membership.Add([pscustomobject]@{
+            LogicalName = $reference.LogicalName
+            ComponentRole = 'Table'
+            ComponentType = 1
+            MatchCount = $matches.Count
+        })
+    }
+    $membership.ToArray()
 }
 
 function Get-AppModuleRoleSnapshot {
@@ -1063,8 +1103,9 @@ function Get-TargetSnapshot {
 
     $script:LastStage = 'Read unpublished AppModule'
     $matchingApps = @(Get-ODataRows -Path (New-CollectionPath -EntitySet 'appmodules' -Select 'appmoduleid,appmoduleidunique,name,uniquename,statecode,componentstate' -Filter "uniquename eq '$($script:Target.AppUniqueName)'"))
-    if ($matchingApps.Count -ne 1 -or $matchingApps[0].appmoduleid -cne $script:Target.AppModuleId) {
-        throw 'The adopted srapp unique name does not resolve to exactly one existing AppModule.'
+    if ($matchingApps.Count -gt 1 -or
+        ($matchingApps.Count -eq 1 -and $matchingApps[0].appmoduleid -cne $script:Target.AppModuleId)) {
+        throw 'The published AppModule collection returned duplicate or conflicting srapp records.'
     }
     $app = Invoke-DataverseRequest -Method GET -Path "appmodules($($script:Target.AppModuleId))/Microsoft.Dynamics.CRM.RetrieveUnpublished()?%24select=appmoduleid,appmoduleidunique,name,uniquename,componentstate,statecode,statuscode,solutionid,publishedon,_publisherid_value"
     if ($app.appmoduleid -cne $script:Target.AppModuleId -or $app.appmoduleidunique -cne $script:Target.AppModuleIdUnique -or
@@ -1085,15 +1126,17 @@ function Get-TargetSnapshot {
 
     $script:LastStage = 'Read Solution component membership'
     $solutionComponents = @(Get-ODataRows -Path (New-CollectionPath -EntitySet 'solutioncomponents' -Select 'solutioncomponentid,componenttype,objectid,rootsolutioncomponentid,rootcomponentbehavior,ismetadata,_solutionid_value' -Filter "_solutionid_value eq $($solution.solutionid)"))
-    $appRoot = @($solutionComponents | Where-Object { [int]$_.componenttype -eq 80 -and $_.objectid -ceq $script:Target.AppModuleId })
+    $appRoot = Assert-SingleAppModuleSolutionRoot -SolutionComponents $solutionComponents -AppModuleId $script:Target.AppModuleId
     $siteMapRoots = @($solutionComponents | Where-Object { [int]$_.componenttype -eq 62 })
     $siteMapRoot = @($siteMapRoots | Where-Object { ([string]$_.objectid).Trim('{}') -ieq $script:Target.SiteMapId })
-    if ($appRoot.Count -ne 1 -or $siteMapRoots.Count -ne 1 -or $siteMapRoot.Count -ne 1) {
+    if ($siteMapRoots.Count -ne 1 -or $siteMapRoot.Count -ne 1) {
         throw 'App or unique existing Site Map Solution root membership mismatch.'
     }
+    $referenceSolutionMembership = @(Assert-ReferenceTableSolutionMembership -SolutionComponents $solutionComponents -ReferenceComponents $referenceComponents)
     foreach ($reference in $referenceComponents) {
-        $entityRoot = @($solutionComponents | Where-Object { [int]$_.componenttype -eq 1 -and ([string]$_.objectid).Trim('{}') -ieq $reference.TableMetadataId })
-        if ($entityRoot.Count -ne 1) { throw "Reference table $($reference.LogicalName) lacks exact project Solution root membership." }
+        $reference | Add-Member -NotePropertyName SolutionMembership -NotePropertyValue @(
+            $referenceSolutionMembership | Where-Object { $_.LogicalName -ceq $reference.LogicalName }
+        ) -Force
     }
 
     $script:LastStage = 'Read AppModule components'
@@ -1114,10 +1157,9 @@ function Get-TargetSnapshot {
     }
     $script:LastStage = 'Verify all reference components in Solution export'
     foreach ($reference in $referenceComponents) {
-        if ($reference.TableMetadataId.Trim('{}').ToLowerInvariant() -notin $export.TableIds -or
-            $reference.MainForm.Id.Trim('{}').ToLowerInvariant() -notin $export.MainFormIds -or
+        if ($reference.MainForm.Id.Trim('{}').ToLowerInvariant() -notin $export.MainFormIds -or
             $reference.ActiveView.Id.Trim('{}').ToLowerInvariant() -notin $export.ActiveViewIds) {
-            throw "Solution export does not contain the exact table, Main form, and public view for $($reference.LogicalName)."
+            throw "Solution export does not contain the exact Main form and public view for $($reference.LogicalName)."
         }
     }
     if ($ReferenceUiCompositionOnly) { Assert-ApprovedAppRoles -Roles $roleSnapshot }
@@ -1139,6 +1181,7 @@ function Get-TargetSnapshot {
             PublishedOn = Get-PropertyValue -Object $app -Name 'publishedon'
             PublisherLookupStatus = if ($app.PSObject.Properties['_publisherid_value']) { 'Returned; verify separately' } else { 'UNKNOWN' }
         }
+        AppModuleCollectionMatchCount = $matchingApps.Count
         IdentityChecks = [pscustomobject]@{
             PacIdentityAvailable = $true
             AzIdentityAvailable = $true
@@ -1167,6 +1210,7 @@ function Get-TargetSnapshot {
         SiteMapNavigationAfter = @(Get-SiteMapSemanticNavigation -SiteMapXml $proposedXml)
         ReferenceComponents = $referenceComponents
         SolutionComponents = @($solutionComponents | ForEach-Object { [pscustomobject]@{ ComponentType = $_.componenttype; ObjectId = $_.objectid; RootComponentId = $_.rootsolutioncomponentid; RootComponentBehavior = $_.rootcomponentbehavior } })
+        SolutionAppModuleRootCount = 1
         AppComponents = @($components | ForEach-Object { [pscustomobject]@{ ComponentId = $_.appmodulecomponentid; ComponentType = $_.componenttype; ObjectId = $_.objectid; IsMetadata = $_.ismetadata } })
         AppModuleRoles = $roleSnapshot
         AppValidation = [pscustomobject]@{

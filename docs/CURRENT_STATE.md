@@ -1,6 +1,6 @@
 # Current State
 
-**Environment evidence:** Sprint 02F.3 performed a fresh authenticated preflight and final GET-only reconciliation on 22 October 2026. The verified project-table inventory is `os_sr_ta`, `os_sr_pos`, `os_sr_csrc`, and `os_sr_loc` in `os_sr_bso_rs_support`; all four tables have exact approved metadata and `PUBLISHED_NO_PENDING_DELTA`. The owner-approved existing AppModule `srapp` was not rechecked in Sprint 02F.3; it was freshly verified again during the Phase 2D.1 preflight below.
+**Environment evidence:** Sprint 02F.3 performed a fresh authenticated preflight and final GET-only reconciliation on 22 October 2026. The verified project-table inventory is `os_sr_ta`, `os_sr_pos`, `os_sr_csrc`, and `os_sr_loc` in `os_sr_bso_rs_support`; all four tables have exact approved metadata and `PUBLISHED_NO_PENDING_DELTA`. The owner-approved AppModule `srapp` and its Site Map were freshly reverified during Phase 2D.3A below.
 
 ## Sprint 02D Update — 22 October 2026
 
@@ -72,13 +72,24 @@ The owner explicitly authorized associating only the existing Site Map with the 
 - Recorded Dataverse Web API counts for Phase 2D.2: **75 GET** (25 in the dry-run preflight and 50 in the apply preflight plus post-write reconciliation), **1 AddAppComponents POST** (HTTP 204), **0 other POST**, **0 Site Map PATCH**, **0 PublishXml**, **0 publish operations**, **0 role changes**, and **0 retries**. PAC identity checks and read-only Solution exports are separate CLI operations and are not included in the script’s Web API GET counter.
 - Regression validation passed after the implementation update: **52** app-composition assertions, **550** provisioning/recovery assertions, **11** readiness assertions, and `git diff --check`.
 
-## Phase 2D.3 Update — 22 October 2026
+## Phase 2D.3 Initial Preflight — 22 October 2026 (Superseded)
 
 The owner authorized the bounded reference-UI composition scope. The local guarded mode now requires the exact four approved table/Main-form/public-view records, the existing Site Map as the only starting direct app component, the expected two app roles, a successful 12-component reconciliation and intermediate `ValidateApp` before the single ETag-protected Site Map PATCH, and final GET-only validation. The operation order is AddAppComponents POST first, Site Map PATCH second; publishing, role changes, retries, and unrelated writes remain blocked. Synthetic regression tests exercise the exact payload and 13-component final inventory.
 
-- The fresh guarded live preflight stopped at `Verify PAC target` before a Dataverse Web API request. The required process-scoped target configuration (`BSO_RS_ENVIRONMENT_NAME`, `BSO_RS_ORG_URL`, `BSO_RS_EXPECTED_ENVIRONMENT_ID`, `BSO_RS_EXPECTED_ORG_ID`) and expected-user guard (`BSO_RS_EXPECTED_USER_ID`) were not available in Process, User, or Machine environment scopes. The exact target match and expected-user guard therefore could not be established; Dataverse `WhoAmI` was not called. No interactive login or environment switch was attempted.
-- **Outcome: BLOCKED_BEFORE_WRITE.** This attempt made **0 Dataverse GET**, **0 AddAppComponents POST**, **0 Site Map PATCH**, **0 other POST**, **0 PublishXml**, **0 publish operation**, **0 role change**, and **0 retry**. PAC/Az context availability does not substitute for the missing target and user guards.
-- The last verified live app state remains the Phase 2D.2 state: the existing Site Map is associated, `srapp` remains Active/Unpublished, and no table/form/view composition or navigation update is verified. Restore the approved process-scoped guard configuration from its authorized source and repeat a fresh DryRun before any Apply. Do not infer or copy expected identifiers from the active PAC identity.
+- The first Phase 2D.3A attempt stopped before a Dataverse request because the process-scoped target and expected-user guards were unavailable. Later, two fresh guarded runs matched PAC, existing Az, and Dataverse WhoAmI identities and reached the `appmodules` collection lookup, which returned HTTP 200 with zero matching published rows. Neither run established the draft app's collection cardinality; the app was not classified absent or duplicated. No interactive login or environment switch occurred.
+- These initial attempts made **8 Dataverse GET** total and **0 writes or retries**. Their result was superseded by the fresh guarded dry run in Phase 2D.3A below.
+
+## Phase 2D.3A Update — 22 October 2026
+
+The approved VN LMV IT organization URL and environment/organization guards were restored from the authoritative runbook into a short-lived process only. PAC identity, the existing Az user context, and Dataverse WhoAmI matched; only then was the verified Dataverse user GUID pinned to `BSO_RS_EXPECTED_USER_ID` for that process. No interactive login, environment switch, or persistent guard configuration was used.
+
+- The unmanaged Solution `os_sr_bso_rs_support` and linked Publisher `os_bso_rs_support` with prefix `os` were freshly verified. The exact existing `srapp` was read through its unpublished AppModule representation as BSO-RS-Support, Active / Unpublished. The published `appmodules` collection query returned zero matches; this was not treated as absence. Exactly one type-80 AppModule root exists in the target Solution, so no duplicate project AppModule exists in that Solution.
+- The existing app-aware `srapp` Site Map was uniquely resolved, remains Published, and remains directly associated with `srapp`; one Solution type-62 root and one `AppModuleSiteMap.SiteMapUniqueName=srapp` export binding were verified. Its existing ETag was available. The starting direct app component set was exactly this Site Map.
+- Fresh component resolution found exactly four approved tables, four active Information Main forms, and four public active views. The four table roots were present in the target Solution; the exact form and view IDs were confirmed in the read-only Solution export. The exact AddAppComponents payload contains 12 distinct components (4 entity, 4 systemform, 4 savedquery), no Site Map, and no unrelated component. Normalized payload SHA-256: `ac66583cc589e1da351cf95025e3a902d8aa54484e9e68f1ba10ee6569269a50`.
+- The live Site Map transformation preserves the existing placeholder Area/Group/SubArea identities and proposes only the approved Settings > Administration entries: TA Directory (`os_sr_ta`), Positions (`os_sr_pos`), Candidate Sources (`os_sr_csrc`), and Locations (`os_sr_loc`). No Candidate Operations or future-feature navigation is included.
+- `ValidateApp` succeeded with one non-blocking warning, `App does not reference at least one entity`; the Site Map blocker and all blocking errors are absent. The existing app-role associations remain System Administrator and System Customizer.
+- **Outcome: READY_FOR_REFERENCE_UI_EXECUTION.** The successful GET-only dry run used **27 Dataverse Web API GET** and **0 writes**. Across all guarded dry-run attempts and focused read-only diagnostics in this Phase 2D.3A continuation, the recorded total is **138 GET**; the five PAC Solution exports are separate read-only CLI operations and are excluded from the Web API counter. Cumulative counts: **0 AddAppComponents POST**, **0 Site Map PATCH**, **0 other POST**, **0 PublishXml**, **0 app publish**, **0 role changes**, and **0 retries**.
+- Regression validation passed: **89** app-composition assertions, **550** provisioning/recovery assertions, **11** readiness assertions, and `git diff --check`. No Dataverse write or publication was performed. The next task is the separately invoked, already-authorized bounded Phase 2D.3 Apply; it must stop on any changed preflight condition and must not publish `srapp`.
 
 ## Facts
 
@@ -112,7 +123,7 @@ Schema owner approval and remaining field/choice decisions; dedicated Dev/Test a
 
 ## Current next authorized action
 
-Phase 2D.3 is authorized but blocked before any Dataverse request because the required target and expected-user guards are unavailable. Restore those values in the approved process-scoped environment without exposing them, then run the dedicated GET-only DryRun. Apply remains prohibited unless every identity, component, role, ETag, and validation gate passes. The Phase 2D.3 authorization permits only the exact 12-component AddAppComponents operation followed by at most one guarded Site Map PATCH; publication and role changes are not authorized.
+Phase 2D.3A is **READY_FOR_REFERENCE_UI_EXECUTION** after a fresh guarded GET-only dry run. The next task is to invoke only the already-authorized Phase 2D.3 Apply: one exact 12-component AddAppComponents POST, GET-only reconciliation and intermediate `ValidateApp`, then at most one ETag-protected PATCH to the existing Site Map, followed by final GET-only reconciliation. Stop on any changed state or failed gate. Publication, role changes, retries, and other writes are not authorized.
 
 ## Historical next-action statement (superseded)
 

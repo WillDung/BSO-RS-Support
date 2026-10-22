@@ -48,6 +48,36 @@ $syntheticTarget = [pscustomobject]@{
     ActiveViewId = '33333333-3333-4333-8333-333333333333'
     SiteMapId = '44444444-4444-4444-8444-444444444444'
 }
+$syntheticAppRoot = [pscustomobject]@{ componenttype = 80; objectid = $syntheticTarget.AppModuleId }
+$acceptedAppRoot = Assert-SingleAppModuleSolutionRoot -SolutionComponents @($syntheticAppRoot) -AppModuleId $syntheticTarget.AppModuleId
+Assert-Test ($acceptedAppRoot.objectid -ceq $syntheticTarget.AppModuleId) 'Accept exactly one matching AppModule root in the target Solution'
+Assert-Rejected {
+    Assert-SingleAppModuleSolutionRoot -SolutionComponents @($syntheticAppRoot, $syntheticAppRoot) -AppModuleId $syntheticTarget.AppModuleId
+} 'Reject duplicate AppModule roots in the target Solution' 'exactly one AppModule root'
+Assert-Rejected {
+    Assert-SingleAppModuleSolutionRoot -SolutionComponents @($syntheticAppRoot) -AppModuleId 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+} 'Reject a Solution AppModule root that differs from the adopted srapp' 'exactly one AppModule root'
+$syntheticReference = [pscustomobject]@{
+    LogicalName = 'os_sr_ta'
+    TableMetadataId = $syntheticTarget.TableMetadataId
+    MainForm = [pscustomobject]@{ Id = $syntheticTarget.MainFormId }
+    ActiveView = [pscustomobject]@{ Id = $syntheticTarget.ActiveViewId }
+}
+$syntheticReferenceSolutionComponents = @(
+    [pscustomobject]@{ componenttype = 1; objectid = $syntheticTarget.TableMetadataId }
+)
+$syntheticMembership = @(Assert-ReferenceTableSolutionMembership -SolutionComponents $syntheticReferenceSolutionComponents -ReferenceComponents @($syntheticReference))
+Assert-Test ($syntheticMembership.Count -eq 1 -and $syntheticMembership[0].ComponentRole -ceq 'Table' -and $syntheticMembership[0].MatchCount -eq 1) 'Require exact table Solution membership'
+Assert-Rejected {
+    Assert-ReferenceTableSolutionMembership -SolutionComponents @() -ReferenceComponents @($syntheticReference)
+} 'Reject missing table Solution membership' 'lacks exactly one table Solution component'
+Assert-Rejected {
+    Assert-ReferenceTableSolutionMembership -SolutionComponents (@($syntheticReferenceSolutionComponents) + @($syntheticReferenceSolutionComponents[0])) -ReferenceComponents @($syntheticReference)
+} 'Reject duplicate table Solution membership' 'lacks exactly one table Solution component'
+$syntheticExportXml = [xml]'<Root><systemform><formid>{22222222-2222-4222-8222-222222222222}</formid></systemform><savedquery><savedqueryid>{33333333-3333-4333-8333-333333333333}</savedqueryid></savedquery></Root>'
+$syntheticExportForms = @(Get-ExportGuidIds -Document $syntheticExportXml -ParentName 'systemform' -IdName 'formid')
+$syntheticExportViews = @(Get-ExportGuidIds -Document $syntheticExportXml -ParentName 'savedquery' -IdName 'savedqueryid')
+Assert-Test ($syntheticTarget.MainFormId -in $syntheticExportForms -and $syntheticTarget.ActiveViewId -in $syntheticExportViews) 'Extract exact Main form and public view IDs from Solution XML'
 $payloads = @(Get-AppComponentPayloads -Target $syntheticTarget)
 Assert-Test ($payloads.Count -eq 3) 'Exactly three existing app components are planned'
 Assert-Test ($payloads[0].'@odata.type' -ceq 'Microsoft.Dynamics.CRM.entity' -and $payloads[0].entityid -ceq $syntheticTarget.TableMetadataId) 'Entity component uses primary-key property and OData type'
@@ -186,6 +216,10 @@ Assert-Rejected { Get-AppComponentsContract -Metadata $wrongContract } 'Reject i
 Assert-Test ($script:ExternalCalls -eq 0) 'All PlanOnly and metadata contract tests remain offline'
 
 $phasePlan = (& $scriptPath -PlanOnly -ReferenceUiCompositionOnly) | ConvertFrom-Json
+Assert-Test ($ReferenceUiCompositionOnly -eq $false -and -not (Test-AllowsProcessExpectedUserPin)) 'Do not permit process user pinning in generic composition mode'
+$ReferenceUiCompositionOnly = $true
+Assert-Test (Test-AllowsProcessExpectedUserPin) 'Allow process-only expected-user pin for guarded Phase 2D.3 identity verification'
+$ReferenceUiCompositionOnly = $false
 Assert-Test ($phasePlan.MaximumWriteRequests -eq 2 -and $phasePlan.AutomaticRetries -eq 0) 'Phase 2D.3 plan caps writes at two and retries at zero'
 Assert-Test ($phasePlan.OrderedWriteOperations[0].Method -ceq 'POST' -and
     $phasePlan.OrderedWriteOperations[0].ComponentCount -eq 12 -and

@@ -224,7 +224,7 @@ Read-back queries cast string columns to `Microsoft.Dynamics.CRM.StringAttribute
 
 See [Phase 1D-B runbook](../docs/PHASE_1D_B_REFERENCE_TABLE_RUNBOOK.md), [Dataverse Schema Specification](../docs/DATAVERSE_SCHEMA_SPECIFICATION.md), and [ALM and Deployment](../docs/ALM_DEPLOYMENT.md).
 
-## Phase 2D Adopted App Composition
+## Historical Phase 2D Adopted App Composition Plan
 
 [Configure-BsoRsModelDrivenApp.ps1](Configure-BsoRsModelDrivenApp.ps1) targets only the adopted `srapp` AppModule. No switches means **PlanOnly**: local payload preview with no authentication, PAC call, or network request. `-DryRun` verifies PAC/Az identity, AppModule/Solution/Site Map/table/form/view metadata, the Solution `AppModuleSiteMap` binding, live AddAppComponents OData metadata, and Solution-export form/view membership using GETs and a temporary export ZIP that is deleted in `finally`.
 
@@ -239,7 +239,7 @@ Only a separately approved future Apply may use `-Apply`, the exact confirmation
 
 DryRun requires `BSO_RS_ENVIRONMENT_NAME`, `BSO_RS_ORG_URL`, `BSO_RS_EXPECTED_ENVIRONMENT_ID`, and `BSO_RS_EXPECTED_ORG_ID` in the current process; never save their values in the repository. Runtime AddAppComponents acceptance on this unpublished app and whether Site Map PATCH creates the expected unpublished layer remain unverified. See the [Phase 2D runbook](../docs/MODEL_DRIVEN_APP_AUTOMATION_RUNBOOK.md).
 
-## Phase 2D Adopted App Composition (Prepared, Not Authorized)
+## Historical Phase 2D Composition Plan (Prepared, Not Authorized)
 
 [Configure-BsoRsModelDrivenApp.ps1](Configure-BsoRsModelDrivenApp.ps1) targets only the owner-adopted AppModule `srapp`. Running it with no switches is **PlanOnly**: it prints the planned operations and typed `AddAppComponents` payloads without authentication, PAC, or network calls. `-DryRun` performs PAC identity checks and GET-only verification of the AppModule, Solution, Site Map, TA table/form/view, AppModuleSiteMaps export binding, and live OData action/component metadata. It also exports the target Solution to a temporary ZIP and deletes it in `finally`.
 
@@ -253,3 +253,11 @@ Run PlanOnly and GET-only DryRun:
 ```
 
 DryRun requires `BSO_RS_ENVIRONMENT_NAME`, `BSO_RS_ORG_URL`, `BSO_RS_EXPECTED_ENVIRONMENT_ID`, and `BSO_RS_EXPECTED_ORG_ID` in the current process. Do not persist their values in the repository. Runtime acceptance of the AddAppComponents action on this unpublished app and the Site Map PATCH's draft-layer behavior remain unverified; see the [Phase 2D Runbook](../docs/MODEL_DRIVEN_APP_AUTOMATION_RUNBOOK.md).
+
+## Phase 2D.1 srapp Composition — Blocked Before Write
+
+The owner-authorized Phase 2D.1 preflight targets only the adopted `srapp` and the four approved reference-table experiences: TA, Position, Candidate Source, and Location. PlanOnly is local and makes no network calls. DryRun performs identity and GET-only app, Solution, Site Map, table/form/view, dependency, and validation checks.
+
+Fresh live `ValidateApp` returned the blocking error **`App does not contain Site Map`**, despite the Solution export's package-level `AppModuleSiteMap.SiteMapUniqueName=srapp` binding. The proposed AddAppComponents list contains the 12 table/form/view components and excludes the existing Site Map. The scope decision to include the Site Map or use another supported association route remains open. **Do not use Apply until that decision and any changed write scope are explicitly authorized and a fresh preflight passes.** The app remains unpublished; no Site Map PATCH, AddAppComponents action, publish, role change, or retry occurred.
+
+The recorded Phase 2D.1 total is 83 Dataverse GETs, zero Site Map PATCHes, zero app-component operations, zero PublishXml, zero publish operations, zero role changes, and zero retries. The final guarded DryRun made 25 GETs in addition to its separate identity WhoAmI GET; the total also includes earlier GET-only diagnostics. See the [Phase 2D.1 runbook](../docs/MODEL_DRIVEN_APP_AUTOMATION_RUNBOOK.md) and [current state](../docs/CURRENT_STATE.md).

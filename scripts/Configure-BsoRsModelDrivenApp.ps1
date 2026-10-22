@@ -23,6 +23,15 @@ $script:Target = [ordered]@{
     AppModuleIdUnique = '81d8d848-2e00-470c-8899-2f55f560e018'
     SolutionUniqueName = 'os_sr_bso_rs_support'
     SolutionPublisherUniqueName = 'os_bso_rs_support'
+    ReferenceTableNames = @('os_sr_ta', 'os_sr_pos', 'os_sr_csrc', 'os_sr_loc')
+    NavigationAreaTitle = 'Settings'
+    NavigationGroupTitle = 'Administration'
+    NavigationSubareas = @(
+        [pscustomobject]@{ LogicalName = 'os_sr_ta'; Title = 'TA Directory'; NodeId = 'subarea_9787e9c1' }
+        [pscustomobject]@{ LogicalName = 'os_sr_pos'; Title = 'Positions'; NodeId = 'subarea_02d1f8a7' }
+        [pscustomobject]@{ LogicalName = 'os_sr_csrc'; Title = 'Candidate Sources'; NodeId = 'subarea_03c7b614' }
+        [pscustomobject]@{ LogicalName = 'os_sr_loc'; Title = 'Locations'; NodeId = 'subarea_04e9c321' }
+    )
     TableLogicalName = 'os_sr_ta'
     TableMetadataId = 'f248212e-b5cb-f111-a05a-7c1e52376817'
     TableObjectTypeCode = 11005
@@ -41,6 +50,9 @@ $script:AccessToken = $null
 $script:AccessTokenExpiresOn = [DateTimeOffset]::MinValue
 $script:RequestCounts = @{ GET = 0; PATCH = 0; POST = 0 }
 $script:WriteResults = [System.Collections.Generic.List[object]]::new()
+$script:ResolvedReferenceComponents = @()
+$script:MissingAppComponentPayloads = @()
+$script:TokenUserId = $null
 $script:WritesStarted = $false
 $script:WritesAllowed = $false
 $script:LastPath = $null
@@ -57,6 +69,7 @@ if (-not $PlanOnly -and -not $DryRun -and -not $Apply) { $PlanOnly = $true }
 function Get-PropertyValue {
     param([object]$Object, [Parameter(Mandatory = $true)][string]$Name)
     if ($null -eq $Object) { return $null }
+    if ($Object -is [System.Collections.IDictionary] -and $Object.Contains($Name)) { return $Object[$Name] }
     $property = $Object.PSObject.Properties[$Name]
     if ($property) { return $property.Value }
     return $null
@@ -64,6 +77,13 @@ function Get-PropertyValue {
 
 function Get-AppComponentPayloads {
     param([object]$Target = $script:Target)
+    $referenceComponents = Get-PropertyValue -Object $Target -Name 'ReferenceComponents'
+    if ($referenceComponents) {
+        return @($referenceComponents | ForEach-Object { $_.Payload })
+    }
+    if ([object]::ReferenceEquals($Target, $script:Target) -and $script:ResolvedReferenceComponents.Count) {
+        return @($script:ResolvedReferenceComponents | ForEach-Object { $_.Payloads })
+    }
     @(
         [ordered]@{
             entityid = $Target.TableMetadataId
@@ -96,6 +116,9 @@ function Assert-AppComponentsPayload {
         throw 'AddAppComponents payload does not match the fixed AppId/Components contract.'
     }
     $expected = @(Get-AppComponentPayloads -Target $Target)
+    if ([object]::ReferenceEquals($Target, $script:Target) -and $script:MissingAppComponentPayloads) {
+        $expected = @($script:MissingAppComponentPayloads)
+    }
     $actual = @($Body['Components'])
     if ($actual.Count -ne $expected.Count) { throw 'AddAppComponents component count differs from the approved plan.' }
     for ($index = 0; $index -lt $expected.Count; $index++) {
@@ -112,16 +135,19 @@ function Assert-AppComponentsPayload {
 }
 
 function Get-AppCompositionPlan {
-    $components = @(Get-AppComponentPayloads)
+    $resolved = $script:ResolvedReferenceComponents.Count -gt 0
+    $components = if ($resolved) {
+        if ($script:MissingAppComponentPayloads.Count) { @($script:MissingAppComponentPayloads) } else { @(Get-AppComponentPayloads) }
+    }
+    else { @() }
     [ordered]@{
         Mode = if ($Apply) { 'Apply; explicit approval phrase required' } elseif ($DryRun) { 'DryRun; GET-only' } else { 'PlanOnly; no authentication or network' }
         Target = [ordered]@{
             EnvironmentName = $script:Target.EnvironmentName
             AppName = $script:Target.AppName
             AppUniqueName = $script:Target.AppUniqueName
-            AppModuleId = $script:Target.AppModuleId
             SolutionUniqueName = $script:Target.SolutionUniqueName
-            TableLogicalName = $script:Target.TableLogicalName
+            ReferenceTables = @($script:Target.ReferenceTableNames)
         }
         ExistingSiteMapBinding = [ordered]@{
             ExportElement = 'AppModuleSiteMap'
@@ -131,16 +157,17 @@ function Get-AppCompositionPlan {
             AddSiteMapComponent = $false
         }
         ProposedNavigation = [ordered]@{
-            Area = 'Recruitment Support'
-            Group = 'Administration'
-            SubArea = 'TA Directory'
-            SubAreaType = 'Entity'
-            EntityLogicalName = $script:Target.TableLogicalName
+            Area = $script:Target.NavigationAreaTitle
+            Group = $script:Target.NavigationGroupTitle
+            SubAreas = @($script:Target.NavigationSubareas | ForEach-Object {
+                [ordered]@{ Title = $_.Title; EntityLogicalName = $_.LogicalName; NodeId = $_.NodeId }
+            })
             PreserveExistingNodeIds = $true
         }
         AddAppComponentsPayload = [ordered]@{
-            AppId = $script:Target.AppModuleId
+            AppId = if ($resolved) { $script:Target.AppModuleId } else { '[resolved and guarded during live preflight]' }
             Components = $components
+            ExactLiveIdsResolved = $resolved
         }
         OrderedWriteOperations = @(
             [ordered]@{
@@ -157,7 +184,7 @@ function Get-AppCompositionPlan {
                 Method = 'POST'
                 Target = 'AddAppComponents'
                 ComponentTypes = @(1, 60, 26)
-                Purpose = 'Add existing TA table, Main form, and public view; omit Site Map because the export binding already exists.'
+                Purpose = 'Add only the verified missing reference table, Main form, and public view components; omit Site Map because the export binding already exists.'
                 MayPublish = $false
                 SeparateApprovalRequired = $true
             }
@@ -167,6 +194,10 @@ function Get-AppCompositionPlan {
         AutomaticRollbackOrDelete = $false
         PublishXmlOrPublishAll = $false
         RoleAndAuditChanges = $false
+        AppCreationRenameDelete = $false
+        CustomPageCreation = $false
+        ReferenceTables = @($script:Target.ReferenceTableNames)
+        LiveComponentResolutionRequired = -not $resolved
     }
 }
 
@@ -207,18 +238,33 @@ function New-ProposedSiteMapXml {
         throw 'Site Map Group structure/ID differs from the verified placeholder; stop without changing unrelated navigation.'
     }
     $subAreas = @($groups[0].SelectNodes("./*[local-name()='SubArea']"))
-    if ($subAreas.Count -ne 1 -or $subAreas[0].GetAttribute('Id') -cne $ExpectedNodeIds.SubArea) {
-        throw 'Site Map SubArea structure/ID differs from the verified placeholder; stop without changing unrelated navigation.'
+    $expectedSubareas = @($script:Target.NavigationSubareas)
+    if ($subAreas.Count -notin @(1, $expectedSubareas.Count) -or
+        $subAreas[0].GetAttribute('Id') -cne $expectedSubareas[0].NodeId) {
+        throw 'Site Map SubArea structure/ID differs from the approved baseline; stop without changing existing navigation.'
     }
 
-    Set-LocalizedSiteMapTitle -Node $areas[0] -Title 'Recruitment Support'
-    Set-LocalizedSiteMapTitle -Node $groups[0] -Title 'Administration'
-    Set-LocalizedSiteMapTitle -Node $subAreas[0] -Title 'TA Directory'
-    $entity = $subAreas[0].GetAttributeNode('Entity')
-    if ($entity -and $entity.Value -cne $script:Target.TableLogicalName) {
-        throw 'Existing Site Map SubArea targets a different entity; stop without replacing it.'
+    Set-LocalizedSiteMapTitle -Node $areas[0] -Title $script:Target.NavigationAreaTitle
+    Set-LocalizedSiteMapTitle -Node $groups[0] -Title $script:Target.NavigationGroupTitle
+    for ($index = 0; $index -lt $expectedSubareas.Count; $index++) {
+        if ($index -ge $subAreas.Count) {
+            $newSubarea = [System.Xml.XmlElement]$subAreas[0].CloneNode($true)
+            $newSubarea.SetAttribute('Id', $expectedSubareas[$index].NodeId)
+            $newSubarea.RemoveAttribute('Entity')
+            $groups[0].AppendChild($newSubarea) | Out-Null
+            $subAreas = @($subAreas) + @($newSubarea)
+        }
+        $subarea = $subAreas[$index]
+        if ($subarea.GetAttribute('Id') -cne $expectedSubareas[$index].NodeId) {
+            throw 'Site Map has a partial or unexpected approved SubArea sequence; stop without overwriting it.'
+        }
+        $entity = $subarea.GetAttributeNode('Entity')
+        if ($entity -and $entity.Value -cne $expectedSubareas[$index].LogicalName) {
+            throw 'Existing Site Map SubArea targets a different entity; stop without replacing it.'
+        }
+        $subarea.SetAttribute('Entity', $expectedSubareas[$index].LogicalName)
+        Set-LocalizedSiteMapTitle -Node $subarea -Title $expectedSubareas[$index].Title
     }
-    if (-not $entity) { $subAreas[0].SetAttribute('Entity', $script:Target.TableLogicalName) }
     $document.OuterXml
 }
 
@@ -230,8 +276,9 @@ function Get-PacIdentity {
     $url = [regex]::Match($text, '(?m)^\s*Org URL:\s*(\S+)')
     $orgId = [regex]::Match($text, '(?m)^\s*Org ID:\s*([0-9a-fA-F-]{36})')
     $environmentId = [regex]::Match($text, '(?m)^\s*Environment ID:\s*([0-9a-fA-F-]{36})')
+    $userId = [regex]::Match($text, '(?m)^\s*User ID:\s*([0-9a-fA-F-]{36})')
     $userEmail = [regex]::Match($text, '(?m)^\s*User Email:\s*(\S+)')
-    if (-not $friendlyName.Success -or -not $url.Success -or -not $orgId.Success -or -not $environmentId.Success -or -not $userEmail.Success) {
+    if (-not $friendlyName.Success -or -not $url.Success -or -not $orgId.Success -or -not $environmentId.Success -or -not $userId.Success -or -not $userEmail.Success) {
         throw 'Could not verify PAC target identity; stop without Dataverse requests.'
     }
     [pscustomobject]@{
@@ -239,6 +286,7 @@ function Get-PacIdentity {
         OrganizationUrl = $url.Groups[1].Value.TrimEnd('/')
         OrganizationId = $orgId.Groups[1].Value
         EnvironmentId = $environmentId.Groups[1].Value
+        UserId = $userId.Groups[1].Value
         UserEmail = $userEmail.Groups[1].Value
     }
 }
@@ -260,6 +308,12 @@ function Assert-TargetInputs {
         $pac.EnvironmentId -cne $ExpectedEnvironmentId -or
         $pac.OrganizationId -cne $ExpectedOrganizationId) {
         throw 'PAC identity does not match configured VN LMV IT target; stop without switching environments.'
+    }
+    $expectedUserId = [Environment]::GetEnvironmentVariable('BSO_RS_EXPECTED_USER_ID', 'Process')
+    $expectedUserGuid = [guid]::Empty
+    if (-not [guid]::TryParse($expectedUserId, [ref]$expectedUserGuid) -or
+        $expectedUserGuid.ToString() -ine $pac.UserId) {
+        throw 'Process-scoped expected-user guard is missing or differs from PAC; stop without Dataverse requests.'
     }
     $script:ApiRoot = $uri.AbsoluteUri.TrimEnd('/') + '/api/data/v9.2/'
     $pac
@@ -395,7 +449,7 @@ function Invoke-DataverseRequest {
         throw 'Dataverse request path is outside the verified organization origin.'
     }
     $resource = [Uri]::UnescapeDataString($uri.AbsolutePath.Substring('/api/data/v9.2/'.Length))
-    if ($Method -eq 'GET' -and $resource -notmatch '^(WhoAmI$|appmodules\(|appmodulecomponents$|sitemaps\(|sitemaps/Microsoft\.Dynamics\.CRM\.RetrieveUnpublishedMultiple\(|solutions$|publishers\(|solutioncomponents$|EntityDefinitions\(|systemforms\(|savedqueries(\(|$)|ValidateApp\()') {
+    if ($Method -eq 'GET' -and $resource -notmatch '^(WhoAmI$|appmodules\(|appmodulecomponents$|sitemaps\(|sitemaps/Microsoft\.Dynamics\.CRM\.RetrieveUnpublishedMultiple\(|solutions$|publishers\(|solutioncomponents$|EntityDefinitions\(|systemforms(\(|$)|savedqueries(\(|$)|roles\(|RetrieveRequiredComponents\(|ValidateApp\()') {
         throw 'GET blocked: endpoint is outside the app and component metadata allowlist.'
     }
     if ($Method -eq 'PATCH' -and ($resource -cne "sitemaps($($script:Target.SiteMapId))" -or
@@ -427,6 +481,7 @@ function Invoke-DataverseRequest {
         SkipHttpErrorCheck = $true
         StatusCodeVariable = 'responseStatusCode'
         TimeoutSec = 90
+        MaximumRetryCount = 0
         ErrorAction = 'Stop'
     }
     if ($null -ne $Body) {
@@ -530,13 +585,121 @@ function Get-SolutionExportSummary {
             }
             [pscustomobject]@{
                 AppModuleSiteMapEntries = $siteMapNames.ToArray()
-                MainFormInSolutionExport = @((Get-ExportGuidIds -Document $document -ParentName 'systemform' -IdName 'formid') -contains $script:Target.MainFormId)
-                ActiveViewInSolutionExport = @((Get-ExportGuidIds -Document $document -ParentName 'savedquery' -IdName 'savedqueryid') -contains $script:Target.ActiveViewId)
+                TableIds = @(Get-ExportGuidIds -Document $document -ParentName 'Entity' -IdName 'MetadataId')
+                MainFormIds = @(Get-ExportGuidIds -Document $document -ParentName 'systemform' -IdName 'formid')
+                ActiveViewIds = @(Get-ExportGuidIds -Document $document -ParentName 'savedquery' -IdName 'savedqueryid')
             }
         }
         finally { $archive.Dispose() }
     }
     finally { if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force } }
+}
+
+function Get-ReferenceComponentInventory {
+    $inventory = [System.Collections.Generic.List[object]]::new()
+    foreach ($navigation in $script:Target.NavigationSubareas) {
+        $logicalName = [string]$navigation.LogicalName
+        $script:LastStage = "Resolve $logicalName table"
+        $entity = Invoke-DataverseRequest -Method GET -Path "EntityDefinitions(LogicalName='$logicalName')?%24select=LogicalName,MetadataId,ObjectTypeCode,EntitySetName"
+        $tableMetadataGuid = [guid]::Empty
+        if ($entity.LogicalName -cne $logicalName -or -not [guid]::TryParse([string]$entity.MetadataId, [ref]$tableMetadataGuid)) {
+            throw "Reference table $logicalName metadata identity is invalid."
+        }
+
+        $script:LastStage = "Resolve unique active default Main form for $logicalName"
+        $forms = @(Get-ODataRows -Path (New-CollectionPath -EntitySet 'systemforms' -Select 'formid,name,objecttypecode,type,formactivationstate,componentstate,ismanaged,isdefault,publishedon' -Filter "objecttypecode eq '$logicalName' and type eq 2 and formactivationstate eq 1 and componentstate eq 0"))
+        if ($forms.Count -eq 0) { throw "Reference table $logicalName has no active, published Main form." }
+        if ($forms.Count -gt 1) {
+            $defaultForms = @($forms | Where-Object { $_.isdefault -eq $true })
+            if ($defaultForms.Count -ne 1) { throw "Reference table $logicalName has ambiguous active Main forms." }
+            $forms = $defaultForms
+        }
+        if ([string]$forms[0].objecttypecode -cne $logicalName -or [int]$forms[0].type -ne 2 -or [int]$forms[0].formactivationstate -ne 1 -or [int]$forms[0].componentstate -ne 0) {
+            throw "Reference table $logicalName resolved Main form has invalid identity or state."
+        }
+        $formGuid = [guid]::Empty
+        if (-not [guid]::TryParse([string]$forms[0].formid, [ref]$formGuid)) { throw "Reference table $logicalName resolved Main form ID is invalid." }
+
+        $script:LastStage = "Resolve unique public active default view for $logicalName"
+        $views = @(Get-ODataRows -Path (New-CollectionPath -EntitySet 'savedqueries' -Select 'savedqueryid,name,returnedtypecode,querytype,isprivate,statecode,componentstate,ismanaged,isdefault' -Filter "returnedtypecode eq '$logicalName' and querytype eq 0 and isprivate eq false and statecode eq 0 and componentstate eq 0"))
+        if ($views.Count -eq 0) { throw "Reference table $logicalName has no public, active view." }
+        if ($views.Count -gt 1) {
+            $defaultViews = @($views | Where-Object { $_.isdefault -eq $true })
+            if ($defaultViews.Count -ne 1) { throw "Reference table $logicalName has ambiguous public, active views." }
+            $views = $defaultViews
+        }
+        if ([string]$views[0].returnedtypecode -cne $logicalName -or [int]$views[0].querytype -ne 0 -or [bool]$views[0].isprivate -or [int]$views[0].statecode -ne 0 -or [int]$views[0].componentstate -ne 0) {
+            throw "Reference table $logicalName resolved public view has invalid identity or state."
+        }
+        $viewGuid = [guid]::Empty
+        if (-not [guid]::TryParse([string]$views[0].savedqueryid, [ref]$viewGuid)) { throw "Reference table $logicalName resolved public view ID is invalid." }
+
+        $payloads = @(
+            [ordered]@{ entityid = [string]$entity.MetadataId; '@odata.type' = 'Microsoft.Dynamics.CRM.entity' }
+            [ordered]@{ formid = [string]$forms[0].formid; '@odata.type' = 'Microsoft.Dynamics.CRM.systemform' }
+            [ordered]@{ savedqueryid = [string]$views[0].savedqueryid; '@odata.type' = 'Microsoft.Dynamics.CRM.savedquery' }
+        )
+        $inventory.Add([pscustomobject]@{
+            LogicalName = $logicalName
+            Title = [string]$navigation.Title
+            TableMetadataId = [string]$entity.MetadataId
+            ObjectTypeCode = $entity.ObjectTypeCode
+            EntitySetName = $entity.EntitySetName
+            MainForm = [pscustomobject]@{ Id = [string]$forms[0].formid; Name = [string]$forms[0].name; ObjectTypeCode = $forms[0].objecttypecode; IsDefault = [bool]$forms[0].isdefault; Type = $forms[0].type; ActivationState = $forms[0].formactivationstate; ComponentState = $forms[0].componentstate }
+            ActiveView = [pscustomobject]@{ Id = [string]$views[0].savedqueryid; Name = [string]$views[0].name; ReturnedTypeCode = $views[0].returnedtypecode; IsDefault = [bool]$views[0].isdefault; QueryType = $views[0].querytype; IsPrivate = $views[0].isprivate; StateCode = $views[0].statecode; ComponentState = $views[0].componentstate }
+            Payloads = $payloads
+        })
+    }
+    $inventory.ToArray()
+}
+
+function Get-AppModuleRoleSnapshot {
+    $dependencyPath = "RetrieveRequiredComponents(ObjectId=$($script:Target.AppModuleId),ComponentType=80)"
+    $dependencies = Invoke-DataverseRequest -Method GET -Path $dependencyPath
+    $required = @(Get-PropertyValue -Object $dependencies -Name 'value')
+    $roleDependencies = @($required | Where-Object { [int]$_.requiredcomponenttype -eq 20 })
+    $roles = [System.Collections.Generic.List[object]]::new()
+    foreach ($dependency in $roleDependencies) {
+        $roleId = ([string]$dependency.requiredcomponentobjectid).Trim('{}')
+        $roleGuid = [guid]::Empty
+        if (-not [guid]::TryParse($roleId, [ref]$roleGuid)) { throw 'AppModule role dependency has an invalid component ID.' }
+        $role = Invoke-DataverseRequest -Method GET -Path "roles($($roleGuid.ToString()))?%24select=roleid,name,ismanaged"
+        if (([string]$role.roleid).Trim('{}') -ine $roleGuid.ToString() -or [string]::IsNullOrWhiteSpace([string]$role.name)) {
+            throw 'AppModule role dependency did not resolve to an exact role record.'
+        }
+        $roles.Add([pscustomobject]@{
+            RoleId = $roleGuid.ToString().ToLowerInvariant()
+            Name = [string]$role.name
+            IsManaged = [bool]$role.ismanaged
+        })
+    }
+    if ($roles.Count -ne $roleDependencies.Count -or
+        @($roles | Select-Object -ExpandProperty RoleId -Unique).Count -ne $roles.Count) {
+        throw 'AppModule role dependency inventory is ambiguous or duplicated.'
+    }
+    @($roles | Sort-Object RoleId)
+}
+
+function ConvertTo-SafeValidationIssueSummaries {
+    param([object[]]$Issues)
+    @($Issues | ForEach-Object {
+        $message = [string](Get-PropertyValue -Object $_ -Name 'Message')
+        $message = [regex]::Replace($message, '[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}', '[GUID]')
+        $message = [regex]::Replace($message, 'https?://\S+', '[URL]')
+        $message = [regex]::Replace($message, '[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}', '[EMAIL]', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        [pscustomobject]@{
+            ErrorType = [string](Get-PropertyValue -Object $_ -Name 'ErrorType')
+            Message = $message
+            ErrorCode = [string](Get-PropertyValue -Object $_ -Name 'CRMErrorCode')
+        }
+    })
+}
+
+function Assert-AppValidationAllowsApply {
+    param([Parameter(Mandatory = $true)][object]$AppValidation)
+    if (@($AppValidation.Issues | Where-Object { $_.ErrorType -ceq 'Error' }).Count -gt 0) {
+        throw 'ValidateApp reported an existing blocking error outside the approved component plan; stop before writes.'
+    }
 }
 
 function Get-TargetSnapshot {
@@ -545,14 +708,18 @@ function Get-TargetSnapshot {
     $script:AccessToken = Get-ValidatedAccessToken
     $script:LastStage = 'Verify Dataverse organization'
     $who = Invoke-DataverseRequest -Method GET -Path 'WhoAmI'
-    if ([string]$who.OrganizationId -cne $ExpectedOrganizationId) { throw 'WhoAmI organization does not match expected organization.' }
+    if ([string]$who.OrganizationId -cne $ExpectedOrganizationId -or
+        [string]$who.UserId -ine $script:PacIdentity.UserId -or
+        [string]$who.UserId -ine [string]([Environment]::GetEnvironmentVariable('BSO_RS_EXPECTED_USER_ID', 'Process'))) {
+        throw 'Dataverse WhoAmI identity does not match PAC and the process-scoped expected-user guard.'
+    }
 
     $script:LastStage = 'Verify project Solution and Publisher'
     $solutionRows = @(Get-ODataRows -Path (New-CollectionPath -EntitySet 'solutions' -Select 'solutionid,uniquename,friendlyname,ismanaged,_publisherid_value' -Filter "uniquename eq '$($script:Target.SolutionUniqueName)'"))
     if ($solutionRows.Count -ne 1) { throw 'Target Solution is missing or not unique.' }
     $solution = $solutionRows[0]
     $solutionPublisher = Invoke-DataverseRequest -Method GET -Path "publishers($($solution._publisherid_value))?%24select=publisherid,uniquename,customizationprefix"
-    if ($solutionPublisher.uniquename -cne 'os_bso_rs_support' -or $solutionPublisher.customizationprefix -cne 'os') { throw 'Target Solution Publisher does not match the approved project Publisher.' }
+    if ([bool]$solution.ismanaged -or $solutionPublisher.uniquename -cne 'os_bso_rs_support' -or $solutionPublisher.customizationprefix -cne 'os') { throw 'Target Solution must be unmanaged and linked to the approved project Publisher.' }
 
     $script:LastStage = 'Read unpublished AppModule'
     $app = Invoke-DataverseRequest -Method GET -Path "appmodules($($script:Target.AppModuleId))/Microsoft.Dynamics.CRM.RetrieveUnpublished()?%24select=appmoduleid,appmoduleidunique,name,uniquename,componentstate,statecode,statuscode,solutionid,publishedon,_publisherid_value"
@@ -563,27 +730,23 @@ function Get-TargetSnapshot {
     $siteMap = Invoke-DataverseRequest -Method GET -Path "sitemaps($($script:Target.SiteMapId))?%24select=sitemapid,sitemapname,sitemapnameunique,isappaware,componentstate,ismanaged,sitemapxml"
     if ($siteMap.sitemapid -cne $script:Target.SiteMapId -or $siteMap.sitemapnameunique -cne $script:Target.SiteMapUniqueName -or -not $siteMap.isappaware) { throw 'Target Site Map identity mismatch.' }
 
-    $script:LastStage = 'Read TA table metadata'
-    $entity = Invoke-DataverseRequest -Method GET -Path "EntityDefinitions(LogicalName='$($script:Target.TableLogicalName)')?%24select=LogicalName,MetadataId,ObjectTypeCode,EntitySetName"
-    if ($entity.MetadataId -cne $script:Target.TableMetadataId -or [int]$entity.ObjectTypeCode -ne $script:Target.TableObjectTypeCode) { throw 'Target TA table identity mismatch.' }
-    $script:LastStage = 'Read TA Main form'
-    $form = Invoke-DataverseRequest -Method GET -Path "systemforms($($script:Target.MainFormId))?%24select=formid,name,objecttypecode,type,formactivationstate,componentstate,ismanaged,publishedon"
-    $script:LastStage = 'Validate TA Main form'
-    if ($form.formid -cne $script:Target.MainFormId -or $form.name -cne 'Information' -or [int]$form.type -ne 2 -or [string]$form.objecttypecode -notin @($script:Target.TableLogicalName,[string]$script:Target.TableObjectTypeCode) -or [int]$form.formactivationstate -ne 1 -or [int]$form.componentstate -ne 0) { throw 'TA Main form identity/state mismatch.' }
-    $script:LastStage = 'Read TA public view'
-    $view = Invoke-DataverseRequest -Method GET -Path "savedqueries($($script:Target.ActiveViewId))?%24select=savedqueryid,name,returnedtypecode,querytype,isprivate,statecode,componentstate,ismanaged"
-    $script:LastStage = 'Validate TA public view'
-    if ($view.savedqueryid -cne $script:Target.ActiveViewId -or $view.name -cne 'Active TA Directories' -or [int]$view.querytype -ne 0 -or $view.isprivate -or [string]$view.returnedtypecode -notin @($script:Target.TableLogicalName,[string]$script:Target.TableObjectTypeCode) -or [int]$view.statecode -ne 0 -or [int]$view.componentstate -ne 0) { throw 'TA public view identity/state mismatch.' }
+    $script:LastStage = 'Resolve all approved reference-table components'
+    $referenceComponents = @(Get-ReferenceComponentInventory)
+    $script:ResolvedReferenceComponents = $referenceComponents
 
     $script:LastStage = 'Read Solution component membership'
     $solutionComponents = @(Get-ODataRows -Path (New-CollectionPath -EntitySet 'solutioncomponents' -Select 'solutioncomponentid,componenttype,objectid,rootsolutioncomponentid,rootcomponentbehavior,ismetadata,_solutionid_value' -Filter "_solutionid_value eq $($solution.solutionid)"))
     $appRoot = @($solutionComponents | Where-Object { [int]$_.componenttype -eq 80 -and $_.objectid -ceq $script:Target.AppModuleId })
     $siteMapRoot = @($solutionComponents | Where-Object { [int]$_.componenttype -eq 62 -and $_.objectid -ceq $script:Target.SiteMapId })
-    $tableRoot = @($solutionComponents | Where-Object { [int]$_.componenttype -eq 1 -and $_.objectid -ceq $script:Target.TableMetadataId })
-    if ($appRoot.Count -ne 1 -or $siteMapRoot.Count -ne 1 -or $tableRoot.Count -ne 1) { throw 'App, Site Map, or TA Solution root membership mismatch.' }
+    if ($appRoot.Count -ne 1 -or $siteMapRoot.Count -ne 1) { throw 'App or Site Map Solution root membership mismatch.' }
+    foreach ($reference in $referenceComponents) {
+        $entityRoot = @($solutionComponents | Where-Object { [int]$_.componenttype -eq 1 -and ([string]$_.objectid).Trim('{}') -ieq $reference.TableMetadataId })
+        if ($entityRoot.Count -ne 1) { throw "Reference table $($reference.LogicalName) lacks exact project Solution root membership." }
+    }
 
     $script:LastStage = 'Read AppModule components'
     $components = @(Get-ODataRows -Path (New-CollectionPath -EntitySet 'appmodulecomponents' -Select 'appmodulecomponentid,_appmoduleidunique_value,componenttype,objectid,isdefault,ismetadata,rootappmodulecomponentid,rootcomponentbehavior' -Filter "_appmoduleidunique_value eq $($script:Target.AppModuleIdUnique)"))
+    $roleSnapshot = @(Get-AppModuleRoleSnapshot)
     $script:LastStage = 'Inspect unpublished Site Map layer'
     $siteMapDraft = Get-UnpublishedSiteMap
     $sourceXml = if ($siteMapDraft -and $siteMapDraft.sitemapxml) { [string]$siteMapDraft.sitemapxml } else { [string]$siteMap.sitemapxml }
@@ -594,9 +757,18 @@ function Get-TargetSnapshot {
     $export = Get-SolutionExportSummary
     $script:LastStage = 'Verify exported Site Map binding'
     if (@($export.AppModuleSiteMapEntries | Where-Object { $_ -ceq $script:Target.SiteMapUniqueName }).Count -ne 1) { throw 'Target Solution export lacks the unique-name AppModuleSiteMap binding.' }
-    $script:LastStage = 'Verify exported form, view, and table'
-    if (-not $export.MainFormInSolutionExport) { $script:LastSafeError = 'Main form ID was not matched in exported Solution XML.'; throw 'Target Solution export is missing the verified Main form.' }
-    if (-not $export.ActiveViewInSolutionExport) { $script:LastSafeError = 'Active public view ID was not matched in exported Solution XML.'; throw 'Target Solution export is missing the verified Active view.' }
+    $script:LastStage = 'Verify all reference components in Solution export'
+    foreach ($reference in $referenceComponents) {
+        if ($reference.MainForm.Id.Trim('{}').ToLowerInvariant() -notin $export.MainFormIds -or
+            $reference.ActiveView.Id.Trim('{}').ToLowerInvariant() -notin $export.ActiveViewIds) {
+            throw "Solution export does not contain the exact table, Main form, and public view for $($reference.LogicalName)."
+        }
+    }
+    $script:LastStage = 'Read current app dependency validation'
+    $validation = Invoke-DataverseRequest -Method GET -Path "ValidateApp(AppModuleId=$($script:Target.AppModuleId))"
+    $validationResponse = Get-PropertyValue -Object $validation -Name 'AppValidationResponse'
+    $validationIssues = @(Get-PropertyValue -Object $validationResponse -Name 'ValidationIssueList')
+    $validationIssueSummaries = @(ConvertTo-SafeValidationIssueSummaries -Issues $validationIssues)
     [pscustomobject]@{
         AppModule = [pscustomobject]@{
             Id = $app.appmoduleid
@@ -606,8 +778,17 @@ function Get-TargetSnapshot {
             StateCode = $app.statecode
             StatusCode = $app.statuscode
             ComponentState = $app.componentstate
+            PublicationState = if ([int]$app.componentstate -eq 1) { 'UNPUBLISHED_DRAFT' } else { 'PUBLISHED' }
             PublishedOn = Get-PropertyValue -Object $app -Name 'publishedon'
             PublisherLookupStatus = if ($app.PSObject.Properties['_publisherid_value']) { 'Returned; verify separately' } else { 'UNKNOWN' }
+        }
+        IdentityChecks = [pscustomobject]@{
+            PacIdentityAvailable = $true
+            AzIdentityAvailable = $true
+            DataverseIdentityAvailable = $true
+            PacAzWhoAmIMatch = $true
+            ExpectedUserConfigured = $true
+            ExpectedUserMatch = $true
         }
         AppModulePublisher = if ($app.PSObject.Properties['_publisherid_value']) { 'returned' } else { 'UNKNOWN' }
         Solution = [pscustomobject]@{ UniqueName = $solution.uniquename; FriendlyName = $solution.friendlyname; IsManaged = $solution.ismanaged }
@@ -624,11 +805,16 @@ function Get-TargetSnapshot {
         SiteMapUnpublishedQuery = if ($siteMapDraft) { [pscustomobject]@{ ComponentState = $siteMapDraft.componentstate; IsUnpublishedLayer = ([int]$siteMapDraft.componentstate -eq 1) } } else { $null }
         ProposedSiteMapXml = $proposedXml
         SiteMapNeedsUpdate = ($sourceXml -cne $proposedXml)
-        Table = [pscustomobject]@{ LogicalName = $entity.LogicalName; MetadataId = $entity.MetadataId; ObjectTypeCode = $entity.ObjectTypeCode; EntitySetName = $entity.EntitySetName }
-        MainForm = [pscustomobject]@{ Id = $form.formid; Name = $form.name; ObjectTypeCode = $form.objecttypecode; Type = $form.type; ActivationState = $form.formactivationstate; ComponentState = $form.componentstate }
-        ActiveView = [pscustomobject]@{ Id = $view.savedqueryid; Name = $view.name; ReturnedTypeCode = $view.returnedtypecode; QueryType = $view.querytype; IsPrivate = $view.isprivate; StateCode = $view.statecode; ComponentState = $view.componentstate }
+        ReferenceComponents = $referenceComponents
         SolutionComponents = @($solutionComponents | ForEach-Object { [pscustomobject]@{ ComponentType = $_.componenttype; ObjectId = $_.objectid; RootComponentId = $_.rootsolutioncomponentid; RootComponentBehavior = $_.rootcomponentbehavior } })
         AppComponents = @($components | ForEach-Object { [pscustomobject]@{ ComponentId = $_.appmodulecomponentid; ComponentType = $_.componenttype; ObjectId = $_.objectid; IsMetadata = $_.ismetadata } })
+        AppModuleRoles = $roleSnapshot
+        AppValidation = [pscustomobject]@{
+            ValidationSuccess = Get-PropertyValue -Object $validationResponse -Name 'ValidationSuccess'
+            IssueCount = $validationIssues.Count
+            BlockingErrorCount = @($validationIssueSummaries | Where-Object { $_.ErrorType -ceq 'Error' }).Count
+            Issues = $validationIssueSummaries
+        }
         AppModuleSiteMapBinding = $export.AppModuleSiteMapEntries
         SolutionExport = $export
         AddAppComponentsContract = $componentContract
@@ -637,6 +823,21 @@ function Get-TargetSnapshot {
 }
 
 function Get-ExpectedComponentKeys {
+    if ($script:ResolvedReferenceComponents.Count) {
+        foreach ($reference in $script:ResolvedReferenceComponents) {
+            foreach ($payload in $reference.Payloads) {
+                $type = switch ([string]$payload['@odata.type']) {
+                    'Microsoft.Dynamics.CRM.entity' { 1; break }
+                    'Microsoft.Dynamics.CRM.systemform' { 60; break }
+                    'Microsoft.Dynamics.CRM.savedquery' { 26; break }
+                    default { throw 'Unsupported app component type in resolved composition plan.' }
+                }
+                $id = @($payload.Keys | Where-Object { $_ -ne '@odata.type' })[0]
+                [pscustomobject]@{ ComponentType = $type; ObjectId = [string]$payload[$id]; Payload = $payload; LogicalName = $reference.LogicalName }
+            }
+        }
+        return
+    }
     @(
         [pscustomobject]@{ ComponentType = 1; ObjectId = $script:Target.TableMetadataId }
         [pscustomobject]@{ ComponentType = 60; ObjectId = $script:Target.MainFormId }
@@ -653,11 +854,30 @@ function Assert-ComponentStateForApply {
         if (-not $match -and ([int]$_.componenttype -ne 62 -or $_.objectid -cne $script:Target.SiteMapId)) { $true }
     })
     if ($unexpected.Count) { throw 'Unexpected AppModule components exist; stop for manual reconciliation.' }
-    $matches = foreach ($item in $expected) { @($ExistingComponents | Where-Object { [int]$_.componenttype -eq $item.ComponentType -and $_.objectid -ceq $item.ObjectId }).Count }
-    if (@($matches | Where-Object { $_ -gt 0 }).Count -gt 0 -and @($matches | Where-Object { $_ -eq 0 }).Count -gt 0) {
-        throw 'Partial expected AppModule component state detected; preserve and reconcile manually before Apply.'
+    $states = [System.Collections.Generic.List[object]]::new()
+    $missing = [System.Collections.Generic.List[object]]::new()
+    foreach ($item in $expected) {
+        $matches = @($ExistingComponents | Where-Object {
+            [int]$_.componenttype -eq $item.ComponentType -and ([string]$_.objectid).Trim('{}') -ieq ([string]$item.ObjectId).Trim('{}')
+        })
+        if ($matches.Count -gt 1) { throw 'Duplicate expected AppModule component rows exist; stop for manual reconciliation.' }
+        $present = $matches.Count -eq 1
+        $states.Add([pscustomobject]@{
+            LogicalName = $item.LogicalName
+            ComponentType = $item.ComponentType
+            ObjectId = $item.ObjectId
+            State = if ($present) { 'ALREADY_PRESENT' } else { 'ABSENT' }
+        })
+        if (-not $present) { $missing.Add($item.Payload) }
     }
-    [pscustomobject]@{ AllPresent = (@($matches | Where-Object { $_ -gt 0 }).Count -eq $expected.Count); NonePresent = (@($matches | Where-Object { $_ -gt 0 }).Count -eq 0) }
+    $script:MissingAppComponentPayloads = $missing.ToArray()
+    [pscustomobject]@{
+        AllPresent = $missing.Count -eq 0
+        NonePresent = $states.Count -eq $missing.Count
+        MissingCount = $missing.Count
+        MissingPayloads = $missing.ToArray()
+        ComponentStates = $states.ToArray()
+    }
 }
 
 function Invoke-ApplySequence {
@@ -669,12 +889,14 @@ function Invoke-ApplySequence {
         if ([string]::IsNullOrWhiteSpace($etag)) { throw 'Site Map preflight ETag is missing; stop before writes.' }
         Invoke-DataverseRequest -Method PATCH -Path "sitemaps($($script:Target.SiteMapId))" -Body ([ordered]@{ sitemapxml = $Snapshot.ProposedSiteMapXml }) -ETag $etag | Out-Null
         $draft = Get-UnpublishedSiteMap
-        if (-not $draft -or [int]$draft.componentstate -ne 1 -or $draft.sitemapxml -cne $Snapshot.ProposedSiteMapXml) {
+        $published = Invoke-DataverseRequest -Method GET -Path "sitemaps($($script:Target.SiteMapId))?%24select=sitemapid,sitemapnameunique,componentstate,sitemapxml"
+        if (-not $draft -or [int]$draft.componentstate -ne 1 -or $draft.sitemapxml -cne $Snapshot.ProposedSiteMapXml -or
+            $published.sitemapxml -cne $Snapshot.SiteMap.SitemapXml) {
             throw 'Site Map PATCH did not read back as the expected Unpublished layer; stop without rollback or retry.'
         }
     }
-    if ($state.NonePresent) {
-        $body = [ordered]@{ AppId = $script:Target.AppModuleId; Components = @(Get-AppComponentPayloads) }
+    if ($state.MissingCount -gt 0) {
+        $body = [ordered]@{ AppId = $script:Target.AppModuleId; Components = @($state.MissingPayloads) }
         Invoke-DataverseRequest -Method POST -Path 'AddAppComponents' -Body $body | Out-Null
         $components = @(Get-ODataRows -Path (New-CollectionPath -EntitySet 'appmodulecomponents' -Select 'appmodulecomponentid,_appmoduleidunique_value,componenttype,objectid,isdefault,ismetadata,rootappmodulecomponentid,rootcomponentbehavior' -Filter "_appmoduleidunique_value eq $($script:Target.AppModuleIdUnique)"))
         $afterState = Assert-ComponentStateForApply -ExistingComponents $components
@@ -684,7 +906,9 @@ function Invoke-ApplySequence {
     $postState = Assert-ComponentStateForApply -ExistingComponents $postSnapshot.AppComponents
     if (-not $postState.AllPresent -or $postSnapshot.SiteMapNeedsUpdate -or
         $postSnapshot.AppModule.UniqueName -cne $script:Target.AppUniqueName -or
-        [int]$postSnapshot.AppModule.StateCode -ne 0 -or [int]$postSnapshot.AppModule.ComponentState -ne 1) {
+        $postSnapshot.AppModule.Id -cne $Snapshot.AppModule.Id -or
+        [int]$postSnapshot.AppModule.StateCode -ne 0 -or [int]$postSnapshot.AppModule.ComponentState -ne 1 -or
+        (ConvertTo-Json -InputObject @($postSnapshot.AppModuleRoles) -Compress) -cne (ConvertTo-Json -InputObject @($Snapshot.AppModuleRoles) -Compress)) {
         throw 'Independent post-write GET verification failed; preserve partial state and reconcile manually.'
     }
     $appAfter = $postSnapshot.AppModule
@@ -723,13 +947,15 @@ function Invoke-Main {
         }
     }
     $snapshot = Get-TargetSnapshot
+    if ($Apply) { Assert-AppValidationAllowsApply -AppValidation $snapshot.AppValidation }
     $componentState = Assert-ComponentStateForApply -ExistingComponents $snapshot.AppComponents
+    $plan = Get-AppCompositionPlan
     $result = [ordered]@{
         Mode = if ($DryRun) { 'DryRun; GET-only' } else { 'Apply; explicitly gated' }
         Plan = $plan
         Preflight = $snapshot
         ComponentState = $componentState
-        PlannedWriteCount = [int]$snapshot.SiteMapNeedsUpdate + [int]$componentState.NonePresent
+        PlannedWriteCount = [int]$snapshot.SiteMapNeedsUpdate + [int]($componentState.MissingCount -gt 0)
         WritesMayHaveOccurred = $script:WritesStarted
     }
     if ($DryRun) {

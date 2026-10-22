@@ -4,13 +4,25 @@
 
 ## Adopted App Identity
 
+**Superseding update — 22 October 2026:** The owner subsequently authorized the bounded Phase 2D.1 preflight and conditional composition. Fresh `ValidateApp` returned the blocking error `App does not contain Site Map`; the result is **BLOCKED_BEFORE_WRITE**. No write was attempted. The Phase 2D plan below is historical and is superseded where it conflicts with the findings and open decision recorded in Phase 2D.1.
+
 - Environment: VN LMV IT, `https://org14938ec2.crm4.dynamics.com/`.
 - App: BSO-RS-Support, unique name `srapp`, AppModule ID `3709bb7c-28cd-f111-a05c-70a8a581cbfa`.
 - Solution: `os_sr_bso_rs_support`; the AppModule is verified as a type-80 root. The Solution Publisher is `os_bso_rs_support`; the AppModule Publisher lookup remains **UNKNOWN**.
 - Phase 2C closed by owner-approved adoption, not by a successful AppModule Create. No additional AppModule is required. Do not create, rename, or recreate the app.
 - R3-P GET-only DryRun reconfirmed `statecode=0` Active and `componentstate=1` Unpublished. The `srapp` Site Map remains Published with placeholder-only XML; the Site Map unpublished query returned `componentstate=0`, so no distinct draft layer was observed. The target Solution export contains one `AppModuleSiteMap.SiteMapUniqueName=srapp` binding; direct appmodulecomponents remains empty. No verified app-linked forms/views/pages or project-specific end-user role were found. System Administrator and System Customizer are the only verified app-role associations. Type 10091 remains unidentified and is not the type-62 Site Map object.
 
-## Phase 2D Plan (Prepared, Not Authorized)
+## Phase 2D.1 — Live Preflight and Outcome
+
+The owner authorized a fresh guarded preflight and conditional composition of only the existing `srapp` with the four approved reference-table experiences. Environment, PAC/Az/WhoAmI identity agreement, process-scoped expected-user guard, unmanaged Solution, Publisher, and prefix matched. No environment switch or interactive login occurred.
+
+- `srapp` remains Active and Unpublished. Its `RetrieveUnpublished` representation reported `componentstate=1`; the published-row GET returned 404. The existing Site Map remains Published and contains a placeholder Area/Group/SubArea only. No distinct unpublished Site Map layer was observed. The Solution export contains one `AppModuleSiteMap.SiteMapUniqueName=srapp` binding; direct `appmodulecomponents` inventory is empty.
+- All four reference tables are present in the target Solution: `os_sr_ta`, `os_sr_pos`, `os_sr_csrc`, and `os_sr_loc`. The selected Main form for each is Information. The selected public active views are Active TA Directories, Active Positions, Active Candidate Sources, and Active Locations. All twelve table/form/view components are absent from `srapp`; no form/view IDs were fabricated. Read-only dependency results resolve the existing managed app-role associations to System Administrator and System Customizer.
+- `ValidateApp` returned warnings `No component is referenced` and `App does not reference at least one entity`, plus the blocking error **`App does not contain Site Map`**. The package-level Site Map binding did not satisfy this validation. The bounded app-component list excluded the existing type-62 Site Map; adding it or using another association path is an unresolved scope decision and was not authorized by the component list.
+- **Final outcome: BLOCKED_BEFORE_WRITE.** No Site Map PATCH, AddAppComponents action, POST, PublishXml, publish operation, role change, or retry occurred. The cumulative Phase 2D.1 live-read count is **83 GET requests**; all writes and retries are zero. The final guarded composition DryRun accounted for 25 GETs, with a separate identity WhoAmI GET. The 83 count includes the earlier read-only diagnostics and preflights.
+- Next step: obtain an explicit decision on whether to associate the existing Site Map through the supported app-component operation or pursue another supported route. After any scope change is approved, repeat the full fresh preflight and dry-run plan before any write. Keep `srapp` unpublished and preserve its existing role associations.
+
+## Original Phase 2D Plan (historical; superseded by Phase 2D.1)
 
 ### Read-Only Preflight
 
@@ -91,7 +103,7 @@ The following operations are proposals for a separately authorized Phase 2D Appl
 6. Do not call `PublishXml`, Publish All Customizations, Site Map Publish, solution import, or any publication operation. The app must remain Unpublished. If an operation publishes automatically, stop and treat the route as unsuitable.
 7. On any timeout or ambiguous result, reconcile with GETs before retrying. Do not assume rollback unless the entire operation was inside a verified supported change set.
 
-**Phase 2D execution readiness: BLOCKED.** Identity, Solution membership, live Site Map binding/XML, TA table, form, view, AddAppComponents parameter contract, and typed payload keys are verified. The runtime AddAppComponents call has not been authorized or tested; Site Map PATCH layer/publication behavior is not verified; the AppModule Publisher and type-10091 identity remain unknown. The script therefore remains guarded and no Apply is permitted.
+**Historical Phase 2D pre-authorization readiness was BLOCKED.** The later Phase 2D.1 owner authorization did not override its bounded component list; its fresh validation found the separate missing-Site-Map blocker described above. The AppModule Publisher and type-10091 identity remain unknown. Do not use this historical plan as an Apply authorization or as evidence that Site Map inclusion is approved.
 
 ## Historical Phase 2C Target (superseded)
 

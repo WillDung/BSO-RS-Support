@@ -573,9 +573,9 @@ function Assert-PacEnvironment {
         $envId.Groups[1].Value -cne $ExpectedEnvironmentId) {
         throw 'PAC active environment does not match the configured VN LMV IT target; stop without switching.'
     }
-    if ($CreateOnlyRecovery) {
+    if ($CreateOnlyRecovery -or $CreateOnlyCandidateSource) {
         Assert-ExpectedRecoveryUser -ActualUserId $userId.Groups[1].Value
-        $script:RecoveryEnvironmentVerified = $true
+        if ($CreateOnlyRecovery) { $script:RecoveryEnvironmentVerified = $true }
     }
     $script:PacUserId = $userId.Groups[1].Value
     $script:PacUserEmail = $userEmail.Groups[1].Value
@@ -1237,7 +1237,7 @@ function Get-Preflight {
         Assert-RecoveryInventory -ProjectTables $projectTables -SolutionComponents $solutionComponents -ExistingTableIds $existingTableIds.ToArray()
         if ($TableName -in $projectTables) { throw 'Position already exists; recovery will not update, delete, or recreate it.' }
     }
-    elseif ($CreateOnlyCandidateSource -or $PublishOnly) {
+    elseif ($CreateOnlyCandidateSource -or $PublishOnly -or $VerifyPublicationOnly) {
         $script:PreflightStage = 'SOLUTION_COMPONENT_INVENTORY'
         $solutionComponents = @(Get-SolutionSchemaComponents -SolutionId $solutions[0].solutionid)
         $expectedTables = if ($CreateOnlyCandidateSource -or $TableName -ceq 'os_sr_pos') {
@@ -1425,6 +1425,7 @@ function Invoke-BoundedEntityCreation {
         RequestId = $script:RecoveryRequestId
         CorrelationId = $script:RecoveryCorrelationId
         Reconciliation = $script:RecoveryReconciliation
+        RequestCounts = [ordered]@{ GET = $script:RequestCounts.GET; POST = $script:RequestCounts.POST }
         StateTransitions = $script:RecoveryTransitions.ToArray()
         ExpectedPayloadSha256 = $script:RecoveryExpectedFingerprint
         ActualPayloadSha256 = $script:RecoveryActualFingerprint
@@ -1581,7 +1582,7 @@ try {
     $boundedModeCount = @(@($CreateOnlyRecovery, $CreateOnlyCandidateSource, $PublishOnly, $VerifyPublicationOnly) | Where-Object { $_ }).Count
     if (($Apply -and $PlanOnly) -or ($boundedModeCount -gt 1) -or
         ($script:IsBoundedWrite -and ($Apply -or $PlanOnly)) -or
-        ($VerifyPublicationOnly -and ($Apply -or $PlanOnly -or $TableName -cne 'os_sr_pos'))) {
+        ($VerifyPublicationOnly -and ($Apply -or $PlanOnly -or $TableName -notin @('os_sr_pos', 'os_sr_csrc')))) {
         if ($script:IsBoundedWrite) { Set-RecoveryState -State 'BLOCKED' }
         throw 'Choose exactly one supported mode; publication verification is Position-only and read-only.'
     }
@@ -1641,10 +1642,10 @@ try {
     $preflight = Get-Preflight
     $script:ReconciliationSolutionId = $preflight.SolutionId
     if ($VerifyPublicationOnly) {
-        $metadata = Get-EntityMetadata -LogicalName 'os_sr_pos'
+        $metadata = Get-EntityMetadata -LogicalName $TableName
         $classification = Get-TablePublicationState -SolutionId $preflight.SolutionId -Metadata $metadata
         Write-Result -Stage 'VerifyPublicationOnly' -Status $classification -Details ([ordered]@{
-            TableLogicalName = 'os_sr_pos'
+            TableLogicalName = $TableName
             PublicationClassification = $classification
             Comparison = $script:PublicationStateDiagnostic
             SolutionUniqueName = $preflight.SolutionUniqueName

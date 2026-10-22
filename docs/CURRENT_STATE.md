@@ -1,6 +1,6 @@
 # Current State
 
-**Environment evidence:** the latest authenticated read-only preflight was run during Sprint 02D.1 on 22 October 2026; see the update below. **Repository status updated:** Sprint 02D.1. **Phase:** Position (`os_sr_pos`) remains present with exact approved metadata and Solution membership. `RetrieveEntity` comparison verified `PUBLISHED_NO_PENDING_DELTA`. No publication or schema change was performed. Candidate Source and Location remain absent. The owner-approved existing AppModule `srapp` remains the last observed active/unpublished state from Sprint 02C.1; it was not rechecked in Sprint 02D.1.
+**Environment evidence:** the latest authenticated read-only verification was run during Sprint 02E on 22 October 2026; see the update below. **Repository status updated:** Sprint 02E. **Phase:** `os_sr_ta`, `os_sr_pos`, and `os_sr_csrc` exist in `os_sr_bso_rs_support`. Position remains exact and `PUBLISHED_NO_PENDING_DELTA`; Candidate Source was reconciled to its exact approved schema and also verified `PUBLISHED_NO_PENDING_DELTA` without a publication call. `os_sr_loc` remains absent. The owner-approved existing AppModule `srapp` remains the last observed active/unpublished state from Sprint 02C.1; it was not rechecked in Sprint 02E.
 
 ## Sprint 02D Update — 22 October 2026
 
@@ -26,6 +26,17 @@ Position publication state was verified using the supported `RetrieveEntity` Web
 - The live verification issued **19 GETs** total (preflight plus the two metadata retrievals), with `MaximumRetryCount=0`, and zero POST, PublishXml, PATCH, DELETE, or retry operations.
 - Offline regression validation passed: **529** provisioning/recovery assertions, **32** app-composition assertions, **11** readiness assertions, and `git diff --check`.
 - Position’s publication gate is cleared. Candidate Source may be considered in a separate, freshly preflighted, explicitly authorized bounded task. Do not create Location, publish `srapp`, or infer authorization for other components from this result.
+
+## Sprint 02E Update — 22 October 2026
+
+The controlled Candidate Source creation POST returned HTTP 204. Its immediate GET reconciliation reported absent, so the create-only operation correctly returned `UNCERTAIN` and did not retry. A separate GET-only verification subsequently found Candidate Source with exact approved metadata and Solution membership. Published and as-if-published metadata matched, yielding **PUBLISHED_NO_PENDING_DELTA**. No `PublishXml` was sent.
+
+- The validated PlanOnly payload was `os_sr_csrc`, Candidate Source / Candidate Sources, OrganizationOwned, primary `os_sr_csrc_nm` / Source Name (String/Text, length 100, ApplicationRequired), with zero additional custom attributes, alternate keys, custom relationships, or business records. SHA-256 matched `867803e7533bfb053c70b951edc47cb4475b5f0183852dcb850b88b317c08f16`.
+- Fresh post-write verification checked the expected VN LMV IT target, identity consistency, project inventory, Solution, Publisher, table metadata, and Solution membership. Inventory was exactly `os_sr_ta`, `os_sr_pos`, and `os_sr_csrc`; no unexpected project tables or unmapped project Entity/Attribute components were reported. Position’s schema was also validated unchanged.
+- Important preflight gap: `BSO_RS_EXPECTED_USER_ID` was not configured in the process when the create ran, and the Candidate Source bounded path did not yet enforce that user pin. PAC, Az user, and Dataverse identity consistency checks succeeded, but this task’s process-scoped expected-user requirement was not met. The local create path has now been hardened to require this guard for future bounded Candidate Source writes. This does not alter the already-created table.
+- The first create result did not include its cumulative GET counter, so the exact GET count for its two preflights and immediate reconciliation was not retained; do not infer or reconstruct it. The subsequent independent GET-only verification used **29 GETs**, and the GET-only publication comparison used **24 GETs**. Those 53 GETs are confirmed; total Sprint 02E GET count is **UNKNOWN** because the first invocation omitted its counter. The provisioner now includes request counts in bounded-create results for future operations.
+- Confirmed write counts: exactly **1 POST EntityDefinitions** for `os_sr_csrc`, zero PublishXml, PATCH, DELETE, attribute POST, or retry. The immediate reconciliation was absent; later independent read-back verified exact state. No repair or additional write was performed.
+- Offline validation passed after hardening: **530** provisioning/recovery assertions, **32** app-composition assertions, **11** readiness assertions, and `git diff --check`. No Location, app, role, Flow, Candidate business-table, or business-record operation occurred.
 
 ## Facts
 

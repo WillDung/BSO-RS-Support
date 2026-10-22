@@ -373,6 +373,9 @@ $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList @($s
         try { Assert-ExpectedRecoveryUser -ActualUserId '22222222-2222-4222-8222-222222222222' } catch { $identityMismatch=$true }
         $results.Add([pscustomobject]@{Kind='IdentityGuard';Passed=$identityMismatch})
         $script:ExpectedUserId=$null
+        $pacEnvironmentAst=$sourceAst.Find({param($node)$node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Assert-PacEnvironment'},$true)
+        $candidateSourceExpectedUserGuard=$pacEnvironmentAst.Extent.Text -match '(?s)if \(\$CreateOnlyRecovery -or \$CreateOnlyCandidateSource\)\s*\{\s*Assert-ExpectedRecoveryUser'
+        $results.Add([pscustomobject]@{Kind='CandidateSourceExpectedUserGuard';Passed=$candidateSourceExpectedUserGuard})
         $required=@('prvCreateEntity','prvCreateAttribute','prvCreateCustomization')
         Assert-RequiredPrivilegeSet -Privileges @([pscustomobject]@{Name='synthetic'},[pscustomobject]@{Name='synthetic'},[pscustomobject]@{Name='synthetic'}) -RequiredNames $required
         $privilegeMissing=$false
@@ -506,7 +509,7 @@ $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList @($s
         $script:RecoveryActualFingerprint=$script:CandidateSourceExpectedFingerprint
         $script:RecoveryState='READY';$script:WritesAllowed=$true;$script:Outcome='PRESENT';$script:TransportState.Status=201
         $candidateCreatedResult=Invoke-CandidateSourceCreateOnly -Payload $script:CandidateSourcePayload -SolutionId 'synthetic-solution'
-        $results.Add([pscustomobject]@{Kind='CandidateSourceCreateOutcome';Passed=($candidateCreatedResult.State -ceq 'VERIFIED_SUCCESS' -and $candidateCreatedResult.Outcome -ceq 'VERIFIED_CREATED' -and $script:TransportState.PostCalls -eq 1)})
+        $results.Add([pscustomobject]@{Kind='CandidateSourceCreateOutcome';Passed=($candidateCreatedResult.State -ceq 'VERIFIED_SUCCESS' -and $candidateCreatedResult.Outcome -ceq 'VERIFIED_CREATED' -and $script:TransportState.PostCalls -eq 1 -and $candidateCreatedResult.RequestCounts.POST -eq 1 -and $candidateCreatedResult.RequestCounts.GET -eq $script:RequestCounts.GET)})
 
         Reset-SyntheticState
         $script:CreateOnlyCandidateSource=$true;$script:Apply=$false;$script:TableName='os_sr_csrc'
@@ -631,6 +634,8 @@ foreach ($kind in @('IdentityGuard','PrivilegeGuard','PrivilegeEndpoint','Invent
     $guard=@($recovery | Where-Object Kind -eq $kind)[0]
     Assert-Test $guard.Passed "$kind fails closed on mismatch"
 }
+$candidateSourceIdentityGuard=@($recovery | Where-Object Kind -eq 'CandidateSourceExpectedUserGuard')[0]
+Assert-Test $candidateSourceIdentityGuard.Passed 'Candidate Source create-only preflight enforces the process-scoped expected-user guard'
 $fingerprintMismatch=@($recovery | Where-Object Kind -eq 'FingerprintMismatch')[0]
 Assert-Test ($fingerprintMismatch.Passed -and $fingerprintMismatch.Expected -ceq '0f7372eeb66c0214ae08ed0dc74f82c981cc4cd73baa9156f16d6e1bd1f48e80' -and $fingerprintMismatch.Actual -cne $fingerprintMismatch.Expected) 'Fingerprint mismatch fails validation before authentication or network'
 $fingerprintMatch=@($recovery | Where-Object Kind -eq 'FingerprintMatch')[0]

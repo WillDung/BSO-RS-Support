@@ -110,7 +110,7 @@ Assert-Rejected {Assert-TableMetadata $fixture} 'Custom active column' 'Unexpect
 $sourceAst=[System.Management.Automation.Language.Parser]::ParseFile($provisioner,[ref]$null,[ref]$null)
 $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList $sourceAst -ScriptBlock {
     param($sourceAst)
-    foreach ($functionName in @('Ensure-DataverseAccessToken','Invoke-PrivateOperation','Get-SafeDiagnosticText','Get-SafeErrorMessage','Get-SafeResponseHeader','New-SafeHttpFailure','Get-StoppedDetails','Get-ReconciliationSummary','Write-Result','Get-PayloadFingerprint','Set-RecoveryState','Get-RecoveryFailureState','Assert-CreateOnlyRecoveryTable','Assert-PositionPayloadFingerprint','Assert-ExpectedRecoveryUser','Assert-RequiredPrivilegeSet','Assert-RecoveryInventory','Assert-RecoveryPrivileges','Invoke-PositionCreateOnlyRecovery','Invoke-DataverseRequest')) {
+    foreach ($functionName in @('Ensure-DataverseAccessToken','Invoke-PrivateOperation','Get-SafeDiagnosticText','Get-SafeErrorMessage','Get-SafeResponseHeader','Get-SafeRawResponseHeader','Get-SafeAuthenticationChallenge','Get-HttpExceptionDetails','Get-RecoveryFailureClass','New-SafeHttpFailure','Get-StoppedDetails','Get-ReconciliationSummary','Write-Result','Get-PayloadFingerprint','Set-RecoveryState','Get-RecoveryFailureState','Assert-CreateOnlyRecoveryTable','Assert-PositionPayloadFingerprint','Assert-ExpectedRecoveryUser','Assert-RequiredPrivilegeSet','Assert-RecoveryInventory','Assert-RecoveryPrivileges','Invoke-PositionCreateOnlyRecovery','Invoke-DataverseRequest')) {
         $functionAst=$sourceAst.Find({param($node)$node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName},$true)
         Invoke-Expression $functionAst.Extent.Text
     }
@@ -145,7 +145,30 @@ $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList $sou
                 Write-Warning $script:State.UnsafeText
                 Write-Information $script:State.UnsafeText
                 Write-Verbose $script:State.UnsafeText
-                if ($script:State.Timeout -or $script:State.TransportException) { throw [IOException]::new($script:State.UnsafeText) }
+                if ($Method -eq 'POST' -and $script:State.ExceptionScenario) {
+                    if ($script:State.ExceptionScenario -eq 'Timeout') { throw [TimeoutException]::new($script:State.UnsafeText) }
+                    if ($script:State.ExceptionScenario -eq 'Transport') { throw [System.Net.Http.HttpRequestException]::new($script:State.UnsafeText) }
+                    if ($script:State.ExceptionScenario -eq 'Unknown') { throw [InvalidOperationException]::new($script:State.UnsafeText) }
+                    $responseCode = [int]$script:State.Status
+                    $httpResponse = [System.Net.Http.HttpResponseMessage]::new([System.Net.HttpStatusCode]$responseCode)
+                    [void]$httpResponse.Headers.TryAddWithoutValidation('WWW-Authenticate', ('Bearer error="invalid_token", error_description="'+$script:State.UnsafeText+'", claims="'+$script:State.Secrets[0]+'"'))
+                    [void]$httpResponse.Headers.TryAddWithoutValidation('x-ms-service-request-id', '11111111-1111-4111-8111-111111111111')
+                    [void]$httpResponse.Headers.TryAddWithoutValidation('x-ms-correlation-request-id', '22222222-2222-4222-8222-222222222222')
+                    [void]$httpResponse.Headers.TryAddWithoutValidation('Authorization', $script:State.UnsafeText)
+                    [void]$httpResponse.Headers.TryAddWithoutValidation('Set-Cookie', $script:State.UnsafeText)
+                    $exception = [InvalidOperationException]::new($script:State.UnsafeText)
+                    $exception | Add-Member -NotePropertyName Response -NotePropertyValue $httpResponse -Force
+                    $errorRecord = [System.Management.Automation.ErrorRecord]::new($exception, 'SyntheticHttpException', [System.Management.Automation.ErrorCategory]::InvalidOperation, $null)
+                    $bodyText = if ($script:State.ExceptionScenario -eq 'MalformedBody') {
+                        'not-json ' + $script:State.UnsafeText
+                    } else {
+                        '{"error":{"code":"0x80040220","message":"'+$script:State.UnsafeText+'"},"rawAuthentication":"'+$script:State.UnsafeText+'"}'
+                    }
+                    $errorRecord.ErrorDetails = [System.Management.Automation.ErrorDetails]::new($bodyText)
+                    throw $errorRecord
+                }
+                if ($script:State.Timeout) { throw [TimeoutException]::new($script:State.UnsafeText) }
+                if ($script:State.TransportException) { throw [IOException]::new($script:State.UnsafeText) }
                 $responseCode=if ($Method -eq 'GET') { $script:State.GetStatus } else { $script:State.Status }
                 Set-Variable -Name $StatusCodeVariable -Value $responseCode -Scope 1
                 Set-Variable -Name $ResponseHeadersVariable -Value @{
@@ -213,11 +236,12 @@ $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList $sou
         $script:RecoveryAttemptTimestampUtc=$null;$script:RecoveryEnvironmentVerified=$false
         $script:RecoveryIdentityVerified=$false;$script:RecoveryVerifiedPrivileges=@()
         $script:RecoveryPreflight=$null
-        $script:RecoveryRequestId=$null;$script:RecoveryCorrelationId=$null
+        $script:RecoveryRequestId=$null;$script:RecoveryCorrelationId=$null;$script:LastRequestDispatchStarted=$false
         $script:WritesAllowed=$true;$script:WritesStarted=$false
-        $script:TransportState=@{Calls=0;PostCalls=0;Request=$null;ReadUris=[System.Collections.Generic.List[string]]::new();ReadMethods=[System.Collections.Generic.List[string]]::new();Status=0;GetStatus=200;Timeout=$false;TransportException=$false;PrivilegeCount=3;Secrets=$script:Secrets;UnsafeText=$script:UnsafeText;ExpiresOn=[DateTimeOffset]::MinValue}
+        $script:TransportState=@{Calls=0;PostCalls=0;Request=$null;ReadUris=[System.Collections.Generic.List[string]]::new();ReadMethods=[System.Collections.Generic.List[string]]::new();Status=0;GetStatus=200;Timeout=$false;TransportException=$false;ExceptionScenario=$null;PrivilegeCount=3;Secrets=$script:Secrets;UnsafeText=$script:UnsafeText;ExpiresOn=[DateTimeOffset]::MinValue}
     }
     function Test-SyntheticHttpChecks {
+        param([object]$RecoveryPayload)
         $results=[System.Collections.Generic.List[object]]::new()
         foreach ($status in @(401,403,400,429,500,0,302)) {
             foreach ($outcome in @('PRESENT','ABSENT','PARTIAL','UNKNOWN')) {
@@ -254,7 +278,51 @@ $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList $sou
         $script:AccessTokenExpiresOn=[DateTimeOffset]::UtcNow.AddMinutes(-1)
         try { Ensure-DataverseAccessToken -RefreshAction {} } catch { $guardResults.InvalidRefresh=($script:TransportState.Calls -eq 0) }
         $unsafeCode=New-SafeHttpFailure -Method POST -Resource ('EntityDefinitions/'+$script:Secrets[0]) -Timestamp ([DateTimeOffset]::UtcNow) -StatusCode 400 -Response ([pscustomobject]@{error=[pscustomobject]@{code=$script:UnsafeText}}) -Headers @{'x-ms-request-id'=$script:Secrets[0]}
-        [pscustomobject]@{Cases=$results.ToArray();Guards=$guardResults;UnsafeCode=$unsafeCode;OmittedText=(Get-SafeDiagnosticText $script:UnsafeText);OmittedException=(Get-SafeErrorMessage ([System.Management.Automation.ErrorRecord]::new([Exception]::new($script:UnsafeText),'Synthetic',[System.Management.Automation.ErrorCategory]::NotSpecified,$null)))}
+        $exceptionCases=[System.Collections.Generic.List[object]]::new()
+        foreach($case in @(
+            @{Status=401;Scenario='HttpResponse';Class='HTTP_401';State='FAILED_AUTH';Category='HttpResponse';Code='0x80040220'},
+            @{Status=403;Scenario='HttpResponse';Class='HTTP_403';State='FAILED_AUTHZ';Category='HttpResponse';Code='0x80040220'},
+            @{Status=422;Scenario='HttpResponse';Class='HTTP_4XX_VALIDATION';State='FAILED_VALIDATION';Category='HttpResponse';Code='0x80040220'},
+            @{Status=429;Scenario='HttpResponse';Class='HTTP_429';State='UNCERTAIN';Category='HttpResponse';Code='0x80040220'},
+            @{Status=503;Scenario='HttpResponse';Class='HTTP_5XX';State='UNCERTAIN';Category='HttpResponse';Code='0x80040220'},
+            @{Status=0;Scenario='Timeout';Class='TIMEOUT';State='UNCERTAIN';Category='Timeout';Code=$null},
+            @{Status=0;Scenario='Transport';Class='TRANSPORT_FAILURE';State='UNCERTAIN';Category='Transport';Code=$null},
+            @{Status=400;Scenario='MalformedBody';Class='HTTP_4XX_VALIDATION';State='FAILED_VALIDATION';Category='HttpResponse';Code=$null},
+            @{Status=0;Scenario='Unknown';Class='UNKNOWN_HTTP_FAILURE';State='UNCERTAIN';Category='Unknown';Code=$null}
+        )){
+            Reset-SyntheticState
+            $script:CreateOnlyRecovery=$true;$script:Apply=$false;$script:TableName='os_sr_pos'
+            $script:RecoveryActualFingerprint=$script:RecoveryExpectedFingerprint
+            $script:RecoveryState='READY';$script:WritesAllowed=$true;$script:Outcome='ABSENT'
+            $script:TransportState.Status=$case.Status;$script:TransportState.ExceptionScenario=$case.Scenario
+            $result=Invoke-PositionCreateOnlyRecovery -Payload $RecoveryPayload -SolutionId 'synthetic-solution'
+            $failure=$result.HttpFailure
+            $report=Write-Result -Stage Recovery -Status $result.State -Details $result | ConvertFrom-Json
+            $serialized=ConvertTo-Json -InputObject $report -Depth 25 -Compress
+            $reportedFailure=$report.Details.HttpFailure
+            $challengeSafe=if($case.Scenario -in @('HttpResponse','MalformedBody')) {
+                $failure.AuthenticationChallenge.Scheme -ceq 'Bearer' -and $failure.AuthenticationChallenge.Error -ceq 'invalid_token' -and
+                    $failure.AuthenticationChallenge.ErrorDescriptionPresent -and $failure.AuthenticationChallenge.ClaimsChallengePresent
+            } else { $null -eq $failure.AuthenticationChallenge }
+            $checks=[ordered]@{
+                Classification=($failure.FailureClass -ceq $case.Class -and $failure.ExceptionCategory -ceq $case.Category)
+                TerminalState=($result.State -ceq $case.State)
+                Status=($failure.StatusCode -eq $(if($case.Status -eq 0){$null}else{$case.Status}) -and $reportedFailure.StatusCode -eq $failure.StatusCode)
+                StatusExplicit=($failure.HttpStatus -eq $(if($case.Status -eq 0){'UNKNOWN'}else{$case.Status}))
+                ErrorCode=($failure.DataverseErrorCode -ceq $case.Code)
+                Dispatch=([bool]$failure.DispatchStarted -and [bool]$failure.WritesMayHaveOccurred)
+                SingleWrite=($script:TransportState.PostCalls -eq 1 -and $script:RequestCounts.POST -eq 1 -and $script:TransportState.Request.MaximumRetryCount -eq 0)
+                GetOnlyReconciliation=($script:RequestCounts.GET -ge 1 -and @($script:TransportState.ReadMethods | Where-Object { $_ -ne 'GET' }).Count -eq 0)
+                Challenge=$challengeSafe
+                RequestIds=($case.Scenario -notin @('HttpResponse','MalformedBody') -or
+                    ($failure.RequestId -ceq '11111111-1111-4111-8111-111111111111' -and $failure.CorrelationId -ceq '22222222-2222-4222-8222-222222222222'))
+                Privacy=($serialized -notmatch [regex]::Escape($script:Secrets[0]) -and
+                    $serialized -notmatch '"Authorization"\s*:|rawAuthentication|refresh_token\s*=|client_secret\s*=|Set-Cookie|error_description\s*=|claims\s*=')
+            }
+            $valid=@($checks.Values | Where-Object { -not $_ }).Count -eq 0
+            $exceptionCases.Add([pscustomobject]@{Scenario=$case.Scenario;Status=$failure.StatusCode;HttpStatus=$failure.HttpStatus;FailureClass=$failure.FailureClass;ExceptionCategory=$failure.ExceptionCategory;State=$result.State;Passed=$valid;CheckSummary=($checks.GetEnumerator() | Where-Object { -not $_.Value } | ForEach-Object Key) -join ',';ReportStatus=$reportedFailure.StatusCode;ReportHttpStatus=$reportedFailure.HttpStatus;RequestId=$failure.RequestId;CorrelationId=$failure.CorrelationId})
+        }
+        [pscustomobject]@{Cases=$results.ToArray();ExceptionCases=$exceptionCases.ToArray();Guards=$guardResults;UnsafeCode=$unsafeCode;OmittedText=(Get-SafeDiagnosticText $script:UnsafeText);OmittedException=(Get-SafeErrorMessage ([System.Management.Automation.ErrorRecord]::new([Exception]::new($script:UnsafeText),'Synthetic',[System.Management.Automation.ErrorCategory]::NotSpecified,$null)))}
     }
     function Test-SyntheticRecoveryChecks {
         param([object]$RecoveryPayload,[object]$ExpectedPositionMetadata)
@@ -401,7 +469,7 @@ $transcript=[IO.Path]::GetTempFileName()
 try {
     Start-Transcript -LiteralPath $transcript -Force | Out-Null
     try {
-        $http=Test-SyntheticHttpChecks
+        $http=Test-SyntheticHttpChecks -RecoveryPayload $positionPayload
         $recovery=Test-SyntheticRecoveryChecks -RecoveryPayload $positionPayload -ExpectedPositionMetadata (New-Fixture os_sr_pos)
     }
     finally { Stop-Transcript | Out-Null }
@@ -430,7 +498,7 @@ $writeGuards=@($recovery | Where-Object Kind -eq 'WriteGuards')[0]
 Assert-Test $writeGuards.Passed 'Recovery mode blocks second POST, attribute POST, PublishXml and DELETE'
 $privacy=@($recovery | Where-Object Kind -eq 'DiagnosticPrivacy')[0]
 Assert-Test $privacy.Passed 'Recovery diagnostics omit token, identity and environment URL'
-$diagnosticKeys=@('Operation','Method','ApiPath','TimestampUtc','StatusCode','DataverseErrorCode','ErrorSummary','RequestId','CorrelationId','WritesMayHaveOccurred','ReconciliationCompleted','ReconciliationOutcome') | Sort-Object
+$diagnosticKeys=@('Operation','Method','ApiPath','TimestampUtc','StatusCode','HttpStatus','DataverseErrorCode','ErrorSummary','RequestId','CorrelationId','AuthenticationChallenge','FailureClass','ExceptionCategory','TransportKind','DispatchStarted','WritesMayHaveOccurred','ReconciliationCompleted','ReconciliationOutcome') | Sort-Object
 foreach ($case in $http.Cases) {
     $failure=$case.Diagnostic.Details.HttpFailure
     $name="HTTP $($case.Status) / $($case.Outcome)"
@@ -449,10 +517,18 @@ foreach ($case in $http.Cases) {
     if ($case.Status -ne 0) {
         Assert-Test ($failure.RequestId -ceq '11111111-1111-4111-8111-111111111111' -and $failure.CorrelationId -ceq '22222222-2222-4222-8222-222222222222' -and $failure.DataverseErrorCode -ceq '0x80040220') "$name safe IDs and Dataverse code"
     }
-    $summaryPattern=switch ($case.Status) { 401 {'Authentication/token'} 403 {'Authorization/privilege'} 400 {'metadata validation'} 429 {'Rate limited'} 500 {'Server failure'} 0 {'Transport failure or timeout'} default {'Unexpected HTTP response'} }
+    $summaryPattern=switch ($case.Status) { 401 {'Authentication/token'} 403 {'Authorization/privilege'} 400 {'Dataverse rejected'} 429 {'rate limited'} 500 {'server failure'} 0 {'timed out'} default {'status unavailable'} }
     Assert-Test ($failure.ErrorSummary -match $summaryPattern) "$name trusted status summary"
-    Assert-Test (($case.Diagnostic | ConvertTo-Json -Depth 20) -notmatch '"Authorization"\s*:|WWW-Authenticate|Cookie|rawAuthentication|Bearer') "$name sensitive headers and bodies omitted"
+    Assert-Test (($case.Diagnostic | ConvertTo-Json -Depth 20) -notmatch '"Authorization"\s*:|WWW-Authenticate|Set-Cookie|rawAuthentication|refresh_token\s*=|client_secret\s*=|error_description\s*=|claims\s*=') "$name sensitive headers and bodies omitted"
 }
+Assert-Test ($http.ExceptionCases.Count -eq 9) 'All requested exception-path diagnostic scenarios executed'
+foreach($case in $http.ExceptionCases){ Assert-Test $case.Passed "Exception $($case.Scenario) safe diagnostics and GET-only recovery; class=$($case.FailureClass), category=$($case.ExceptionCategory), state=$($case.State), status=$($case.Status), failed checks=$($case.CheckSummary)" }
+Assert-Test (@($http.ExceptionCases | Where-Object { $_.Scenario -eq 'Unknown' -and $null -eq $_.Status -and $_.FailureClass -eq 'UNKNOWN_HTTP_FAILURE' -and $null -eq $_.ReportStatus }).Count -eq 1) 'Unavailable HTTP status remains explicitly UNKNOWN'
+Assert-Test (@($http.ExceptionCases | Where-Object { $_.Scenario -eq 'Unknown' -and $_.HttpStatus -eq 'UNKNOWN' -and $_.ReportHttpStatus -eq 'UNKNOWN' }).Count -eq 1) 'UNKNOWN status is retained in serialized diagnostics'
+Assert-Test (@($http.ExceptionCases | Where-Object { $_.Scenario -eq 'MalformedBody' -and $_.Status -eq 400 -and $_.ReportStatus -eq 400 -and $_.FailureClass -eq 'HTTP_4XX_VALIDATION' }).Count -eq 1) 'Malformed non-JSON exception body does not leak and preserves HTTP status'
+Assert-Test (@($http.ExceptionCases | Where-Object { $_.Scenario -eq 'HttpResponse' -and $_.RequestId -eq '11111111-1111-4111-8111-111111111111' -and $_.CorrelationId -eq '22222222-2222-4222-8222-222222222222' }).Count -ge 5) 'Exception response request and correlation GUIDs are extracted'
+Assert-Test (@($http.Cases | Where-Object { $_.Status -eq 302 -and $_.Diagnostic.Details.HttpFailure.FailureClass -eq 'UNKNOWN_HTTP_FAILURE' }).Count -eq 4) 'Unrecognized HTTP status remains an explicit unknown HTTP failure'
+Assert-Test (@($http.Cases | Where-Object { $_.Status -eq 408 -and $_.Diagnostic.Details.HttpFailure.FailureClass -eq 'TIMEOUT' }).Count -eq 1) 'HTTP 408 maps to timeout without retry'
 foreach ($guard in $http.Guards.GetEnumerator()) { Assert-Test $guard.Value "$($guard.Key) guard" }
 Assert-Test ($null -eq $http.UnsafeCode.DataverseErrorCode -and $null -eq $http.UnsafeCode.RequestId -and $http.UnsafeCode.ApiPath -ceq '/api/data/v9.2/EntityDefinitions') 'Risky code, ID and endpoint values omitted'
 Assert-Test ($http.OmittedText -ceq 'Untrusted text omitted.' -and $http.OmittedException -notmatch 'synthetic-') 'Untrusted local text and exceptions omitted'

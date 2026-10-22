@@ -20,6 +20,7 @@ $script:AccessToken = $null
 $script:AccessTokenIssuedAt = [DateTimeOffset]::MinValue
 $script:AccessTokenExpiresOn = [DateTimeOffset]::MinValue
 $script:LastHttpFailure = $null
+$script:LastRequestDispatchStarted = $false
 $script:ApiRoot = $null
 $script:WritesStarted = $false
 $script:WritesAllowed = $false
@@ -137,11 +138,30 @@ function Set-RecoveryState {
     })
 }
 
+function Get-RecoveryFailureClass {
+    param([Nullable[int]]$StatusCode, [string]$ExceptionCategory)
+    if ($null -ne $StatusCode -and $StatusCode -ge 100 -and $StatusCode -le 599) {
+        if ($StatusCode -eq 401) { return 'HTTP_401' }
+        if ($StatusCode -eq 403) { return 'HTTP_403' }
+        if ($StatusCode -eq 408) { return 'TIMEOUT' }
+        if ($StatusCode -eq 429) { return 'HTTP_429' }
+        if ($StatusCode -ge 500) { return 'HTTP_5XX' }
+        if ($StatusCode -ge 400) { return 'HTTP_4XX_VALIDATION' }
+        return 'UNKNOWN_HTTP_FAILURE'
+    }
+    if ($ExceptionCategory -eq 'Timeout') { return 'TIMEOUT' }
+    if ($ExceptionCategory -eq 'Transport') { return 'TRANSPORT_FAILURE' }
+    'UNKNOWN_HTTP_FAILURE'
+}
+
 function Get-RecoveryFailureState {
-    param([int]$StatusCode)
-    if ($StatusCode -eq 401) { return 'FAILED_AUTH' }
-    if ($StatusCode -eq 403) { return 'FAILED_AUTHZ' }
-    if ($StatusCode -ge 400 -and $StatusCode -lt 500 -and $StatusCode -notin @(408, 429)) { return 'FAILED_VALIDATION' }
+    param([Nullable[int]]$StatusCode, [string]$FailureClass)
+    if ($FailureClass -eq 'HTTP_401' -or $StatusCode -eq 401) { return 'FAILED_AUTH' }
+    if ($FailureClass -eq 'HTTP_403' -or $StatusCode -eq 403) { return 'FAILED_AUTHZ' }
+    if ($FailureClass -eq 'HTTP_4XX_VALIDATION' -or
+        ($null -ne $StatusCode -and $StatusCode -ge 400 -and $StatusCode -lt 500 -and $StatusCode -notin @(408, 429))) {
+        return 'FAILED_VALIDATION'
+    }
     'UNCERTAIN'
 }
 
@@ -241,19 +261,153 @@ function Get-SafeDiagnosticText {
 function Get-SafeResponseHeader {
     param([object]$Headers, [Parameter(Mandatory = $true)][string]$Name)
     if ($null -eq $Headers) { return $null }
-    foreach ($key in $Headers.Keys) {
-        if ([string]$key -ieq $Name) {
-            $value = [string](@($Headers[$key]) -join ', ')
-            if ($value -cmatch '^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$') { return $value.ToLowerInvariant() }
-            return $null
+    $value = $null
+    if ($Headers -is [System.Net.Http.Headers.HttpHeaders]) {
+        $values = $null
+        if (-not $Headers.TryGetValues($Name, [ref]$values)) { return $null }
+        $value = [string](@($values) -join ', ')
+    }
+    elseif ($Headers -is [System.Collections.Specialized.NameValueCollection]) {
+        $value = [string]$Headers.Get($Name)
+    }
+    elseif ($Headers -is [System.Collections.IDictionary]) {
+        foreach ($key in $Headers.Keys) {
+            if ([string]$key -ieq $Name) {
+                $value = [string](@($Headers[$key]) -join ', ')
+                break
+            }
         }
+    }
+    else {
+        $property = $Headers.PSObject.Properties | Where-Object { $_.Name -ieq $Name } | Select-Object -First 1
+        if ($property) { $value = [string]$property.Value }
+    }
+    if ($value -cmatch '^[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$') {
+        return $value.ToLowerInvariant()
     }
     return $null
 }
 
+function Get-SafeAuthenticationChallenge {
+    param([object]$Headers)
+    $challenge = Get-SafeRawResponseHeader -Headers $Headers -Name 'WWW-Authenticate'
+    if ([string]::IsNullOrWhiteSpace($challenge)) { return $null }
+    $scheme = if ($challenge -match '^\s*Bearer(?:\s|$)') { 'Bearer' }
+        elseif ($challenge -match '^\s*Basic(?:\s|$)') { 'Basic' }
+        else { 'Other' }
+    $errorMatch = [regex]::Match($challenge, '(?i)(?:^|[, ]+)error\s*=\s*"?([a-z_]+)"?')
+    $safeError = if ($errorMatch.Success -and $errorMatch.Groups[1].Value.ToLowerInvariant() -in @('invalid_token','insufficient_scope')) {
+        $errorMatch.Groups[1].Value.ToLowerInvariant()
+    } else { $null }
+    [ordered]@{
+        Scheme = $scheme
+        Error = $safeError
+        ErrorDescriptionPresent = ($challenge -match '(?i)(?:^|[, ]+)error_description\s*=')
+        ClaimsChallengePresent = ($challenge -match '(?i)(?:^|[, ]+)claims\s*=')
+    }
+}
+
+function Get-SafeRawResponseHeader {
+    param([object]$Headers, [Parameter(Mandatory = $true)][string]$Name)
+    if ($null -eq $Headers) { return $null }
+    if ($Headers -is [System.Net.Http.Headers.HttpHeaders]) {
+        $values = $null
+        if ($Headers.TryGetValues($Name, [ref]$values)) { return [string](@($values) -join ', ') }
+        return $null
+    }
+    if ($Headers -is [System.Collections.Specialized.NameValueCollection]) {
+        return [string]$Headers.Get($Name)
+    }
+    if ($Headers -is [System.Collections.IDictionary]) {
+        foreach ($key in $Headers.Keys) {
+            if ([string]$key -ieq $Name) { return [string](@($Headers[$key]) -join ', ') }
+        }
+        return $null
+    }
+    $property = $Headers.PSObject.Properties | Where-Object { $_.Name -ieq $Name } | Select-Object -First 1
+    if ($property) { return [string]$property.Value }
+    return $null
+}
+
+function Get-HttpExceptionDetails {
+    param([System.Management.Automation.ErrorRecord]$ErrorRecord)
+    $response = $null
+    $exception = $ErrorRecord.Exception
+    for ($depth = 0; $null -ne $exception -and $depth -lt 5; $depth++) {
+        try { $response = $exception.Response } catch { }
+        if ($response -or -not $exception.InnerException) { break }
+        $exception = $exception.InnerException
+    }
+    $statusCode = $null
+    if ($null -ne $response) {
+        try {
+            $candidate = [int]$response.StatusCode
+            if ($candidate -ge 100 -and $candidate -le 599) { $statusCode = $candidate }
+        } catch { }
+    }
+    if ($null -eq $statusCode) {
+        try {
+            $candidate = [int]$exception.StatusCode
+            if ($candidate -ge 100 -and $candidate -le 599) { $statusCode = $candidate }
+        } catch { }
+    }
+    $headers = $null
+    if ($null -ne $response) {
+        $headers = $response.Headers
+        if ($null -ne $response.Content -and $response.Content.Headers) {
+            $contentHeaders = $response.Content.Headers
+            $headers = @{
+                'x-ms-service-request-id' = Get-SafeRawResponseHeader -Headers $headers -Name 'x-ms-service-request-id'
+                'x-ms-request-id' = Get-SafeRawResponseHeader -Headers $headers -Name 'x-ms-request-id'
+                'x-ms-correlation-request-id' = Get-SafeRawResponseHeader -Headers $headers -Name 'x-ms-correlation-request-id'
+                'request-id' = Get-SafeRawResponseHeader -Headers $headers -Name 'request-id'
+                'WWW-Authenticate' = Get-SafeRawResponseHeader -Headers $headers -Name 'WWW-Authenticate'
+            }
+            foreach ($name in @('x-ms-service-request-id','x-ms-request-id','x-ms-correlation-request-id','request-id','WWW-Authenticate')) {
+                $value = Get-SafeRawResponseHeader -Headers $contentHeaders -Name $name
+                if ($value) { $headers[$name] = $value }
+            }
+        }
+    }
+    $exceptionCategory = 'Unknown'
+    if ($exception -is [System.TimeoutException] -or
+        $exception -is [System.Threading.Tasks.TaskCanceledException] -or
+        ($exception -is [System.Net.WebException] -and $exception.Status -eq [System.Net.WebExceptionStatus]::Timeout)) {
+        $exceptionCategory = 'Timeout'
+    }
+    elseif ($null -ne $statusCode) { $exceptionCategory = 'HttpResponse' }
+    elseif ($exception -is [System.Net.Http.HttpRequestException] -or
+        $exception -is [System.Net.WebException] -or
+        $exception -is [System.IO.IOException]) {
+        $exceptionCategory = 'Transport'
+    }
+    $errorCode = $null
+    $message = [string]$ErrorRecord.ErrorDetails.Message
+    if (-not [string]::IsNullOrWhiteSpace($message) -and $message.Length -le 65536) {
+        try {
+            $body = ConvertFrom-Json -InputObject $message -ErrorAction Stop
+            if ([string]$body.error.code -cmatch '^0x[0-9a-fA-F]{8}$') {
+                $errorCode = ([string]$body.error.code).ToLowerInvariant()
+            }
+        } catch { }
+    }
+    [pscustomobject]@{
+        StatusCode = $statusCode
+        Headers = $headers
+        ErrorCode = $errorCode
+        ExceptionCategory = $exceptionCategory
+    }
+}
+
 function New-SafeHttpFailure {
     param([string]$Method, [string]$Resource, [DateTimeOffset]$Timestamp,
-        [int]$StatusCode, [object]$Response, [object]$Headers)
+        [Nullable[int]]$StatusCode, [object]$Response, [object]$Headers,
+        [System.Management.Automation.ErrorRecord]$ErrorRecord,
+        [bool]$DispatchStarted = $false, [bool]$WritesMayHaveOccurred = $script:WritesStarted,
+        [string]$ExceptionCategoryOverride)
+    $exceptionDetails = if ($ErrorRecord) { Get-HttpExceptionDetails -ErrorRecord $ErrorRecord } else { $null }
+    if ($null -eq $StatusCode -and $exceptionDetails) { $StatusCode = $exceptionDetails.StatusCode }
+    if ($null -eq $Headers -and $exceptionDetails) { $Headers = $exceptionDetails.Headers }
     $endpoint = switch -Regex ($Resource) {
         '^EntityDefinitions' { '/api/data/v9.2/EntityDefinitions'; break }
         '^PublishXml$' { '/api/data/v9.2/PublishXml'; break }
@@ -264,22 +418,29 @@ function New-SafeHttpFailure {
         '^solutioncomponents$' { '/api/data/v9.2/solutioncomponents'; break }
         default { '/api/data/v9.2/[omitted]' }
     }
+    $validStatus = if ($null -ne $StatusCode -and $StatusCode -ge 100 -and $StatusCode -le 599) { [int]$StatusCode } else { $null }
+    $exceptionCategory = if ($ExceptionCategoryOverride -in @('HttpResponse','Timeout','Transport','Unknown')) {
+        $ExceptionCategoryOverride
+    } elseif ($exceptionDetails) { [string]$exceptionDetails.ExceptionCategory } else { 'None' }
+    $failureClass = Get-RecoveryFailureClass -StatusCode $validStatus -ExceptionCategory $exceptionCategory
     $operation = if ($Method -eq 'POST') {
         if ($Resource -ceq 'PublishXml') { 'PublishTable' }
         elseif ($Resource -ceq 'EntityDefinitions') { 'CreateTable' }
         else { 'CreateAttribute' }
     } else { 'ReadMetadata' }
-    $summary = switch ($StatusCode) {
-        0 { 'Transport failure or timeout; response unavailable.' }
-        400 { 'Request construction or metadata validation rejected.' }
-        401 { 'Authentication/token failure; challenge and body omitted.' }
-        403 { 'Authorization/privilege failure.' }
-        408 { 'Request timed out; write outcome uncertain.' }
-        429 { 'Rate limited; no automatic retry.' }
-        default { if ($StatusCode -ge 500) { 'Server failure; outcome uncertain.' } else { 'Unexpected HTTP response; operation stopped.' } }
+    $summary = switch ($failureClass) {
+        'HTTP_401' { 'Authentication/token failure; unsafe response details omitted.' }
+        'HTTP_403' { 'Authorization/privilege failure; unsafe response details omitted.' }
+        'HTTP_4XX_VALIDATION' { 'Dataverse rejected the request; unsafe response details omitted.' }
+        'HTTP_429' { 'Dataverse rate limited the request; no automatic retry.' }
+        'HTTP_5XX' { 'Dataverse server failure; write outcome may be uncertain.' }
+        'TIMEOUT' { 'Request timed out; write outcome may be uncertain.' }
+        'TRANSPORT_FAILURE' { 'Transport failed; HTTP response unavailable.' }
+        default { 'HTTP status unavailable or unexpected; write outcome may be uncertain.' }
     }
     $code = $null
     if ($null -ne $Response -and [string]$Response.error.code -cmatch '^0x[0-9a-fA-F]{8}$') { $code = ([string]$Response.error.code).ToLowerInvariant() }
+    if (-not $code -and $exceptionDetails) { $code = $exceptionDetails.ErrorCode }
     $requestId = Get-SafeResponseHeader -Headers $Headers -Name 'x-ms-service-request-id'
     if (-not $requestId) { $requestId = Get-SafeResponseHeader -Headers $Headers -Name 'x-ms-request-id' }
     $correlationId = Get-SafeResponseHeader -Headers $Headers -Name 'x-ms-correlation-request-id'
@@ -289,12 +450,18 @@ function New-SafeHttpFailure {
         Method = if ($Method -in @('GET','POST')) { $Method } else { 'UNKNOWN' }
         ApiPath = $endpoint
         TimestampUtc = $Timestamp.ToUniversalTime().ToString('o')
-        StatusCode = if ($StatusCode -ge 100 -and $StatusCode -le 599) { $StatusCode } else { $null }
+        StatusCode = $validStatus
+        HttpStatus = if ($null -ne $validStatus) { $validStatus } else { 'UNKNOWN' }
         DataverseErrorCode = $code
         ErrorSummary = $summary
         RequestId = $requestId
         CorrelationId = $correlationId
-        WritesMayHaveOccurred = [bool]$script:WritesStarted
+        AuthenticationChallenge = Get-SafeAuthenticationChallenge -Headers $Headers
+        FailureClass = $failureClass
+        ExceptionCategory = $exceptionCategory
+        TransportKind = if ($exceptionCategory -eq 'Timeout') { 'TIMEOUT' } elseif ($exceptionCategory -eq 'Transport') { 'TRANSPORT' } elseif ($null -ne $validStatus) { 'HTTP' } else { 'UNKNOWN' }
+        DispatchStarted = [bool]$DispatchStarted
+        WritesMayHaveOccurred = [bool]$WritesMayHaveOccurred
         ReconciliationCompleted = $false
         ReconciliationOutcome = 'UNKNOWN'
     }
@@ -399,10 +566,45 @@ function Invoke-PrivateOperation {
         $null = $pipeline.AddScript({
             param($operation, $parameters)
             try { & ([scriptblock]::Create($operation)) @parameters }
-            catch { [pscustomobject]@{ Succeeded = $false } }
+            catch {
+                $record = $_
+                $exception = $record.Exception
+                $responseStatus = $null
+                $category = 'Unknown'
+                for ($depth = 0; $null -ne $exception -and $depth -lt 8; $depth++) {
+                    try {
+                        $candidate = [int]$exception.Response.StatusCode
+                        if ($candidate -ge 100 -and $candidate -le 599) { $responseStatus = $candidate }
+                    } catch { }
+                    if ($null -eq $responseStatus) {
+                        try {
+                            $candidate = [int]$exception.StatusCode
+                            if ($candidate -ge 100 -and $candidate -le 599) { $responseStatus = $candidate }
+                        } catch { }
+                    }
+                    if ($null -ne $responseStatus) { $category = 'HttpResponse'; break }
+                    if ($exception -is [System.TimeoutException] -or
+                        $exception -is [System.Threading.Tasks.TaskCanceledException] -or
+                        ($exception -is [System.Net.WebException] -and $exception.Status -eq [System.Net.WebExceptionStatus]::Timeout)) {
+                        $category = 'Timeout'
+                        break
+                    }
+                    if ($exception -is [System.Net.Http.HttpRequestException] -or
+                        $exception -is [System.Net.WebException] -or
+                        $exception -is [System.IO.IOException]) {
+                        $category = 'Transport'
+                        break
+                    }
+                    $exception = $exception.InnerException
+                }
+                [pscustomobject]@{ Succeeded = $false; ErrorRecord = $record; StatusCode = $responseStatus; ExceptionCategory = $category }
+            }
         }).AddArgument($Action.ToString()).AddArgument($Arguments)
         $records = @($pipeline.Invoke())
-        if ($pipeline.HadErrors -or $records.Count -ne 1) { return [pscustomobject]@{ Succeeded = $false } }
+        if ($records.Count -ne 1) {
+            $pipelineError = if ($pipeline.Streams.Error.Count) { $pipeline.Streams.Error[0] } else { $null }
+            return [pscustomobject]@{ Succeeded = $false; ErrorRecord = $pipelineError }
+        }
         $records[0]
     }
     finally { $pipeline.Dispose() }
@@ -575,6 +777,7 @@ function Invoke-DataverseRequest {
     $requestStartedUtc = [DateTimeOffset]::UtcNow
     $responseStatusCode = 0
     $responseHeaders = $null
+    $script:LastRequestDispatchStarted = $false
     if ($Method -eq 'POST') {
         if ($CreateOnlyRecovery) {
             if (-not $script:WritesAllowed -or $Apply -or $PlanOnly -or $TableName -cne 'os_sr_pos' -or
@@ -594,13 +797,21 @@ function Invoke-DataverseRequest {
         if ($CreateOnlyRecovery) { $script:RecoveryAttemptTimestampUtc = $requestStartedUtc.ToString('o') }
     }
     $script:RequestCounts[$Method]++
+    $script:LastRequestDispatchStarted = $true
     $transport = Invoke-PrivateOperation -Arguments @($request) -Action {
         param($parameters)
         $response = Invoke-RestMethod @parameters -Verbose:$false -Debug:$false -WarningAction SilentlyContinue -InformationAction SilentlyContinue 2>$null 3>$null 4>$null 5>$null 6>$null
         [pscustomobject]@{ Succeeded = $true; Response = $response; Status = $responseStatusCode; Headers = $responseHeaders }
     }
     if (-not $transport.Succeeded) {
-        $script:LastHttpFailure = New-SafeHttpFailure -Method $Method -Resource $resource -Timestamp $requestStartedUtc -StatusCode 0
+        $script:LastHttpFailure = New-SafeHttpFailure -Method $Method -Resource $resource -Timestamp $requestStartedUtc `
+            -StatusCode $transport.StatusCode -ErrorRecord $transport.ErrorRecord -ExceptionCategoryOverride $transport.ExceptionCategory `
+            -DispatchStarted $script:LastRequestDispatchStarted `
+            -WritesMayHaveOccurred:$script:WritesStarted
+        if ($CreateOnlyRecovery -and $Method -eq 'POST') {
+            $script:RecoveryRequestId = $script:LastHttpFailure.RequestId
+            $script:RecoveryCorrelationId = $script:LastHttpFailure.CorrelationId
+        }
         throw 'Dataverse transport failed; raw exception details omitted. Reconcile before recovery.'
     }
     $response = $transport.Response
@@ -616,7 +827,13 @@ function Invoke-DataverseRequest {
         $script:WriteResults.Add([ordered]@{ Method = $Method; Path = $Path; StatusCode = $statusCode })
     }
     if ($statusCode -lt 200 -or $statusCode -ge 300) {
-        $script:LastHttpFailure = New-SafeHttpFailure -Method $Method -Resource $resource -Timestamp $requestStartedUtc -StatusCode $statusCode -Response $response -Headers $responseHeaders
+        $script:LastHttpFailure = New-SafeHttpFailure -Method $Method -Resource $resource -Timestamp $requestStartedUtc `
+            -StatusCode $statusCode -Response $response -Headers $responseHeaders -DispatchStarted $script:LastRequestDispatchStarted `
+            -WritesMayHaveOccurred:$script:WritesStarted
+        if ($CreateOnlyRecovery -and $Method -eq 'POST') {
+            $script:RecoveryRequestId = $script:LastHttpFailure.RequestId
+            $script:RecoveryCorrelationId = $script:LastHttpFailure.CorrelationId
+        }
         throw "Dataverse HTTP $statusCode; raw response details omitted. Review the safe diagnostic."
     }
     $response
@@ -867,10 +1084,13 @@ function Invoke-PositionCreateOnlyRecovery {
         $script:RecoveryResponseClass = 'SUCCESS_RESPONSE'
     }
     catch {
-        if ($null -ne $script:LastHttpFailure -and $null -ne $script:LastHttpFailure.StatusCode) {
-            $statusCode = [int]$script:LastHttpFailure.StatusCode
+        if ($null -eq $script:LastHttpFailure) {
+            $script:LastHttpFailure = New-SafeHttpFailure -Method POST -Resource 'EntityDefinitions' `
+                -Timestamp ([DateTimeOffset]::UtcNow) -StatusCode $null -ErrorRecord $_ `
+                -DispatchStarted $script:LastRequestDispatchStarted -WritesMayHaveOccurred:$script:WritesStarted
         }
-        $script:RecoveryResponseClass = Get-RecoveryFailureState -StatusCode $statusCode
+        if ($null -ne $script:LastHttpFailure.StatusCode) { $statusCode = [int]$script:LastHttpFailure.StatusCode }
+        $script:RecoveryResponseClass = [string]$script:LastHttpFailure.FailureClass
     }
 
     Set-RecoveryState -State 'RECONCILING'
@@ -887,10 +1107,7 @@ function Invoke-PositionCreateOnlyRecovery {
         'PARTIAL' { 'PARTIAL_STATE'; break }
         default {
             if ($statusCode -ge 200 -and $statusCode -lt 300) { 'UNCERTAIN' }
-            elseif ($statusCode -eq 401) { 'FAILED_AUTH' }
-            elseif ($statusCode -eq 403) { 'FAILED_AUTHZ' }
-            elseif ($statusCode -ge 400 -and $statusCode -lt 500 -and $statusCode -notin @(408, 429)) { 'FAILED_VALIDATION' }
-            else { 'UNCERTAIN' }
+            else { Get-RecoveryFailureState -StatusCode $script:LastHttpFailure.StatusCode -FailureClass $script:LastHttpFailure.FailureClass }
         }
     }
     Set-RecoveryState -State $terminalState

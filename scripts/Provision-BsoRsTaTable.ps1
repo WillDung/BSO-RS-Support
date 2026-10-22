@@ -4,6 +4,8 @@ param(
     [switch]$Apply,
     [switch]$PlanOnly,
     [switch]$CreateOnlyRecovery,
+    [switch]$CreateOnlyCandidateSource,
+    [switch]$PublishOnly,
     [string]$AuthorizationReference,
     [string]$EnvironmentName = $env:BSO_RS_ENVIRONMENT_NAME,
     [string]$OrganizationUrl = $env:BSO_RS_ORG_URL,
@@ -20,15 +22,20 @@ $script:AccessToken = $null
 $script:AccessTokenIssuedAt = [DateTimeOffset]::MinValue
 $script:AccessTokenExpiresOn = [DateTimeOffset]::MinValue
 $script:LastHttpFailure = $null
+$script:PreflightStage = 'INITIALIZATION'
+$script:PublicationStateDiagnostic = $null
+$script:PositionPublicationState = $null
 $script:LastRequestDispatchStarted = $false
 $script:ApiRoot = $null
 $script:WritesStarted = $false
 $script:WritesAllowed = $false
 $script:RequestCounts = @{ GET = 0; POST = 0 }
 $script:WriteResults = [System.Collections.Generic.List[object]]::new()
-$script:RecoveryState = if ($CreateOnlyRecovery) { 'PRECHECK' } else { $null }
+$script:IsBoundedWrite = $CreateOnlyRecovery -or $CreateOnlyCandidateSource -or $PublishOnly
+$script:RecoveryState = if ($script:IsBoundedWrite) { 'PRECHECK' } else { $null }
 $script:RecoveryTransitions = [System.Collections.Generic.List[object]]::new()
 $script:RecoveryExpectedFingerprint = '0f7372eeb66c0214ae08ed0dc74f82c981cc4cd73baa9156f16d6e1bd1f48e80'
+$script:CandidateSourceExpectedFingerprint = '867803e7533bfb053c70b951edc47cb4475b5f0183852dcb850b88b317c08f16'
 $script:RecoveryActualFingerprint = $null
 $script:RecoveryReconciliation = $null
 $script:RecoveryResponseClass = $null
@@ -178,6 +185,23 @@ function Assert-PositionPayloadFingerprint {
         throw 'Position payload fingerprint differs from the approved recovery payload; no authentication or request was attempted.'
     }
     $script:RecoveryActualFingerprint
+}
+
+function Assert-CandidateSourceTable {
+    param([Parameter(Mandatory = $true)][string]$Name)
+    if ($Name -cne 'os_sr_csrc') { throw 'Candidate Source create-only mode is restricted to os_sr_csrc.' }
+}
+
+function Assert-CandidateSourcePayloadFingerprint {
+    param([Parameter(Mandatory = $true)][object]$Payload)
+    $script:RecoveryExpectedFingerprint = $script:CandidateSourceExpectedFingerprint
+    $script:CandidateSourceActualFingerprint = Get-PayloadFingerprint -Payload $Payload
+    if ($script:CandidateSourceActualFingerprint -cne $script:CandidateSourceExpectedFingerprint) {
+        if ($script:RecoveryState -eq 'PRECHECK') { Set-RecoveryState -State 'FAILED_VALIDATION' }
+        throw 'Candidate Source payload differs from the approved fingerprint; no authentication or request was attempted.'
+    }
+    $script:RecoveryActualFingerprint = $script:CandidateSourceActualFingerprint
+    $script:CandidateSourceActualFingerprint
 }
 
 function Assert-ExpectedRecoveryUser {
@@ -485,13 +509,15 @@ function Get-StoppedDetails {
     }
     $details = [ordered]@{
         Error = 'Operation stopped; raw exception details omitted. Do not retry automatically.'
+        PreflightStage = $script:PreflightStage
         WritesMayHaveOccurred = [bool]$script:WritesStarted
         Reconciliation = $reconciliation
         RequestsAttempted = $script:RequestCounts
         WriteResults = $script:WriteResults.ToArray()
         HttpFailure = $originalFailure
+        PublicationStateDiagnostic = $script:PublicationStateDiagnostic
     }
-    if ($CreateOnlyRecovery) {
+    if ($CreateOnlyRecovery -or $CreateOnlyCandidateSource -or $PublishOnly) {
         $details.Recovery = [ordered]@{
             State = $script:RecoveryState
             StateTransitions = $script:RecoveryTransitions.ToArray()
@@ -626,7 +652,7 @@ function Get-ValidatedAccessToken {
     }
     $authorizedTenants = @(Get-AzTenant -ErrorAction SilentlyContinue)
     if ($authorizedTenants.Count -eq 0) {
-        if ($CreateOnlyRecovery) { throw 'No existing Az user context is available; recovery will not trigger interactive sign-in.' }
+        if ($script:IsBoundedWrite) { throw 'No existing Az user context is available; bounded metadata operations will not trigger interactive sign-in.' }
         Connect-AzAccount -ErrorAction Stop | Out-Null
     }
     $context = Get-AzContext -ErrorAction Stop
@@ -716,6 +742,7 @@ function Invoke-DataverseRequest {
         [object]$Body,
         [switch]$WithSolutionHeader
     )
+    $boundedWrite = $CreateOnlyRecovery -or $CreateOnlyCandidateSource -or $PublishOnly
     if ($Method -eq 'POST') {
         if ($CreateOnlyRecovery) {
             if (-not $script:WritesAllowed -or $Apply -or $PlanOnly -or $TableName -cne 'os_sr_pos' -or
@@ -725,6 +752,26 @@ function Invoke-DataverseRequest {
                 $script:RecoveryActualFingerprint -cne $script:RecoveryExpectedFingerprint -or
                 (Get-PayloadFingerprint -Payload $Body) -cne $script:RecoveryExpectedFingerprint) {
                 throw 'Create-only recovery POST blocked by its one-write guard.'
+            }
+        }
+        elseif ($CreateOnlyCandidateSource) {
+            if (-not $script:WritesAllowed -or $Apply -or $PlanOnly -or $TableName -cne 'os_sr_csrc' -or
+                $Path -cne 'EntityDefinitions' -or $Body.SchemaName -cne 'os_sr_csrc' -or
+                -not $WithSolutionHeader -or $script:RecoveryState -cne 'READY' -or
+                $script:RequestCounts.POST -ne 0 -or
+                $script:RecoveryActualFingerprint -cne $script:CandidateSourceExpectedFingerprint -or
+                (Get-PayloadFingerprint -Payload $Body) -cne $script:CandidateSourceExpectedFingerprint) {
+                throw 'Candidate Source create-only POST blocked by its one-write guard.'
+            }
+        }
+        elseif ($PublishOnly) {
+            $expectedXml = "<importexportxml><entities><entity>$TableName</entity></entities></importexportxml>"
+            if (-not $script:WritesAllowed -or $Apply -or $PlanOnly -or
+                $TableName -notin @('os_sr_pos', 'os_sr_csrc') -or
+                $Path -cne 'PublishXml' -or $Body.ParameterXml -cne $expectedXml -or
+                $WithSolutionHeader -or $script:RecoveryState -cne 'READY' -or
+                $script:RequestCounts.POST -ne 0) {
+                throw 'Table-scoped PublishXml blocked by its one-write guard.'
             }
         }
         else {
@@ -769,7 +816,7 @@ function Invoke-DataverseRequest {
         TimeoutSec = 120
         ErrorAction = 'Stop'
     }
-    if ($CreateOnlyRecovery) { $request.MaximumRetryCount = 0 }
+    if ($boundedWrite) { $request.MaximumRetryCount = 0 }
     if ($PSBoundParameters.ContainsKey('Body')) {
         $request.ContentType = 'application/json; charset=utf-8'
         $request.Body = ConvertTo-Json -InputObject $Body -Depth 40 -Compress
@@ -779,14 +826,10 @@ function Invoke-DataverseRequest {
     $responseHeaders = $null
     $script:LastRequestDispatchStarted = $false
     if ($Method -eq 'POST') {
-        if ($CreateOnlyRecovery) {
-            if (-not $script:WritesAllowed -or $Apply -or $PlanOnly -or $TableName -cne 'os_sr_pos' -or
-                $Path -cne 'EntityDefinitions' -or $Body.SchemaName -cne 'os_sr_pos' -or
-                -not $WithSolutionHeader -or $script:RecoveryState -cne 'READY' -or
-                $script:RequestCounts.POST -ne 0 -or
-                $script:RecoveryActualFingerprint -cne $script:RecoveryExpectedFingerprint -or
-                (Get-PayloadFingerprint -Payload $Body) -cne $script:RecoveryExpectedFingerprint) {
-                throw 'Create-only recovery POST blocked by its one-write guard.'
+        if ($boundedWrite) {
+            if (-not $script:WritesAllowed -or $Apply -or $PlanOnly -or
+                $script:RecoveryState -cne 'READY' -or $script:RequestCounts.POST -ne 0) {
+                throw 'Bounded metadata POST blocked by its one-write guard.'
             }
             Set-RecoveryState -State 'WRITE_ATTEMPTED'
         }
@@ -794,7 +837,7 @@ function Invoke-DataverseRequest {
             throw 'POST blocked: confirmed Apply is required.'
         }
         $script:WritesStarted = $true
-        if ($CreateOnlyRecovery) { $script:RecoveryAttemptTimestampUtc = $requestStartedUtc.ToString('o') }
+        if ($boundedWrite) { $script:RecoveryAttemptTimestampUtc = $requestStartedUtc.ToString('o') }
     }
     $script:RequestCounts[$Method]++
     $script:LastRequestDispatchStarted = $true
@@ -808,7 +851,7 @@ function Invoke-DataverseRequest {
             -StatusCode $transport.StatusCode -ErrorRecord $transport.ErrorRecord -ExceptionCategoryOverride $transport.ExceptionCategory `
             -DispatchStarted $script:LastRequestDispatchStarted `
             -WritesMayHaveOccurred:$script:WritesStarted
-        if ($CreateOnlyRecovery -and $Method -eq 'POST') {
+        if ($boundedWrite -and $Method -eq 'POST') {
             $script:RecoveryRequestId = $script:LastHttpFailure.RequestId
             $script:RecoveryCorrelationId = $script:LastHttpFailure.CorrelationId
         }
@@ -817,7 +860,7 @@ function Invoke-DataverseRequest {
     $response = $transport.Response
     $responseHeaders = $transport.Headers
     $statusCode = [int]$transport.Status
-    if ($CreateOnlyRecovery -and $Method -eq 'POST') {
+    if ($boundedWrite -and $Method -eq 'POST') {
         $script:RecoveryRequestId = Get-SafeResponseHeader -Headers $responseHeaders -Name 'x-ms-service-request-id'
         if (-not $script:RecoveryRequestId) { $script:RecoveryRequestId = Get-SafeResponseHeader -Headers $responseHeaders -Name 'x-ms-request-id' }
         $script:RecoveryCorrelationId = Get-SafeResponseHeader -Headers $responseHeaders -Name 'x-ms-correlation-request-id'
@@ -830,7 +873,7 @@ function Invoke-DataverseRequest {
         $script:LastHttpFailure = New-SafeHttpFailure -Method $Method -Resource $resource -Timestamp $requestStartedUtc `
             -StatusCode $statusCode -Response $response -Headers $responseHeaders -DispatchStarted $script:LastRequestDispatchStarted `
             -WritesMayHaveOccurred:$script:WritesStarted
-        if ($CreateOnlyRecovery -and $Method -eq 'POST') {
+        if ($boundedWrite -and $Method -eq 'POST') {
             $script:RecoveryRequestId = $script:LastHttpFailure.RequestId
             $script:RecoveryCorrelationId = $script:LastHttpFailure.CorrelationId
         }
@@ -892,6 +935,24 @@ function Get-SolutionMembership {
     @(Get-ODataList -Path "solutioncomponents?`$select=solutioncomponentid,componenttype,objectid,_solutionid_value,rootcomponentbehavior&`$filter=$filter")
 }
 
+function Get-TablePublicationState {
+    param([Parameter(Mandatory = $true)][string]$SolutionId, [Parameter(Mandatory = $true)][object]$Metadata)
+    $script:PreflightStage = 'PUBLICATION_STATE'
+    $filter = [Uri]::EscapeDataString("_solutionid_value eq $SolutionId and objectid eq $($Metadata.MetadataId) and componenttype eq 1")
+    $components = @(Get-ODataList -Path "solutioncomponents?`$filter=$filter")
+    $stateProperty = if ($components.Count -eq 1) { $components[0].PSObject.Properties['componentstate'] } else { $null }
+    $script:PublicationStateDiagnostic = [ordered]@{
+        ComponentCount = $components.Count
+        StateFieldPresent = ($null -ne $stateProperty)
+    }
+    if ($components.Count -ne 1 -or $null -eq $stateProperty -or $null -eq $stateProperty.Value) { return 'UNKNOWN' }
+    switch ([int]$stateProperty.Value) {
+        0 { $script:PublicationStateDiagnostic.State = 'PUBLISHED'; 'PUBLISHED'; break }
+        1 { $script:PublicationStateDiagnostic.State = 'UNPUBLISHED'; 'UNPUBLISHED'; break }
+        default { 'UNKNOWN' }
+    }
+}
+
 function Get-SolutionSchemaComponents {
     param([Parameter(Mandatory = $true)][string]$SolutionId)
     $filter = [Uri]::EscapeDataString("_solutionid_value eq $SolutionId")
@@ -914,7 +975,11 @@ function Assert-SolutionMembership {
 }
 
 function Assert-RecoveryPrivileges {
-    $requiredPrivileges = @('prvCreateEntity', 'prvCreateAttribute', 'prvCreateCustomization')
+    $requiredPrivileges = if ($PublishOnly) {
+        @('prvPublishCustomization')
+    } else {
+        @('prvCreateEntity', 'prvCreateAttribute', 'prvCreateCustomization')
+    }
     $names = ConvertTo-Json -InputObject $requiredPrivileges -Compress
     $path = "systemusers($($script:PacUserId))/Microsoft.Dynamics.CRM.RetrieveUserSetOfPrivilegesByNames(PrivilegeNames=@p)?@p=$names"
     $result = Invoke-DataverseRequest -Method GET -Path $path
@@ -934,29 +999,39 @@ function Get-AuditState {
 }
 
 function Get-Preflight {
+    $script:PreflightStage = 'PAC_ENVIRONMENT'
     Assert-PacEnvironment
+    $script:PreflightStage = 'TOKEN_AND_IDENTITY'
     Get-InteractiveAccessToken
     $who = Invoke-DataverseRequest -Method GET -Path 'WhoAmI'
     if ($who.OrganizationId -ne $ExpectedOrganizationId -or $who.UserId -ne $script:PacUserId) { throw 'WhoAmI organization/user mismatch; stop without writes.' }
-    if ($CreateOnlyRecovery) { $script:RecoveryIdentityVerified = $true }
+    if ($script:IsBoundedWrite) {
+        $script:RecoveryIdentityVerified = $true
+        $script:RecoveryEnvironmentVerified = $true
+    }
+    $script:PreflightStage = 'ORGANIZATION'
     $org = Invoke-DataverseRequest -Method GET -Path "organizations($ExpectedOrganizationId)?`$select=organizationid"
     if ($org.organizationid -ne $ExpectedOrganizationId) { throw 'Organization metadata mismatch; stop without writes.' }
 
+    $script:PreflightStage = 'PUBLISHER'
     $publisherFilter = [Uri]::EscapeDataString("uniquename eq 'os_bso_rs_support'")
     $publishers = @(Get-ODataList -Path "publishers?`$select=publisherid,friendlyname,uniquename,customizationprefix&`$filter=$publisherFilter")
     if ($publishers.Count -ne 1 -or $publishers[0].friendlyname -cne 'BSO-RS-Support Publisher' -or
         $publishers[0].customizationprefix -cne 'os') { throw 'Project Publisher mismatch; stop without writes.' }
+    $script:PreflightStage = 'SOLUTION'
     $solutionFilter = [Uri]::EscapeDataString("uniquename eq 'os_sr_bso_rs_support'")
     $solutions = @(Get-ODataList -Path "solutions?`$select=solutionid,friendlyname,uniquename,version,ismanaged,_publisherid_value&`$filter=$solutionFilter")
     if ($solutions.Count -ne 1 -or $solutions[0].friendlyname -cne 'BSO-RS-Support' -or
         $solutions[0].version -cne '1.0.0.0' -or $solutions[0].ismanaged -ne $false -or
         $solutions[0]._publisherid_value -ne $publishers[0].publisherid) { throw 'Project Solution/Publisher linkage mismatch; stop without writes.' }
 
+    $script:PreflightStage = 'PROJECT_INVENTORY'
     $projectTables = @(Get-ProjectEntityNames)
     if (@($projectTables | Where-Object { $_ -notin $script:Definitions.Keys }).Count) { throw 'Unexpected project table exists; stop for reconciliation.' }
     $snapshots = @{}
     $existingTableIds = [System.Collections.Generic.List[string]]::new()
     foreach ($existingName in $projectTables) {
+        $script:PreflightStage = "TABLE_METADATA:$existingName"
         $existing = Get-EntityMetadata -LogicalName $existingName
         Assert-TableMetadata -Metadata $existing -Definition $script:Definitions[$existingName]
         Assert-SolutionMembership -SolutionId $solutions[0].solutionid -Metadata $existing
@@ -969,17 +1044,49 @@ function Get-Preflight {
         }
     }
     if ($CreateOnlyRecovery) {
+        $script:PreflightStage = 'SOLUTION_COMPONENT_INVENTORY'
         $solutionComponents = @(Get-SolutionSchemaComponents -SolutionId $solutions[0].solutionid)
         Assert-RecoveryInventory -ProjectTables $projectTables -SolutionComponents $solutionComponents -ExistingTableIds $existingTableIds.ToArray()
         if ($TableName -in $projectTables) { throw 'Position already exists; recovery will not update, delete, or recreate it.' }
     }
+    elseif ($CreateOnlyCandidateSource -or $PublishOnly) {
+        $script:PreflightStage = 'SOLUTION_COMPONENT_INVENTORY'
+        $solutionComponents = @(Get-SolutionSchemaComponents -SolutionId $solutions[0].solutionid)
+        $expectedTables = if ($CreateOnlyCandidateSource -or $TableName -ceq 'os_sr_pos') {
+            @('os_sr_pos', 'os_sr_ta')
+        } else {
+            @('os_sr_csrc', 'os_sr_pos', 'os_sr_ta')
+        }
+        if ((($projectTables | Sort-Object) -join ',') -cne (($expectedTables | Sort-Object) -join ',') -or
+            @($solutionComponents | Where-Object {
+                [int]$_.componenttype -in @(1, 2) -and [string]$_.objectid -notin $existingTableIds
+            }).Count) {
+            throw 'Project table inventory or Solution Entity/Attribute mapping differs from the approved bounded-operation baseline.'
+        }
+        if ($CreateOnlyCandidateSource -and $TableName -in $projectTables) {
+            throw 'Candidate Source already exists; create-only mode will not update or recreate it.'
+        }
+        if ($CreateOnlyCandidateSource) {
+            $position = Get-EntityMetadata -LogicalName 'os_sr_pos'
+            $script:PositionPublicationState = Get-TablePublicationState -SolutionId $solutions[0].solutionid -Metadata $position
+            if ($script:PositionPublicationState -cne 'PUBLISHED') {
+                throw 'Position is not verified as published; Candidate Source creation is blocked.'
+            }
+        }
+        if ($PublishOnly -and $TableName -notin $projectTables) {
+            throw 'Table-scoped publication requires the target table to exist and validate.'
+        }
+    }
     elseif ($Apply -and $TableName -in $projectTables) { throw 'Target already exists; Apply will not update, delete, or recreate it.' }
-    $verifiedPrivileges = if ($CreateOnlyRecovery) { @(Assert-RecoveryPrivileges) } else { @() }
-    if ($CreateOnlyRecovery) { $script:RecoveryVerifiedPrivileges = $verifiedPrivileges }
+    $script:PreflightStage = 'PRIVILEGES'
+    $verifiedPrivileges = if ($script:IsBoundedWrite) { @(Assert-RecoveryPrivileges) } else { @() }
+    if ($script:IsBoundedWrite) { $script:RecoveryVerifiedPrivileges = $verifiedPrivileges }
+    $script:PreflightStage = 'AUDIT'
     $audit = Get-AuditState
     if ($audit.AuditingEnabled -ne $false -or $audit.UserAccessAuditingEnabled -ne $false) {
         throw 'Audit state differs from the documented baseline; this script will not modify audit settings.'
     }
+    $script:PreflightStage = 'COMPLETE'
     [pscustomobject]@{
         OrganizationId = [string]$org.organizationid
         PublisherId = [string]$publishers[0].publisherid
@@ -1071,7 +1178,7 @@ function Get-ReconciliationSummary {
     catch { return [ordered]@{ Completed = $false; Outcome = 'UNKNOWN' } }
 }
 
-function Invoke-PositionCreateOnlyRecovery {
+function Invoke-BoundedEntityCreation {
     param(
         [Parameter(Mandatory = $true)][object]$Payload,
         [Parameter(Mandatory = $true)][string]$SolutionId
@@ -1111,8 +1218,18 @@ function Invoke-PositionCreateOnlyRecovery {
         }
     }
     Set-RecoveryState -State $terminalState
+    $operationOutcome = if ($script:RecoveryReconciliation.Outcome -eq 'PARTIAL') {
+        'PARTIAL_STATE'
+    } elseif ($script:RecoveryReconciliation.Outcome -eq 'PRESENT' -and $statusCode -ge 200 -and $statusCode -lt 300) {
+        if ($CreateOnlyCandidateSource) { 'VERIFIED_CREATED' } else { 'VERIFIED_SUCCESS' }
+    } elseif ($script:RecoveryReconciliation.Outcome -eq 'PRESENT') {
+        'EXISTING_STATE'
+    } else {
+        $script:RecoveryState
+    }
     [pscustomobject]@{
         State = $script:RecoveryState
+        Outcome = $operationOutcome
         ResponseClass = $script:RecoveryResponseClass
         StatusCode = if ($statusCode -ge 100 -and $statusCode -le 599) { $statusCode } else { $null }
         Method = 'POST'
@@ -1129,14 +1246,96 @@ function Invoke-PositionCreateOnlyRecovery {
     }
 }
 
+function Invoke-PositionCreateOnlyRecovery {
+    param(
+        [Parameter(Mandatory = $true)][object]$Payload,
+        [Parameter(Mandatory = $true)][string]$SolutionId
+    )
+    Invoke-BoundedEntityCreation -Payload $Payload -SolutionId $SolutionId
+}
+
+function Invoke-CandidateSourceCreateOnly {
+    param(
+        [Parameter(Mandatory = $true)][object]$Payload,
+        [Parameter(Mandatory = $true)][string]$SolutionId
+    )
+    $script:RecoveryExpectedFingerprint = $script:CandidateSourceExpectedFingerprint
+    Invoke-BoundedEntityCreation -Payload $Payload -SolutionId $SolutionId
+}
+
+function Invoke-TableScopedPublication {
+    param([Parameter(Mandatory = $true)][string]$SolutionId)
+    $script:ReconciliationSolutionId = $SolutionId
+    $xml = "<importexportxml><entities><entity>$TableName</entity></entities></importexportxml>"
+    $statusCode = 0
+    try {
+        $null = Invoke-DataverseRequest -Method POST -Path 'PublishXml' -Body ([ordered]@{ ParameterXml = $xml })
+        $statusCode = [int]$script:WriteResults[$script:WriteResults.Count - 1].StatusCode
+        $script:RecoveryResponseClass = 'SUCCESS_RESPONSE'
+    }
+    catch {
+        if ($null -eq $script:LastHttpFailure) {
+            $script:LastHttpFailure = New-SafeHttpFailure -Method POST -Resource 'PublishXml' `
+                -Timestamp ([DateTimeOffset]::UtcNow) -StatusCode $null -ErrorRecord $_ `
+                -DispatchStarted $script:LastRequestDispatchStarted -WritesMayHaveOccurred:$script:WritesStarted
+        }
+        if ($null -ne $script:LastHttpFailure.StatusCode) { $statusCode = [int]$script:LastHttpFailure.StatusCode }
+        $script:RecoveryResponseClass = [string]$script:LastHttpFailure.FailureClass
+    }
+
+    Set-RecoveryState -State 'RECONCILING'
+    $originalFailure = if ($null -ne $script:LastHttpFailure) { [ordered]@{} + $script:LastHttpFailure } else { $null }
+    try {
+        $script:RecoveryReconciliation = Get-ReconciliationSummary
+        $publicationState = if ($script:RecoveryReconciliation.Outcome -eq 'PRESENT') {
+            $table = Get-TableMetadataIfPresent
+            Get-TablePublicationState -SolutionId $SolutionId -Metadata $table
+        } else { 'UNKNOWN' }
+    }
+    finally { $script:LastHttpFailure = $originalFailure }
+    if ($null -ne $originalFailure) {
+        $originalFailure.WritesMayHaveOccurred = [bool]$script:WritesStarted
+        $originalFailure.ReconciliationCompleted = $script:RecoveryReconciliation.Completed
+        $originalFailure.ReconciliationOutcome = $script:RecoveryReconciliation.Outcome
+        $originalFailure.PublicationState = $publicationState
+    }
+    $terminalState = if ($script:RecoveryReconciliation.Outcome -eq 'PARTIAL') {
+        'PARTIAL_STATE'
+    } elseif ($publicationState -eq 'PUBLISHED') {
+        'VERIFIED_SUCCESS'
+    } elseif ($null -ne $originalFailure) {
+        Get-RecoveryFailureState -StatusCode $originalFailure.StatusCode -FailureClass $originalFailure.FailureClass
+    } elseif ($statusCode -ge 200 -and $statusCode -lt 300) {
+        'UNCERTAIN'
+    } else {
+        Get-RecoveryFailureState -StatusCode $script:LastHttpFailure.StatusCode -FailureClass $script:LastHttpFailure.FailureClass
+    }
+    Set-RecoveryState -State $terminalState
+    [pscustomobject]@{
+        State = $script:RecoveryState
+        ResponseClass = $script:RecoveryResponseClass
+        StatusCode = if ($statusCode -ge 100 -and $statusCode -le 599) { $statusCode } else { $null }
+        Method = 'POST'
+        ApiPath = '/api/data/v9.2/PublishXml'
+        PublicationState = $publicationState
+        RequestId = $script:RecoveryRequestId
+        CorrelationId = $script:RecoveryCorrelationId
+        Reconciliation = $script:RecoveryReconciliation
+        StateTransitions = $script:RecoveryTransitions.ToArray()
+        Preflight = $script:RecoveryPreflight
+        HttpFailure = if ($null -ne $originalFailure) { $originalFailure } else { $null }
+        WritesMayHaveOccurred = [bool]$script:WritesStarted
+    }
+}
+
 function Show-Plan {
     param([Parameter(Mandatory = $true)][object]$Payloads)
     $preview = [ordered]@{
-        Mode = if ($CreateOnlyRecovery) { 'CreateOnlyRecovery; Position-only; one POST maximum; GET-only reconciliation' } elseif ($PlanOnly) { 'PlanOnly; no authentication/network calls' } elseif ($Apply) { 'Apply requested; preflight and typed confirmation required' } else { 'DryRun; interactive auth and GET-only preflight' }
+        Mode = if ($CreateOnlyRecovery) { 'CreateOnlyRecovery; Position-only; one POST maximum; GET-only reconciliation' } elseif ($CreateOnlyCandidateSource) { 'CreateOnlyCandidateSource; one EntityDefinitions POST maximum; GET-only reconciliation' } elseif ($PublishOnly) { 'PublishOnly; table-scoped PublishXml only; one POST maximum; GET-only reconciliation' } elseif ($PlanOnly) { 'PlanOnly; no authentication/network calls' } elseif ($Apply) { 'Apply requested; preflight and typed confirmation required' } else { 'DryRun; interactive auth and GET-only preflight' }
         Environment = if ($EnvironmentName) { $EnvironmentName } else { 'NOT SUPPLIED' }
-        OrganizationUrl = if ($CreateOnlyRecovery) { '[omitted]' } elseif ($OrganizationUrl) { $OrganizationUrl.TrimEnd('/') } else { 'NOT SUPPLIED' }
-        ExpectedEnvironmentId = if ($CreateOnlyRecovery) { '[omitted]' } elseif ($ExpectedEnvironmentId) { $ExpectedEnvironmentId } else { 'NOT SUPPLIED' }
-        ExpectedOrganizationId = if ($CreateOnlyRecovery) { '[omitted]' } elseif ($ExpectedOrganizationId) { $ExpectedOrganizationId } else { 'NOT SUPPLIED' }
+        OrganizationUrl = if ($script:IsBoundedWrite) { '[omitted]' } elseif ($OrganizationUrl) { $OrganizationUrl.TrimEnd('/') } else { 'NOT SUPPLIED' }
+        ExpectedEnvironmentId = if ($script:IsBoundedWrite) { '[omitted]' } elseif ($ExpectedEnvironmentId) { $ExpectedEnvironmentId } else { 'NOT SUPPLIED' }
+        ExpectedOrganizationId = if ($script:IsBoundedWrite) { '[omitted]' } elseif ($ExpectedOrganizationId) { $ExpectedOrganizationId } else { 'NOT SUPPLIED' }
         SolutionUniqueName = 'os_sr_bso_rs_support'
         PublisherUniqueName = 'os_bso_rs_support'
         PublisherPrefix = 'os'
@@ -1162,6 +1361,14 @@ function Show-Plan {
             @('GET-only target, identity, privilege, Solution, Publisher, inventory, and audit preflight',
                 'At most one POST EntityDefinitions for Position with MSCRM.SolutionUniqueName',
                 'GET-only Position schema and Solution membership reconciliation')
+        } elseif ($CreateOnlyCandidateSource) {
+            @('GET-only target, identity, privilege, Solution, Publisher, inventory, and audit preflight',
+                'At most one POST EntityDefinitions for Candidate Source with MSCRM.SolutionUniqueName',
+                'GET-only Candidate Source schema and Solution membership reconciliation')
+        } elseif ($PublishOnly) {
+            @('GET-only target, identity, privilege, Solution, Publisher, inventory, and audit preflight',
+                "At most one table-scoped PublishXml for $TableName, only when componentstate is unpublished",
+                'GET-only schema, Solution membership, and publication-state reconciliation')
         } else {
             @(
                 'GET WhoAmI, Organization, Publisher, Solution, EntityDefinitions, audit flags',
@@ -1179,9 +1386,11 @@ function Show-Plan {
 }
 
 try {
-    if (($Apply -and $PlanOnly) -or ($CreateOnlyRecovery -and ($Apply -or $PlanOnly))) {
-        if ($CreateOnlyRecovery) { Set-RecoveryState -State 'BLOCKED' }
-        throw 'Choose exactly one of -Apply, -PlanOnly, or -CreateOnlyRecovery.'
+    $boundedModeCount = @(@($CreateOnlyRecovery, $CreateOnlyCandidateSource, $PublishOnly) | Where-Object { $_ }).Count
+    if (($Apply -and $PlanOnly) -or ($boundedModeCount -gt 1) -or
+        ($script:IsBoundedWrite -and ($Apply -or $PlanOnly))) {
+        if ($script:IsBoundedWrite) { Set-RecoveryState -State 'BLOCKED' }
+        throw 'Choose exactly one of -Apply, -PlanOnly, -CreateOnlyRecovery, -CreateOnlyCandidateSource, or -PublishOnly.'
     }
     if ($CreateOnlyRecovery -and $TableName -cne 'os_sr_pos') {
         Set-RecoveryState -State 'BLOCKED'
@@ -1195,18 +1404,40 @@ try {
         Set-RecoveryState -State 'BLOCKED'
         throw 'Create-only recovery requires a safe, non-empty external authorization reference.'
     }
+    if ($CreateOnlyCandidateSource) {
+        if ($TableName -cne 'os_sr_csrc') {
+            Set-RecoveryState -State 'BLOCKED'
+            Assert-CandidateSourceTable -Name $TableName
+        }
+        if (-not $collectionNameWasExplicit) {
+            Set-RecoveryState -State 'BLOCKED'
+            throw 'Candidate Source create-only mode requires explicit -DisplayCollectionName Candidate Sources.'
+        }
+    }
+    if ($PublishOnly -and $TableName -notin @('os_sr_pos', 'os_sr_csrc')) {
+        Set-RecoveryState -State 'BLOCKED'
+        throw 'Publish-only mode is restricted to Position or Candidate Source.'
+    }
+    if (($CreateOnlyCandidateSource -or $PublishOnly) -and
+        $AuthorizationReference -notmatch '^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$') {
+        Set-RecoveryState -State 'BLOCKED'
+        throw 'Bounded operation requires a safe, non-empty external authorization reference.'
+    }
     if ($Apply -and -not $collectionNameWasExplicit) { throw 'Apply requires explicit -DisplayCollectionName and separate owner authorization.' }
     if ($DisplayCollectionName -cne $expectedCollectionName) {
-        if ($CreateOnlyRecovery) { Set-RecoveryState -State 'FAILED_VALIDATION' }
+        if ($script:IsBoundedWrite) { Set-RecoveryState -State 'FAILED_VALIDATION' }
         throw 'Collection label differs from the declared reference schema; stop for review.'
     }
     $payloads = New-SchemaPayloads
     if ($CreateOnlyRecovery) {
         Assert-PositionPayloadFingerprint -Payload $payloads.Table | Out-Null
     }
+    if ($CreateOnlyCandidateSource) {
+        Assert-CandidateSourcePayloadFingerprint -Payload $payloads.Table | Out-Null
+    }
     try { Assert-SchemaPayloads -Payloads $payloads }
     catch {
-        if ($CreateOnlyRecovery -and $script:RecoveryState -eq 'PRECHECK') {
+        if ($script:IsBoundedWrite -and $script:RecoveryState -eq 'PRECHECK') {
             Set-RecoveryState -State 'FAILED_VALIDATION'
         }
         throw
@@ -1216,6 +1447,22 @@ try {
 
     $preflight = Get-Preflight
     $script:ReconciliationSolutionId = $preflight.SolutionId
+    if ($CreateOnlyCandidateSource -or $PublishOnly) {
+        $script:RecoveryPreflight = [ordered]@{
+            EnvironmentName = 'VN LMV IT'
+            EnvironmentVerified = $script:RecoveryEnvironmentVerified
+            IdentityVerified = $script:RecoveryIdentityVerified
+            SolutionUniqueName = $preflight.SolutionUniqueName
+            SolutionUnmanaged = $true
+            PublisherUniqueName = 'os_bso_rs_support'
+            PublisherPrefix = $preflight.PublisherPrefix
+            ProjectTables = $preflight.ProjectTables
+            TargetAbsent = -not $preflight.TargetExists
+            PositionPublicationState = $script:PositionPublicationState
+            SolutionSchemaComponentsMapped = $true
+            VerifiedPrivileges = $preflight.VerifiedPrivileges
+        }
+    }
     if ($CreateOnlyRecovery) {
         $script:RecoveryPreflight = [ordered]@{
             EnvironmentName = 'VN LMV IT'
@@ -1227,6 +1474,7 @@ try {
             PublisherPrefix = $preflight.PublisherPrefix
             ProjectTables = $preflight.ProjectTables
             TargetAbsent = -not $preflight.TargetExists
+            PositionPublicationState = $script:PositionPublicationState
             SolutionSchemaComponentsMapped = $true
             VerifiedPrivileges = $preflight.VerifiedPrivileges
         }
@@ -1242,6 +1490,110 @@ try {
         $recovery = Invoke-PositionCreateOnlyRecovery -Payload $payloads.Table -SolutionId $preflight.SolutionId
         Write-Result -Stage 'CreateOnlyRecovery' -Status $recovery.State -Details $recovery
         if ($recovery.State -cne 'VERIFIED_SUCCESS') { exit 1 }
+        return
+    }
+    if ($CreateOnlyCandidateSource) {
+        $script:RecoveryPreflight = [ordered]@{
+            EnvironmentName = 'VN LMV IT'
+            EnvironmentVerified = $script:RecoveryEnvironmentVerified
+            IdentityVerified = $script:RecoveryIdentityVerified
+            SolutionUniqueName = $preflight.SolutionUniqueName
+            SolutionUnmanaged = $true
+            PublisherUniqueName = 'os_bso_rs_support'
+            PublisherPrefix = $preflight.PublisherPrefix
+            ProjectTables = $preflight.ProjectTables
+            TargetAbsent = -not $preflight.TargetExists
+            SolutionSchemaComponentsMapped = $true
+            VerifiedPrivileges = $preflight.VerifiedPrivileges
+        }
+        $confirmationPhrase = "CREATE CANDIDATE SOURCE os_sr_csrc IN VN LMV IT AUTHORIZATION $AuthorizationReference"
+        $confirmation = Read-Host "Type '$confirmationPhrase' only after confirming the external approval"
+        if ($confirmation -cne $confirmationPhrase) {
+            Set-RecoveryState -State 'BLOCKED'
+            throw 'Candidate Source create-only confirmation did not match; no write performed.'
+        }
+        Ensure-DataverseAccessToken
+        $finalPreflight = Get-Preflight
+        if ($finalPreflight.SolutionId -cne $preflight.SolutionId) {
+            Set-RecoveryState -State 'BLOCKED'
+            throw 'Solution changed during confirmation; no Candidate Source write performed.'
+        }
+        Assert-CandidateSourcePayloadFingerprint -Payload $payloads.Table | Out-Null
+        $preflight = $finalPreflight
+        $script:RecoveryPreflight.ProjectTables = $preflight.ProjectTables
+        $script:RecoveryPreflight.VerifiedPrivileges = $preflight.VerifiedPrivileges
+        $script:WritesAllowed = $true
+        Set-RecoveryState -State 'READY'
+        $recovery = Invoke-CandidateSourceCreateOnly -Payload $payloads.Table -SolutionId $preflight.SolutionId
+        Write-Result -Stage 'CreateOnlyCandidateSource' -Status $recovery.Outcome -Details $recovery
+        if ($recovery.State -cne 'VERIFIED_SUCCESS') { exit 1 }
+        return
+    }
+    if ($PublishOnly) {
+        $metadata = Get-EntityMetadata -LogicalName $TableName
+        $publicationState = Get-TablePublicationState -SolutionId $preflight.SolutionId -Metadata $metadata
+        $script:RecoveryPreflight.TableLogicalName = $TableName
+        $script:RecoveryPreflight.PublicationState = $publicationState
+        if ($publicationState -eq 'PUBLISHED') {
+            Write-Result -Stage 'PublishOnly' -Status 'ALREADY_PUBLISHED' -Details ([ordered]@{
+                TableLogicalName = $TableName
+                PublicationState = $publicationState
+                WritesPerformed = 0
+                RequestsAttempted = $script:RequestCounts
+            })
+            return
+        }
+        if ($publicationState -cne 'UNPUBLISHED') {
+            Set-RecoveryState -State 'BLOCKED'
+            throw 'Table publication state is unknown or ambiguous; no publication was attempted.'
+        }
+        $script:RecoveryPreflight = [ordered]@{
+            EnvironmentName = 'VN LMV IT'
+            EnvironmentVerified = $script:RecoveryEnvironmentVerified
+            IdentityVerified = $script:RecoveryIdentityVerified
+            SolutionUniqueName = $preflight.SolutionUniqueName
+            SolutionUnmanaged = $true
+            PublisherUniqueName = 'os_bso_rs_support'
+            PublisherPrefix = $preflight.PublisherPrefix
+            TableLogicalName = $TableName
+            PublicationState = $publicationState
+            VerifiedPrivileges = $preflight.VerifiedPrivileges
+        }
+        $confirmationPhrase = "PUBLISH $TableName IN VN LMV IT AUTHORIZATION $AuthorizationReference"
+        $confirmation = Read-Host "Type '$confirmationPhrase' only after confirming the external approval"
+        if ($confirmation -cne $confirmationPhrase) {
+            Set-RecoveryState -State 'BLOCKED'
+            throw 'Table-scoped publication confirmation did not match; no write performed.'
+        }
+        Ensure-DataverseAccessToken
+        $finalPreflight = Get-Preflight
+        if ($finalPreflight.SolutionId -cne $preflight.SolutionId) {
+            Set-RecoveryState -State 'BLOCKED'
+            throw 'Solution changed during confirmation; publication was not attempted.'
+        }
+        $metadata = Get-EntityMetadata -LogicalName $TableName
+        $publicationState = Get-TablePublicationState -SolutionId $finalPreflight.SolutionId -Metadata $metadata
+        if ($publicationState -eq 'PUBLISHED') {
+            Write-Result -Stage 'PublishOnly' -Status 'ALREADY_PUBLISHED' -Details ([ordered]@{
+                TableLogicalName = $TableName
+                PublicationState = $publicationState
+                WritesPerformed = 0
+                RequestsAttempted = $script:RequestCounts
+            })
+            return
+        }
+        if ($publicationState -cne 'UNPUBLISHED') {
+            Set-RecoveryState -State 'BLOCKED'
+            throw 'Table publication state changed or is ambiguous; publication was not attempted.'
+        }
+        $preflight = $finalPreflight
+        $script:RecoveryPreflight.PublicationState = $publicationState
+        $script:RecoveryPreflight.VerifiedPrivileges = $preflight.VerifiedPrivileges
+        $script:WritesAllowed = $true
+        Set-RecoveryState -State 'READY'
+        $publication = Invoke-TableScopedPublication -SolutionId $preflight.SolutionId
+        Write-Result -Stage 'PublishOnly' -Status $publication.State -Details $publication
+        if ($publication.State -cne 'VERIFIED_SUCCESS') { exit 1 }
         return
     }
     if (-not $Apply) {
@@ -1304,7 +1656,7 @@ try {
     })
 }
 catch {
-    if ($CreateOnlyRecovery -and $script:RecoveryState -in @('PRECHECK', 'READY')) {
+    if ($script:IsBoundedWrite -and $script:RecoveryState -in @('PRECHECK', 'READY')) {
         Set-RecoveryState -State 'BLOCKED'
     }
     Write-Result -Stage 'PreflightOrExecution' -Status 'Stopped' -Details (Get-StoppedDetails)

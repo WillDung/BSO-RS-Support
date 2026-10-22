@@ -65,6 +65,11 @@ $positionPayloadJson = ConvertTo-Json -InputObject $positionPayload -Depth 40 -C
 $positionPayloadHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($positionPayloadJson))).ToLowerInvariant()
 Assert-Test ($positionPayloadHash -ceq '0f7372eeb66c0214ae08ed0dc74f82c981cc4cd73baa9156f16d6e1bd1f48e80') 'Position PlanOnly payload matches the recovery SHA-256 fingerprint'
 Assert-Test ($positionPlan.Mode -like 'PlanOnly*' -and $positionPlan.OwnershipType -ceq 'OrganizationOwned' -and $positionPlan.TableDisplayName -ceq 'Position' -and $positionPlan.DisplayCollectionName -ceq 'Positions' -and @($positionPlan.AdditionalColumnPayloads).Count -eq 0 -and $positionPlan.AlternateKeys -ceq 'None' -and $positionPlan.DuplicateDetection -ceq 'None' -and $positionPlan.DataRowOperations -match 'no data-table requests') 'Position recovery plan excludes extra columns, keys, relationships and business rows'
+$candidateSourcePlan = (& $provisioner -TableName os_sr_csrc -PlanOnly) | ConvertFrom-Json
+$candidateSourcePayloadJson = ConvertTo-Json -InputObject $candidateSourcePlan.TablePayload -Depth 40 -Compress
+$candidateSourcePayloadHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($candidateSourcePayloadJson))).ToLowerInvariant()
+Assert-Test ($candidateSourcePayloadHash -ceq '867803e7533bfb053c70b951edc47cb4475b5f0183852dcb850b88b317c08f16') 'Candidate Source PlanOnly payload matches the approved SHA-256 fingerprint'
+Assert-Test ($candidateSourcePlan.TableDisplayName -ceq 'Candidate Source' -and $candidateSourcePlan.DisplayCollectionName -ceq 'Candidate Sources' -and $candidateSourcePlan.OwnershipType -ceq 'OrganizationOwned' -and $candidateSourcePlan.PrimaryNameSchemaName -ceq 'os_sr_csrc_nm' -and @($candidateSourcePlan.AdditionalColumnPayloads).Count -eq 0 -and $candidateSourcePlan.AlternateKeys -ceq 'None') 'Candidate Source payload remains single-column and OrganizationOwned'
 $loc = (& $provisioner -TableName os_sr_loc -PlanOnly) | ConvertFrom-Json
 $email, $memo = $loc.AdditionalColumnPayloads
 Assert-Test ($email.SchemaName -ceq 'os_sr_loc_rmeml' -and $email.DisplayName.LocalizedLabels[0].Label -ceq 'Room/Resource Email' -and $email.FormatName.Value -ceq 'Email' -and $email.MaxLength -eq 254 -and $email.RequiredLevel.Value -ceq 'None') 'Location email exact schema'
@@ -108,9 +113,11 @@ $fixture=New-Fixture os_sr_ta;$fixture.Attributes += [pscustomobject]@{LogicalNa
 Assert-Rejected {Assert-TableMetadata $fixture} 'Custom active column' 'Unexpected or missing custom'
 
 $sourceAst=[System.Management.Automation.Language.Parser]::ParseFile($provisioner,[ref]$null,[ref]$null)
-$httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList $sourceAst -ScriptBlock {
-    param($sourceAst)
-    foreach ($functionName in @('Ensure-DataverseAccessToken','Invoke-PrivateOperation','Get-SafeDiagnosticText','Get-SafeErrorMessage','Get-SafeResponseHeader','Get-SafeRawResponseHeader','Get-SafeAuthenticationChallenge','Get-HttpExceptionDetails','Get-RecoveryFailureClass','New-SafeHttpFailure','Get-StoppedDetails','Get-ReconciliationSummary','Write-Result','Get-PayloadFingerprint','Set-RecoveryState','Get-RecoveryFailureState','Assert-CreateOnlyRecoveryTable','Assert-PositionPayloadFingerprint','Assert-ExpectedRecoveryUser','Assert-RequiredPrivilegeSet','Assert-RecoveryInventory','Assert-RecoveryPrivileges','Invoke-PositionCreateOnlyRecovery','Invoke-DataverseRequest')) {
+$httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList @($sourceAst,$candidateSourcePlan.TablePayload) -ScriptBlock {
+    param($sourceAst,$CandidateSourcePayload)
+    $script:CandidateSourcePayload=$CandidateSourcePayload
+    $script:CandidateSourceExpectedFingerprint='867803e7533bfb053c70b951edc47cb4475b5f0183852dcb850b88b317c08f16'
+    foreach ($functionName in @('Ensure-DataverseAccessToken','Invoke-PrivateOperation','Get-SafeDiagnosticText','Get-SafeErrorMessage','Get-SafeResponseHeader','Get-SafeRawResponseHeader','Get-SafeAuthenticationChallenge','Get-HttpExceptionDetails','Get-RecoveryFailureClass','New-SafeHttpFailure','Get-StoppedDetails','Get-ReconciliationSummary','Write-Result','Get-PayloadFingerprint','Set-RecoveryState','Get-RecoveryFailureState','Assert-CreateOnlyRecoveryTable','Assert-CandidateSourceTable','Assert-PositionPayloadFingerprint','Assert-CandidateSourcePayloadFingerprint','Assert-ExpectedRecoveryUser','Assert-RequiredPrivilegeSet','Assert-RecoveryInventory','Assert-RecoveryPrivileges','Get-TablePublicationState','Invoke-BoundedEntityCreation','Invoke-PositionCreateOnlyRecovery','Invoke-CandidateSourceCreateOnly','Invoke-TableScopedPublication','Invoke-DataverseRequest')) {
         $functionAst=$sourceAst.Find({param($node)$node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName},$true)
         Invoke-Expression $functionAst.Extent.Text
     }
@@ -124,6 +131,11 @@ $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList $sou
         $script:AccessTokenIssuedAt=[DateTimeOffset]::UtcNow
         $script:AccessTokenExpiresOn=[DateTimeOffset]::UtcNow.AddHours(1)
         $script:TransportState.ExpiresOn=$script:AccessTokenExpiresOn
+    }
+    function Get-ODataList {
+        param([string]$Path)
+        $script:LastPublicationQuery = $Path
+        @($script:PublicationRows)
     }
     function New-PrivatePipeline {
         $pipeline=[System.Management.Automation.PowerShell]::Create()
@@ -229,13 +241,15 @@ $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList $sou
         $script:Refreshes=0;$script:LastHttpFailure=$null
         $script:AccessToken='expired-synthetic';$script:AccessTokenExpiresOn=[DateTimeOffset]::UtcNow.AddMinutes(-1)
         $script:RequestCounts=@{GET=0;POST=0};$script:WriteResults=[System.Collections.Generic.List[object]]::new()
-        $script:Apply=$true;$script:CreateOnlyRecovery=$false;$script:RecoveryState=$null
+        $script:Apply=$true;$script:CreateOnlyRecovery=$false;$script:CreateOnlyCandidateSource=$false;$script:PublishOnly=$false;$script:RecoveryState=$null
+        $script:TableName='os_sr_pos'
         $script:RecoveryTransitions=[System.Collections.Generic.List[object]]::new()
         $script:RecoveryExpectedFingerprint='0f7372eeb66c0214ae08ed0dc74f82c981cc4cd73baa9156f16d6e1bd1f48e80'
         $script:RecoveryActualFingerprint=$null;$script:RecoveryReconciliation=$null;$script:RecoveryResponseClass=$null
         $script:RecoveryAttemptTimestampUtc=$null;$script:RecoveryEnvironmentVerified=$false
         $script:RecoveryIdentityVerified=$false;$script:RecoveryVerifiedPrivileges=@()
         $script:RecoveryPreflight=$null
+        $script:PublicationStateDiagnostic=$null;$script:PreflightStage='INITIALIZATION';$script:PublicationRows=@()
         $script:RecoveryRequestId=$null;$script:RecoveryCorrelationId=$null;$script:LastRequestDispatchStarted=$false
         $script:WritesAllowed=$true;$script:WritesStarted=$false
         $script:TransportState=@{Calls=0;PostCalls=0;Request=$null;ReadUris=[System.Collections.Generic.List[string]]::new();ReadMethods=[System.Collections.Generic.List[string]]::new();Status=0;GetStatus=200;Timeout=$false;TransportException=$false;ExceptionScenario=$null;PrivilegeCount=3;Secrets=$script:Secrets;UnsafeText=$script:UnsafeText;ExpiresOn=[DateTimeOffset]::MinValue}
@@ -243,7 +257,7 @@ $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList $sou
     function Test-SyntheticHttpChecks {
         param([object]$RecoveryPayload)
         $results=[System.Collections.Generic.List[object]]::new()
-        foreach ($status in @(401,403,400,429,500,0,302)) {
+        foreach ($status in @(401,403,400,408,429,500,0,302)) {
             foreach ($outcome in @('PRESENT','ABSENT','PARTIAL','UNKNOWN')) {
                 Reset-SyntheticState
                 $script:TransportState.Status=$status;$script:TransportState.Timeout=($status -eq 0);$script:Outcome=$outcome
@@ -380,6 +394,78 @@ $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList $sou
         $fingerprint=Assert-PositionPayloadFingerprint -Payload $RecoveryPayload
         $results.Add([pscustomobject]@{Kind='FingerprintMatch';Passed=($fingerprint -ceq $script:RecoveryExpectedFingerprint)})
 
+        Reset-SyntheticState
+        $script:CreateOnlyCandidateSource=$true;$script:Apply=$false;$script:TableName='os_sr_csrc';$script:RecoveryState='PRECHECK'
+        $candidateFingerprint=Assert-CandidateSourcePayloadFingerprint -Payload $script:CandidateSourcePayload
+        $candidateTableBlocked=$false
+        try { Assert-CandidateSourceTable -Name 'os_sr_pos' } catch { $candidateTableBlocked=$true }
+        $results.Add([pscustomobject]@{Kind='CandidateSourceFingerprintMatch';Passed=($candidateFingerprint -ceq $script:CandidateSourceExpectedFingerprint -and $script:RecoveryExpectedFingerprint -ceq $script:CandidateSourceExpectedFingerprint)})
+        $results.Add([pscustomobject]@{Kind='CandidateSourceTableRestriction';Passed=$candidateTableBlocked})
+
+        Reset-SyntheticState
+        $script:CreateOnlyCandidateSource=$true;$script:Apply=$false;$script:TableName='os_sr_csrc';$script:RecoveryState='PRECHECK'
+        $candidateWrongPayload=[ordered]@{SchemaName='os_sr_csrc';DisplayName='Unexpected'}
+        $candidateFingerprintRejected=$false
+        try { Assert-CandidateSourcePayloadFingerprint -Payload $candidateWrongPayload | Out-Null } catch { $candidateFingerprintRejected=$true }
+        $results.Add([pscustomobject]@{Kind='CandidateSourceFingerprintMismatch';Passed=($candidateFingerprintRejected -and $script:RecoveryState -eq 'FAILED_VALIDATION' -and $script:TransportState.Calls -eq 0 -and $script:Refreshes -eq 0)})
+
+        Reset-SyntheticState
+        $publicationStates=[ordered]@{}
+        foreach($case in @(
+            @{Name='Published';Rows=@([pscustomobject]@{componentstate=0});Expected='PUBLISHED';FieldPresent=$true},
+            @{Name='Unpublished';Rows=@([pscustomobject]@{componentstate=1});Expected='UNPUBLISHED';FieldPresent=$true},
+            @{Name='MissingField';Rows=@([pscustomobject]@{rootcomponentbehavior=0});Expected='UNKNOWN';FieldPresent=$false},
+            @{Name='MissingComponent';Rows=@();Expected='UNKNOWN';FieldPresent=$false},
+            @{Name='UnexpectedState';Rows=@([pscustomobject]@{componentstate=2});Expected='UNKNOWN';FieldPresent=$true}
+        )){
+            $script:PublicationRows=$case.Rows
+            $actual=Get-TablePublicationState -SolutionId 'synthetic-solution' -Metadata ([pscustomobject]@{MetadataId='synthetic-table-id'})
+            $publicationStates[$case.Name]=$actual -ceq $case.Expected -and
+                $script:PublicationStateDiagnostic.StateFieldPresent -eq $case.FieldPresent
+        }
+        $results.Add([pscustomobject]@{Kind='PublicationStateClassification';Passed=($publicationStates.Count -eq 5 -and @($publicationStates.Values | Where-Object { -not $_ }).Count -eq 0);Cases=$publicationStates})
+
+        Reset-SyntheticState
+        $script:CreateOnlyCandidateSource=$true;$script:Apply=$false;$script:TableName='os_sr_csrc'
+        $script:RecoveryActualFingerprint=$script:CandidateSourceExpectedFingerprint
+        $script:RecoveryState='READY';$script:WritesAllowed=$true;$script:TransportState.Status=201
+        $candidateCreated=Invoke-DataverseRequest -Method POST -Path EntityDefinitions -Body $script:CandidateSourcePayload -WithSolutionHeader
+        $candidateFirstWrite=($script:TransportState.PostCalls -eq 1 -and $script:RequestCounts.POST -eq 1 -and
+            $script:TransportState.Request.MaximumRetryCount -eq 0 -and
+            $script:TransportState.Request.Solution -ceq 'os_sr_bso_rs_support' -and
+            $script:TransportState.Request.Body.SchemaName -ceq 'os_sr_csrc')
+        $candidateSecondWriteBlocked=$false
+        try { Invoke-DataverseRequest -Method POST -Path EntityDefinitions -Body $script:CandidateSourcePayload -WithSolutionHeader | Out-Null }
+        catch { $candidateSecondWriteBlocked=($script:TransportState.PostCalls -eq 1) }
+        $candidateAttributeBlocked=$false
+        try { Invoke-DataverseRequest -Method POST -Path "EntityDefinitions(LogicalName='os_sr_csrc')/Attributes" -Body @{SchemaName='os_sr_csrc_extra'} -WithSolutionHeader | Out-Null }
+        catch { $candidateAttributeBlocked=($script:TransportState.PostCalls -eq 1) }
+        $results.Add([pscustomobject]@{Kind='CandidateSourceSingleCreateGuard';Passed=($candidateFirstWrite -and $candidateSecondWriteBlocked -and $candidateAttributeBlocked -and $null -ne $candidateCreated)})
+
+        Reset-SyntheticState
+        $script:CreateOnlyCandidateSource=$true;$script:Apply=$false;$script:TableName='os_sr_csrc'
+        $script:RecoveryActualFingerprint=$script:CandidateSourceExpectedFingerprint
+        $script:RecoveryState='READY';$script:WritesAllowed=$true;$script:Outcome='PRESENT';$script:TransportState.Status=201
+        $candidateCreatedResult=Invoke-CandidateSourceCreateOnly -Payload $script:CandidateSourcePayload -SolutionId 'synthetic-solution'
+        $results.Add([pscustomobject]@{Kind='CandidateSourceCreateOutcome';Passed=($candidateCreatedResult.State -ceq 'VERIFIED_SUCCESS' -and $candidateCreatedResult.Outcome -ceq 'VERIFIED_CREATED' -and $script:TransportState.PostCalls -eq 1)})
+
+        Reset-SyntheticState
+        $script:CreateOnlyCandidateSource=$true;$script:Apply=$false;$script:TableName='os_sr_csrc'
+        $script:RecoveryActualFingerprint=$script:CandidateSourceExpectedFingerprint
+        $script:RecoveryState='READY';$script:WritesAllowed=$true;$script:Outcome='PRESENT';$script:TransportState.Status=401
+        $candidateExistingResult=Invoke-CandidateSourceCreateOnly -Payload $script:CandidateSourcePayload -SolutionId 'synthetic-solution'
+        $results.Add([pscustomobject]@{Kind='CandidateSourceExistingOutcome';Passed=($candidateExistingResult.Outcome -ceq 'EXISTING_STATE' -and $script:TransportState.PostCalls -eq 1)})
+
+        Reset-SyntheticState
+        $script:PublishOnly=$true;$script:Apply=$false;$script:TableName='os_sr_pos'
+        $script:RecoveryState='READY';$script:WritesAllowed=$true;$script:TransportState.Status=200
+        $publishBody=[ordered]@{ParameterXml="<importexportxml><entities><entity>os_sr_pos</entity></entities></importexportxml>"}
+        $null=Invoke-DataverseRequest -Method POST -Path PublishXml -Body $publishBody
+        $publishEntityBlocked=$false
+        try { Invoke-DataverseRequest -Method POST -Path EntityDefinitions -Body @{SchemaName='os_sr_pos'} -WithSolutionHeader | Out-Null }
+        catch { $publishEntityBlocked=($script:TransportState.PostCalls -eq 1) }
+        $results.Add([pscustomobject]@{Kind='PublishOnlyScopeGuard';Passed=($script:TransportState.PostCalls -eq 1 -and $script:RequestCounts.POST -eq 1 -and $script:TransportState.Request.MaximumRetryCount -eq 0 -and $script:TransportState.Request.Uri -match '/PublishXml$' -and $publishEntityBlocked)})
+
         foreach ($case in @(
             @{Status=401;Outcome='ABSENT';Expected='FAILED_AUTH'},
             @{Status=403;Outcome='ABSENT';Expected='FAILED_AUTHZ'},
@@ -441,7 +527,10 @@ $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList $sou
         $deleteBlocked=$false
         try { Invoke-DataverseRequest -Method DELETE -Path EntityDefinitions | Out-Null }
         catch { $deleteBlocked=($script:TransportState.PostCalls -eq $before) }
-        $results.Add([pscustomobject]@{Kind='WriteGuards';Passed=($before -eq 1 -and $secondBlocked -and $deleteBlocked -and @($blockedPaths.Values | Where-Object { -not $_ }).Count -eq 0);Paths=$blockedPaths;SecondPostBlocked=$secondBlocked;DeleteBlocked=$deleteBlocked})
+        $patchBlocked=$false
+        try { Invoke-DataverseRequest -Method PATCH -Path EntityDefinitions -Body @{DisplayName='Changed'} | Out-Null }
+        catch { $patchBlocked=($script:TransportState.PostCalls -eq $before) }
+        $results.Add([pscustomobject]@{Kind='WriteGuards';Passed=($before -eq 1 -and $secondBlocked -and $deleteBlocked -and $patchBlocked -and @($blockedPaths.Values | Where-Object { -not $_ }).Count -eq 0);Paths=$blockedPaths;SecondPostBlocked=$secondBlocked;DeleteBlocked=$deleteBlocked;PatchBlocked=$patchBlocked})
 
         $safeDetails=Get-StoppedDetails | ConvertTo-Json -Depth 20 -Compress
         $results.Add([pscustomobject]@{Kind='DiagnosticPrivacy';Passed=($safeDetails -notmatch 'synthetic\.access\.token-marker|synthetic-refresh-marker|"Authorization"\s*:|Bearer|User Email|https://synthetic\.crm\.dynamics\.com|11111111-1111-4111-8111-111111111111')})
@@ -496,6 +585,22 @@ $transportException=@($recovery | Where-Object Kind -eq 'TransportException')[0]
 Assert-Test $transportException.Passed 'Transport exception is uncertain and never retried'
 $writeGuards=@($recovery | Where-Object Kind -eq 'WriteGuards')[0]
 Assert-Test $writeGuards.Passed 'Recovery mode blocks second POST, attribute POST, PublishXml and DELETE'
+$candidateSourceGuard=@($recovery | Where-Object Kind -eq 'CandidateSourceSingleCreateGuard')[0]
+Assert-Test $candidateSourceGuard.Passed 'Candidate Source mode allows only its fingerprinted EntityDefinitions POST and disables retries'
+$candidateCreatedOutcome=@($recovery | Where-Object Kind -eq 'CandidateSourceCreateOutcome')[0]
+Assert-Test $candidateCreatedOutcome.Passed 'Candidate Source verified create outcome is reported distinctly'
+$candidateExistingOutcome=@($recovery | Where-Object Kind -eq 'CandidateSourceExistingOutcome')[0]
+Assert-Test $candidateExistingOutcome.Passed 'Existing exact Candidate Source state is not mislabeled as newly created'
+$candidateFingerprintMatch=@($recovery | Where-Object Kind -eq 'CandidateSourceFingerprintMatch')[0]
+Assert-Test $candidateFingerprintMatch.Passed 'Candidate Source runtime fingerprint gate matches the approved hash'
+$candidateFingerprintMismatch=@($recovery | Where-Object Kind -eq 'CandidateSourceFingerprintMismatch')[0]
+Assert-Test $candidateFingerprintMismatch.Passed 'Candidate Source fingerprint mismatch fails before authentication or network'
+$candidateTableRestriction=@($recovery | Where-Object Kind -eq 'CandidateSourceTableRestriction')[0]
+Assert-Test $candidateTableRestriction.Passed 'Candidate Source create-only mode rejects other table targets'
+$publishGuard=@($recovery | Where-Object Kind -eq 'PublishOnlyScopeGuard')[0]
+Assert-Test $publishGuard.Passed 'Publish-only mode permits only one table-scoped PublishXml POST'
+$publicationStates=@($recovery | Where-Object Kind -eq 'PublicationStateClassification')[0]
+Assert-Test $publicationStates.Passed 'Publication state is unknown when component state is absent or unrecognized'
 $privacy=@($recovery | Where-Object Kind -eq 'DiagnosticPrivacy')[0]
 Assert-Test $privacy.Passed 'Recovery diagnostics omit token, identity and environment URL'
 $diagnosticKeys=@('Operation','Method','ApiPath','TimestampUtc','StatusCode','HttpStatus','DataverseErrorCode','ErrorSummary','RequestId','CorrelationId','AuthenticationChallenge','FailureClass','ExceptionCategory','TransportKind','DispatchStarted','WritesMayHaveOccurred','ReconciliationCompleted','ReconciliationOutcome') | Sort-Object
@@ -517,7 +622,7 @@ foreach ($case in $http.Cases) {
     if ($case.Status -ne 0) {
         Assert-Test ($failure.RequestId -ceq '11111111-1111-4111-8111-111111111111' -and $failure.CorrelationId -ceq '22222222-2222-4222-8222-222222222222' -and $failure.DataverseErrorCode -ceq '0x80040220') "$name safe IDs and Dataverse code"
     }
-    $summaryPattern=switch ($case.Status) { 401 {'Authentication/token'} 403 {'Authorization/privilege'} 400 {'Dataverse rejected'} 429 {'rate limited'} 500 {'server failure'} 0 {'timed out'} default {'status unavailable'} }
+    $summaryPattern=switch ($case.Status) { 401 {'Authentication/token'} 403 {'Authorization/privilege'} 400 {'Dataverse rejected'} 408 {'timed out'} 429 {'rate limited'} 500 {'server failure'} 0 {'timed out'} default {'status unavailable'} }
     Assert-Test ($failure.ErrorSummary -match $summaryPattern) "$name trusted status summary"
     Assert-Test (($case.Diagnostic | ConvertTo-Json -Depth 20) -notmatch '"Authorization"\s*:|WWW-Authenticate|Set-Cookie|rawAuthentication|refresh_token\s*=|client_secret\s*=|error_description\s*=|claims\s*=') "$name sensitive headers and bodies omitted"
 }
@@ -528,7 +633,7 @@ Assert-Test (@($http.ExceptionCases | Where-Object { $_.Scenario -eq 'Unknown' -
 Assert-Test (@($http.ExceptionCases | Where-Object { $_.Scenario -eq 'MalformedBody' -and $_.Status -eq 400 -and $_.ReportStatus -eq 400 -and $_.FailureClass -eq 'HTTP_4XX_VALIDATION' }).Count -eq 1) 'Malformed non-JSON exception body does not leak and preserves HTTP status'
 Assert-Test (@($http.ExceptionCases | Where-Object { $_.Scenario -eq 'HttpResponse' -and $_.RequestId -eq '11111111-1111-4111-8111-111111111111' -and $_.CorrelationId -eq '22222222-2222-4222-8222-222222222222' }).Count -ge 5) 'Exception response request and correlation GUIDs are extracted'
 Assert-Test (@($http.Cases | Where-Object { $_.Status -eq 302 -and $_.Diagnostic.Details.HttpFailure.FailureClass -eq 'UNKNOWN_HTTP_FAILURE' }).Count -eq 4) 'Unrecognized HTTP status remains an explicit unknown HTTP failure'
-Assert-Test (@($http.Cases | Where-Object { $_.Status -eq 408 -and $_.Diagnostic.Details.HttpFailure.FailureClass -eq 'TIMEOUT' }).Count -eq 1) 'HTTP 408 maps to timeout without retry'
+Assert-Test (@($http.Cases | Where-Object { $_.Status -eq 408 -and $_.Diagnostic.Details.HttpFailure.FailureClass -eq 'TIMEOUT' }).Count -eq 4) 'HTTP 408 maps to timeout without retry'
 foreach ($guard in $http.Guards.GetEnumerator()) { Assert-Test $guard.Value "$($guard.Key) guard" }
 Assert-Test ($null -eq $http.UnsafeCode.DataverseErrorCode -and $null -eq $http.UnsafeCode.RequestId -and $http.UnsafeCode.ApiPath -ceq '/api/data/v9.2/EntityDefinitions') 'Risky code, ID and endpoint values omitted'
 Assert-Test ($http.OmittedText -ceq 'Untrusted text omitted.' -and $http.OmittedException -notmatch 'synthetic-') 'Untrusted local text and exceptions omitted'

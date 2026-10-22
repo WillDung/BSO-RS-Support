@@ -254,10 +254,16 @@ Run PlanOnly and GET-only DryRun:
 
 DryRun requires `BSO_RS_ENVIRONMENT_NAME`, `BSO_RS_ORG_URL`, `BSO_RS_EXPECTED_ENVIRONMENT_ID`, and `BSO_RS_EXPECTED_ORG_ID` in the current process. Do not persist their values in the repository. Runtime acceptance of the AddAppComponents action on this unpublished app and the Site Map PATCH's draft-layer behavior remain unverified; see the [Phase 2D Runbook](../docs/MODEL_DRIVEN_APP_AUTOMATION_RUNBOOK.md).
 
-## Phase 2D.1 srapp Composition — Blocked Before Write
+## Historical Phase 2D.1 srapp Composition — Blocked Before Write
 
 The owner-authorized Phase 2D.1 preflight targets only the adopted `srapp` and the four approved reference-table experiences: TA, Position, Candidate Source, and Location. PlanOnly is local and makes no network calls. DryRun performs identity and GET-only app, Solution, Site Map, table/form/view, dependency, and validation checks.
 
 Fresh live `ValidateApp` returned the blocking error **`App does not contain Site Map`**, despite the Solution export's package-level `AppModuleSiteMap.SiteMapUniqueName=srapp` binding. The proposed AddAppComponents list contains the 12 table/form/view components and excludes the existing Site Map. The scope decision to include the Site Map or use another supported association route remains open. **Do not use Apply until that decision and any changed write scope are explicitly authorized and a fresh preflight passes.** The app remains unpublished; no Site Map PATCH, AddAppComponents action, publish, role change, or retry occurred.
 
 The recorded Phase 2D.1 total is 83 Dataverse GETs, zero Site Map PATCHes, zero app-component operations, zero PublishXml, zero publish operations, zero role changes, and zero retries. The final guarded DryRun made 25 GETs in addition to its separate identity WhoAmI GET; the total also includes earlier GET-only diagnostics. See the [Phase 2D.1 runbook](../docs/MODEL_DRIVEN_APP_AUTOMATION_RUNBOOK.md) and [current state](../docs/CURRENT_STATE.md).
+
+## Phase 2D.2 srapp Site Map Association — Verified
+
+The separate `-SiteMapAssociationOnly` mode supports only `-DryRun` or `-Apply`; Apply requires the phase-specific confirmation phrase and authorization reference. It reruns the target identity and metadata preflight, requires exactly one existing Solution Site Map root and the exact `ValidateApp` blocker, then sends a single `AddAppComponents` payload containing only the live-verified existing `sitemapid`. It does not PATCH Site Map XML, add table/form/view components, publish, change roles, retry, or create/delete anything. The expected-user guard is pinned in process scope only after PAC, Az token context, and Dataverse WhoAmI identities agree. Post-write GET reconciliation checks the app identity/state, one direct Site Map component, no other components, unchanged Site Map XML and role associations, and cleared Site Map validation error.
+
+Phase 2D.2 completed as **VERIFIED_SITEMAP_ASSOCIATED**: the one AddAppComponents POST returned HTTP 204. Recorded Dataverse Web API totals across the dry-run and Apply were 75 GET, 1 AddAppComponents POST, 0 other POST, 0 Site Map PATCH, 0 PublishXml, 0 publish, 0 role changes, and 0 retries. See the [Model-driven App Automation Runbook](../docs/MODEL_DRIVEN_APP_AUTOMATION_RUNBOOK.md). Stop here; Phase 2D.3 reference-table composition requires separate authorization.

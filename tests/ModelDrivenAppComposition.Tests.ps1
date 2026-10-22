@@ -46,6 +46,7 @@ $syntheticTarget = [pscustomobject]@{
     TableMetadataId = '11111111-1111-4111-8111-111111111111'
     MainFormId = '22222222-2222-4222-8222-222222222222'
     ActiveViewId = '33333333-3333-4333-8333-333333333333'
+    SiteMapId = '44444444-4444-4444-8444-444444444444'
 }
 $payloads = @(Get-AppComponentPayloads -Target $syntheticTarget)
 Assert-Test ($payloads.Count -eq 3) 'Exactly three existing app components are planned'
@@ -53,6 +54,24 @@ Assert-Test ($payloads[0].'@odata.type' -ceq 'Microsoft.Dynamics.CRM.entity' -an
 Assert-Test ($payloads[1].'@odata.type' -ceq 'Microsoft.Dynamics.CRM.systemform' -and $payloads[1].formid -ceq $syntheticTarget.MainFormId) 'Form component uses primary-key property and OData type'
 Assert-Test ($payloads[2].'@odata.type' -ceq 'Microsoft.Dynamics.CRM.savedquery' -and $payloads[2].savedqueryid -ceq $syntheticTarget.ActiveViewId) 'View component uses primary-key property and OData type'
 Assert-Test (@($payloads | Where-Object { $_.'@odata.type' -ceq 'Microsoft.Dynamics.CRM.sitemap' }).Count -eq 0) 'Existing SiteMap binding is not duplicated in AddAppComponents'
+$siteMapPayload = Get-SiteMapComponentPayload -SiteMapId $syntheticTarget.SiteMapId
+$siteMapBody = [ordered]@{ AppId = $syntheticTarget.AppModuleId; Components = @($siteMapPayload) }
+Assert-SiteMapAssociationPayload -Body $siteMapBody -Target $syntheticTarget
+Assert-Test ($siteMapBody.Components.Count -eq 1 -and $siteMapBody.Components[0].sitemapid -ceq $syntheticTarget.SiteMapId -and
+    $siteMapBody.Components[0].'@odata.type' -ceq 'Microsoft.Dynamics.CRM.sitemap') 'Build exactly one typed existing Site Map component'
+$extraSiteMapComponentBody = [ordered]@{ AppId = $syntheticTarget.AppModuleId; Components = @($siteMapPayload, $payloads[0]) }
+Assert-Rejected { Assert-SiteMapAssociationPayload -Body $extraSiteMapComponentBody -Target $syntheticTarget } 'Reject table mixed into Site Map-only request' 'exactly one component'
+$duplicateSiteMapBody = [ordered]@{ AppId = $syntheticTarget.AppModuleId; Components = @($siteMapPayload, $siteMapPayload) }
+Assert-Rejected { Assert-SiteMapAssociationPayload -Body $duplicateSiteMapBody -Target $syntheticTarget } 'Reject duplicate Site Map component' 'exactly one component'
+$wrongSiteMapBody = [ordered]@{ AppId = $syntheticTarget.AppModuleId; Components = @((Get-SiteMapComponentPayload -SiteMapId $syntheticTarget.TableMetadataId)) }
+Assert-Rejected { Assert-SiteMapAssociationPayload -Body $wrongSiteMapBody -Target $syntheticTarget } 'Reject wrong existing Site Map ID' 'differs from the single verified existing Site Map'
+$validationWithSiteMapError = Get-SiteMapValidationState -AppValidation ([pscustomobject]@{ Issues = @(
+    [pscustomobject]@{ ErrorType = 'Error'; Message = 'App does not contain Site Map' },
+    [pscustomobject]@{ ErrorType = 'Warning'; Message = 'App does not reference at least one entity' }
+) })
+Assert-Test ($validationWithSiteMapError.SiteMapErrorPresent -and $validationWithSiteMapError.OtherBlockingErrorCount -eq 0) 'Recognize exact Site Map blocker while allowing unrelated warnings'
+$validationWithoutSiteMapError = Get-SiteMapValidationState -AppValidation ([pscustomobject]@{ Issues = @([pscustomobject]@{ ErrorType = 'Warning'; Message = 'No component is referenced' }) })
+Assert-Test (-not $validationWithoutSiteMapError.SiteMapErrorPresent) 'Recognize when Site Map validation blocker is already absent'
 $syntheticBody = [ordered]@{ AppId = $syntheticTarget.AppModuleId; Components = $payloads }
 Assert-AppComponentsPayload -Body $syntheticBody -Target $syntheticTarget
 Assert-Test $true 'Allow exact synthetic AppId and three approved component payloads'

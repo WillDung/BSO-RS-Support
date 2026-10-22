@@ -4,6 +4,7 @@ param(
     [switch]$PlanOnly,
     [switch]$DryRun,
     [switch]$Apply,
+    [switch]$SiteMapAssociationOnly,
     [string]$Confirmation,
     [string]$AuthorizationReference,
     [string]$EnvironmentName = $env:BSO_RS_ENVIRONMENT_NAME,
@@ -60,8 +61,11 @@ $script:LastHttpStatus = $null
 $script:LastErrorCode = $null
 $script:LastSafeError = $null
 $script:LastStage = 'Startup'
+$script:ExpectedUserGuardNeedsPin = $false
 
-if (($PlanOnly -and ($DryRun -or $Apply)) -or ($DryRun -and $Apply)) {
+if (($PlanOnly -and ($DryRun -or $Apply -or $SiteMapAssociationOnly)) -or
+    ($DryRun -and $Apply) -or
+    ($SiteMapAssociationOnly -and -not ($DryRun -or $Apply))) {
     throw 'Choose exactly one of PlanOnly, DryRun, or Apply.'
 }
 if (-not $PlanOnly -and -not $DryRun -and -not $Apply) { $PlanOnly = $true }
@@ -102,9 +106,84 @@ function Get-AppComponentPayloads {
 
 function Assert-ApplyAuthorization {
     param([string]$Phrase, [string]$Reference)
-    if ($Phrase -cne 'APPLY PHASE 2D IN VN LMV IT' -or [string]::IsNullOrWhiteSpace($Reference)) {
-        throw 'Apply requires the exact Phase 2D confirmation phrase and a recorded authorization reference; no request was sent.'
+    $expectedPhrase = if ($SiteMapAssociationOnly) { 'APPLY PHASE 2D.2 IN VN LMV IT' } else { 'APPLY PHASE 2D IN VN LMV IT' }
+    if ($Phrase -cne $expectedPhrase -or [string]::IsNullOrWhiteSpace($Reference)) {
+        throw 'Apply requires the exact phase-specific confirmation phrase and a recorded authorization reference; no request was sent.'
     }
+}
+
+function Get-SiteMapComponentPayload {
+    param([string]$SiteMapId = $script:Target.SiteMapId)
+    [ordered]@{
+        sitemapid = $SiteMapId
+        '@odata.type' = 'Microsoft.Dynamics.CRM.sitemap'
+    }
+}
+
+function Assert-SiteMapAssociationPayload {
+    param(
+        [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Body,
+        [object]$Target = $script:Target
+    )
+    $expectedKeys = @('AppId', 'Components')
+    $actualBodyKeys = @($Body.Keys | Sort-Object)
+    $sortedExpectedKeys = @($expectedKeys | Sort-Object)
+    if ([string]$Body['AppId'] -cne $Target.AppModuleId -or
+        ($actualBodyKeys -join ',') -cne ($sortedExpectedKeys -join ',')) {
+        throw 'Site Map AddAppComponents request must contain only the fixed AppId and Components fields.'
+    }
+    $components = @($Body['Components'])
+    if ($components.Count -ne 1) { throw 'Site Map association must contain exactly one component.' }
+    $component = $components[0]
+    $keys = @($component.Keys | ForEach-Object { [string]$_ } | Sort-Object)
+    if (($keys -join ',') -cne '@odata.type,sitemapid' -or
+        [string]$component['@odata.type'] -cne 'Microsoft.Dynamics.CRM.sitemap' -or
+        ([string]$component['sitemapid']).Trim('{}') -ine ([string]$Target.SiteMapId).Trim('{}')) {
+        throw 'Site Map association payload differs from the single verified existing Site Map.'
+    }
+}
+
+function Get-SiteMapValidationState {
+    param([object]$AppValidation)
+    $matchingErrors = @($AppValidation.Issues | Where-Object {
+        $_.ErrorType -ceq 'Error' -and $_.Message -ceq 'App does not contain Site Map'
+    })
+    [pscustomobject]@{
+        SiteMapErrorPresent = ($matchingErrors.Count -eq 1)
+        SiteMapErrorCount = $matchingErrors.Count
+        OtherBlockingErrorCount = @($AppValidation.Issues | Where-Object {
+            $_.ErrorType -ceq 'Error' -and $_.Message -cne 'App does not contain Site Map'
+        }).Count
+    }
+}
+
+function Get-SiteMapDirectComponentState {
+    param([object[]]$Components)
+    $siteMapComponents = @($Components | Where-Object { [int]$_.ComponentType -eq 62 })
+    $expected = @($siteMapComponents | Where-Object {
+        ([string]$_.ObjectId).Trim('{}') -ieq $script:Target.SiteMapId
+    })
+    $otherComponents = @($Components | Where-Object {
+        [int]$_.ComponentType -ne 62 -or ([string]$_.ObjectId).Trim('{}') -ine $script:Target.SiteMapId
+    })
+    if ($siteMapComponents.Count -gt 1 -or $expected.Count -gt 1) {
+        throw 'Unexpected or duplicate Site Map AppModule components exist; stop without writing.'
+    }
+    [pscustomobject]@{
+        SiteMapPresent = ($expected.Count -eq 1)
+        SiteMapCount = $expected.Count
+        OtherComponentCount = $otherComponents.Count
+        Components = @($Components)
+    }
+}
+
+function Assert-SiteMapOnlyComponentSet {
+    param([object[]]$Components)
+    $state = Get-SiteMapDirectComponentState -Components $Components
+    if ($state.OtherComponentCount -ne 0) {
+        throw 'Unexpected non-Site Map AppModule component exists; stop without adding or changing components.'
+    }
+    $state
 }
 
 function Assert-AppComponentsPayload {
@@ -311,7 +390,10 @@ function Assert-TargetInputs {
     }
     $expectedUserId = [Environment]::GetEnvironmentVariable('BSO_RS_EXPECTED_USER_ID', 'Process')
     $expectedUserGuid = [guid]::Empty
-    if (-not [guid]::TryParse($expectedUserId, [ref]$expectedUserGuid) -or
+    if ([string]::IsNullOrWhiteSpace($expectedUserId) -and $SiteMapAssociationOnly) {
+        $script:ExpectedUserGuardNeedsPin = $true
+    }
+    elseif (-not [guid]::TryParse($expectedUserId, [ref]$expectedUserGuid) -or
         $expectedUserGuid.ToString() -ine $pac.UserId) {
         throw 'Process-scoped expected-user guard is missing or differs from PAC; stop without Dataverse requests.'
     }
@@ -459,7 +541,10 @@ function Invoke-DataverseRequest {
     if ($Method -eq 'POST' -and $resource -cne 'AddAppComponents') {
         throw 'POST blocked: only AddAppComponents is allowed; no create, publish, or role endpoint is allowed.'
     }
-    if ($Method -eq 'POST') { Assert-AppComponentsPayload -Body $Body }
+    if ($Method -eq 'POST') {
+        if ($SiteMapAssociationOnly) { Assert-SiteMapAssociationPayload -Body $Body }
+        else { Assert-AppComponentsPayload -Body $Body }
+    }
     Ensure-DataverseAccessToken
     $headers = @{
         Authorization = 'Bearer ' + $script:AccessToken
@@ -708,10 +793,15 @@ function Get-TargetSnapshot {
     $script:AccessToken = Get-ValidatedAccessToken
     $script:LastStage = 'Verify Dataverse organization'
     $who = Invoke-DataverseRequest -Method GET -Path 'WhoAmI'
-    if ([string]$who.OrganizationId -cne $ExpectedOrganizationId -or
-        [string]$who.UserId -ine $script:PacIdentity.UserId -or
-        [string]$who.UserId -ine [string]([Environment]::GetEnvironmentVariable('BSO_RS_EXPECTED_USER_ID', 'Process'))) {
-        throw 'Dataverse WhoAmI identity does not match PAC and the process-scoped expected-user guard.'
+    if ([string]$who.OrganizationId -cne $ExpectedOrganizationId -or [string]$who.UserId -ine $script:PacIdentity.UserId) {
+        throw 'Dataverse WhoAmI identity does not match PAC and the expected organization.'
+    }
+    if ($script:ExpectedUserGuardNeedsPin) {
+        [Environment]::SetEnvironmentVariable('BSO_RS_EXPECTED_USER_ID', [string]$who.UserId, 'Process')
+        $script:ExpectedUserGuardNeedsPin = $false
+    }
+    if ([string]$who.UserId -ine [string]([Environment]::GetEnvironmentVariable('BSO_RS_EXPECTED_USER_ID', 'Process'))) {
+        throw 'Dataverse WhoAmI identity does not match the process-scoped expected-user guard.'
     }
 
     $script:LastStage = 'Verify project Solution and Publisher'
@@ -737,8 +827,11 @@ function Get-TargetSnapshot {
     $script:LastStage = 'Read Solution component membership'
     $solutionComponents = @(Get-ODataRows -Path (New-CollectionPath -EntitySet 'solutioncomponents' -Select 'solutioncomponentid,componenttype,objectid,rootsolutioncomponentid,rootcomponentbehavior,ismetadata,_solutionid_value' -Filter "_solutionid_value eq $($solution.solutionid)"))
     $appRoot = @($solutionComponents | Where-Object { [int]$_.componenttype -eq 80 -and $_.objectid -ceq $script:Target.AppModuleId })
-    $siteMapRoot = @($solutionComponents | Where-Object { [int]$_.componenttype -eq 62 -and $_.objectid -ceq $script:Target.SiteMapId })
-    if ($appRoot.Count -ne 1 -or $siteMapRoot.Count -ne 1) { throw 'App or Site Map Solution root membership mismatch.' }
+    $siteMapRoots = @($solutionComponents | Where-Object { [int]$_.componenttype -eq 62 })
+    $siteMapRoot = @($siteMapRoots | Where-Object { ([string]$_.objectid).Trim('{}') -ieq $script:Target.SiteMapId })
+    if ($appRoot.Count -ne 1 -or $siteMapRoots.Count -ne 1 -or $siteMapRoot.Count -ne 1) {
+        throw 'App or unique existing Site Map Solution root membership mismatch.'
+    }
     foreach ($reference in $referenceComponents) {
         $entityRoot = @($solutionComponents | Where-Object { [int]$_.componenttype -eq 1 -and ([string]$_.objectid).Trim('{}') -ieq $reference.TableMetadataId })
         if ($entityRoot.Count -ne 1) { throw "Reference table $($reference.LogicalName) lacks exact project Solution root membership." }
@@ -818,6 +911,96 @@ function Get-TargetSnapshot {
         AppModuleSiteMapBinding = $export.AppModuleSiteMapEntries
         SolutionExport = $export
         AddAppComponentsContract = $componentContract
+        RequestCounts = [ordered]@{} + $script:RequestCounts
+    }
+}
+
+function Invoke-SiteMapAssociationOnly {
+    param([Parameter(Mandatory = $true)][object]$Snapshot)
+
+    $beforeState = Assert-SiteMapOnlyComponentSet -Components $Snapshot.AppComponents
+    $validationState = Get-SiteMapValidationState -AppValidation $Snapshot.AppValidation
+    if ($Snapshot.SiteMap.UniqueName -cne $script:Target.SiteMapUniqueName -or
+        -not $Snapshot.SiteMap.IsAppAware) {
+        throw 'Existing Site Map identity failed the integrity guard.'
+    }
+    if ($Snapshot.AppModule.UniqueName -cne $script:Target.AppUniqueName -or
+        $Snapshot.AppModule.Name -cne $script:Target.AppName -or
+        [int]$Snapshot.AppModule.StateCode -ne 0 -or [int]$Snapshot.AppModule.ComponentState -ne 1) {
+        throw 'Existing srapp identity or unpublished state changed; stop.'
+    }
+
+    if (-not $validationState.SiteMapErrorPresent) {
+        if ($beforeState.SiteMapPresent -and $validationState.OtherBlockingErrorCount -eq 0) {
+            return [pscustomobject]@{
+                Status = 'ALREADY_ASSOCIATED'
+                Preflight = $Snapshot
+                SiteMapComponent = $beforeState
+                RequestCounts = [ordered]@{} + $script:RequestCounts
+                WriteResults = @()
+            }
+        }
+        throw 'Current ValidateApp state does not show the exact Site Map blocker; stop without writing.'
+    }
+    if ($validationState.OtherBlockingErrorCount -gt 0) {
+        throw 'ValidateApp returned an additional blocking error; stop before the authorized association.'
+    }
+    if ($beforeState.SiteMapPresent) {
+        throw 'Site Map component is already present while ValidateApp still reports it missing; stop for reconciliation.'
+    }
+
+    $payload = Get-SiteMapComponentPayload -SiteMapId ([string]$Snapshot.SiteMap.Id)
+    $body = [ordered]@{ AppId = [string]$Snapshot.AppModule.Id; Components = @($payload) }
+    Assert-SiteMapAssociationPayload -Body $body
+
+    if ($DryRun) {
+        return [pscustomobject]@{
+            Status = 'READY_TO_ASSOCIATE_SITE_MAP'
+            Preflight = $Snapshot
+            SiteMapComponent = $beforeState
+            AddAppComponentsPayload = $body
+            RequestCounts = [ordered]@{} + $script:RequestCounts
+            WriteResults = @()
+        }
+    }
+
+    $script:WritesAllowed = $true
+    Invoke-DataverseRequest -Method POST -Path 'AddAppComponents' -Body $body | Out-Null
+    $script:WritesAllowed = $false
+
+    $after = Get-TargetSnapshot
+    $afterState = Assert-SiteMapOnlyComponentSet -Components $after.AppComponents
+    $afterValidationState = Get-SiteMapValidationState -AppValidation $after.AppValidation
+    $appUnchanged = $after.AppModule.Id -ceq $Snapshot.AppModule.Id -and
+        $after.AppModule.UniqueName -ceq $Snapshot.AppModule.UniqueName -and
+        $after.AppModule.Name -ceq $Snapshot.AppModule.Name -and
+        [int]$after.AppModule.StateCode -eq [int]$Snapshot.AppModule.StateCode -and
+        [int]$after.AppModule.ComponentState -eq [int]$Snapshot.AppModule.ComponentState
+    $siteMapUnchanged = $after.SiteMap.Id -ceq $Snapshot.SiteMap.Id -and
+        $after.SiteMap.UniqueName -ceq $Snapshot.SiteMap.UniqueName -and
+        $after.SiteMap.SitemapXml -ceq $Snapshot.SiteMap.SitemapXml -and
+        [int]$after.SiteMap.ComponentState -eq [int]$Snapshot.SiteMap.ComponentState
+    $rolesUnchanged = (ConvertTo-Json -InputObject @($after.AppModuleRoles) -Compress) -ceq
+        (ConvertTo-Json -InputObject @($Snapshot.AppModuleRoles) -Compress)
+
+    if (-not $appUnchanged -or -not $siteMapUnchanged -or -not $rolesUnchanged -or
+        -not $afterState.SiteMapPresent -or $afterState.OtherComponentCount -ne 0) {
+        throw 'Post-association GET reconciliation found changed or unintended app/Site Map state; stop without retry.'
+    }
+    if ($afterValidationState.SiteMapErrorPresent -or $afterValidationState.OtherBlockingErrorCount -gt 0) {
+        throw 'Post-association ValidateApp did not clear the Site Map error or returned another blocking error.'
+    }
+
+    [pscustomobject]@{
+        Status = 'VERIFIED_SITEMAP_ASSOCIATED'
+        Preflight = $Snapshot
+        PostWrite = $after
+        SiteMapComponent = $afterState
+        PostValidation = $after.AppValidation
+        PublicationState = 'Unpublished; no publish endpoint invoked'
+        RoleChanges = 0
+        RetryCount = 0
+        WriteResults = $script:WriteResults.ToArray()
         RequestCounts = [ordered]@{} + $script:RequestCounts
     }
 }
@@ -941,12 +1124,14 @@ function Invoke-Main {
         Write-Output ($plan | ConvertTo-Json -Depth 20 -Compress)
         return
     }
-    if ($Apply) {
-        if ($Confirmation -cne 'APPLY PHASE 2D IN VN LMV IT' -or [string]::IsNullOrWhiteSpace($AuthorizationReference)) {
-            throw 'Apply requires the exact Phase 2D confirmation phrase and a recorded authorization reference; no request was sent.'
-        }
-    }
+    if ($Apply) { Assert-ApplyAuthorization -Phrase $Confirmation -Reference $AuthorizationReference }
     $snapshot = Get-TargetSnapshot
+    if ($SiteMapAssociationOnly) {
+        $result = Invoke-SiteMapAssociationOnly -Snapshot $snapshot
+        $result | Add-Member -NotePropertyName Mode -NotePropertyValue $(if ($Apply) { 'Site Map association Apply' } else { 'Site Map association DryRun; GET-only' })
+        Write-Output ($result | ConvertTo-Json -Depth 30 -Compress)
+        return
+    }
     if ($Apply) { Assert-AppValidationAllowsApply -AppValidation $snapshot.AppValidation }
     $componentState = Assert-ComponentStateForApply -ExistingComponents $snapshot.AppComponents
     $plan = Get-AppCompositionPlan

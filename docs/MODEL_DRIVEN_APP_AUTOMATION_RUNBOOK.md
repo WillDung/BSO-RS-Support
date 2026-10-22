@@ -1,6 +1,9 @@
 # Model-driven App and Sitemap Automation Runbook
+**Current status — 22 October 2026:** Phase 2D.2 is **VERIFIED_SITEMAP_ASSOCIATED**. The existing Site Map is associated with `srapp`; the app remains Active/Unpublished and no other components, navigation, roles, or publication were changed. Do not treat this authorization as covering Phase 2D.3.
 
 **Status:** Phase 2C-R3 adoption recorded; Phase 2D plan prepared, 21 October 2026. The owner officially adopted the existing BSO-RS-Support AppModule `srapp` (ID `3709bb7c-28cd-f111-a05c-70a8a581cbfa`) in `os_sr_bso_rs_support`. The actual unique name is `srapp`; `os_srapp` is superseded and must not be used or applied by renaming. Phase 2D composition remains **not authorized**. Do not execute any request in this runbook.
+
+The dated adoption-status paragraph below records the pre-Phase 2D.1 state and is superseded by this current status and the Phase 2D.2 result.
 
 ## Adopted App Identity
 
@@ -12,7 +15,19 @@
 - Phase 2C closed by owner-approved adoption, not by a successful AppModule Create. No additional AppModule is required. Do not create, rename, or recreate the app.
 - R3-P GET-only DryRun reconfirmed `statecode=0` Active and `componentstate=1` Unpublished. The `srapp` Site Map remains Published with placeholder-only XML; the Site Map unpublished query returned `componentstate=0`, so no distinct draft layer was observed. The target Solution export contains one `AppModuleSiteMap.SiteMapUniqueName=srapp` binding; direct appmodulecomponents remains empty. No verified app-linked forms/views/pages or project-specific end-user role were found. System Administrator and System Customizer are the only verified app-role associations. Type 10091 remains unidentified and is not the type-62 Site Map object.
 
-## Phase 2D.1 — Live Preflight and Outcome
+## Phase 2D.2 — Existing Site Map Association
+
+The owner authorized exactly one bounded `AddAppComponents` call containing only the live-resolved existing Site Map. No Site Map XML PATCH, publication, role change, reference-table component, or app identity change was in scope.
+
+- Fresh identity and environment guards matched VN LMV IT; the expected-user guard was configured in process scope only after PAC, Az, and Dataverse WhoAmI identity agreement.
+- The Solution export binding and exact live Site Map identity matched. The Site Map was already present in the Solution; the Solution contained exactly one intended type-62 root. Pre-write direct AppModule components were empty.
+- Pre-write `ValidateApp` returned the exact blocker `App does not contain Site Map`, with warnings `No component is referenced` and `App does not reference at least one entity`.
+- The request contained the existing `srapp` AppId and exactly one typed `Microsoft.Dynamics.CRM.sitemap` component with the verified `sitemapid`. The single POST returned HTTP 204.
+- GET-only reconciliation verified the direct Site Map component, no other direct app components, unchanged app identity and Active/Unpublished state, unchanged Site Map ID/XML/publication state, and unchanged managed role associations. Post-write `ValidateApp` no longer reports the Site Map error; the warning `App does not reference at least one entity` remains because no table/form/view components were authorized here.
+- **Outcome: VERIFIED_SITEMAP_ASSOCIATED.** Counts: **75 Dataverse Web API GET**, **1 AddAppComponents POST** (HTTP 204), **0 other POST**, **0 Site Map PATCH**, **0 PublishXml**, **0 publish operation**, **0 role change**, and **0 retry**. The GET count is the script’s recorded Web API counter and excludes separate PAC identity and read-only Solution-export CLI operations.
+- Stop after this association. Phase 2D.3 reference-table app composition needs a separate authorization and fresh preflight.
+
+## Phase 2D.1 — Historical Live Preflight and Outcome (superseded)
 
 The owner authorized a fresh guarded preflight and conditional composition of only the existing `srapp` with the four approved reference-table experiences. Environment, PAC/Az/WhoAmI identity agreement, process-scoped expected-user guard, unmanaged Solution, Publisher, and prefix matched. No environment switch or interactive login occurred.
 
@@ -20,7 +35,7 @@ The owner authorized a fresh guarded preflight and conditional composition of on
 - All four reference tables are present in the target Solution: `os_sr_ta`, `os_sr_pos`, `os_sr_csrc`, and `os_sr_loc`. The selected Main form for each is Information. The selected public active views are Active TA Directories, Active Positions, Active Candidate Sources, and Active Locations. All twelve table/form/view components are absent from `srapp`; no form/view IDs were fabricated. Read-only dependency results resolve the existing managed app-role associations to System Administrator and System Customizer.
 - `ValidateApp` returned warnings `No component is referenced` and `App does not reference at least one entity`, plus the blocking error **`App does not contain Site Map`**. The package-level Site Map binding did not satisfy this validation. The bounded app-component list excluded the existing type-62 Site Map; adding it or using another association path is an unresolved scope decision and was not authorized by the component list.
 - **Final outcome: BLOCKED_BEFORE_WRITE.** No Site Map PATCH, AddAppComponents action, POST, PublishXml, publish operation, role change, or retry occurred. The cumulative Phase 2D.1 live-read count is **83 GET requests**; all writes and retries are zero. The final guarded composition DryRun accounted for 25 GETs, with a separate identity WhoAmI GET. The 83 count includes the earlier read-only diagnostics and preflights.
-- Next step: obtain an explicit decision on whether to associate the existing Site Map through the supported app-component operation or pursue another supported route. After any scope change is approved, repeat the full fresh preflight and dry-run plan before any write. Keep `srapp` unpublished and preserve its existing role associations.
+- At the time, the next step was to obtain authorization for the Site Map association. That decision was subsequently provided and executed in Phase 2D.2 above.
 
 ## Original Phase 2D Plan (historical; superseded by Phase 2D.1)
 

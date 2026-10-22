@@ -2,21 +2,26 @@
 
 **Status:** Phase 2C-R3 official adoption recorded, 21 October 2026. The owner adopted the existing BSO-RS-Support AppModule with actual unique name `srapp`; Phase 2C is closed by adoption, not by a successful Create. Composition and publication remain unconfigured and are not authorized by this decision. The AppModule Publisher lookup and component type 10091 identity remain unknown.
 
-**Superseding update — 22 October 2026:** The owner separately authorized Phase 2D.1 composition, but fresh live validation returned `App does not contain Site Map`. The operation stopped before any write. The current composition status is **BLOCKED_BEFORE_WRITE**; no Site Map association, app component, or publication change was made.
+**Phase 2D.1 historical status — 22 October 2026 (superseded by Phase 2D.2 below):** The owner-authorized Phase 2D.1 preflight returned `App does not contain Site Map` and stopped before any write. The later Phase 2D.2 authorization resolved that blocker by associating the existing Site Map.
+
+## Phase 2D.2 Current Status — Site Map Associated
+
+The single owner-authorized Site Map association succeeded and reconciled. `srapp` remains Active/Unpublished; the existing Site Map XML and roles are unchanged. The Site Map blocker is cleared; entity/form/view warnings remain for the separate Phase 2D.3 component phase.
 
 ## Current Adopted App Manifest
 
 ```yaml
 apiVersion: bso-rs-support/v1
 kind: adoptedModelDrivenApp
-status: adopted-unconfigured
+status: sitemap-associated-unpublished-reference-components-pending
 asOf: 2026-10-22
 adoption:
   ownerApproved: true
   phase2cDisposition: closed-by-adoption-no-create
   phase2dAuthorized: true
   phase2dAuthorizationScope: bounded-four-reference-table-composition
-  phase2dExecutionStatus: blocked-before-write
+  phase2dExecutionStatus: verified-sitemap-associated
+  phase2d2AuthorizationScope: existing-sitemap-component-only
   renameAllowed: false
   recreateAllowed: false
 app:
@@ -40,13 +45,13 @@ currentSiteMap:
   solutionComponentType: 62
   publicationState: Published
   solutionPackageBinding: AppModuleSiteMap.SiteMapUniqueName=srapp
-  standardAppModuleComponentRow: not-observed
-  appComponentAssociation: absent
+  standardAppModuleComponentRow: verified-present
+  appComponentAssociation: verified-present-after-phase-2d2
   content: placeholder-area-group-subarea-only
   subareaTarget: none
   unpublishedLayerQuery: returned-componentstate-0-no-distinct-draft-observed
 proposedComposition:
-  status: blocked-before-write-live-validation
+  status: site-map-associated-reference-components-pending-separate-authorization
   navigation:
     area: Settings
     group: Administration
@@ -57,7 +62,10 @@ proposedComposition:
       - Locations
   appComponents:
     plannedTableFormViewCount: 12
-    currentState: all-absent
+    currentState: site-map-only
+    directComponentInventory:
+      siteMap: verified-present
+      tableFormViewComponents: absent
     entries:
       - table: os_sr_ta
         mainForm: Information
@@ -72,13 +80,12 @@ proposedComposition:
         mainForm: Information
         publicActiveView: Active Locations
   validation:
-    status: blocked
-    blockingError: App does not contain Site Map
+    status: site-map-error-cleared
+    remainingWarning: App does not reference at least one entity
     warnings:
-      - No component is referenced
       - App does not reference at least one entity
-    directAppModuleComponents: none
-    solutionPackageSiteMapBinding: present-but-insufficient-for-validation
+    directAppModuleComponents: existing-sitemap-only
+    solutionPackageSiteMapBinding: present
   components:
     table:
       logicalName: os_sr_ta
@@ -117,14 +124,13 @@ publication:
 unresolved:
   - appmodule-publisher-lookup
   - solution-component-type-10091-exact-identity
-  - explicit-scope-decision-for-existing-sitemap-component-association
-  - AddAppComponents-server-acceptance-not-attempted
+  - Phase-2D3-reference-component-composition-requires-separate-authorization
   - sitemap-PATCH-unpublished-layer-behavior-not-tested
 ```
 
 The Solution Publisher `os_bso_rs_support` is verified; the AppModule's Publisher lookup was not returned and is not inferred from Solution membership. R2 remains the detailed adoption baseline; the R3-P GET-only DryRun subsequently reconfirmed the AppModule state, Site Map XML/state, solution membership, form/view metadata, and package-level unique-name binding. Form/view IDs above are verified metadata/Solution-export records, not app associations. `componentstate=Unpublished` is distinct from `statecode=Active` and from the Published Site Map state.
 
-## Phase 2D.1 Live Preflight
+## Phase 2D.1 Historical Live Preflight (superseded by Phase 2D.2)
 
 On 22 October 2026, the owner-authorized guarded GET-only preflight matched the target environment, PAC/Az/WhoAmI identities, expected-user guard, unmanaged Solution, and Publisher. The adopted AppModule is still Active/Unpublished. The existing Site Map is Published and placeholder-only; its Solution package binding is present, but no direct AppModuleComponent association exists. The four tables are in the Solution. Their selected Main forms are Information and their public active views are Active TA Directories, Active Positions, Active Candidate Sources, and Active Locations. All twelve table/form/view components are absent from the app.
 

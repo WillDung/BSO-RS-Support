@@ -1,6 +1,6 @@
 # Proposed Dataverse Data Model
 
-**Status:** Phase 1C's wider design remains proposed in [Dataverse Schema Specification](DATAVERSE_SCHEMA_SPECIFICATION.md). Phase 1D-C owner approval and independent metadata reads on 19 October 2026 confirm only `os_sr_ta` and its approved columns are implemented in the existing unmanaged Solution. All other tables, custom relationships, and keys remain unprovisioned. See [Current State](CURRENT_STATE.md) for evidence and remaining approval gates.
+**Status:** Phase 1C's wider design remains proposed in [Dataverse Schema Specification](DATAVERSE_SCHEMA_SPECIFICATION.md). The approved TA, Position, Candidate Source, and Location reference-table slices and their approved columns are verified in the existing unmanaged Solution; the remaining tables, custom relationships, and keys remain unprovisioned. Location was independently reconciled on 22 October 2026. See [Current State](CURRENT_STATE.md) for evidence and remaining approval gates.
 
 ## Verified TA Implementation
 
@@ -18,9 +18,25 @@
 
 Creation used Dataverse Web API metadata requests with the approved Solution header. Independent metadata reads passed after correcting a local membership-verifier false negative; Apply was not retried. This confirms schema creation only, not app usability, business-data quality, security-role acceptance, or audit-policy approval.
 
+## Verified Location Implementation
+
+| Item | Verified metadata, 22 October 2026 |
+|---|---|
+| Table | `os_sr_loc`; **Location**; plural **Locations** |
+| Ownership | `OrganizationOwned` |
+| Primary GUID | `os_sr_locid`; `Uniqueidentifier`; primary ID |
+| Primary name | `os_sr_loc_nm`; **Location Name**; String/Text; max 150; `ApplicationRequired`; primary name |
+| Room/resource email | `os_sr_loc_rmeml`; **Room/Resource Email**; String/Email; max 254; optional |
+| Details | `os_sr_loc_det`; **Location Details**; Memo/Text; max 1,000; optional |
+| Keys and relationships | No alternate keys or custom relationships |
+| Solution and publication | `os_sr_bso_rs_support`, unmanaged; membership verified; `PUBLISHED_NO_PENDING_DELTA` |
+| Audit and data | Table audit flag false; audit settings unchanged; no business records created |
+
+The table and two additional attributes were created in the separately authorized Sprint 02F.3 bounded operation. Each write was reconciled by Strong-consistency GET before the next step; the final exact-schema, inventory, membership, audit, and publication checks passed. No `PublishXml`, PATCH, DELETE, or retry was sent. This confirms metadata only, not application usability, business-data quality, security-role acceptance, or audit-policy approval; see [Current State](CURRENT_STATE.md).
+
 ## Naming standard and private abbreviation dictionary
 
-The following internal dictionary maps business meanings to technical abbreviations. Keep this mapping in this repository; do not publish it externally. The selected naming strategy is Publisher Prefix `os` plus the project namespace segment `sr_`. Together they form the final technical-name prefix `os_sr_`; examples below show final names, not values to paste blindly into auto-prefixing name fields. Names other than the implemented TA slice above remain proposals.
+The following internal dictionary maps business meanings to technical abbreviations. Keep this mapping in this repository; do not publish it externally. The selected naming strategy is Publisher Prefix `os` plus the project namespace segment `sr_`. Together they form the final technical-name prefix `os_sr_`; examples below show final names, not values to paste blindly into auto-prefixing name fields. Names other than the four verified reference-table slices remain proposals.
 
 | Business meaning | Abbreviation | Example proposed table name |
 |---|---|---|

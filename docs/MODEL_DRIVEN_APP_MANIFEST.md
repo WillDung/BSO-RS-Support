@@ -1,19 +1,19 @@
 # BSO-RS-Support Model-driven App Manifest
 
-**Status:** Phase 2C-R3 official adoption recorded, 21 October 2026. The owner adopted the existing BSO-RS-Support AppModule with actual unique name `srapp`; Phase 2C is closed by adoption, not by a successful Create. Composition and publication remain unconfigured and are not authorized by this decision. The AppModule Publisher lookup and component type 10091 identity remain unknown.
+**Status:** Phase 2C-R3 official adoption recorded, 21 October 2026. The owner adopted the existing BSO-RS-Support AppModule with actual unique name `srapp`; Phase 2C is closed by adoption, not by a successful Create. Phase 2D.2 verified the existing Site Map association. Phase 2D.3 is authorized, but its latest live preflight stopped before any Dataverse request because the required process-scoped target and expected-user guards were unavailable. The AppModule Publisher lookup and component type 10091 identity remain unknown.
 
 **Phase 2D.1 historical status — 22 October 2026 (superseded by Phase 2D.2 below):** The owner-authorized Phase 2D.1 preflight returned `App does not contain Site Map` and stopped before any write. The later Phase 2D.2 authorization resolved that blocker by associating the existing Site Map.
 
-## Phase 2D.2 Current Status — Site Map Associated
+## Phase 2D.3 Current Status — Blocked Before Write
 
-The single owner-authorized Site Map association succeeded and reconciled. `srapp` remains Active/Unpublished; the existing Site Map XML and roles are unchanged. The Site Map blocker is cleared; entity/form/view warnings remain for the separate Phase 2D.3 component phase.
+The Phase 2D.2 Site Map association remains the last verified live state. Phase 2D.3 local guarded orchestration and synthetic coverage are implemented, but the fresh live preflight stopped at `Verify PAC target`: the process-scoped environment and expected-user guards were unavailable. No Dataverse Web API request or write occurred in the Phase 2D.3 attempt. The app is therefore still documented as Site-Map-only, Active/Unpublished; reference components and navigation are not verified as composed.
 
 ## Current Adopted App Manifest
 
 ```yaml
 apiVersion: bso-rs-support/v1
 kind: adoptedModelDrivenApp
-status: sitemap-associated-unpublished-reference-components-pending
+status: phase-2d3-authorized-preflight-blocked-before-write
 asOf: 2026-10-22
 adoption:
   ownerApproved: true
@@ -22,6 +22,8 @@ adoption:
   phase2dAuthorizationScope: bounded-four-reference-table-composition
   phase2dExecutionStatus: verified-sitemap-associated
   phase2d2AuthorizationScope: existing-sitemap-component-only
+  phase2d3AuthorizationScope: four-reference-table-composition-and-existing-sitemap-patch-no-publish
+  phase2d3ExecutionStatus: blocked-before-write-missing-process-guards
   renameAllowed: false
   recreateAllowed: false
 app:
@@ -51,7 +53,7 @@ currentSiteMap:
   subareaTarget: none
   unpublishedLayerQuery: returned-componentstate-0-no-distinct-draft-observed
 proposedComposition:
-  status: site-map-associated-reference-components-pending-separate-authorization
+  status: site-map-associated-reference-components-pending-live-preflight
   navigation:
     area: Settings
     group: Administration
@@ -124,7 +126,7 @@ publication:
 unresolved:
   - appmodule-publisher-lookup
   - solution-component-type-10091-exact-identity
-  - Phase-2D3-reference-component-composition-requires-separate-authorization
+  - Phase-2D3-live-preflight-requires-approved-process-scoped-target-and-expected-user-guards
   - sitemap-PATCH-unpublished-layer-behavior-not-tested
 ```
 

@@ -239,11 +239,11 @@ Only a separately approved future Apply may use `-Apply`, the exact confirmation
 
 DryRun requires `BSO_RS_ENVIRONMENT_NAME`, `BSO_RS_ORG_URL`, `BSO_RS_EXPECTED_ENVIRONMENT_ID`, and `BSO_RS_EXPECTED_ORG_ID` in the current process; never save their values in the repository. Runtime AddAppComponents acceptance on this unpublished app and whether Site Map PATCH creates the expected unpublished layer remain unverified. See the [Phase 2D runbook](../docs/MODEL_DRIVEN_APP_AUTOMATION_RUNBOOK.md).
 
-## Historical Phase 2D Composition Plan (Prepared, Not Authorized)
+## Historical Phase 2D Composition Plan (Superseded)
 
 [Configure-BsoRsModelDrivenApp.ps1](Configure-BsoRsModelDrivenApp.ps1) targets only the owner-adopted AppModule `srapp`. Running it with no switches is **PlanOnly**: it prints the planned operations and typed `AddAppComponents` payloads without authentication, PAC, or network calls. `-DryRun` performs PAC identity checks and GET-only verification of the AppModule, Solution, Site Map, TA table/form/view, AppModuleSiteMaps export binding, and live OData action/component metadata. It also exports the target Solution to a temporary ZIP and deletes it in `finally`.
 
-The maximum sequence is two independent writes: PATCH only `sitemapxml` on the existing Site Map, then POST `AddAppComponents` for the existing table, Main form, and public view. The Site Map is omitted from that action because the target Solution export already contains `AppModuleSiteMap.SiteMapUniqueName=srapp`. There is no `$batch`, transaction, rollback, retry, delete, PublishXml, PublishAllXml, role, audit, or business-data operation. Each write has an independent read-back; an uncertain or partial result stops without compensating writes. The script requires `-Apply`, the exact confirmation phrase, a nonempty authorization reference, and process-scoped VN LMV IT identity variables. **Do not use Apply until a separate Phase 2D authorization exists.**
+This original sequence (PATCH before POST) is historical and superseded by the Phase 2D.3 dedicated flow below. It must not be used for the current task.
 
 Run PlanOnly and GET-only DryRun:
 
@@ -266,4 +266,17 @@ The recorded Phase 2D.1 total is 83 Dataverse GETs, zero Site Map PATCHes, zero 
 
 The separate `-SiteMapAssociationOnly` mode supports only `-DryRun` or `-Apply`; Apply requires the phase-specific confirmation phrase and authorization reference. It reruns the target identity and metadata preflight, requires exactly one existing Solution Site Map root and the exact `ValidateApp` blocker, then sends a single `AddAppComponents` payload containing only the live-verified existing `sitemapid`. It does not PATCH Site Map XML, add table/form/view components, publish, change roles, retry, or create/delete anything. The expected-user guard is pinned in process scope only after PAC, Az token context, and Dataverse WhoAmI identities agree. Post-write GET reconciliation checks the app identity/state, one direct Site Map component, no other components, unchanged Site Map XML and role associations, and cleared Site Map validation error.
 
-Phase 2D.2 completed as **VERIFIED_SITEMAP_ASSOCIATED**: the one AddAppComponents POST returned HTTP 204. Recorded Dataverse Web API totals across the dry-run and Apply were 75 GET, 1 AddAppComponents POST, 0 other POST, 0 Site Map PATCH, 0 PublishXml, 0 publish, 0 role changes, and 0 retries. See the [Model-driven App Automation Runbook](../docs/MODEL_DRIVEN_APP_AUTOMATION_RUNBOOK.md). Stop here; Phase 2D.3 reference-table composition requires separate authorization.
+Phase 2D.2 completed as **VERIFIED_SITEMAP_ASSOCIATED**: the one AddAppComponents POST returned HTTP 204. Recorded Dataverse Web API totals across the dry-run and Apply were 75 GET, 1 AddAppComponents POST, 0 other POST, 0 Site Map PATCH, 0 PublishXml, 0 publish, 0 role changes, and 0 retries. See the [Model-driven App Automation Runbook](../docs/MODEL_DRIVEN_APP_AUTOMATION_RUNBOOK.md). The owner later separately authorized Phase 2D.3.
+
+## Phase 2D.3 Reference UI Composition — Authorized, Preflight Blocked
+
+`-ReferenceUiCompositionOnly` is the dedicated PlanOnly/DryRun/Apply mode for the four approved reference-table UI sets. DryRun requires the process-scoped VN LMV IT target variables and an already configured `BSO_RS_EXPECTED_USER_ID`; it never pins that guard from PAC. It freshly resolves only `os_sr_ta`, `os_sr_pos`, `os_sr_csrc`, and `os_sr_loc`, requiring the exact Information Main form and named public active view for each, and validates Solution membership, the adopted `srapp`, the unique existing Site Map, and the two existing app roles.
+
+Apply requires the exact confirmation phrase `APPLY PHASE 2D.3 IN VN LMV IT` and a nonempty authorization reference. It allows one AddAppComponents POST with exactly 12 table/form/view records; only after GET reconciliation and successful intermediate `ValidateApp` may it issue one `If-Match` Site Map PATCH. It then performs GET-only final reconciliation and validation. It has no publish, role, schema, or retry route. If any check fails after a write, it stops and requires manual reconciliation; do not rerun automatically.
+
+The latest fresh Phase 2D.3 preflight stopped before Dataverse Web API access because the process-scoped target variables and expected-user guard were unavailable in all checked Windows environment scopes. **No live Dataverse GET or write occurred; outcome is BLOCKED_BEFORE_WRITE.** Restore configuration from the approved secure source, do not copy expected values from PAC, and run a new DryRun before Apply.
+
+```powershell
+& ./scripts/Configure-BsoRsModelDrivenApp.ps1 -PlanOnly -ReferenceUiCompositionOnly
+& ./scripts/Configure-BsoRsModelDrivenApp.ps1 -DryRun -ReferenceUiCompositionOnly
+```

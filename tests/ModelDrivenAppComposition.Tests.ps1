@@ -185,4 +185,126 @@ $wrongContract = [xml]$metadataFixture.OuterXml.Replace('PropertyRef Name="sitem
 Assert-Rejected { Get-AppComponentsContract -Metadata $wrongContract } 'Reject invalid SiteMap primary key contract' 'lacks expected key sitemapid'
 Assert-Test ($script:ExternalCalls -eq 0) 'All PlanOnly and metadata contract tests remain offline'
 
+$phasePlan = (& $scriptPath -PlanOnly -ReferenceUiCompositionOnly) | ConvertFrom-Json
+Assert-Test ($phasePlan.MaximumWriteRequests -eq 2 -and $phasePlan.AutomaticRetries -eq 0) 'Phase 2D.3 plan caps writes at two and retries at zero'
+Assert-Test ($phasePlan.OrderedWriteOperations[0].Method -ceq 'POST' -and
+    $phasePlan.OrderedWriteOperations[0].ComponentCount -eq 12 -and
+    $phasePlan.OrderedWriteOperations[1].Method -ceq 'PATCH') 'Phase 2D.3 writes components before the Site Map PATCH'
+Assert-Test ($phasePlan.OrderedWriteOperations[0].ComponentTypes -join ',' -ceq '1,60,26' -and
+    $phasePlan.ProposedNavigation.SubAreas.Count -eq 4) 'Phase 2D.3 limits composition to four approved table/form/view sets'
+Assert-Test (($phasePlan.ProposedNavigation.SubAreas | ForEach-Object { $_.MainForm + '|' + $_.PublicView }) -join ',' -ceq
+    'Information|Active TA Directories,Information|Active Positions,Information|Active Candidate Sources,Information|Active Locations') 'Plan only the four approved Main forms and public views'
+
+$ReferenceUiCompositionOnly = $true
+$script:ResolvedReferenceComponents = @(
+    foreach ($table in @('os_sr_ta', 'os_sr_pos', 'os_sr_csrc', 'os_sr_loc')) {
+        $ordinal = [array]::IndexOf(@('os_sr_ta', 'os_sr_pos', 'os_sr_csrc', 'os_sr_loc'), $table) + 1
+        $tableId = '{0:x8}-0000-4000-8000-{1:x12}' -f $ordinal, $ordinal
+        $formId = '{0:x8}-1000-4000-8000-{1:x12}' -f $ordinal, $ordinal
+        $viewId = '{0:x8}-2000-4000-8000-{1:x12}' -f $ordinal, $ordinal
+        [pscustomobject]@{
+            LogicalName = $table
+            Payloads = @(
+                [ordered]@{ entityid = $tableId; '@odata.type' = 'Microsoft.Dynamics.CRM.entity' }
+                [ordered]@{ formid = $formId; '@odata.type' = 'Microsoft.Dynamics.CRM.systemform' }
+                [ordered]@{ savedqueryid = $viewId; '@odata.type' = 'Microsoft.Dynamics.CRM.savedquery' }
+            )
+        }
+    }
+)
+$referencePayloads = @(Get-ReferenceUiComponentPayloads)
+$referenceBody = [ordered]@{ AppId = $script:Target.AppModuleId; Components = $referencePayloads }
+Assert-ReferenceUiCompositionPayload -Body $referenceBody
+Assert-Test ($referenceBody.Components.Count -eq 12 -and
+    @($referenceBody.Components | Where-Object { $_.'@odata.type' -ceq 'Microsoft.Dynamics.CRM.entity' }).Count -eq 4 -and
+    @($referenceBody.Components | Where-Object { $_.'@odata.type' -ceq 'Microsoft.Dynamics.CRM.systemform' }).Count -eq 4 -and
+    @($referenceBody.Components | Where-Object { $_.'@odata.type' -ceq 'Microsoft.Dynamics.CRM.savedquery' }).Count -eq 4) 'Payload contains exactly four tables, four forms, and four views'
+$originalSecondFormId = $script:ResolvedReferenceComponents[0].Payloads[1].formid
+$script:ResolvedReferenceComponents[0].Payloads[1].formid = $script:ResolvedReferenceComponents[0].Payloads[0].entityid
+$duplicateIdBody = [ordered]@{ AppId = $script:Target.AppModuleId; Components = @(Get-ReferenceUiComponentPayloads) }
+Assert-Rejected { Assert-ReferenceUiCompositionPayload -Body $duplicateIdBody } 'Reject duplicate IDs across component types' 'duplicate component'
+$script:ResolvedReferenceComponents[0].Payloads[1].formid = $originalSecondFormId
+$mixedReferenceBody = [ordered]@{ AppId = $script:Target.AppModuleId; Components = @($referencePayloads) + @((Get-SiteMapComponentPayload)) }
+Assert-Rejected { Assert-ReferenceUiCompositionPayload -Body $mixedReferenceBody } 'Reject Site Map mixed into the 12 reference components' 'exactly twelve'
+$shortReferenceBody = [ordered]@{ AppId = $script:Target.AppModuleId; Components = @($referencePayloads | Select-Object -First 11) }
+Assert-Rejected { Assert-ReferenceUiCompositionPayload -Body $shortReferenceBody } 'Reject incomplete 11-component payload' 'exactly twelve'
+
+$siteMapComponent = [pscustomobject]@{ ComponentType = 62; ObjectId = $script:Target.SiteMapId }
+$startingUiState = Assert-ReferenceUiComponentState -Components @($siteMapComponent)
+Assert-Test ($startingUiState.SiteMapCount -eq 1 -and $startingUiState.ReferenceComponentCount -eq 0 -and
+    $startingUiState.TotalComponentCount -eq 1) 'Require existing Site Map as the only starting app component'
+$composedUiComponents = @(
+    $siteMapComponent
+    foreach ($reference in $script:ResolvedReferenceComponents) {
+        foreach ($payload in $reference.Payloads) {
+            $componentType = switch ([string]$payload['@odata.type']) {
+                'Microsoft.Dynamics.CRM.entity' { 1 }
+                'Microsoft.Dynamics.CRM.systemform' { 60 }
+                'Microsoft.Dynamics.CRM.savedquery' { 26 }
+            }
+            $key = @($payload.Keys | Where-Object { $_ -ne '@odata.type' })[0]
+            [pscustomobject]@{ ComponentType = $componentType; ObjectId = $payload[$key] }
+        }
+    }
+)
+$composedUiState = Assert-ReferenceUiComponentState -Components $composedUiComponents -RequireComposed
+Assert-Test ($composedUiState.SiteMapCount -eq 1 -and $composedUiState.TableCount -eq 4 -and
+    $composedUiState.MainFormCount -eq 4 -and $composedUiState.PublicViewCount -eq 4 -and
+    $composedUiState.TotalComponentCount -eq 13) 'Require exact final 13-component AppModule inventory'
+Assert-Rejected { Assert-ReferenceUiComponentState -Components @() } 'Reject missing starting Site Map association' 'exactly the existing Site Map'
+Assert-Rejected { Assert-ReferenceUiComponentState -Components (@($composedUiComponents) + @([pscustomobject]@{ ComponentType = 1; ObjectId = 'unexpected' })) -RequireComposed } 'Reject unexpected final AppModule component' 'Unexpected direct AppModule component'
+Assert-Rejected { Assert-ReferenceUiComponentState -Components (@($composedUiComponents) + @($siteMapComponent)) -RequireComposed } 'Reject duplicate Site Map component' 'exactly the existing Site Map'
+
+$approvedRoles = @(
+    [pscustomobject]@{ Name = 'System Administrator'; RoleId = '11111111-1111-4111-8111-111111111111' }
+    [pscustomobject]@{ Name = 'System Customizer'; RoleId = '22222222-2222-4222-8222-222222222222' }
+)
+Assert-ApprovedAppRoles -Roles $approvedRoles
+Assert-Test $true 'Accept only the approved existing app-role associations'
+$extraRoles = @($approvedRoles) + @([pscustomobject]@{ Name = 'Unexpected Role' })
+Assert-Rejected { Assert-ApprovedAppRoles -Roles $extraRoles } 'Reject unexpected app role association' 'differ from the approved'
+
+$beforeUiValidation = Get-ReferenceUiValidationState -AppValidation ([pscustomobject]@{ Issues = @(
+    [pscustomobject]@{ ErrorType = 'Warning'; Message = 'App does not reference at least one entity' }
+) })
+Assert-Test ($beforeUiValidation.EntityReferenceWarningCount -eq 1 -and $beforeUiValidation.BlockingErrorCount -eq 0) 'Recognize expected pre-composition entity warning'
+$afterUiValidation = Get-ReferenceUiValidationState -AppValidation ([pscustomobject]@{ Issues = @() })
+Assert-Test ($afterUiValidation.SiteMapErrorCount -eq 0 -and $afterUiValidation.EntityReferenceWarningCount -eq 0 -and
+    $afterUiValidation.BlockingErrorCount -eq 0) 'Recognize clean intermediate and final ValidateApp state'
+$blockedUiValidation = Get-ReferenceUiValidationState -AppValidation ([pscustomobject]@{ Issues = @(
+    [pscustomobject]@{ ErrorType = 'Error'; Message = 'Unexpected validation blocker' }
+) })
+Assert-Test ($blockedUiValidation.BlockingErrorCount -eq 1) 'Detect blocking ValidateApp error before Site Map PATCH'
+
+$script:RequestCounts = @{ GET = 0; PATCH = 0; POST = 0 }
+$script:WriteResults = [System.Collections.Generic.List[object]]::new()
+Assert-Rejected { Assert-ReferenceUiWriteSequence -Method PATCH } 'Reject Site Map PATCH before AddAppComponents' 'after the successful single component POST'
+$script:RequestCounts.POST = 1
+Assert-Rejected { Assert-ReferenceUiWriteSequence -Method PATCH } 'Reject PATCH after unsuccessful or unverified component POST' 'after the successful single component POST'
+$script:WriteResults.Add([pscustomobject]@{ Method = 'POST'; HttpStatus = 204 })
+Assert-ReferenceUiWriteSequence -Method PATCH
+Assert-Test $true 'Allow the single Site Map PATCH only after successful AddAppComponents'
+Assert-Rejected { Assert-ReferenceUiWriteSequence -Method POST } 'Reject second AddAppComponents operation' 'one AddAppComponents POST'
+$script:RequestCounts.PATCH = 1
+Assert-Rejected { Assert-ReferenceUiWriteSequence -Method PATCH } 'Reject second Site Map PATCH' 'after the successful single component POST'
+$script:RequestCounts = @{ GET = 0; PATCH = 0; POST = 0 }
+$script:WriteResults = [System.Collections.Generic.List[object]]::new()
+
+$beforeNavigation = @(Get-SiteMapSemanticNavigation -SiteMapXml $fixtureXml)
+$afterNavigation = @(Get-SiteMapSemanticNavigation -SiteMapXml $proposedXml)
+Assert-Test ($beforeNavigation.Count -eq 1 -and $afterNavigation.Count -eq 4 -and
+    $afterNavigation[0].Entity -ceq 'os_sr_ta' -and $afterNavigation[3].Entity -ceq 'os_sr_loc') 'Produce semantic before/after navigation for review'
+Assert-SiteMapSemanticNodePreservation -Before $beforeNavigation -After $afterNavigation
+Assert-Test $true 'Preserve all existing Site Map Area, Group, and SubArea identities'
+$removedNavigation = @([pscustomobject]@{
+    AreaId = $afterNavigation[0].AreaId
+    GroupId = $afterNavigation[0].GroupId
+    SubAreaId = 'unexpected-replacement'
+})
+Assert-Rejected { Assert-SiteMapSemanticNodePreservation -Before $beforeNavigation -After $removedNavigation } 'Reject semantic delta deleting an existing node ID' 'removes or fails to preserve'
+$duplicateIdsXml = $fixtureXml.Replace('</Group>', '<SubArea Id="subarea_9787e9c1"><Titles><Title LCID="1033" Title="Duplicate"/></Titles></SubArea></Group>')
+Assert-Rejected { Assert-SiteMapHasNoDuplicateNavigationIds -SiteMapXml $duplicateIdsXml } 'Reject duplicate Site Map navigation IDs' 'duplicate SubArea IDs'
+
+Assert-Test ($script:ExternalCalls -eq 0) 'All Phase 2D.3 regression coverage remains synthetic and offline'
+
 Write-Output "PASS: $script:Passed synthetic app-composition assertions; no authentication, API calls, PAC export, or Apply invocation."

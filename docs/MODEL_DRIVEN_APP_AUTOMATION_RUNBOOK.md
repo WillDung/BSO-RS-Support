@@ -1,7 +1,7 @@
 # Model-driven App and Sitemap Automation Runbook
-**Current status — 22 October 2026:** Phase 2D.2 is **VERIFIED_SITEMAP_ASSOCIATED**. The existing Site Map is associated with `srapp`; the app remains Active/Unpublished and no other components, navigation, roles, or publication were changed. Do not treat this authorization as covering Phase 2D.3.
+**Current status — 22 October 2026:** Phase 2D.2 is **VERIFIED_SITEMAP_ASSOCIATED**. Phase 2D.3 was separately authorized, but its latest fresh live preflight stopped before Dataverse access because the required process-scoped target and expected-user guards were unavailable. No Phase 2D.3 app component or Site Map write occurred; the last verified live state remains `srapp` Active/Unpublished with only the existing Site Map associated.
 
-**Status:** Phase 2C-R3 adoption recorded; Phase 2D plan prepared, 21 October 2026. The owner officially adopted the existing BSO-RS-Support AppModule `srapp` (ID `3709bb7c-28cd-f111-a05c-70a8a581cbfa`) in `os_sr_bso_rs_support`. The actual unique name is `srapp`; `os_srapp` is superseded and must not be used or applied by renaming. Phase 2D composition remains **not authorized**. Do not execute any request in this runbook.
+**Historical adoption status — 21 October 2026:** The owner adopted the existing BSO-RS-Support AppModule `srapp` (ID `3709bb7c-28cd-f111-a05c-70a8a581cbfa`) in `os_sr_bso_rs_support`. The actual unique name is `srapp`; `os_srapp` is superseded and must not be used or applied by renaming.
 
 The dated adoption-status paragraph below records the pre-Phase 2D.1 state and is superseded by this current status and the Phase 2D.2 result.
 
@@ -25,7 +25,17 @@ The owner authorized exactly one bounded `AddAppComponents` call containing only
 - The request contained the existing `srapp` AppId and exactly one typed `Microsoft.Dynamics.CRM.sitemap` component with the verified `sitemapid`. The single POST returned HTTP 204.
 - GET-only reconciliation verified the direct Site Map component, no other direct app components, unchanged app identity and Active/Unpublished state, unchanged Site Map ID/XML/publication state, and unchanged managed role associations. Post-write `ValidateApp` no longer reports the Site Map error; the warning `App does not reference at least one entity` remains because no table/form/view components were authorized here.
 - **Outcome: VERIFIED_SITEMAP_ASSOCIATED.** Counts: **75 Dataverse Web API GET**, **1 AddAppComponents POST** (HTTP 204), **0 other POST**, **0 Site Map PATCH**, **0 PublishXml**, **0 publish operation**, **0 role change**, and **0 retry**. The GET count is the script’s recorded Web API counter and excludes separate PAC identity and read-only Solution-export CLI operations.
-- Stop after this association. Phase 2D.3 reference-table app composition needs a separate authorization and fresh preflight.
+- At the time, stop after this association. The owner later separately authorized Phase 2D.3; its current preflight outcome is recorded below.
+
+## Phase 2D.3 — Authorized Reference UI Composition (Blocked Before Write)
+
+The owner authorized one `AddAppComponents` operation for exactly the four approved reference tables, their Information Main forms, and their public active views, followed only after reconciliation and intermediate `ValidateApp` by at most one ETag-protected PATCH of the existing Site Map. Publishing, role changes, other components, table changes, retries, and app recreation are outside scope.
+
+- Local automation now resolves exact component names and states, confirms all 12 records and Solution membership, requires the existing Site Map as the only initial direct app component, and validates the expected System Administrator/System Customizer associations. It refuses to patch navigation until all 12 requested app components reconcile exactly and the intermediate entity-reference validation warning is gone.
+- The request order is POST `AddAppComponents` (exactly 12 components) first, then PATCH `sitemapxml` on the existing Site Map with `If-Match`; operation counts are guarded to one each and retries are disabled. GET-only reconciliation checks the 13 direct app components, navigation XML, unchanged roles, app identity, and unpublished state. No publish endpoint is implemented in this mode.
+- Fresh live preflight stopped at `Verify PAC target` because `BSO_RS_ENVIRONMENT_NAME`, `BSO_RS_ORG_URL`, `BSO_RS_EXPECTED_ENVIRONMENT_ID`, `BSO_RS_EXPECTED_ORG_ID`, and the process-scoped `BSO_RS_EXPECTED_USER_ID` were unavailable. The expected target/user could not be matched and Dataverse `WhoAmI` was not called. No Dataverse Web API GET, POST, PATCH, publish, role change, or retry occurred.
+- **Outcome: BLOCKED_BEFORE_WRITE.** The last verified live state is Phase 2D.2: existing Site Map association present; `srapp` Active/Unpublished; table/form/view composition and navigation update not verified.
+- Before a new attempt, restore the approved configuration from its secure authorized source in the intended process. Never derive expected IDs from active PAC identity, switch environments, or trigger interactive sign-in. Run `-DryRun -ReferenceUiCompositionOnly`, review its exact component/navigation plan, and only run Apply if all guards pass.
 
 ## Phase 2D.1 — Historical Live Preflight and Outcome (superseded)
 

@@ -5,6 +5,7 @@ param(
     [switch]$PlanOnly,
     [switch]$CreateOnlyRecovery,
     [switch]$CreateOnlyCandidateSource,
+    [switch]$CreateOnlyLocation,
     [switch]$PublishOnly,
     [switch]$VerifyPublicationOnly,
     [string]$AuthorizationReference,
@@ -26,17 +27,28 @@ $script:LastHttpFailure = $null
 $script:PreflightStage = 'INITIALIZATION'
 $script:PublicationStateDiagnostic = $null
 $script:PositionPublicationState = $null
+$script:LocationPrerequisitePublicationStates = [ordered]@{}
 $script:LastRequestDispatchStarted = $false
 $script:ApiRoot = $null
 $script:WritesStarted = $false
 $script:WritesAllowed = $false
 $script:RequestCounts = @{ GET = 0; POST = 0 }
 $script:WriteResults = [System.Collections.Generic.List[object]]::new()
-$script:IsBoundedWrite = $CreateOnlyRecovery -or $CreateOnlyCandidateSource -or $PublishOnly
+$script:IsBoundedWrite = $CreateOnlyRecovery -or $CreateOnlyCandidateSource -or $CreateOnlyLocation -or $PublishOnly
 $script:RecoveryState = if ($script:IsBoundedWrite) { 'PRECHECK' } else { $null }
 $script:RecoveryTransitions = [System.Collections.Generic.List[object]]::new()
 $script:RecoveryExpectedFingerprint = '0f7372eeb66c0214ae08ed0dc74f82c981cc4cd73baa9156f16d6e1bd1f48e80'
 $script:CandidateSourceExpectedFingerprint = '867803e7533bfb053c70b951edc47cb4475b5f0183852dcb850b88b317c08f16'
+$script:LocationExpectedFingerprints = [ordered]@{
+    Table = 'd0d41539714feaa1f090335d74f7d2078cbf3670f35279226064e116801d090e'
+    RoomEmail = 'f070e1f1204498aabf738d05e4345d6b89a7800259a1a1ffb354c467401cd0a4'
+    Details = '84e085de78acf88713c4d008607185245cd105dcd2f8c6568515132d7bf709ae'
+}
+$script:LocationActualFingerprints = [ordered]@{}
+$script:LocationWriteStep = $null
+$script:LocationStepState = $null
+$script:LocationWriteAttempts = @{}
+$script:StrongConsistencyReads = $false
 $script:RecoveryActualFingerprint = $null
 $script:RecoveryReconciliation = $null
 $script:RecoveryResponseClass = $null
@@ -126,7 +138,7 @@ function Set-RecoveryState {
         READY = @('WRITE_ATTEMPTED', 'BLOCKED', 'FAILED_VALIDATION')
         WRITE_ATTEMPTED = @('RECONCILING')
         RECONCILING = @('VERIFIED_SUCCESS', 'BLOCKED', 'FAILED_AUTH', 'FAILED_AUTHZ', 'FAILED_VALIDATION', 'UNCERTAIN', 'PARTIAL_STATE')
-        VERIFIED_SUCCESS = @()
+        VERIFIED_SUCCESS = if ($CreateOnlyLocation) { @('READY') } else { @() }
         BLOCKED = @()
         FAILED_AUTH = @()
         FAILED_AUTHZ = @()
@@ -205,12 +217,38 @@ function Assert-CandidateSourcePayloadFingerprint {
     $script:CandidateSourceActualFingerprint
 }
 
+function Assert-LocationPayloadFingerprint {
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet('Table', 'RoomEmail', 'Details')][string]$Step,
+        [Parameter(Mandatory = $true)][object]$Payload
+    )
+    $actual = Get-PayloadFingerprint -Payload $Payload
+    $script:LocationActualFingerprints[$Step] = $actual
+    if ($actual -cne $script:LocationExpectedFingerprints[$Step]) {
+        if ($script:RecoveryState -eq 'PRECHECK') { Set-RecoveryState -State 'FAILED_VALIDATION' }
+        throw "Location $Step payload differs from the approved fingerprint; no write was attempted."
+    }
+    $actual
+}
+
 function Assert-ExpectedRecoveryUser {
     param([Parameter(Mandatory = $true)][string]$ActualUserId)
     $expectedUserGuid = [Guid]::Empty
     if (-not [Guid]::TryParse($ExpectedUserId, [ref]$expectedUserGuid) -or
         $ActualUserId -ine $expectedUserGuid.ToString()) {
         throw 'PAC identity does not match BSO_RS_EXPECTED_USER_ID; stop without displaying the identity.'
+    }
+}
+
+function Assert-ProcessExpectedUserGuard {
+    $processExpectedUser = [Environment]::GetEnvironmentVariable('BSO_RS_EXPECTED_USER_ID', 'Process')
+    $configuredGuid = [Guid]::Empty
+    $parameterGuid = [Guid]::Empty
+    if ([string]::IsNullOrWhiteSpace($processExpectedUser) -or
+        -not [Guid]::TryParse($processExpectedUser, [ref]$configuredGuid) -or
+        -not [Guid]::TryParse($ExpectedUserId, [ref]$parameterGuid) -or
+        $configuredGuid -ne $parameterGuid) {
+        throw 'The process-scoped BSO_RS_EXPECTED_USER_ID guard is missing or does not match the configured expected user.'
     }
 }
 
@@ -573,9 +611,11 @@ function Assert-PacEnvironment {
         $envId.Groups[1].Value -cne $ExpectedEnvironmentId) {
         throw 'PAC active environment does not match the configured VN LMV IT target; stop without switching.'
     }
-    if ($CreateOnlyRecovery -or $CreateOnlyCandidateSource) {
+    if ($CreateOnlyRecovery -or $CreateOnlyCandidateSource -or $CreateOnlyLocation) {
+        Assert-ProcessExpectedUserGuard
         Assert-ExpectedRecoveryUser -ActualUserId $userId.Groups[1].Value
-        if ($CreateOnlyRecovery) { $script:RecoveryEnvironmentVerified = $true }
+        $script:RecoveryEnvironmentVerified = $true
+        $script:RecoveryIdentityVerified = $true
     }
     $script:PacUserId = $userId.Groups[1].Value
     $script:PacUserEmail = $userEmail.Groups[1].Value
@@ -743,7 +783,7 @@ function Invoke-DataverseRequest {
         [object]$Body,
         [switch]$WithSolutionHeader
     )
-    $boundedWrite = $CreateOnlyRecovery -or $CreateOnlyCandidateSource -or $PublishOnly
+    $boundedWrite = $CreateOnlyRecovery -or $CreateOnlyCandidateSource -or $CreateOnlyLocation -or $PublishOnly
     if ($Method -eq 'POST') {
         if ($CreateOnlyRecovery) {
             if (-not $script:WritesAllowed -or $Apply -or $PlanOnly -or $TableName -cne 'os_sr_pos' -or
@@ -765,6 +805,34 @@ function Invoke-DataverseRequest {
                 throw 'Candidate Source create-only POST blocked by its one-write guard.'
             }
         }
+        elseif ($CreateOnlyLocation) {
+            $expectedStep = switch ($script:LocationWriteStep) {
+                'Table' { 'EntityDefinitions'; break }
+                'RoomEmail' { "EntityDefinitions(LogicalName='os_sr_loc')/Attributes"; break }
+                'Details' { "EntityDefinitions(LogicalName='os_sr_loc')/Attributes"; break }
+                default { $null }
+            }
+            $expectedFingerprint = $script:LocationExpectedFingerprints[$script:LocationWriteStep]
+            $expectedSchemaName = switch ($script:LocationWriteStep) {
+                'Table' { 'os_sr_loc'; break }
+                'RoomEmail' { 'os_sr_loc_rmeml'; break }
+                'Details' { 'os_sr_loc_det'; break }
+                default { $null }
+            }
+            $expectedOrder = @('Table', 'RoomEmail', 'Details')
+            $nextStep = if ($script:LocationWriteAttempts.Count -lt $expectedOrder.Count) {
+                $expectedOrder[$script:LocationWriteAttempts.Count]
+            } else { $null }
+            if (-not $script:WritesAllowed -or $Apply -or $PlanOnly -or $TableName -cne 'os_sr_loc' -or
+                $Path -cne $expectedStep -or $Body.SchemaName -cne $expectedSchemaName -or
+                $script:LocationWriteStep -cne $nextStep -or
+                -not $WithSolutionHeader -or $script:RecoveryState -cne 'READY' -or
+                $script:LocationStepState -cne 'READY' -or
+                $script:LocationWriteAttempts.ContainsKey([string]$script:LocationWriteStep) -or
+                (Get-PayloadFingerprint -Payload $Body) -cne $expectedFingerprint) {
+                throw 'Location step POST blocked by its per-step fingerprint and one-attempt guard.'
+            }
+        }
         elseif ($PublishOnly) {
             $expectedXml = "<importexportxml><entities><entity>$TableName</entity></entities></importexportxml>"
             if (-not $script:WritesAllowed -or $Apply -or $PlanOnly -or
@@ -774,6 +842,9 @@ function Invoke-DataverseRequest {
                 $script:RequestCounts.POST -ne 0) {
                 throw 'Table-scoped PublishXml blocked by its one-write guard.'
             }
+        }
+        elseif ($Apply -and $TableName -ceq 'os_sr_loc') {
+            throw 'Location metadata writes require the Location-only bounded create mode.'
         }
         else {
             if (-not $Apply -or $PlanOnly -or -not $script:WritesAllowed) { throw 'POST blocked: confirmed Apply is required.' }
@@ -794,6 +865,7 @@ function Invoke-DataverseRequest {
         'If-None-Match' = 'null'
     }
     if ($WithSolutionHeader) { $headers['MSCRM.SolutionUniqueName'] = 'os_sr_bso_rs_support' }
+    if ($Method -eq 'GET' -and $script:StrongConsistencyReads) { $headers['Consistency'] = 'Strong' }
     $requestUri = if ([Uri]::IsWellFormedUriString($Path, [UriKind]::Absolute)) { $Path } else { $script:ApiRoot + $Path }
     $parsedRequestUri = [Uri]$requestUri
     $organizationUri = [Uri]$OrganizationUrl
@@ -829,11 +901,18 @@ function Invoke-DataverseRequest {
     $script:LastRequestDispatchStarted = $false
     if ($Method -eq 'POST') {
         if ($boundedWrite) {
-            if (-not $script:WritesAllowed -or $Apply -or $PlanOnly -or
-                $script:RecoveryState -cne 'READY' -or $script:RequestCounts.POST -ne 0) {
-                throw 'Bounded metadata POST blocked by its one-write guard.'
+            if ($CreateOnlyLocation) {
+                $script:LocationWriteAttempts[[string]$script:LocationWriteStep] = $true
+                $script:LocationStepState = 'WRITE_ATTEMPTED'
+                Set-RecoveryState -State 'WRITE_ATTEMPTED'
             }
-            Set-RecoveryState -State 'WRITE_ATTEMPTED'
+            else {
+                if (-not $script:WritesAllowed -or $Apply -or $PlanOnly -or
+                    $script:RecoveryState -cne 'READY' -or $script:RequestCounts.POST -ne 0) {
+                    throw 'Bounded metadata POST blocked by its one-write guard.'
+                }
+                Set-RecoveryState -State 'WRITE_ATTEMPTED'
+            }
         }
         elseif (-not $Apply -or $PlanOnly -or -not $script:WritesAllowed) {
             throw 'POST blocked: confirmed Apply is required.'
@@ -1237,10 +1316,12 @@ function Get-Preflight {
         Assert-RecoveryInventory -ProjectTables $projectTables -SolutionComponents $solutionComponents -ExistingTableIds $existingTableIds.ToArray()
         if ($TableName -in $projectTables) { throw 'Position already exists; recovery will not update, delete, or recreate it.' }
     }
-    elseif ($CreateOnlyCandidateSource -or $PublishOnly -or $VerifyPublicationOnly) {
+    elseif ($CreateOnlyCandidateSource -or $CreateOnlyLocation -or $PublishOnly -or $VerifyPublicationOnly) {
         $script:PreflightStage = 'SOLUTION_COMPONENT_INVENTORY'
         $solutionComponents = @(Get-SolutionSchemaComponents -SolutionId $solutions[0].solutionid)
-        $expectedTables = if ($CreateOnlyCandidateSource -or $TableName -ceq 'os_sr_pos') {
+        $expectedTables = if ($CreateOnlyLocation) {
+            @('os_sr_ta', 'os_sr_pos', 'os_sr_csrc')
+        } elseif ($CreateOnlyCandidateSource -or $TableName -ceq 'os_sr_pos') {
             @('os_sr_pos', 'os_sr_ta')
         } else {
             @('os_sr_csrc', 'os_sr_pos', 'os_sr_ta')
@@ -1254,11 +1335,24 @@ function Get-Preflight {
         if ($CreateOnlyCandidateSource -and $TableName -in $projectTables) {
             throw 'Candidate Source already exists; create-only mode will not update or recreate it.'
         }
+        if ($CreateOnlyLocation -and $TableName -in $projectTables) {
+            throw 'Location already exists; create-only mode will not update or recreate it.'
+        }
         if ($CreateOnlyCandidateSource) {
             $position = Get-EntityMetadata -LogicalName 'os_sr_pos'
             $script:PositionPublicationState = Get-TablePublicationState -SolutionId $solutions[0].solutionid -Metadata $position
             if ($script:PositionPublicationState -cne 'PUBLISHED_NO_PENDING_DELTA') {
                 throw 'Position is not verified as published; Candidate Source creation is blocked.'
+            }
+        }
+        if ($CreateOnlyLocation) {
+            foreach ($referenceName in @('os_sr_pos', 'os_sr_csrc')) {
+                $reference = Get-EntityMetadata -LogicalName $referenceName
+                $publicationState = Get-TablePublicationState -SolutionId $solutions[0].solutionid -Metadata $reference
+                if ($publicationState -cne 'PUBLISHED_NO_PENDING_DELTA') {
+                    throw "$referenceName is not verified as published; Location creation is blocked."
+                }
+                $script:LocationPrerequisitePublicationStates[$referenceName] = $publicationState
             }
         }
         if ($PublishOnly -and $TableName -notin $projectTables) {
@@ -1286,6 +1380,7 @@ function Get-Preflight {
         ExistingSnapshots = $snapshots
         TargetExists = ($TableName -in $projectTables)
         VerifiedPrivileges = $verifiedPrivileges
+        ExistingSchemaComponentIds = $existingTableIds.ToArray()
     }
 }
 
@@ -1364,6 +1459,123 @@ function Get-ReconciliationSummary {
         return [ordered]@{ Completed = $true; Outcome = 'PRESENT' }
     }
     catch { return [ordered]@{ Completed = $false; Outcome = 'UNKNOWN' } }
+}
+
+function Get-LocationStepReconciliationSummary {
+    param([Parameter(Mandatory = $true)][ValidateSet('Table', 'RoomEmail', 'Details')][string]$Step)
+    try {
+        $table = Get-TableMetadataIfPresent
+    }
+    catch { return [ordered]@{ Completed = $false; Outcome = 'UNKNOWN'; Diagnostic = $script:LastHttpFailure } }
+    if (-not $table) { return [ordered]@{ Completed = $true; Outcome = 'ABSENT' } }
+    try {
+        $expectedDefinition = $script:Definition.Clone()
+        if ($Step -eq 'Table') { $expectedDefinition.Columns = @() }
+        elseif ($Step -eq 'RoomEmail') { $expectedDefinition.Columns = @($script:Definition.Columns[0]) }
+        Assert-TableMetadata -Metadata $table -Definition $expectedDefinition
+    }
+    catch { return [ordered]@{ Completed = $true; Outcome = 'PARTIAL' } }
+    try {
+        $entityMembership = @(Get-SolutionMembership -SolutionId $script:ReconciliationSolutionId `
+            -ObjectId $table.MetadataId -ComponentType 1)
+    }
+    catch { return [ordered]@{ Completed = $false; Outcome = 'UNKNOWN'; Diagnostic = $script:LastHttpFailure } }
+    if ($entityMembership.Count -ne 1) { return [ordered]@{ Completed = $true; Outcome = 'PARTIAL' } }
+    if ($null -ne $entityMembership[0].rootcomponentbehavior -and $entityMembership[0].rootcomponentbehavior -eq 0) {
+        return [ordered]@{ Completed = $true; Outcome = 'PRESENT' }
+    }
+    foreach ($columnName in @($expectedDefinition.PrimaryName.SchemaName) +
+        @($expectedDefinition.Columns | ForEach-Object { $_.SchemaName })) {
+        $column = @($table.Attributes | Where-Object { $_.LogicalName -ceq $columnName })
+        if ($column.Count -ne 1) { return [ordered]@{ Completed = $true; Outcome = 'PARTIAL' } }
+        try {
+            $membership = @(Get-SolutionMembership -SolutionId $script:ReconciliationSolutionId `
+                -ObjectId $column[0].MetadataId -ComponentType 2)
+        }
+        catch { return [ordered]@{ Completed = $false; Outcome = 'UNKNOWN'; Diagnostic = $script:LastHttpFailure } }
+        if ($membership.Count -ne 1) { return [ordered]@{ Completed = $true; Outcome = 'PARTIAL' } }
+    }
+    [ordered]@{ Completed = $true; Outcome = 'PRESENT' }
+}
+
+function Invoke-BoundedLocationStep {
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet('Table', 'RoomEmail', 'Details')][string]$Step,
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][object]$Payload,
+        [Parameter(Mandatory = $true)][string]$SolutionId
+    )
+    $script:ReconciliationSolutionId = $SolutionId
+    $actualFingerprint = Assert-LocationPayloadFingerprint -Step $Step -Payload $Payload
+    $script:LocationWriteStep = $Step
+    $script:LocationStepState = 'READY'
+    $statusCode = 0
+    try {
+        $null = Invoke-DataverseRequest -Method POST -Path $Path -Body $Payload -WithSolutionHeader
+        $statusCode = [int]$script:WriteResults[$script:WriteResults.Count - 1].StatusCode
+        $script:RecoveryResponseClass = 'SUCCESS_RESPONSE'
+    }
+    catch {
+        if ($null -eq $script:LastHttpFailure) {
+            $script:LastHttpFailure = New-SafeHttpFailure -Method POST -Resource $Path `
+                -Timestamp ([DateTimeOffset]::UtcNow) -StatusCode $null -ErrorRecord $_ `
+                -DispatchStarted $script:LastRequestDispatchStarted -WritesMayHaveOccurred:$script:WritesStarted
+        }
+        if ($null -ne $script:LastHttpFailure.StatusCode) { $statusCode = [int]$script:LastHttpFailure.StatusCode }
+        $script:RecoveryResponseClass = [string]$script:LastHttpFailure.FailureClass
+    }
+
+    if (-not $script:LocationWriteAttempts.ContainsKey($Step)) {
+        Set-RecoveryState -State 'BLOCKED'
+        return [pscustomobject]@{
+            Step = $Step; Outcome = 'BLOCKED_BEFORE_WRITE'; StatusCode = $null
+            PayloadSha256 = $actualFingerprint; Reconciliation = $null
+            RequestCounts = [ordered]@{ GET = $script:RequestCounts.GET; POST = $script:RequestCounts.POST }
+            RetryCount = 0; StrongConsistency = $false; HttpFailure = $script:LastHttpFailure
+        }
+    }
+
+    Set-RecoveryState -State 'RECONCILING'
+    $originalFailure = if ($null -ne $script:LastHttpFailure) { [ordered]@{} + $script:LastHttpFailure } else { $null }
+    $previousConsistency = $script:StrongConsistencyReads
+    try {
+        $script:StrongConsistencyReads = $true
+        $reconciliation = Get-LocationStepReconciliationSummary -Step $Step
+    }
+    finally {
+        $script:StrongConsistencyReads = $previousConsistency
+        $script:LastHttpFailure = $originalFailure
+    }
+    if ($null -ne $originalFailure) {
+        $originalFailure.WritesMayHaveOccurred = [bool]$script:WritesStarted
+        $originalFailure.ReconciliationCompleted = $reconciliation.Completed
+        $originalFailure.ReconciliationOutcome = $reconciliation.Outcome
+    }
+
+    if ($statusCode -lt 200 -or $statusCode -ge 300) {
+        $terminalState = Get-RecoveryFailureState -StatusCode $script:LastHttpFailure.StatusCode -FailureClass $script:LastHttpFailure.FailureClass
+    }
+    else {
+        $terminalState = switch ($reconciliation.Outcome) {
+            'PRESENT' { 'VERIFIED_SUCCESS'; break }
+            'PARTIAL' { 'PARTIAL_STATE'; break }
+            default { 'UNCERTAIN' }
+        }
+    }
+    Set-RecoveryState -State $terminalState
+    $script:LocationStepState = $terminalState
+    [pscustomobject]@{
+        Step = $Step
+        Outcome = $terminalState
+        StatusCode = if ($statusCode -ge 100 -and $statusCode -le 599) { $statusCode } else { $null }
+        ResponseClass = $script:RecoveryResponseClass
+        PayloadSha256 = $actualFingerprint
+        Reconciliation = $reconciliation
+        RequestCounts = [ordered]@{ GET = $script:RequestCounts.GET; POST = $script:RequestCounts.POST }
+        RetryCount = 0
+        StrongConsistency = $true
+        HttpFailure = if ($null -ne $originalFailure) { $originalFailure } else { $null }
+    }
 }
 
 function Invoke-BoundedEntityCreation {
@@ -1520,7 +1732,7 @@ function Invoke-TableScopedPublication {
 function Show-Plan {
     param([Parameter(Mandatory = $true)][object]$Payloads)
     $preview = [ordered]@{
-        Mode = if ($CreateOnlyRecovery) { 'CreateOnlyRecovery; Position-only; one POST maximum; GET-only reconciliation' } elseif ($CreateOnlyCandidateSource) { 'CreateOnlyCandidateSource; one EntityDefinitions POST maximum; GET-only reconciliation' } elseif ($PublishOnly) { 'PublishOnly; table-scoped PublishXml only; one POST maximum; GET-only reconciliation' } elseif ($VerifyPublicationOnly) { 'VerifyPublicationOnly; Position-only; RetrieveEntity GET comparison; no writes' } elseif ($PlanOnly) { 'PlanOnly; no authentication/network calls' } elseif ($Apply) { 'Apply requested; preflight and typed confirmation required' } else { 'DryRun; interactive auth and GET-only preflight' }
+        Mode = if ($CreateOnlyRecovery) { 'CreateOnlyRecovery; Position-only; one POST maximum; GET-only reconciliation' } elseif ($CreateOnlyCandidateSource) { 'CreateOnlyCandidateSource; one EntityDefinitions POST maximum; GET-only reconciliation' } elseif ($CreateOnlyLocation) { 'CreateOnlyLocation; Location-only; one table POST plus two attribute POSTs maximum; Strong-consistency GET-only reconciliation; no publication' } elseif ($PublishOnly) { 'PublishOnly; table-scoped PublishXml only; one POST maximum; GET-only reconciliation' } elseif ($VerifyPublicationOnly) { 'VerifyPublicationOnly; Position-only; RetrieveEntity GET comparison; no writes' } elseif ($PlanOnly) { 'PlanOnly; no authentication/network calls' } elseif ($Apply) { 'Apply requested; preflight and typed confirmation required' } else { 'DryRun; interactive auth and GET-only preflight' }
         Environment = if ($EnvironmentName) { $EnvironmentName } else { 'NOT SUPPLIED' }
         OrganizationUrl = if ($script:IsBoundedWrite -or $VerifyPublicationOnly) { '[omitted]' } elseif ($OrganizationUrl) { $OrganizationUrl.TrimEnd('/') } else { 'NOT SUPPLIED' }
         ExpectedEnvironmentId = if ($script:IsBoundedWrite -or $VerifyPublicationOnly) { '[omitted]' } elseif ($ExpectedEnvironmentId) { $ExpectedEnvironmentId } else { 'NOT SUPPLIED' }
@@ -1542,6 +1754,13 @@ function Show-Plan {
         AdditionalColumnFormatName = $Payloads.EmailColumn.FormatName.Value
         AdditionalColumnMaxLength = $Payloads.EmailColumn.MaxLength
         AdditionalColumnRequiredLevel = $Payloads.EmailColumn.RequiredLevel.Value
+        PayloadFingerprints = if ($TableName -ceq 'os_sr_loc') {
+            [ordered]@{
+                Table = Get-PayloadFingerprint -Payload $Payloads.Table
+                RoomEmail = Get-PayloadFingerprint -Payload $Payloads.Columns[0]
+                Details = Get-PayloadFingerprint -Payload $Payloads.Columns[1]
+            }
+        } else { $null }
         AlternateKeys = 'None'
         DuplicateDetection = 'None'
         AuditChanges = 'None; do not set audit properties and compare environment flags after Apply.'
@@ -1554,6 +1773,13 @@ function Show-Plan {
             @('GET-only target, identity, privilege, Solution, Publisher, inventory, and audit preflight',
                 'At most one POST EntityDefinitions for Candidate Source with MSCRM.SolutionUniqueName',
                 'GET-only Candidate Source schema and Solution membership reconciliation')
+        } elseif ($CreateOnlyLocation) {
+            @('GET-only target, identity, privilege, Solution, Publisher, inventory, and audit preflight',
+                'One POST EntityDefinitions for Location, followed by Strong-consistency GET-only reconciliation',
+                'One Room/Resource Email attribute POST, then Strong-consistency GET-only reconciliation',
+                'One Location Details attribute POST, then Strong-consistency GET-only reconciliation',
+                'GET-only complete-schema, Solution membership, inventory, and RetrieveEntity publication verification',
+                'No PublishXml, PATCH, DELETE, retry, or business-record operation')
         } elseif ($PublishOnly) {
             @('GET-only target, identity, privilege, Solution, Publisher, inventory, and audit preflight',
                 "At most one table-scoped PublishXml for $TableName, only when RetrieveEntity confirms pending unpublished metadata",
@@ -1562,6 +1788,11 @@ function Show-Plan {
             @('GET-only target, identity, Solution, Publisher, inventory, and audit preflight',
                 'GET RetrieveEntity with RetrieveAsIfPublished=false and true for Position',
                 'No POST, PATCH, DELETE, retry, or publication')
+        } elseif ($PlanOnly -and $TableName -ceq 'os_sr_loc') {
+            @('Local Location payload validation and fingerprint calculation only',
+                'Planned table creation followed by Room/Resource Email and Location Details attribute creation',
+                'Planned Strong-consistency GET-only reconciliation after each metadata write',
+                'No authentication, network call, PublishXml, PATCH, DELETE, or business record')
         } else {
             @(
                 'GET WhoAmI, Organization, Publisher, Solution, EntityDefinitions, audit flags',
@@ -1579,12 +1810,15 @@ function Show-Plan {
 }
 
 try {
-    $boundedModeCount = @(@($CreateOnlyRecovery, $CreateOnlyCandidateSource, $PublishOnly, $VerifyPublicationOnly) | Where-Object { $_ }).Count
+    $boundedModeCount = @(@($CreateOnlyRecovery, $CreateOnlyCandidateSource, $CreateOnlyLocation, $PublishOnly, $VerifyPublicationOnly) | Where-Object { $_ }).Count
     if (($Apply -and $PlanOnly) -or ($boundedModeCount -gt 1) -or
         ($script:IsBoundedWrite -and ($Apply -or $PlanOnly)) -or
         ($VerifyPublicationOnly -and ($Apply -or $PlanOnly -or $TableName -notin @('os_sr_pos', 'os_sr_csrc')))) {
         if ($script:IsBoundedWrite) { Set-RecoveryState -State 'BLOCKED' }
         throw 'Choose exactly one supported mode; publication verification is Position-only and read-only.'
+    }
+    if ($Apply -and $TableName -ceq 'os_sr_loc') {
+        throw 'Generic Apply is disabled for Location; use its bounded three-step create mode.'
     }
     if ($CreateOnlyRecovery -and $TableName -cne 'os_sr_pos') {
         Set-RecoveryState -State 'BLOCKED'
@@ -1608,6 +1842,20 @@ try {
             throw 'Candidate Source create-only mode requires explicit -DisplayCollectionName Candidate Sources.'
         }
     }
+    if ($CreateOnlyLocation) {
+        if ($TableName -cne 'os_sr_loc') {
+            Set-RecoveryState -State 'BLOCKED'
+            throw 'Location create-only mode is restricted to os_sr_loc.'
+        }
+        if (-not $collectionNameWasExplicit -or $DisplayCollectionName -cne 'Locations') {
+            Set-RecoveryState -State 'BLOCKED'
+            throw 'Location create-only mode requires explicit -DisplayCollectionName Locations.'
+        }
+        if ($AuthorizationReference -notmatch '^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$') {
+            Set-RecoveryState -State 'BLOCKED'
+            throw 'Location create-only mode requires a safe, non-empty external authorization reference.'
+        }
+    }
     if ($PublishOnly -and $TableName -notin @('os_sr_pos', 'os_sr_csrc')) {
         Set-RecoveryState -State 'BLOCKED'
         throw 'Publish-only mode is restricted to Position or Candidate Source.'
@@ -1628,6 +1876,11 @@ try {
     }
     if ($CreateOnlyCandidateSource) {
         Assert-CandidateSourcePayloadFingerprint -Payload $payloads.Table | Out-Null
+    }
+    if ($CreateOnlyLocation) {
+        Assert-LocationPayloadFingerprint -Step Table -Payload $payloads.Table | Out-Null
+        Assert-LocationPayloadFingerprint -Step RoomEmail -Payload $payloads.Columns[0] | Out-Null
+        Assert-LocationPayloadFingerprint -Step Details -Payload $payloads.Columns[1] | Out-Null
     }
     try { Assert-SchemaPayloads -Payloads $payloads }
     catch {
@@ -1657,7 +1910,7 @@ try {
         })
         return
     }
-    if ($CreateOnlyCandidateSource -or $PublishOnly) {
+    if ($CreateOnlyCandidateSource -or $CreateOnlyLocation -or $PublishOnly) {
         $script:RecoveryPreflight = [ordered]@{
             EnvironmentName = 'VN LMV IT'
             EnvironmentVerified = $script:RecoveryEnvironmentVerified
@@ -1737,6 +1990,154 @@ try {
         $recovery = Invoke-CandidateSourceCreateOnly -Payload $payloads.Table -SolutionId $preflight.SolutionId
         Write-Result -Stage 'CreateOnlyCandidateSource' -Status $recovery.Outcome -Details $recovery
         if ($recovery.State -cne 'VERIFIED_SUCCESS') { exit 1 }
+        return
+    }
+    if ($CreateOnlyLocation) {
+        $script:RecoveryPreflight = [ordered]@{
+            EnvironmentName = 'VN LMV IT'
+            EnvironmentVerified = $script:RecoveryEnvironmentVerified
+            IdentityVerified = $script:RecoveryIdentityVerified
+            ExpectedUserMatched = $true
+            SolutionUniqueName = $preflight.SolutionUniqueName
+            SolutionUnmanaged = $true
+            PublisherUniqueName = 'os_bso_rs_support'
+            PublisherPrefix = $preflight.PublisherPrefix
+            ProjectTables = $preflight.ProjectTables
+            TargetAbsent = -not $preflight.TargetExists
+            ReferencePublicationStates = $script:LocationPrerequisitePublicationStates
+            SolutionSchemaComponentsMapped = $true
+            VerifiedPrivileges = $preflight.VerifiedPrivileges
+        }
+        $confirmationPhrase = "CREATE LOCATION os_sr_loc IN VN LMV IT AUTHORIZATION $AuthorizationReference"
+        $confirmation = Read-Host "Type '$confirmationPhrase' only after confirming the external approval"
+        if ($confirmation -cne $confirmationPhrase) {
+            Set-RecoveryState -State 'BLOCKED'
+            throw 'Location create-only confirmation did not match; no write performed.'
+        }
+
+        Ensure-DataverseAccessToken
+        $finalPreflight = Get-Preflight
+        $expectedInventory = @('os_sr_ta', 'os_sr_pos', 'os_sr_csrc')
+        if ($finalPreflight.SolutionId -cne $preflight.SolutionId -or
+            ((@($finalPreflight.ProjectTables | Sort-Object)) -join ',') -cne ((@($expectedInventory | Sort-Object)) -join ',') -or
+            $finalPreflight.TargetExists -or
+            $finalPreflight.PublisherPrefix -cne 'os' -or
+            $finalPreflight.SolutionUniqueName -cne 'os_sr_bso_rs_support') {
+            Set-RecoveryState -State 'BLOCKED'
+            throw 'Location final preflight changed after confirmation; no write performed.'
+        }
+        Assert-LocationPayloadFingerprint -Step Table -Payload $payloads.Table | Out-Null
+        Assert-LocationPayloadFingerprint -Step RoomEmail -Payload $payloads.Columns[0] | Out-Null
+        Assert-LocationPayloadFingerprint -Step Details -Payload $payloads.Columns[1] | Out-Null
+        $preflight = $finalPreflight
+        $script:RecoveryPreflight.ProjectTables = $preflight.ProjectTables
+        $script:RecoveryPreflight.VerifiedPrivileges = $preflight.VerifiedPrivileges
+        $script:WritesAllowed = $true
+        $script:LocationStepResults = [System.Collections.Generic.List[object]]::new()
+        Set-RecoveryState -State 'READY'
+
+        $steps = @(
+            [pscustomobject]@{ Name = 'Table'; Path = 'EntityDefinitions'; Payload = $payloads.Table },
+            [pscustomobject]@{ Name = 'RoomEmail'; Path = "EntityDefinitions(LogicalName='os_sr_loc')/Attributes"; Payload = $payloads.Columns[0] },
+            [pscustomobject]@{ Name = 'Details'; Path = "EntityDefinitions(LogicalName='os_sr_loc')/Attributes"; Payload = $payloads.Columns[1] }
+        )
+        foreach ($step in $steps) {
+            if ($script:RecoveryState -eq 'VERIFIED_SUCCESS') { Set-RecoveryState -State 'READY' }
+            $stepResult = Invoke-BoundedLocationStep -Step $step.Name -Path $step.Path `
+                -Payload $step.Payload -SolutionId $preflight.SolutionId
+            $script:LocationStepResults.Add($stepResult)
+            if ($stepResult.Outcome -cne 'VERIFIED_SUCCESS') {
+                $writeCounts = [ordered]@{
+                    GET = $script:RequestCounts.GET
+                    EntityDefinitionsPOST = @($script:WriteResults | Where-Object Path -ceq 'EntityDefinitions').Count
+                    AttributePOST = @($script:WriteResults | Where-Object { $_.Path -match '/Attributes$' }).Count
+                    PublishXml = @($script:WriteResults | Where-Object Path -ceq 'PublishXml').Count
+                    PATCH = 0
+                    DELETE = 0
+                    Retries = 0
+                }
+                Write-Result -Stage 'CreateOnlyLocation' -Status $stepResult.Outcome -Details ([ordered]@{
+                    FailedStep = $step.Name
+                    Steps = $script:LocationStepResults.ToArray()
+                    RequestCounts = $writeCounts
+                    ExpectedPayloadFingerprints = $script:LocationExpectedFingerprints
+                    ActualPayloadFingerprints = $script:LocationActualFingerprints
+                    WritesMayHaveOccurred = [bool]$script:WritesStarted
+                    NoFurtherStepAttempted = $true
+                })
+                exit 1
+            }
+        }
+
+        $script:StrongConsistencyReads = $true
+        try {
+            $finalMetadata = Get-EntityMetadata -LogicalName 'os_sr_loc'
+            Assert-TableMetadata -Metadata $finalMetadata
+            Assert-SolutionMembership -SolutionId $preflight.SolutionId -Metadata $finalMetadata
+            $finalProjectTables = @(Get-ProjectEntityNames | Sort-Object)
+            $expectedFinalTables = @('os_sr_ta', 'os_sr_pos', 'os_sr_csrc', 'os_sr_loc')
+            if (($finalProjectTables -join ',') -cne ((@($expectedFinalTables | Sort-Object)) -join ',')) {
+                throw 'Final Location inventory contains missing or unexpected project tables.'
+            }
+            $knownComponentIds = @($preflight.ExistingSchemaComponentIds) +
+                @($finalMetadata.MetadataId) +
+                @($finalMetadata.Attributes | ForEach-Object { $_.MetadataId })
+            $finalComponents = @(Get-SolutionSchemaComponents -SolutionId $preflight.SolutionId)
+            if (@($finalComponents | Where-Object {
+                [int]$_.componenttype -in @(1, 2) -and [string]$_.objectid -notin $knownComponentIds
+            }).Count) {
+                throw 'Final Solution contains an unexpected or unmapped Entity/Attribute component.'
+            }
+            Assert-UnchangedState -Preflight $preflight -Created
+            $publicationState = Get-TablePublicationState -SolutionId $preflight.SolutionId -Metadata $finalMetadata
+        }
+        finally { $script:StrongConsistencyReads = $false }
+
+        $finalOutcome = switch ($publicationState) {
+            'PUBLISHED_NO_PENDING_DELTA' { 'VERIFIED_LOCATION_COMPLETE_AND_PUBLISHED'; break }
+            'PUBLISHED_WITH_UNPUBLISHED_DELTA' { 'VERIFIED_LOCATION_WITH_PENDING_DELTA'; break }
+            'UNPUBLISHED_ONLY' { 'VERIFIED_LOCATION_COMPLETE_UNPUBLISHED'; break }
+            default { 'UNCERTAIN' }
+        }
+        $writeCounts = [ordered]@{
+            GET = $script:RequestCounts.GET
+            EntityDefinitionsPOST = @($script:WriteResults | Where-Object Path -ceq 'EntityDefinitions').Count
+            AttributePOST = @($script:WriteResults | Where-Object { $_.Path -match '/Attributes$' }).Count
+            PublishXml = @($script:WriteResults | Where-Object Path -ceq 'PublishXml').Count
+            PATCH = 0
+            DELETE = 0
+            Retries = 0
+        }
+        Write-Result -Stage 'CreateOnlyLocation' -Status $finalOutcome -Details ([ordered]@{
+            TableLogicalName = $finalMetadata.LogicalName
+            TableDisplayName = $script:Definition.DisplayName
+            DisplayCollectionName = $script:Definition.DisplayCollectionName
+            OwnershipType = $finalMetadata.OwnershipType
+            PrimaryIdAttribute = $finalMetadata.PrimaryIdAttribute
+            PrimaryNameAttribute = $finalMetadata.PrimaryNameAttribute
+            CustomAttributes = @($finalMetadata.Attributes | Where-Object IsCustomAttribute | ForEach-Object LogicalName)
+            AlternateKeys = @($finalMetadata.Keys).Count
+            CustomRelationships = @(
+                @($finalMetadata.ManyToOneRelationships) +
+                @($finalMetadata.OneToManyRelationships) +
+                @($finalMetadata.ManyToManyRelationships) |
+                    Where-Object IsCustomRelationship
+            ).Count
+            SolutionUniqueName = $preflight.SolutionUniqueName
+            SolutionMembershipVerified = $true
+            PublicationClassification = $publicationState
+            PublicationComparison = $script:PublicationStateDiagnostic
+            ProjectTables = $finalProjectTables
+            Steps = $script:LocationStepResults.ToArray()
+            RequestCounts = $writeCounts
+            ExpectedPayloadFingerprints = $script:LocationExpectedFingerprints
+            ActualPayloadFingerprints = $script:LocationActualFingerprints
+            RetryCount = 0
+            PublishXmlSent = $false
+            ExistingMetadataUnchanged = $true
+            AuditSettingsUnchanged = $true
+            BusinessRecordsCreated = 0
+        })
         return
     }
     if ($PublishOnly) {

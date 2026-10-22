@@ -74,6 +74,23 @@ $loc = (& $provisioner -TableName os_sr_loc -PlanOnly) | ConvertFrom-Json
 $email, $memo = $loc.AdditionalColumnPayloads
 Assert-Test ($email.SchemaName -ceq 'os_sr_loc_rmeml' -and $email.DisplayName.LocalizedLabels[0].Label -ceq 'Room/Resource Email' -and $email.FormatName.Value -ceq 'Email' -and $email.MaxLength -eq 254 -and $email.RequiredLevel.Value -ceq 'None') 'Location email exact schema'
 Assert-Test ($memo.'@odata.type' -ceq 'Microsoft.Dynamics.CRM.MemoAttributeMetadata' -and $memo.AttributeTypeName.Value -ceq 'MemoType' -and $memo.MaxLength -eq 1000 -and $memo.RequiredLevel.Value -ceq 'None' -and $memo.Format -ceq 'Text' -and $null -eq $memo.FormatName) 'Location memo exact schema'
+$locationTableJson = ConvertTo-Json -InputObject $loc.TablePayload -Depth 40 -Compress
+$locationTableHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($locationTableJson))).ToLowerInvariant()
+$locationEmailJson = ConvertTo-Json -InputObject $email -Depth 40 -Compress
+$locationEmailHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($locationEmailJson))).ToLowerInvariant()
+$locationDetailsJson = ConvertTo-Json -InputObject $memo -Depth 40 -Compress
+$locationDetailsHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($locationDetailsJson))).ToLowerInvariant()
+Assert-Test ($locationTableHash -ceq 'd0d41539714feaa1f090335d74f7d2078cbf3670f35279226064e116801d090e') 'Location table-create payload matches its approved SHA-256 fingerprint'
+Assert-Test ($locationEmailHash -ceq 'f070e1f1204498aabf738d05e4345d6b89a7800259a1a1ffb354c467401cd0a4') 'Location Room/Resource Email payload matches its approved SHA-256 fingerprint'
+Assert-Test ($locationDetailsHash -ceq '84e085de78acf88713c4d008607185245cd105dcd2f8c6568515132d7bf709ae') 'Location Details payload matches its approved SHA-256 fingerprint'
+Assert-Test ($loc.TableDisplayName -ceq 'Location' -and $loc.DisplayCollectionName -ceq 'Locations' -and
+    $loc.TablePayload.Attributes.Count -eq 1 -and $loc.TablePayload.Attributes[0].SchemaName -ceq 'os_sr_loc_nm' -and
+    $loc.TablePayload.Attributes[0].MaxLength -eq 150 -and $loc.PayloadFingerprints.Table -ceq $locationTableHash -and
+    $loc.PayloadFingerprints.RoomEmail -ceq $locationEmailHash -and $loc.PayloadFingerprints.Details -ceq $locationDetailsHash) `
+    'Location PlanOnly exposes the approved table and separate column payload fingerprints'
+Assert-Test (@($loc.ApiOperations | Where-Object { $_ -match 'PublishXml' -and $_ -notmatch '^No authentication' }).Count -eq 0 -and
+    @($loc.ApiOperations | Where-Object { $_ -match '^No authentication.*PublishXml' }).Count -eq 1) `
+    'Location PlanOnly does not include a publication operation'
 
 function New-Fixture {
     param([string]$Name)
@@ -113,11 +130,17 @@ $fixture=New-Fixture os_sr_ta;$fixture.Attributes += [pscustomobject]@{LogicalNa
 Assert-Rejected {Assert-TableMetadata $fixture} 'Custom active column' 'Unexpected or missing custom'
 
 $sourceAst=[System.Management.Automation.Language.Parser]::ParseFile($provisioner,[ref]$null,[ref]$null)
-$httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList @($sourceAst,$candidateSourcePlan.TablePayload) -ScriptBlock {
-    param($sourceAst,$CandidateSourcePayload)
+$locationDefinitions = Import-PowerShellDataFile (Join-Path $PSScriptRoot '../scripts/ReferenceTableDefinitions.psd1')
+$httpModule = New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList @($sourceAst,$candidateSourcePlan.TablePayload,$loc.TablePayload,$email,$memo,$locationDefinitions) -ScriptBlock {
+    param($sourceAst,$CandidateSourcePayload,$LocationTablePayload,$LocationEmailPayload,$LocationDetailsPayload,$LocationDefinitions)
     $script:CandidateSourcePayload=$CandidateSourcePayload
     $script:CandidateSourceExpectedFingerprint='867803e7533bfb053c70b951edc47cb4475b5f0183852dcb850b88b317c08f16'
-    foreach ($functionName in @('Ensure-DataverseAccessToken','Invoke-PrivateOperation','Get-SafeDiagnosticText','Get-SafeErrorMessage','Get-SafeResponseHeader','Get-SafeRawResponseHeader','Get-SafeAuthenticationChallenge','Get-HttpExceptionDetails','Get-RecoveryFailureClass','New-SafeHttpFailure','Get-StoppedDetails','Get-ReconciliationSummary','Write-Result','Get-PayloadFingerprint','Set-RecoveryState','Get-RecoveryFailureState','Assert-CreateOnlyRecoveryTable','Assert-CandidateSourceTable','Assert-PositionPayloadFingerprint','Assert-CandidateSourcePayloadFingerprint','Assert-ExpectedRecoveryUser','Assert-RequiredPrivilegeSet','Assert-RecoveryInventory','Assert-RecoveryPrivileges','Get-RetrieveEntityMetadata','Get-PublicationLabelText','ConvertTo-PublicationMetadataSnapshot','Compare-PublicationMetadataSnapshots','Get-TablePublicationState','Invoke-BoundedEntityCreation','Invoke-PositionCreateOnlyRecovery','Invoke-CandidateSourceCreateOnly','Invoke-TableScopedPublication','Invoke-DataverseRequest')) {
+    $script:LocationExpectedFingerprints=[ordered]@{Table='d0d41539714feaa1f090335d74f7d2078cbf3670f35279226064e116801d090e';RoomEmail='f070e1f1204498aabf738d05e4345d6b89a7800259a1a1ffb354c467401cd0a4';Details='84e085de78acf88713c4d008607185245cd105dcd2f8c6568515132d7bf709ae'}
+    $script:LocationTablePayload=$LocationTablePayload
+    $script:LocationEmailPayload=$LocationEmailPayload
+    $script:LocationDetailsPayload=$LocationDetailsPayload
+    $script:Definitions=$LocationDefinitions
+    foreach ($functionName in @('Ensure-DataverseAccessToken','Invoke-PrivateOperation','Get-SafeDiagnosticText','Get-SafeErrorMessage','Get-SafeResponseHeader','Get-SafeRawResponseHeader','Get-SafeAuthenticationChallenge','Get-HttpExceptionDetails','Get-RecoveryFailureClass','New-SafeHttpFailure','Get-StoppedDetails','Get-ReconciliationSummary','Get-LocationStepReconciliationSummary','Invoke-BoundedLocationStep','Assert-LocationPayloadFingerprint','Write-Result','Get-PayloadFingerprint','Set-RecoveryState','Get-RecoveryFailureState','Assert-CreateOnlyRecoveryTable','Assert-CandidateSourceTable','Assert-PositionPayloadFingerprint','Assert-CandidateSourcePayloadFingerprint','Assert-ExpectedRecoveryUser','Assert-ProcessExpectedUserGuard','Assert-RequiredPrivilegeSet','Assert-RecoveryInventory','Assert-RecoveryPrivileges','Get-RetrieveEntityMetadata','Get-PublicationLabelText','ConvertTo-PublicationMetadataSnapshot','Compare-PublicationMetadataSnapshots','Get-TablePublicationState','Invoke-BoundedEntityCreation','Invoke-PositionCreateOnlyRecovery','Invoke-CandidateSourceCreateOnly','Invoke-TableScopedPublication','Invoke-DataverseRequest')) {
         $functionAst=$sourceAst.Find({param($node)$node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName},$true)
         Invoke-Expression $functionAst.Extent.Text
     }
@@ -148,12 +171,13 @@ $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList @($s
                 $script:State.Calls++
                 if ($Method -eq 'POST') {
                     $script:State.PostCalls++
-                    $script:State.Request=[ordered]@{Method=$Method;Uri=[string]$Uri;ExactBearer=($Headers.Authorization -ceq ('Bearer '+$script:State.Secrets[0]));Fresh=($script:State.ExpiresOn -gt [DateTimeOffset]::UtcNow.AddMinutes(5));Solution=$Headers['MSCRM.SolutionUniqueName'];ContentType=$ContentType;Redirects=$MaximumRedirection;MaximumRetryCount=$MaximumRetryCount;SkipHttpErrorCheck=$SkipHttpErrorCheck;Body=(ConvertFrom-Json $Body)}
+                    $script:State.Request=[ordered]@{Method=$Method;Uri=[string]$Uri;ExactBearer=($Headers.Authorization -ceq ('Bearer '+$script:State.Secrets[0]));Fresh=($script:State.ExpiresOn -gt [DateTimeOffset]::UtcNow.AddMinutes(5));Solution=$Headers['MSCRM.SolutionUniqueName'];Consistency=$Headers.Consistency;ContentType=$ContentType;Redirects=$MaximumRedirection;MaximumRetryCount=$MaximumRetryCount;SkipHttpErrorCheck=$SkipHttpErrorCheck;Body=(ConvertFrom-Json $Body)}
                 }
                 if ($Method -eq 'GET') {
                     $script:State.ReadUris.Add([string]$Uri)
                     $script:State.ReadMethods.Add($Method)
                     $script:State.ReadRetryLimits.Add([int]$MaximumRetryCount)
+                    $script:State.ReadConsistencyHeaders.Add([string]$Headers.Consistency)
                 }
                 Write-Warning $script:State.UnsafeText
                 Write-Information $script:State.UnsafeText
@@ -224,6 +248,12 @@ $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList @($s
             if ($script:Outcome -eq 'ABSENT') { return $null }
             return $script:ExpectedPositionMetadata
         }
+        if ($script:CreateOnlyLocation) {
+            if ($script:Outcome -eq 'UNKNOWN') { $script:TransportState.Timeout=$true }
+            Invoke-DataverseRequest -Method GET -Path "EntityDefinitions(LogicalName='os_sr_loc')" | Out-Null
+            if ($script:Outcome -eq 'ABSENT') { return $null }
+            return [pscustomobject]@{LogicalName='os_sr_loc'}
+        }
         if ($script:Outcome -eq 'UNKNOWN') {
             $script:TransportState.Timeout=$true
             Invoke-DataverseRequest -Method GET -Path EntityDefinitions | Out-Null
@@ -255,11 +285,15 @@ $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList @($s
         param($SolutionId,$Metadata)
         if ($script:MembershipInvalid) { throw 'Synthetic Solution membership is incomplete.' }
     }
+    function Get-SolutionMembership {
+        param($SolutionId,$ObjectId,$ComponentType)
+        [pscustomobject]@{rootcomponentbehavior=0}
+    }
     function Reset-SyntheticState {
         $script:Refreshes=0;$script:LastHttpFailure=$null
         $script:AccessToken='expired-synthetic';$script:AccessTokenExpiresOn=[DateTimeOffset]::UtcNow.AddMinutes(-1)
         $script:RequestCounts=@{GET=0;POST=0};$script:WriteResults=[System.Collections.Generic.List[object]]::new()
-        $script:Apply=$true;$script:CreateOnlyRecovery=$false;$script:CreateOnlyCandidateSource=$false;$script:PublishOnly=$false;$script:VerifyPublicationOnly=$false;$script:RecoveryState=$null
+        $script:Apply=$true;$script:CreateOnlyRecovery=$false;$script:CreateOnlyCandidateSource=$false;$script:CreateOnlyLocation=$false;$script:PublishOnly=$false;$script:VerifyPublicationOnly=$false;$script:RecoveryState=$null
         $script:TableName='os_sr_pos'
         $script:RecoveryTransitions=[System.Collections.Generic.List[object]]::new()
         $script:RecoveryExpectedFingerprint='0f7372eeb66c0214ae08ed0dc74f82c981cc4cd73baa9156f16d6e1bd1f48e80'
@@ -267,10 +301,12 @@ $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList @($s
         $script:RecoveryAttemptTimestampUtc=$null;$script:RecoveryEnvironmentVerified=$false
         $script:RecoveryIdentityVerified=$false;$script:RecoveryVerifiedPrivileges=@()
         $script:RecoveryPreflight=$null
+        $script:LocationActualFingerprints=[ordered]@{};$script:LocationWriteStep=$null;$script:LocationStepState=$null
+        $script:LocationWriteAttempts=@{};$script:StrongConsistencyReads=$false
         $script:PublicationStateDiagnostic=$null;$script:PreflightStage='INITIALIZATION';$script:PublicationRows=@()
         $script:RecoveryRequestId=$null;$script:RecoveryCorrelationId=$null;$script:LastRequestDispatchStarted=$false
         $script:WritesAllowed=$true;$script:WritesStarted=$false
-        $script:TransportState=@{Calls=0;PostCalls=0;Request=$null;ReadUris=[System.Collections.Generic.List[string]]::new();ReadMethods=[System.Collections.Generic.List[string]]::new();ReadRetryLimits=[System.Collections.Generic.List[int]]::new();Status=0;GetStatus=200;Timeout=$false;TransportException=$false;ExceptionScenario=$null;PrivilegeCount=3;Secrets=$script:Secrets;UnsafeText=$script:UnsafeText;ExpiresOn=[DateTimeOffset]::MinValue;RetrieveEntityResponses=@{}}
+        $script:TransportState=@{Calls=0;PostCalls=0;Request=$null;ReadUris=[System.Collections.Generic.List[string]]::new();ReadMethods=[System.Collections.Generic.List[string]]::new();ReadRetryLimits=[System.Collections.Generic.List[int]]::new();ReadConsistencyHeaders=[System.Collections.Generic.List[string]]::new();Status=0;GetStatus=200;Timeout=$false;TransportException=$false;ExceptionScenario=$null;PrivilegeCount=3;Secrets=$script:Secrets;UnsafeText=$script:UnsafeText;ExpiresOn=[DateTimeOffset]::MinValue;RetrieveEntityResponses=@{}}
     }
     function Test-SyntheticHttpChecks {
         param([object]$RecoveryPayload)
@@ -373,8 +409,26 @@ $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList @($s
         try { Assert-ExpectedRecoveryUser -ActualUserId '22222222-2222-4222-8222-222222222222' } catch { $identityMismatch=$true }
         $results.Add([pscustomobject]@{Kind='IdentityGuard';Passed=$identityMismatch})
         $script:ExpectedUserId=$null
+        $oldProcessExpectedUser=[Environment]::GetEnvironmentVariable('BSO_RS_EXPECTED_USER_ID','Process')
+        $syntheticExpectedUser='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+        $processGuardMatch=$false;$processGuardMissing=$false;$processGuardMismatch=$false
+        try {
+            [Environment]::SetEnvironmentVariable('BSO_RS_EXPECTED_USER_ID',$syntheticExpectedUser,'Process')
+            $script:ExpectedUserId=$syntheticExpectedUser
+            Assert-ProcessExpectedUserGuard
+            $processGuardMatch=$true
+            [Environment]::SetEnvironmentVariable('BSO_RS_EXPECTED_USER_ID','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb','Process')
+            try { Assert-ProcessExpectedUserGuard } catch { $processGuardMismatch=$true }
+            [Environment]::SetEnvironmentVariable('BSO_RS_EXPECTED_USER_ID',$null,'Process')
+            try { Assert-ProcessExpectedUserGuard } catch { $processGuardMissing=$true }
+        }
+        finally {
+            [Environment]::SetEnvironmentVariable('BSO_RS_EXPECTED_USER_ID',$oldProcessExpectedUser,'Process')
+            $script:ExpectedUserId=$null
+        }
+        $results.Add([pscustomobject]@{Kind='ProcessExpectedUserGuard';Passed=($processGuardMatch -and $processGuardMissing -and $processGuardMismatch)})
         $pacEnvironmentAst=$sourceAst.Find({param($node)$node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Assert-PacEnvironment'},$true)
-        $candidateSourceExpectedUserGuard=$pacEnvironmentAst.Extent.Text -match '(?s)if \(\$CreateOnlyRecovery -or \$CreateOnlyCandidateSource\)\s*\{\s*Assert-ExpectedRecoveryUser'
+        $candidateSourceExpectedUserGuard=$pacEnvironmentAst.Extent.Text -match '(?s)if \(\$CreateOnlyRecovery -or \$CreateOnlyCandidateSource -or \$CreateOnlyLocation\)\s*\{\s*Assert-ProcessExpectedUserGuard\s+Assert-ExpectedRecoveryUser'
         $results.Add([pscustomobject]@{Kind='CandidateSourceExpectedUserGuard';Passed=$candidateSourceExpectedUserGuard})
         $required=@('prvCreateEntity','prvCreateAttribute','prvCreateCustomization')
         Assert-RequiredPrivilegeSet -Privileges @([pscustomobject]@{Name='synthetic'},[pscustomobject]@{Name='synthetic'},[pscustomobject]@{Name='synthetic'}) -RequiredNames $required
@@ -512,6 +566,102 @@ $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList @($s
         $results.Add([pscustomobject]@{Kind='CandidateSourceCreateOutcome';Passed=($candidateCreatedResult.State -ceq 'VERIFIED_SUCCESS' -and $candidateCreatedResult.Outcome -ceq 'VERIFIED_CREATED' -and $script:TransportState.PostCalls -eq 1 -and $candidateCreatedResult.RequestCounts.POST -eq 1 -and $candidateCreatedResult.RequestCounts.GET -eq $script:RequestCounts.GET)})
 
         Reset-SyntheticState
+        $script:CreateOnlyLocation=$true;$script:Apply=$false;$script:TableName='os_sr_loc'
+        $script:Definition=$script:Definitions['os_sr_loc']
+        $script:RecoveryState='PRECHECK';$script:WritesAllowed=$true;$script:Outcome='PRESENT';$script:TransportState.Status=204
+        Set-RecoveryState -State 'READY'
+        $locationTableResult=Invoke-BoundedLocationStep -Step Table -Path EntityDefinitions `
+            -Payload $script:LocationTablePayload -SolutionId 'synthetic-solution'
+        $locationStrongRead=($script:TransportState.ReadConsistencyHeaders.Count -gt 0 -and
+            @($script:TransportState.ReadConsistencyHeaders | Where-Object { $_ -cne 'Strong' }).Count -eq 0 -and
+            @($script:TransportState.ReadRetryLimits | Where-Object { $_ -ne 0 }).Count -eq 0)
+        $results.Add([pscustomobject]@{Kind='LocationStrongConsistencyReconciliation';Passed=($locationTableResult.Outcome -ceq 'VERIFIED_SUCCESS' -and
+            $locationTableResult.StrongConsistency -and $script:TransportState.PostCalls -eq 1 -and
+            $script:TransportState.Request.MaximumRetryCount -eq 0 -and $locationStrongRead -and
+            $script:RequestCounts.POST -eq 1 -and $script:LocationWriteAttempts.Count -eq 1)})
+
+        Reset-SyntheticState
+        $script:CreateOnlyLocation=$true;$script:Apply=$false;$script:TableName='os_sr_loc'
+        $script:Definition=$script:Definitions['os_sr_loc'];$script:LocationWriteAttempts['Table']=$true
+        $script:RecoveryState='PRECHECK';$script:WritesAllowed=$true;$script:Outcome='PRESENT';$script:TransportState.Status=204
+        Set-RecoveryState -State 'READY'
+        $locationEmailResult=Invoke-BoundedLocationStep -Step RoomEmail `
+            -Path "EntityDefinitions(LogicalName='os_sr_loc')/Attributes" `
+            -Payload $script:LocationEmailPayload -SolutionId 'synthetic-solution'
+        $locationEmailStrongRead=($script:TransportState.ReadConsistencyHeaders.Count -gt 0 -and
+            @($script:TransportState.ReadConsistencyHeaders | Where-Object { $_ -cne 'Strong' }).Count -eq 0 -and
+            @($script:TransportState.ReadRetryLimits | Where-Object { $_ -ne 0 }).Count -eq 0)
+        $results.Add([pscustomobject]@{Kind='LocationEmailStrongConsistencyReconciliation';Passed=($locationEmailResult.Outcome -ceq 'VERIFIED_SUCCESS' -and
+            $locationEmailResult.StrongConsistency -and $script:TransportState.PostCalls -eq 1 -and
+            $script:TransportState.Request.MaximumRetryCount -eq 0 -and $locationEmailStrongRead)})
+
+        Reset-SyntheticState
+        $script:CreateOnlyLocation=$true;$script:Apply=$false;$script:TableName='os_sr_loc'
+        $script:Definition=$script:Definitions['os_sr_loc'];$script:LocationWriteAttempts['Table']=$true
+        $script:LocationWriteAttempts['RoomEmail']=$true
+        $script:RecoveryState='PRECHECK';$script:WritesAllowed=$true;$script:Outcome='PRESENT';$script:TransportState.Status=204
+        Set-RecoveryState -State 'READY'
+        $locationDetailsResult=Invoke-BoundedLocationStep -Step Details `
+            -Path "EntityDefinitions(LogicalName='os_sr_loc')/Attributes" `
+            -Payload $script:LocationDetailsPayload -SolutionId 'synthetic-solution'
+        $locationDetailsStrongRead=($script:TransportState.ReadConsistencyHeaders.Count -gt 0 -and
+            @($script:TransportState.ReadConsistencyHeaders | Where-Object { $_ -cne 'Strong' }).Count -eq 0 -and
+            @($script:TransportState.ReadRetryLimits | Where-Object { $_ -ne 0 }).Count -eq 0)
+        $results.Add([pscustomobject]@{Kind='LocationDetailsStrongConsistencyReconciliation';Passed=($locationDetailsResult.Outcome -ceq 'VERIFIED_SUCCESS' -and
+            $locationDetailsResult.StrongConsistency -and $script:TransportState.PostCalls -eq 1 -and
+            $script:TransportState.Request.MaximumRetryCount -eq 0 -and $locationDetailsStrongRead)})
+
+        Reset-SyntheticState
+        $script:CreateOnlyLocation=$true;$script:Apply=$false;$script:TableName='os_sr_loc'
+        $script:RecoveryState='PRECHECK';$script:WritesAllowed=$true;$script:LocationWriteStep='Details'
+        $script:LocationStepState='READY';$script:LocationWriteAttempts['Table']=$true
+        Set-RecoveryState -State 'READY'
+        $outOfOrderBlocked=$false
+        try {
+            Invoke-DataverseRequest -Method POST -Path "EntityDefinitions(LogicalName='os_sr_loc')/Attributes" `
+                -Body $script:LocationDetailsPayload -WithSolutionHeader | Out-Null
+        } catch { $outOfOrderBlocked=($script:TransportState.Calls -eq 0) }
+        $publishBlocked=$false
+        try {
+            Invoke-DataverseRequest -Method POST -Path PublishXml `
+                -Body @{ParameterXml='<importexportxml/>'} | Out-Null
+        } catch { $publishBlocked=($script:TransportState.Calls -eq 0) }
+        $results.Add([pscustomobject]@{Kind='LocationWriteSequenceGuards';Passed=($outOfOrderBlocked -and $publishBlocked -and
+            $script:TransportState.Calls -eq 0 -and $script:RequestCounts.POST -eq 0)})
+
+        Reset-SyntheticState
+        $script:CreateOnlyLocation=$false;$script:Apply=$true;$script:TableName='os_sr_loc';$script:WritesAllowed=$true
+        $genericLocationApplyBlocked=$false
+        try {
+            Invoke-DataverseRequest -Method POST -Path EntityDefinitions `
+                -Body $script:LocationTablePayload -WithSolutionHeader | Out-Null
+        } catch { $genericLocationApplyBlocked=($script:TransportState.Calls -eq 0) }
+        $results.Add([pscustomobject]@{Kind='LocationGenericApplyBlocked';Passed=($genericLocationApplyBlocked -and
+            $script:TransportState.Calls -eq 0 -and $script:RequestCounts.POST -eq 0)})
+
+        Reset-SyntheticState
+        $script:CreateOnlyLocation=$true;$script:Apply=$false;$script:TableName='os_sr_loc'
+        $script:RecoveryState='PRECHECK';$script:WritesAllowed=$true;$script:Outcome='ABSENT';$script:TransportState.Status=204
+        Set-RecoveryState -State 'READY'
+        $locationStaleReadResult=Invoke-BoundedLocationStep -Step Table -Path EntityDefinitions `
+            -Payload $script:LocationTablePayload -SolutionId 'synthetic-solution'
+        $results.Add([pscustomobject]@{Kind='LocationStaleReadDoesNotRetry';Passed=($locationStaleReadResult.Outcome -ceq 'UNCERTAIN' -and
+            $locationStaleReadResult.Reconciliation.Outcome -ceq 'ABSENT' -and $script:TransportState.PostCalls -eq 1 -and
+            $script:RequestCounts.POST -eq 1 -and $script:TransportState.Request.MaximumRetryCount -eq 0)})
+
+        Reset-SyntheticState
+        $script:CreateOnlyLocation=$true;$script:Apply=$false;$script:TableName='os_sr_loc'
+        $script:RecoveryState='PRECHECK';$script:WritesAllowed=$true;$script:Outcome='ABSENT'
+        $script:TransportState.Status=401;$script:TransportState.ExceptionScenario='HttpResponse'
+        Set-RecoveryState -State 'READY'
+        $locationAuthFailure=Invoke-BoundedLocationStep -Step Table -Path EntityDefinitions `
+            -Payload $script:LocationTablePayload -SolutionId 'synthetic-solution'
+        $results.Add([pscustomobject]@{Kind='LocationAuthFailureStops';Passed=($locationAuthFailure.Outcome -ceq 'FAILED_AUTH' -and
+            $locationAuthFailure.StatusCode -eq 401 -and $script:TransportState.PostCalls -eq 1 -and
+            $script:RequestCounts.POST -eq 1 -and $script:TransportState.ReadConsistencyHeaders.Count -gt 0 -and
+            @($script:TransportState.ReadConsistencyHeaders | Where-Object { $_ -cne 'Strong' }).Count -eq 0)})
+
+        Reset-SyntheticState
         $script:CreateOnlyCandidateSource=$true;$script:Apply=$false;$script:TableName='os_sr_csrc'
         $script:RecoveryActualFingerprint=$script:CandidateSourceExpectedFingerprint
         $script:RecoveryState='READY';$script:WritesAllowed=$true;$script:Outcome='PRESENT';$script:TransportState.Status=401
@@ -630,7 +780,7 @@ try {
 finally { Remove-Item -LiteralPath $transcript -Force; Remove-Module $httpModule }
 $tableGuards=@($recovery | Where-Object Kind -eq 'TableGuard')
 Assert-Test ($tableGuards.Count -eq 3 -and @($tableGuards | Where-Object { -not $_.Passed }).Count -eq 0) 'Recovery mode rejects Candidate Source, Location and TA'
-foreach ($kind in @('IdentityGuard','PrivilegeGuard','PrivilegeEndpoint','InventoryGuard')) {
+foreach ($kind in @('IdentityGuard','ProcessExpectedUserGuard','PrivilegeGuard','PrivilegeEndpoint','InventoryGuard')) {
     $guard=@($recovery | Where-Object Kind -eq $kind)[0]
     Assert-Test $guard.Passed "$kind fails closed on mismatch"
 }
@@ -653,6 +803,20 @@ $candidateSourceGuard=@($recovery | Where-Object Kind -eq 'CandidateSourceSingle
 Assert-Test $candidateSourceGuard.Passed 'Candidate Source mode allows only its fingerprinted EntityDefinitions POST and disables retries'
 $candidateCreatedOutcome=@($recovery | Where-Object Kind -eq 'CandidateSourceCreateOutcome')[0]
 Assert-Test $candidateCreatedOutcome.Passed 'Candidate Source verified create outcome is reported distinctly'
+$locationStrongConsistency=@($recovery | Where-Object Kind -eq 'LocationStrongConsistencyReconciliation')[0]
+Assert-Test $locationStrongConsistency.Passed 'Location post-write metadata reconciliation sends Consistency: Strong with zero retries'
+$locationEmailStrongConsistency=@($recovery | Where-Object Kind -eq 'LocationEmailStrongConsistencyReconciliation')[0]
+Assert-Test $locationEmailStrongConsistency.Passed 'Location Room/Resource Email post-write reconciliation sends Consistency: Strong with zero retries'
+$locationDetailsStrongConsistency=@($recovery | Where-Object Kind -eq 'LocationDetailsStrongConsistencyReconciliation')[0]
+Assert-Test $locationDetailsStrongConsistency.Passed 'Location Details post-write reconciliation sends Consistency: Strong with zero retries'
+$locationWriteSequenceGuards=@($recovery | Where-Object Kind -eq 'LocationWriteSequenceGuards')[0]
+Assert-Test $locationWriteSequenceGuards.Passed 'Location mode blocks out-of-order attribute writes and PublishXml before dispatch'
+$locationGenericApply=@($recovery | Where-Object Kind -eq 'LocationGenericApplyBlocked')[0]
+Assert-Test $locationGenericApply.Passed 'Generic Apply is blocked for Location before POST dispatch'
+$locationStaleRead=@($recovery | Where-Object Kind -eq 'LocationStaleReadDoesNotRetry')[0]
+Assert-Test $locationStaleRead.Passed 'Location HTTP 2xx with immediate absence reconciles as UNCERTAIN without a second POST'
+$locationAuthFailure=@($recovery | Where-Object Kind -eq 'LocationAuthFailureStops')[0]
+Assert-Test $locationAuthFailure.Passed 'Location HTTP 401 reconciles GET-only as FAILED_AUTH and stops'
 $candidateExistingOutcome=@($recovery | Where-Object Kind -eq 'CandidateSourceExistingOutcome')[0]
 Assert-Test $candidateExistingOutcome.Passed 'Existing exact Candidate Source state is not mislabeled as newly created'
 $candidateFingerprintMatch=@($recovery | Where-Object Kind -eq 'CandidateSourceFingerprintMatch')[0]

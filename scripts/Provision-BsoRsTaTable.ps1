@@ -6,6 +6,7 @@ param(
     [switch]$CreateOnlyRecovery,
     [switch]$CreateOnlyCandidateSource,
     [switch]$PublishOnly,
+    [switch]$VerifyPublicationOnly,
     [string]$AuthorizationReference,
     [string]$EnvironmentName = $env:BSO_RS_ENVIRONMENT_NAME,
     [string]$OrganizationUrl = $env:BSO_RS_ORG_URL,
@@ -801,7 +802,7 @@ function Invoke-DataverseRequest {
         throw 'Dataverse request URL is outside the verified organization API origin.'
     }
     $resource = $parsedRequestUri.AbsolutePath.Substring('/api/data/v9.2/'.Length)
-    if ($Method -eq 'GET' -and $resource -notmatch '^(WhoAmI$|organizations\(|publishers$|solutions$|solutioncomponents$|systemusers\([0-9a-fA-F-]{36}\)/Microsoft\.Dynamics\.CRM\.RetrieveUserSetOfPrivilegesByNames\(PrivilegeNames=@p\)$|EntityDefinitions($|\(|/))') {
+    if ($Method -eq 'GET' -and $resource -notmatch '^(WhoAmI$|organizations\(|publishers$|solutions$|solutioncomponents$|systemusers\([0-9a-fA-F-]{36}\)/Microsoft\.Dynamics\.CRM\.RetrieveUserSetOfPrivilegesByNames\(PrivilegeNames=@p\)$|RetrieveEntity\(|EntityDefinitions($|\(|/))') {
         throw 'GET blocked: only identity, configuration, and schema metadata reads are allowed.'
     }
     $request = @{
@@ -817,6 +818,7 @@ function Invoke-DataverseRequest {
         ErrorAction = 'Stop'
     }
     if ($boundedWrite) { $request.MaximumRetryCount = 0 }
+    if ($VerifyPublicationOnly) { $request.MaximumRetryCount = 0 }
     if ($PSBoundParameters.ContainsKey('Body')) {
         $request.ContentType = 'application/json; charset=utf-8'
         $request.Body = ConvertTo-Json -InputObject $Body -Depth 40 -Compress
@@ -938,18 +940,204 @@ function Get-SolutionMembership {
 function Get-TablePublicationState {
     param([Parameter(Mandatory = $true)][string]$SolutionId, [Parameter(Mandatory = $true)][object]$Metadata)
     $script:PreflightStage = 'PUBLICATION_STATE'
-    $filter = [Uri]::EscapeDataString("_solutionid_value eq $SolutionId and objectid eq $($Metadata.MetadataId) and componenttype eq 1")
-    $components = @(Get-ODataList -Path "solutioncomponents?`$filter=$filter")
-    $stateProperty = if ($components.Count -eq 1) { $components[0].PSObject.Properties['componentstate'] } else { $null }
-    $script:PublicationStateDiagnostic = [ordered]@{
-        ComponentCount = $components.Count
-        StateFieldPresent = ($null -ne $stateProperty)
+    $published = Get-RetrieveEntityMetadata -MetadataId ([string]$Metadata.MetadataId) -RetrieveAsIfPublished:$false
+    $asIfPublished = Get-RetrieveEntityMetadata -MetadataId ([string]$Metadata.MetadataId) -RetrieveAsIfPublished:$true
+    if (-not $published.Succeeded -or -not $asIfPublished.Succeeded) {
+        $script:PublicationStateDiagnostic = [ordered]@{
+            Classification = 'UNKNOWN'
+            PublishedRetrieval = $published.Diagnostic
+            AsIfPublishedRetrieval = $asIfPublished.Diagnostic
+            SemanticDelta = @()
+        }
+        return 'UNKNOWN'
     }
-    if ($components.Count -ne 1 -or $null -eq $stateProperty -or $null -eq $stateProperty.Value) { return 'UNKNOWN' }
-    switch ([int]$stateProperty.Value) {
-        0 { $script:PublicationStateDiagnostic.State = 'PUBLISHED'; 'PUBLISHED'; break }
-        1 { $script:PublicationStateDiagnostic.State = 'UNPUBLISHED'; 'UNPUBLISHED'; break }
-        default { 'UNKNOWN' }
+    if ($null -eq $published.Metadata -and $null -eq $asIfPublished.Metadata) {
+        $script:PublicationStateDiagnostic = [ordered]@{
+            Classification = 'UNKNOWN'
+            PublishedRetrieval = 'ABSENT'
+            AsIfPublishedRetrieval = 'ABSENT'
+            SemanticDelta = @()
+        }
+        return 'UNKNOWN'
+    }
+    if ($null -eq $published.Metadata -and $null -ne $asIfPublished.Metadata) {
+        $script:PublicationStateDiagnostic = [ordered]@{
+            Classification = 'UNPUBLISHED_ONLY'
+            PublishedRetrieval = 'ABSENT'
+            AsIfPublishedRetrieval = 'PRESENT'
+            SemanticDelta = @('Published metadata is absent; as-if-published metadata exists.')
+        }
+        return 'UNPUBLISHED_ONLY'
+    }
+    if ($null -eq $published.Metadata -or $null -eq $asIfPublished.Metadata) {
+        $script:PublicationStateDiagnostic = [ordered]@{
+            Classification = 'UNKNOWN'
+            PublishedRetrieval = if ($null -eq $published.Metadata) { 'ABSENT' } else { 'PRESENT' }
+            AsIfPublishedRetrieval = if ($null -eq $asIfPublished.Metadata) { 'ABSENT' } else { 'PRESENT' }
+            SemanticDelta = @()
+        }
+        return 'UNKNOWN'
+    }
+    try {
+        if ($published.Metadata.LogicalName -cne $Metadata.LogicalName -or
+            $asIfPublished.Metadata.LogicalName -cne $Metadata.LogicalName) {
+            throw 'RetrieveEntity returned metadata for an unexpected entity.'
+        }
+        $publishedSnapshot = ConvertTo-PublicationMetadataSnapshot -Metadata $published.Metadata
+        $asIfPublishedSnapshot = ConvertTo-PublicationMetadataSnapshot -Metadata $asIfPublished.Metadata
+        $difference = @(Compare-PublicationMetadataSnapshots -Published $publishedSnapshot -AsIfPublished $asIfPublishedSnapshot)
+        $currentSnapshot = ConvertTo-PublicationMetadataSnapshot -Metadata $Metadata
+        $publishedMatchesCurrent = @(
+            Compare-PublicationMetadataSnapshots -Published $publishedSnapshot -AsIfPublished $currentSnapshot
+        ).Count -eq 0
+    }
+    catch {
+        $script:PublicationStateDiagnostic = [ordered]@{
+            Classification = 'UNKNOWN'
+            PublishedRetrieval = 'PRESENT'
+            AsIfPublishedRetrieval = 'PRESENT'
+            SemanticDelta = @()
+            Failure = 'MALFORMED_OR_INCONSISTENT_METADATA'
+            ExceptionCategory = $_.Exception.GetType().Name
+        }
+        return 'UNKNOWN'
+    }
+    if ($difference.Count -eq 0 -and -not $publishedMatchesCurrent) {
+        $script:PublicationStateDiagnostic = [ordered]@{
+            Classification = 'UNKNOWN'
+            PublishedRetrieval = 'PRESENT'
+            AsIfPublishedRetrieval = 'PRESENT'
+            PublishedMetadata = $publishedSnapshot
+            AsIfPublishedMetadata = $asIfPublishedSnapshot
+            SemanticDelta = @()
+            Failure = 'RETRIEVED_METADATA_DIFFERS_FROM_VALIDATED_CURRENT_SCHEMA'
+        }
+        return 'UNKNOWN'
+    }
+    $classification = if ($difference.Count) { 'PUBLISHED_WITH_UNPUBLISHED_DELTA' } else { 'PUBLISHED_NO_PENDING_DELTA' }
+    $script:PublicationStateDiagnostic = [ordered]@{
+        Classification = $classification
+        PublishedRetrieval = 'PRESENT'
+        AsIfPublishedRetrieval = 'PRESENT'
+        PublishedMetadata = $publishedSnapshot
+        AsIfPublishedMetadata = $asIfPublishedSnapshot
+        PublishedMatchesValidatedCurrentSchema = $publishedMatchesCurrent
+        SemanticDelta = $difference
+    }
+    $classification
+}
+
+function Get-RetrieveEntityMetadata {
+    param(
+        [Parameter(Mandatory = $true)][string]$MetadataId,
+        [Parameter(Mandatory = $true)][bool]$RetrieveAsIfPublished
+    )
+    $metadataGuid = [Guid]::Empty
+    if (-not [Guid]::TryParse($MetadataId, [ref]$metadataGuid)) {
+        return [pscustomobject]@{ Succeeded = $false; Metadata = $null; Diagnostic = 'INVALID_METADATA_ID' }
+    }
+    $publishedFlag = $RetrieveAsIfPublished.ToString().ToLowerInvariant()
+    $path = "RetrieveEntity(EntityFilters=Microsoft.Dynamics.CRM.EntityFilters'All',MetadataId=$metadataGuid,RetrieveAsIfPublished=$publishedFlag)"
+    $script:LastHttpFailure = $null
+    try {
+        $response = Invoke-DataverseRequest -Method GET -Path $path
+        $entityMetadata = $response.EntityMetadata
+        if ($null -eq $entityMetadata -or [string]::IsNullOrWhiteSpace([string]$entityMetadata.LogicalName)) {
+            return [pscustomobject]@{ Succeeded = $false; Metadata = $null; Diagnostic = 'MALFORMED_RESPONSE' }
+        }
+        [pscustomobject]@{ Succeeded = $true; Metadata = $entityMetadata; Diagnostic = 'PRESENT' }
+    }
+    catch {
+        $failure = $script:LastHttpFailure
+        if ($null -ne $failure -and $failure.StatusCode -eq 404) {
+            return [pscustomobject]@{ Succeeded = $true; Metadata = $null; Diagnostic = 'ABSENT' }
+        }
+        $diagnostic = if ($null -ne $failure) {
+            [ordered]@{
+                Result = 'FAILED'
+                HttpStatus = if ($null -eq $failure.StatusCode) { 'UNKNOWN' } else { [int]$failure.StatusCode }
+                DataverseErrorCode = $failure.DataverseErrorCode
+                FailureClass = $failure.FailureClass
+            }
+        } else {
+            [ordered]@{ Result = 'FAILED'; HttpStatus = 'UNKNOWN'; FailureClass = 'UNKNOWN' }
+        }
+        [pscustomobject]@{ Succeeded = $false; Metadata = $null; Diagnostic = $diagnostic }
+    }
+}
+
+function Get-PublicationLabelText {
+    param([object]$Label)
+    if ($null -eq $Label) { return $null }
+    if ($null -ne $Label.UserLocalizedLabel -and $null -ne $Label.UserLocalizedLabel.Label) {
+        return [string]$Label.UserLocalizedLabel.Label
+    }
+    $localized = @($Label.LocalizedLabels | Sort-Object LanguageCode, Label)
+    if ($localized.Count) { return [string]$localized[0].Label }
+    $null
+}
+
+function ConvertTo-PublicationMetadataSnapshot {
+    param([Parameter(Mandatory = $true)][object]$Metadata)
+    $primaryName = @($Metadata.Attributes | Where-Object {
+        $_.LogicalName -ceq $Metadata.PrimaryNameAttribute -or $_.IsPrimaryName
+    } | Select-Object -First 1)
+    if ($primaryName.Count -ne 1) { throw 'RetrieveEntity metadata lacks the primary-name attribute.' }
+    $customAttributes = @($Metadata.Attributes | Where-Object IsCustomAttribute | ForEach-Object {
+        [ordered]@{
+            LogicalName = [string]$_.LogicalName
+            SchemaName = [string]$_.SchemaName
+            DisplayName = Get-PublicationLabelText $_.DisplayName
+            AttributeType = [string]$_.AttributeType
+            Format = if ($null -ne $_.FormatName.Value) { [string]$_.FormatName.Value } else { [string]$_.Format }
+            MaxLength = if ($null -ne $_.MaxLength) { [int]$_.MaxLength } else { $null }
+            RequiredLevel = [string]$_.RequiredLevel.Value
+            IsPrimaryName = [bool]$_.IsPrimaryName
+        }
+    } | Sort-Object LogicalName)
+    $keys = @($Metadata.Keys | ForEach-Object {
+        [ordered]@{ LogicalName = [string]$_.LogicalName; KeyAttributes = @($_.KeyAttributes | Sort-Object) }
+    } | Sort-Object LogicalName)
+    $relationships = [ordered]@{}
+    foreach ($propertyName in @('ManyToOneRelationships', 'OneToManyRelationships', 'ManyToManyRelationships')) {
+        $relationships[$propertyName] = @($Metadata.$propertyName | ForEach-Object {
+            [ordered]@{ SchemaName = [string]$_.SchemaName; IsCustomRelationship = [bool]$_.IsCustomRelationship }
+        } | Sort-Object SchemaName, IsCustomRelationship)
+    }
+    [ordered]@{
+        LogicalName = [string]$Metadata.LogicalName
+        SchemaName = [string]$Metadata.SchemaName
+        DisplayName = Get-PublicationLabelText $Metadata.DisplayName
+        DisplayCollectionName = Get-PublicationLabelText $Metadata.DisplayCollectionName
+        OwnershipType = [string]$Metadata.OwnershipType
+        PrimaryIdAttribute = [string]$Metadata.PrimaryIdAttribute
+        PrimaryNameAttribute = [string]$Metadata.PrimaryNameAttribute
+        PrimaryName = [ordered]@{
+            LogicalName = [string]$primaryName[0].LogicalName
+            DisplayName = Get-PublicationLabelText $primaryName[0].DisplayName
+            AttributeType = [string]$primaryName[0].AttributeType
+            Format = if ($null -ne $primaryName[0].FormatName.Value) { [string]$primaryName[0].FormatName.Value } else { [string]$primaryName[0].Format }
+            MaxLength = if ($null -ne $primaryName[0].MaxLength) { [int]$primaryName[0].MaxLength } else { $null }
+            RequiredLevel = [string]$primaryName[0].RequiredLevel.Value
+            IsPrimaryName = [bool]$primaryName[0].IsPrimaryName
+        }
+        CustomAttributes = $customAttributes
+        Keys = $keys
+        Relationships = $relationships
+    }
+}
+
+function Compare-PublicationMetadataSnapshots {
+    param(
+        [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Published,
+        [Parameter(Mandatory = $true)][System.Collections.IDictionary]$AsIfPublished
+    )
+    foreach ($property in @('LogicalName', 'SchemaName', 'DisplayName', 'DisplayCollectionName',
+        'OwnershipType', 'PrimaryIdAttribute', 'PrimaryNameAttribute', 'PrimaryName',
+        'CustomAttributes', 'Keys', 'Relationships')) {
+        $publishedJson = ConvertTo-Json -InputObject $Published[$property] -Depth 20 -Compress
+        $asIfPublishedJson = ConvertTo-Json -InputObject $AsIfPublished[$property] -Depth 20 -Compress
+        if ($publishedJson -cne $asIfPublishedJson) { $property }
     }
 }
 
@@ -1069,7 +1257,7 @@ function Get-Preflight {
         if ($CreateOnlyCandidateSource) {
             $position = Get-EntityMetadata -LogicalName 'os_sr_pos'
             $script:PositionPublicationState = Get-TablePublicationState -SolutionId $solutions[0].solutionid -Metadata $position
-            if ($script:PositionPublicationState -cne 'PUBLISHED') {
+            if ($script:PositionPublicationState -cne 'PUBLISHED_NO_PENDING_DELTA') {
                 throw 'Position is not verified as published; Candidate Source creation is blocked.'
             }
         }
@@ -1301,7 +1489,7 @@ function Invoke-TableScopedPublication {
     }
     $terminalState = if ($script:RecoveryReconciliation.Outcome -eq 'PARTIAL') {
         'PARTIAL_STATE'
-    } elseif ($publicationState -eq 'PUBLISHED') {
+    } elseif ($publicationState -eq 'PUBLISHED_NO_PENDING_DELTA') {
         'VERIFIED_SUCCESS'
     } elseif ($null -ne $originalFailure) {
         Get-RecoveryFailureState -StatusCode $originalFailure.StatusCode -FailureClass $originalFailure.FailureClass
@@ -1331,11 +1519,11 @@ function Invoke-TableScopedPublication {
 function Show-Plan {
     param([Parameter(Mandatory = $true)][object]$Payloads)
     $preview = [ordered]@{
-        Mode = if ($CreateOnlyRecovery) { 'CreateOnlyRecovery; Position-only; one POST maximum; GET-only reconciliation' } elseif ($CreateOnlyCandidateSource) { 'CreateOnlyCandidateSource; one EntityDefinitions POST maximum; GET-only reconciliation' } elseif ($PublishOnly) { 'PublishOnly; table-scoped PublishXml only; one POST maximum; GET-only reconciliation' } elseif ($PlanOnly) { 'PlanOnly; no authentication/network calls' } elseif ($Apply) { 'Apply requested; preflight and typed confirmation required' } else { 'DryRun; interactive auth and GET-only preflight' }
+        Mode = if ($CreateOnlyRecovery) { 'CreateOnlyRecovery; Position-only; one POST maximum; GET-only reconciliation' } elseif ($CreateOnlyCandidateSource) { 'CreateOnlyCandidateSource; one EntityDefinitions POST maximum; GET-only reconciliation' } elseif ($PublishOnly) { 'PublishOnly; table-scoped PublishXml only; one POST maximum; GET-only reconciliation' } elseif ($VerifyPublicationOnly) { 'VerifyPublicationOnly; Position-only; RetrieveEntity GET comparison; no writes' } elseif ($PlanOnly) { 'PlanOnly; no authentication/network calls' } elseif ($Apply) { 'Apply requested; preflight and typed confirmation required' } else { 'DryRun; interactive auth and GET-only preflight' }
         Environment = if ($EnvironmentName) { $EnvironmentName } else { 'NOT SUPPLIED' }
-        OrganizationUrl = if ($script:IsBoundedWrite) { '[omitted]' } elseif ($OrganizationUrl) { $OrganizationUrl.TrimEnd('/') } else { 'NOT SUPPLIED' }
-        ExpectedEnvironmentId = if ($script:IsBoundedWrite) { '[omitted]' } elseif ($ExpectedEnvironmentId) { $ExpectedEnvironmentId } else { 'NOT SUPPLIED' }
-        ExpectedOrganizationId = if ($script:IsBoundedWrite) { '[omitted]' } elseif ($ExpectedOrganizationId) { $ExpectedOrganizationId } else { 'NOT SUPPLIED' }
+        OrganizationUrl = if ($script:IsBoundedWrite -or $VerifyPublicationOnly) { '[omitted]' } elseif ($OrganizationUrl) { $OrganizationUrl.TrimEnd('/') } else { 'NOT SUPPLIED' }
+        ExpectedEnvironmentId = if ($script:IsBoundedWrite -or $VerifyPublicationOnly) { '[omitted]' } elseif ($ExpectedEnvironmentId) { $ExpectedEnvironmentId } else { 'NOT SUPPLIED' }
+        ExpectedOrganizationId = if ($script:IsBoundedWrite -or $VerifyPublicationOnly) { '[omitted]' } elseif ($ExpectedOrganizationId) { $ExpectedOrganizationId } else { 'NOT SUPPLIED' }
         SolutionUniqueName = 'os_sr_bso_rs_support'
         PublisherUniqueName = 'os_bso_rs_support'
         PublisherPrefix = 'os'
@@ -1367,8 +1555,12 @@ function Show-Plan {
                 'GET-only Candidate Source schema and Solution membership reconciliation')
         } elseif ($PublishOnly) {
             @('GET-only target, identity, privilege, Solution, Publisher, inventory, and audit preflight',
-                "At most one table-scoped PublishXml for $TableName, only when componentstate is unpublished",
+                "At most one table-scoped PublishXml for $TableName, only when RetrieveEntity confirms pending unpublished metadata",
                 'GET-only schema, Solution membership, and publication-state reconciliation')
+        } elseif ($VerifyPublicationOnly) {
+            @('GET-only target, identity, Solution, Publisher, inventory, and audit preflight',
+                'GET RetrieveEntity with RetrieveAsIfPublished=false and true for Position',
+                'No POST, PATCH, DELETE, retry, or publication')
         } else {
             @(
                 'GET WhoAmI, Organization, Publisher, Solution, EntityDefinitions, audit flags',
@@ -1386,11 +1578,12 @@ function Show-Plan {
 }
 
 try {
-    $boundedModeCount = @(@($CreateOnlyRecovery, $CreateOnlyCandidateSource, $PublishOnly) | Where-Object { $_ }).Count
+    $boundedModeCount = @(@($CreateOnlyRecovery, $CreateOnlyCandidateSource, $PublishOnly, $VerifyPublicationOnly) | Where-Object { $_ }).Count
     if (($Apply -and $PlanOnly) -or ($boundedModeCount -gt 1) -or
-        ($script:IsBoundedWrite -and ($Apply -or $PlanOnly))) {
+        ($script:IsBoundedWrite -and ($Apply -or $PlanOnly)) -or
+        ($VerifyPublicationOnly -and ($Apply -or $PlanOnly -or $TableName -cne 'os_sr_pos'))) {
         if ($script:IsBoundedWrite) { Set-RecoveryState -State 'BLOCKED' }
-        throw 'Choose exactly one of -Apply, -PlanOnly, -CreateOnlyRecovery, -CreateOnlyCandidateSource, or -PublishOnly.'
+        throw 'Choose exactly one supported mode; publication verification is Position-only and read-only.'
     }
     if ($CreateOnlyRecovery -and $TableName -cne 'os_sr_pos') {
         Set-RecoveryState -State 'BLOCKED'
@@ -1447,6 +1640,22 @@ try {
 
     $preflight = Get-Preflight
     $script:ReconciliationSolutionId = $preflight.SolutionId
+    if ($VerifyPublicationOnly) {
+        $metadata = Get-EntityMetadata -LogicalName 'os_sr_pos'
+        $classification = Get-TablePublicationState -SolutionId $preflight.SolutionId -Metadata $metadata
+        Write-Result -Stage 'VerifyPublicationOnly' -Status $classification -Details ([ordered]@{
+            TableLogicalName = 'os_sr_pos'
+            PublicationClassification = $classification
+            Comparison = $script:PublicationStateDiagnostic
+            SolutionUniqueName = $preflight.SolutionUniqueName
+            PublisherPrefix = $preflight.PublisherPrefix
+            ProjectTables = @($preflight.ProjectTables | Sort-Object)
+            RequestCounts = $script:RequestCounts
+            RetryCount = 0
+            WritesPerformed = 0
+        })
+        return
+    }
     if ($CreateOnlyCandidateSource -or $PublishOnly) {
         $script:RecoveryPreflight = [ordered]@{
             EnvironmentName = 'VN LMV IT'
@@ -1534,7 +1743,7 @@ try {
         $publicationState = Get-TablePublicationState -SolutionId $preflight.SolutionId -Metadata $metadata
         $script:RecoveryPreflight.TableLogicalName = $TableName
         $script:RecoveryPreflight.PublicationState = $publicationState
-        if ($publicationState -eq 'PUBLISHED') {
+        if ($publicationState -eq 'PUBLISHED_NO_PENDING_DELTA') {
             Write-Result -Stage 'PublishOnly' -Status 'ALREADY_PUBLISHED' -Details ([ordered]@{
                 TableLogicalName = $TableName
                 PublicationState = $publicationState
@@ -1543,7 +1752,7 @@ try {
             })
             return
         }
-        if ($publicationState -cne 'UNPUBLISHED') {
+        if ($publicationState -notin @('PUBLISHED_WITH_UNPUBLISHED_DELTA', 'UNPUBLISHED_ONLY')) {
             Set-RecoveryState -State 'BLOCKED'
             throw 'Table publication state is unknown or ambiguous; no publication was attempted.'
         }
@@ -1573,7 +1782,7 @@ try {
         }
         $metadata = Get-EntityMetadata -LogicalName $TableName
         $publicationState = Get-TablePublicationState -SolutionId $finalPreflight.SolutionId -Metadata $metadata
-        if ($publicationState -eq 'PUBLISHED') {
+        if ($publicationState -eq 'PUBLISHED_NO_PENDING_DELTA') {
             Write-Result -Stage 'PublishOnly' -Status 'ALREADY_PUBLISHED' -Details ([ordered]@{
                 TableLogicalName = $TableName
                 PublicationState = $publicationState
@@ -1582,7 +1791,7 @@ try {
             })
             return
         }
-        if ($publicationState -cne 'UNPUBLISHED') {
+        if ($publicationState -notin @('PUBLISHED_WITH_UNPUBLISHED_DELTA', 'UNPUBLISHED_ONLY')) {
             Set-RecoveryState -State 'BLOCKED'
             throw 'Table publication state changed or is ambiguous; publication was not attempted.'
         }

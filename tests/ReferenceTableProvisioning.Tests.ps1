@@ -117,7 +117,7 @@ $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList @($s
     param($sourceAst,$CandidateSourcePayload)
     $script:CandidateSourcePayload=$CandidateSourcePayload
     $script:CandidateSourceExpectedFingerprint='867803e7533bfb053c70b951edc47cb4475b5f0183852dcb850b88b317c08f16'
-    foreach ($functionName in @('Ensure-DataverseAccessToken','Invoke-PrivateOperation','Get-SafeDiagnosticText','Get-SafeErrorMessage','Get-SafeResponseHeader','Get-SafeRawResponseHeader','Get-SafeAuthenticationChallenge','Get-HttpExceptionDetails','Get-RecoveryFailureClass','New-SafeHttpFailure','Get-StoppedDetails','Get-ReconciliationSummary','Write-Result','Get-PayloadFingerprint','Set-RecoveryState','Get-RecoveryFailureState','Assert-CreateOnlyRecoveryTable','Assert-CandidateSourceTable','Assert-PositionPayloadFingerprint','Assert-CandidateSourcePayloadFingerprint','Assert-ExpectedRecoveryUser','Assert-RequiredPrivilegeSet','Assert-RecoveryInventory','Assert-RecoveryPrivileges','Get-TablePublicationState','Invoke-BoundedEntityCreation','Invoke-PositionCreateOnlyRecovery','Invoke-CandidateSourceCreateOnly','Invoke-TableScopedPublication','Invoke-DataverseRequest')) {
+    foreach ($functionName in @('Ensure-DataverseAccessToken','Invoke-PrivateOperation','Get-SafeDiagnosticText','Get-SafeErrorMessage','Get-SafeResponseHeader','Get-SafeRawResponseHeader','Get-SafeAuthenticationChallenge','Get-HttpExceptionDetails','Get-RecoveryFailureClass','New-SafeHttpFailure','Get-StoppedDetails','Get-ReconciliationSummary','Write-Result','Get-PayloadFingerprint','Set-RecoveryState','Get-RecoveryFailureState','Assert-CreateOnlyRecoveryTable','Assert-CandidateSourceTable','Assert-PositionPayloadFingerprint','Assert-CandidateSourcePayloadFingerprint','Assert-ExpectedRecoveryUser','Assert-RequiredPrivilegeSet','Assert-RecoveryInventory','Assert-RecoveryPrivileges','Get-RetrieveEntityMetadata','Get-PublicationLabelText','ConvertTo-PublicationMetadataSnapshot','Compare-PublicationMetadataSnapshots','Get-TablePublicationState','Invoke-BoundedEntityCreation','Invoke-PositionCreateOnlyRecovery','Invoke-CandidateSourceCreateOnly','Invoke-TableScopedPublication','Invoke-DataverseRequest')) {
         $functionAst=$sourceAst.Find({param($node)$node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName},$true)
         Invoke-Expression $functionAst.Extent.Text
     }
@@ -153,6 +153,7 @@ $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList @($s
                 if ($Method -eq 'GET') {
                     $script:State.ReadUris.Add([string]$Uri)
                     $script:State.ReadMethods.Add($Method)
+                    $script:State.ReadRetryLimits.Add([int]$MaximumRetryCount)
                 }
                 Write-Warning $script:State.UnsafeText
                 Write-Information $script:State.UnsafeText
@@ -181,7 +182,13 @@ $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList @($s
                 }
                 if ($script:State.Timeout) { throw [TimeoutException]::new($script:State.UnsafeText) }
                 if ($script:State.TransportException) { throw [IOException]::new($script:State.UnsafeText) }
-                $responseCode=if ($Method -eq 'GET') { $script:State.GetStatus } else { $script:State.Status }
+                $retrieveScenario=$null
+                $retrieveFlag=$null
+                if ($Method -eq 'GET' -and [string]$Uri -match 'RetrieveEntity\(') {
+                    $retrieveFlag=if ([string]$Uri -match 'RetrieveAsIfPublished=true') { 'true' } else { 'false' }
+                    $retrieveScenario=$script:State.RetrieveEntityResponses[$retrieveFlag]
+                }
+                $responseCode=if ($null -ne $retrieveScenario -and $null -ne $retrieveScenario.Status) { [int]$retrieveScenario.Status } elseif ($Method -eq 'GET') { $script:State.GetStatus } else { $script:State.Status }
                 Set-Variable -Name $StatusCodeVariable -Value $responseCode -Scope 1
                 Set-Variable -Name $ResponseHeadersVariable -Value @{
                     'WWW-Authenticate'=('Bearer error="'+$script:State.Secrets[0]+'", error_description="'+$script:State.UnsafeText+'"')
@@ -191,6 +198,17 @@ $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList @($s
                 } -Scope 1
                 if ($Method -eq 'GET' -and [string]$Uri -match 'RetrieveUserSetOfPrivilegesByNames') {
                     return [pscustomobject]@{RolePrivileges=@(1..$script:State.PrivilegeCount | ForEach-Object { [pscustomobject]@{PrivilegeId=('synthetic-'+$_);Depth='Global'} })}
+                }
+                if ($Method -eq 'GET' -and [string]$Uri -match 'RetrieveEntity\(') {
+                    if ($responseCode -lt 200 -or $responseCode -ge 300) {
+                        $httpResponse=[System.Net.Http.HttpResponseMessage]::new([System.Net.HttpStatusCode]$responseCode)
+                        $exception=[InvalidOperationException]::new('Synthetic RetrieveEntity HTTP failure')
+                        $exception | Add-Member -NotePropertyName Response -NotePropertyValue $httpResponse -Force
+                        $errorRecord=[System.Management.Automation.ErrorRecord]::new($exception,'SyntheticRetrieveEntityFailure',[System.Management.Automation.ErrorCategory]::InvalidOperation,$null)
+                        $errorRecord.ErrorDetails=[System.Management.Automation.ErrorDetails]::new('{"error":{"code":"0x80040217","message":"synthetic not found"}}')
+                        throw $errorRecord
+                    }
+                    return $retrieveScenario.Response
                 }
                 [pscustomobject]@{error=[pscustomobject]@{code='0x80040220';message=$script:State.UnsafeText};rawAuthentication=$script:State.UnsafeText}
             }
@@ -241,7 +259,7 @@ $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList @($s
         $script:Refreshes=0;$script:LastHttpFailure=$null
         $script:AccessToken='expired-synthetic';$script:AccessTokenExpiresOn=[DateTimeOffset]::UtcNow.AddMinutes(-1)
         $script:RequestCounts=@{GET=0;POST=0};$script:WriteResults=[System.Collections.Generic.List[object]]::new()
-        $script:Apply=$true;$script:CreateOnlyRecovery=$false;$script:CreateOnlyCandidateSource=$false;$script:PublishOnly=$false;$script:RecoveryState=$null
+        $script:Apply=$true;$script:CreateOnlyRecovery=$false;$script:CreateOnlyCandidateSource=$false;$script:PublishOnly=$false;$script:VerifyPublicationOnly=$false;$script:RecoveryState=$null
         $script:TableName='os_sr_pos'
         $script:RecoveryTransitions=[System.Collections.Generic.List[object]]::new()
         $script:RecoveryExpectedFingerprint='0f7372eeb66c0214ae08ed0dc74f82c981cc4cd73baa9156f16d6e1bd1f48e80'
@@ -252,7 +270,7 @@ $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList @($s
         $script:PublicationStateDiagnostic=$null;$script:PreflightStage='INITIALIZATION';$script:PublicationRows=@()
         $script:RecoveryRequestId=$null;$script:RecoveryCorrelationId=$null;$script:LastRequestDispatchStarted=$false
         $script:WritesAllowed=$true;$script:WritesStarted=$false
-        $script:TransportState=@{Calls=0;PostCalls=0;Request=$null;ReadUris=[System.Collections.Generic.List[string]]::new();ReadMethods=[System.Collections.Generic.List[string]]::new();Status=0;GetStatus=200;Timeout=$false;TransportException=$false;ExceptionScenario=$null;PrivilegeCount=3;Secrets=$script:Secrets;UnsafeText=$script:UnsafeText;ExpiresOn=[DateTimeOffset]::MinValue}
+        $script:TransportState=@{Calls=0;PostCalls=0;Request=$null;ReadUris=[System.Collections.Generic.List[string]]::new();ReadMethods=[System.Collections.Generic.List[string]]::new();ReadRetryLimits=[System.Collections.Generic.List[int]]::new();Status=0;GetStatus=200;Timeout=$false;TransportException=$false;ExceptionScenario=$null;PrivilegeCount=3;Secrets=$script:Secrets;UnsafeText=$script:UnsafeText;ExpiresOn=[DateTimeOffset]::MinValue;RetrieveEntityResponses=@{}}
     }
     function Test-SyntheticHttpChecks {
         param([object]$RecoveryPayload)
@@ -409,21 +427,62 @@ $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList @($s
         try { Assert-CandidateSourcePayloadFingerprint -Payload $candidateWrongPayload | Out-Null } catch { $candidateFingerprintRejected=$true }
         $results.Add([pscustomobject]@{Kind='CandidateSourceFingerprintMismatch';Passed=($candidateFingerprintRejected -and $script:RecoveryState -eq 'FAILED_VALIDATION' -and $script:TransportState.Calls -eq 0 -and $script:Refreshes -eq 0)})
 
-        Reset-SyntheticState
-        $publicationStates=[ordered]@{}
-        foreach($case in @(
-            @{Name='Published';Rows=@([pscustomobject]@{componentstate=0});Expected='PUBLISHED';FieldPresent=$true},
-            @{Name='Unpublished';Rows=@([pscustomobject]@{componentstate=1});Expected='UNPUBLISHED';FieldPresent=$true},
-            @{Name='MissingField';Rows=@([pscustomobject]@{rootcomponentbehavior=0});Expected='UNKNOWN';FieldPresent=$false},
-            @{Name='MissingComponent';Rows=@();Expected='UNKNOWN';FieldPresent=$false},
-            @{Name='UnexpectedState';Rows=@([pscustomobject]@{componentstate=2});Expected='UNKNOWN';FieldPresent=$true}
-        )){
-            $script:PublicationRows=$case.Rows
-            $actual=Get-TablePublicationState -SolutionId 'synthetic-solution' -Metadata ([pscustomobject]@{MetadataId='synthetic-table-id'})
-            $publicationStates[$case.Name]=$actual -ceq $case.Expected -and
-                $script:PublicationStateDiagnostic.StateFieldPresent -eq $case.FieldPresent
+        function New-SyntheticPositionMetadata {
+            param([int]$MaxLength=200,[string]$DisplayName='Position Title',[string[]]$AttributeOrder=@('os_sr_pos_ttl','os_sr_posid'),[string]$RuntimeMarker='ignored')
+            $attrs=@($AttributeOrder | ForEach-Object {
+                if ($_ -ceq 'os_sr_pos_ttl') {
+                    [pscustomobject]@{LogicalName='os_sr_pos_ttl';SchemaName='os_sr_pos_ttl';DisplayName=[pscustomobject]@{UserLocalizedLabel=[pscustomobject]@{Label=$DisplayName};LocalizedLabels=@()};AttributeType='String';FormatName=[pscustomobject]@{Value='Text'};MaxLength=$MaxLength;RequiredLevel=[pscustomobject]@{Value='ApplicationRequired'};IsPrimaryName=$true;IsCustomAttribute=$true}
+                } else {
+                    [pscustomobject]@{LogicalName='os_sr_posid';SchemaName='os_sr_posid';AttributeType='Uniqueidentifier';IsPrimaryId=$true;IsCustomAttribute=$false}
+                }
+            })
+            [pscustomobject]@{
+                LogicalName='os_sr_pos';SchemaName='os_sr_pos';MetadataId='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+                DisplayName=[pscustomobject]@{UserLocalizedLabel=[pscustomobject]@{Label='Position'};LocalizedLabels=@()}
+                DisplayCollectionName=[pscustomobject]@{UserLocalizedLabel=[pscustomobject]@{Label='Positions'};LocalizedLabels=@()}
+                OwnershipType='OrganizationOwned';PrimaryIdAttribute='os_sr_posid';PrimaryNameAttribute='os_sr_pos_ttl'
+                Attributes=$attrs;Keys=@();ManyToOneRelationships=@();OneToManyRelationships=@();ManyToManyRelationships=@()
+                RuntimeMetadata=$RuntimeMarker;Timestamp='ignored'
+            }
         }
-        $results.Add([pscustomobject]@{Kind='PublicationStateClassification';Passed=($publicationStates.Count -eq 5 -and @($publicationStates.Values | Where-Object { -not $_ }).Count -eq 0);Cases=$publicationStates})
+        $positionMetadata=New-SyntheticPositionMetadata
+        $publicationCases=@(
+            @{Name='PublishedNoDelta';False=@{Response=[pscustomobject]@{EntityMetadata=$positionMetadata}};True=@{Response=[pscustomobject]@{EntityMetadata=$positionMetadata}};Expected='PUBLISHED_NO_PENDING_DELTA'},
+            @{Name='PublishedWithDelta';False=@{Response=[pscustomobject]@{EntityMetadata=$positionMetadata}};True=@{Response=[pscustomobject]@{EntityMetadata=(New-SyntheticPositionMetadata -MaxLength 199)}};Expected='PUBLISHED_WITH_UNPUBLISHED_DELTA'},
+            @{Name='UnpublishedOnly';False=@{Status=404};True=@{Response=[pscustomobject]@{EntityMetadata=$positionMetadata}};Expected='UNPUBLISHED_ONLY'},
+            @{Name='AbsentBoth';False=@{Status=404};True=@{Status=404};Expected='UNKNOWN'},
+            @{Name='FailedRetrieval';False=@{Status=503};True=@{Response=[pscustomobject]@{EntityMetadata=$positionMetadata}};Expected='UNKNOWN'},
+            @{Name='MalformedRetrieval';False=@{Response=[pscustomobject]@{Unexpected='shape'}};True=@{Response=[pscustomobject]@{EntityMetadata=$positionMetadata}};Expected='UNKNOWN'}
+        )
+        $publicationStates=[ordered]@{}
+        foreach($case in $publicationCases) {
+            Reset-SyntheticState
+            $script:VerifyPublicationOnly=$true
+            $script:TransportState.RetrieveEntityResponses=@{false=$case.False;true=$case.True}
+            $actual=Get-TablePublicationState -SolutionId 'synthetic-solution' -Metadata $positionMetadata
+            $publicationStates[$case.Name]=($actual -ceq $case.Expected -and $script:RequestCounts.GET -eq 2 -and
+                @($script:TransportState.ReadMethods | Where-Object { $_ -ne 'GET' }).Count -eq 0 -and
+                $script:RequestCounts.POST -eq 0 -and $script:WritesStarted -eq $false -and
+                @($script:TransportState.ReadRetryLimits | Where-Object { $_ -ne 0 }).Count -eq 0 -and
+                @($script:TransportState.ReadUris | Where-Object { $_ -match 'RetrieveEntity\(EntityFilters=Microsoft\.Dynamics\.CRM\.EntityFilters''All'',MetadataId=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,RetrieveAsIfPublished=(true|false)\)' }).Count -eq 2)
+        }
+        Reset-SyntheticState
+        $script:VerifyPublicationOnly=$true
+        $orderedPublished=New-SyntheticPositionMetadata -AttributeOrder @('os_sr_posid','os_sr_pos_ttl') -RuntimeMarker 'changed'
+        $orderedCurrent=New-SyntheticPositionMetadata -AttributeOrder @('os_sr_pos_ttl','os_sr_posid') -RuntimeMarker 'different'
+        $script:TransportState.RetrieveEntityResponses=@{
+            false=@{Response=[pscustomobject]@{EntityMetadata=$orderedPublished}}
+            true=@{Response=[pscustomobject]@{EntityMetadata=$orderedCurrent}}
+        }
+        $orderIgnored=(Get-TablePublicationState -SolutionId 'synthetic-solution' -Metadata $orderedCurrent) -ceq 'PUBLISHED_NO_PENDING_DELTA'
+        $results.Add([pscustomobject]@{Kind='PublicationStateClassification';Passed=($publicationStates.Count -eq 6 -and @($publicationStates.Values | Where-Object { -not $_ }).Count -eq 0 -and $orderIgnored);Cases=$publicationStates;OrderingAndRuntimeIgnored=$orderIgnored})
+
+        Reset-SyntheticState
+        $script:Apply=$false;$script:VerifyPublicationOnly=$true;$script:WritesAllowed=$false
+        $publicationWriteBlocked=$false
+        try { Invoke-DataverseRequest -Method POST -Path EntityDefinitions -Body @{SchemaName='os_sr_pos'} | Out-Null }
+        catch { $publicationWriteBlocked=($script:TransportState.Calls -eq 0 -and $script:RequestCounts.POST -eq 0 -and -not $script:WritesStarted) }
+        $results.Add([pscustomobject]@{Kind='PublicationVerifyWriteBlocked';Passed=$publicationWriteBlocked})
 
         Reset-SyntheticState
         $script:CreateOnlyCandidateSource=$true;$script:Apply=$false;$script:TableName='os_sr_csrc'
@@ -600,7 +659,9 @@ Assert-Test $candidateTableRestriction.Passed 'Candidate Source create-only mode
 $publishGuard=@($recovery | Where-Object Kind -eq 'PublishOnlyScopeGuard')[0]
 Assert-Test $publishGuard.Passed 'Publish-only mode permits only one table-scoped PublishXml POST'
 $publicationStates=@($recovery | Where-Object Kind -eq 'PublicationStateClassification')[0]
-Assert-Test $publicationStates.Passed 'Publication state is unknown when component state is absent or unrecognized'
+Assert-Test $publicationStates.Passed 'RetrieveEntity comparison classifies published, unpublished-only, missing, failed, malformed, and order-insensitive metadata'
+$publicationVerifyWriteBlocked=@($recovery | Where-Object Kind -eq 'PublicationVerifyWriteBlocked')[0]
+Assert-Test $publicationVerifyWriteBlocked.Passed 'Position publication verification blocks writes before request dispatch'
 $privacy=@($recovery | Where-Object Kind -eq 'DiagnosticPrivacy')[0]
 Assert-Test $privacy.Passed 'Recovery diagnostics omit token, identity and environment URL'
 $diagnosticKeys=@('Operation','Method','ApiPath','TimestampUtc','StatusCode','HttpStatus','DataverseErrorCode','ErrorSummary','RequestId','CorrelationId','AuthenticationChallenge','FailureClass','ExceptionCategory','TransportKind','DispatchStarted','WritesMayHaveOccurred','ReconciliationCompleted','ReconciliationOutcome') | Sort-Object

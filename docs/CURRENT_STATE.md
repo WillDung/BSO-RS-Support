@@ -1,6 +1,6 @@
 # Current State
 
-**Environment evidence:** the latest authenticated read-only preflight was run during Sprint 02D on 22 October 2026; see the update below. **Repository status updated:** Sprint 02D. **Phase:** Position (`os_sr_pos`) remains present with exact approved metadata and Solution membership. Its publication state is **UNKNOWN**: the available solution-component Web API response did not expose `componentstate`, and a query selecting that property was rejected. Sprint 02D therefore stopped before any publication or Candidate Source write. `os_sr_csrc` and `os_sr_loc` remain absent. The owner-approved existing AppModule `srapp` remains the last observed active/unpublished state from Sprint 02C.1; it was not rechecked in Sprint 02D.
+**Environment evidence:** the latest authenticated read-only preflight was run during Sprint 02D.1 on 22 October 2026; see the update below. **Repository status updated:** Sprint 02D.1. **Phase:** Position (`os_sr_pos`) remains present with exact approved metadata and Solution membership. `RetrieveEntity` comparison verified `PUBLISHED_NO_PENDING_DELTA`. No publication or schema change was performed. Candidate Source and Location remain absent. The owner-approved existing AppModule `srapp` remains the last observed active/unpublished state from Sprint 02C.1; it was not rechecked in Sprint 02D.1.
 
 ## Sprint 02D Update — 22 October 2026
 
@@ -14,6 +14,18 @@ The owner authorized a conditional Position-only publication and a bounded Candi
 - Final offline validation passed: 528 provisioning/recovery assertions, 32 app-composition assertions, and 11 readiness assertions. Candidate Source and Position PlanOnly fingerprints matched their approved values; `git diff --check` passed.
 - This task made 67 Dataverse GET requests across the five read-only preflight attempts, including three failed publication-property selection probes. It made zero POST, PublishXml, PATCH, DELETE, or retry operations. No Location, app, role, record, or integration changes were made.
 - The next task is to establish Position's publication state using a supported read-only Dataverse metadata mechanism that can distinguish published from unpublished customizations. Do not publish or create Candidate Source until that state is proven; do not recreate Position. Any subsequent operation requires a fresh preflight and applicable explicit authorization.
+
+## Sprint 02D.1 Update — 22 October 2026
+
+Position publication state was verified using the supported `RetrieveEntity` Web API function, which is a GET function. The provisioner retrieved `os_sr_pos` with `RetrieveAsIfPublished=false` and `true`, then compared normalized schema properties; it no longer uses `solutioncomponents.componentstate` for publication detection.
+
+- Fresh PAC environment details matched the previously designated VN LMV IT target. The existing Az user context matched the PAC user, and the Dataverse preflight verified the environment, organization identity, Solution, Publisher, project tables, Position schema, Solution membership, and audit baseline. Sensitive identifiers and account values are intentionally omitted.
+- Both metadata retrievals returned Position. The published and as-if-published snapshots matched for logical/schema names, display labels, ownership, primary ID/name, primary-name type/format/length/required level, custom attributes, keys, and relationships. Result: **PUBLISHED_NO_PENDING_DELTA**.
+- The fresh project table inventory was exactly `os_sr_ta` and `os_sr_pos`; Candidate Source and Location remain absent. No Solution, Publisher, or table metadata changed.
+- The local provisioner now offers `-VerifyPublicationOnly -TableName os_sr_pos`, which performs only GET preflight and the two `RetrieveEntity` reads. Failure, malformed metadata, inconsistent entity names, or absence from both retrievals results in `UNKNOWN`. Candidate Source creation remains separately authorized and guarded.
+- The live verification issued **19 GETs** total (preflight plus the two metadata retrievals), with `MaximumRetryCount=0`, and zero POST, PublishXml, PATCH, DELETE, or retry operations.
+- Offline regression validation passed: **529** provisioning/recovery assertions, **32** app-composition assertions, **11** readiness assertions, and `git diff --check`.
+- Position’s publication gate is cleared. Candidate Source may be considered in a separate, freshly preflighted, explicitly authorized bounded task. Do not create Location, publish `srapp`, or infer authorization for other components from this result.
 
 ## Facts
 

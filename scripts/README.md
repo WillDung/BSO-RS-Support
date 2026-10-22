@@ -48,17 +48,23 @@ Historical Phase 1D-C and Phase 1D-D read-only checks passed using PowerShell 7.
 
 The successful TA flow and failed Position flow used the same token-before-preflight / typed-prompt / POST ordering, bearer Authorization construction, JSON Content-Type, `If-None-Match`, and `MSCRM.SolutionUniqueName` header. Transcript timing puts confirmation and the returned failure within seconds; the historical token expiry is unavailable, so expiry cannot be conclusively ruled in or out, though no evidence supports expiry. The current helper validates Dataverse audience/tenant/scope/expiry and refreshes through Az.Accounts before a request when under five minutes remain, including after confirmation. It records only sanitized status, error code/message, allowlisted challenge scheme/error, request/correlation IDs, path, request start, and token timestamps. It never logs a token or full headers. This is preventive hardening, not a confirmed fix for the historical 401. See [Current State](../docs/CURRENT_STATE.md). Do not retry or bypass policy.
 
-### Controlled Position Recovery (Proposed; Not Authorized)
+### Controlled Position Recovery (Implemented Locally; Not Authorized for Remote Execution)
 
-This is a recovery proposal only. The 20 October 2026 Position POST must not be repeated under the prior batch approval. Obtain a new, written recovery authorization after reviewing the historical failure. No step below permits switching environments, identities, authentication mechanisms, or APIs to work around a failure.
+Sprint 02B.1 adds an explicit `-CreateOnlyRecovery` mode for `os_sr_pos`. It is a local implementation only; it has not been run against Dataverse and does not authorize a remote write. The 20 October 2026 Position POST must not be repeated under the prior batch approval. Obtain a new, written recovery authorization after reviewing the historical failure. No step below permits switching environments, identities, authentication mechanisms, or APIs to work around a failure.
 
 **Preconditions**
 
 1. The project owner and the responsible VN LMV IT environment/Dataverse administrator approve one controlled recovery attempt in writing, including the Production-class development target and the exact `os_sr_pos` operation. If the failure requires a privilege or policy change, stop for its own formal security approval; this procedure does not authorize such a change.
-2. Verify the active PAC target is still VN LMV IT and the same approved user identity is used by PAC and the existing Az user context. Use the existing process-scoped expected environment/organization configuration; do not print it, alter it, switch profiles, or trigger sign-in.
-3. Read-only preflight independently confirms `os_sr_pos` is absent from `EntityDefinitions` and the project Solution has no Position component. Reconfirm the `os_bso_rs_support` Publisher (`os` prefix), unmanaged `os_sr_bso_rs_support` Solution, current project inventory, and relevant metadata privileges. The prior effective-privilege result is historical and is not a substitute for this preflight.
-4. Check that the local payload still matches the declared schema: OrganizationOwned `os_sr_pos`, primary name `os_sr_pos_ttl` / Position Title / String-Text length 200 / ApplicationRequired, approved plural Positions, with no additional columns, keys, relationships, audit flags, or data rows.
-5. Confirm that the current provisioner has no retry path and that its safe diagnostic output is available. The existing `-Apply` path is **not suitable** for this bounded attempt: after creating the table it invokes table-scoped `PublishXml`, a second POST. Do not invoke `-Apply` for the one-POST recovery. Before execution, either prepare and test a separately guarded create-only mode that performs exactly one metadata POST and GET-only reconciliation, or remain BLOCKED. A typed confirmation in the script is an additional guard, not a substitute for the new operational authorization.
+2. Set the existing process-scoped environment values for VN LMV IT and `BSO_RS_EXPECTED_USER_ID` to administrator-verified values. The mode checks PAC against the expected environment/organization and user IDs, and checks the existing Az user against PAC without emitting the identity. It will not trigger `Connect-AzAccount`, switch profiles, change identity, or print the configured URL/IDs.
+3. Read-only preflight independently confirms `os_sr_pos` is absent from `EntityDefinitions`, the current project inventory is exactly `os_sr_ta`, and every Entity/Attribute component in the project Solution maps to currently verified project metadata. Any unidentifiable Entity or Attribute component blocks recovery. Reconfirm the `os_bso_rs_support` Publisher (`os` prefix), unmanaged `os_sr_bso_rs_support` Solution, and effective `prvCreateEntity`, `prvCreateAttribute`, and `prvCreateCustomization` privileges. `prvPublishCustomization` is not required because this mode cannot publish.
+4. The mode recalculates the PlanOnly table payload SHA-256 before authentication and compares it to the approved fingerprint below. It blocks before authentication if the hash differs. It also validates the exact declared Position schema; no additional columns, keys, relationships, audit flags, or data rows are planned.
+5. Invoke only the dedicated mode, never `-Apply`:
+
+   ```powershell
+   & ./scripts/Provision-BsoRsTaTable.ps1 -CreateOnlyRecovery -TableName os_sr_pos -DisplayCollectionName 'Positions' -AuthorizationReference '<approved-change-reference>'
+   ```
+
+   The reference must identify a separately approved operational authorization and match the mode's restricted safe-character syntax. The script then requires the exact typed phrase `RECOVER CREATE os_sr_pos IN VN LMV IT AUTHORIZATION <approved-change-reference>`. Neither a reference string nor typed confirmation proves external approval; the project owner and environment administrator must confirm that approval independently. The existing `-Apply` sequence remains unchanged and is **not suitable** for this one-POST recovery because it posts additional attributes and calls table-scoped `PublishXml`.
 
 **Single intended request**
 
@@ -66,52 +72,53 @@ This is a recovery proposal only. The 20 October 2026 Position POST must not be 
 - Body: the exact PlanOnly-validated `Microsoft.Dynamics.CRM.EntityMetadata` payload for `os_sr_pos`, including only the approved table metadata and primary-name attribute.
 - Authentication: the existing Az.Accounts user token requested for the configured Dataverse organization resource. The same user must match PAC. Validate tenant, audience, delegated `user_impersonation` scope, and expiry in memory; never output or persist the token or raw claims.
 - Headers: bearer credential header (never logged), JSON content type, Accept JSON, OData 4.0 version headers, `If-None-Match: null`, and `MSCRM.SolutionUniqueName: os_sr_bso_rs_support`. Require HTTPS, the verified organization API origin, and redirects disabled.
-- Privileges: the metadata operation requires the applicable Dataverse metadata/customization privileges; the later table-scoped publish requires publish-customization authority. Prior read-only checks reported Global depth for `prvCreateEntity`, `prvCreateAttribute`, `prvCreateCustomization`, and `prvPublishCustomization`, but did not explain the historical 401. Do not grant privileges as a diagnostic shortcut.
+- Privileges: recovery preflight requests the effective `prvCreateEntity`, `prvCreateAttribute`, and `prvCreateCustomization` set for the existing PAC/Az identity. Missing or unavailable privilege evidence blocks the write. No privilege is granted or changed. `prvPublishCustomization` is deliberately not checked because publishing is prohibited.
 - Response: treat only a 2xx response as transport success, not proof of a complete deployment. The exact historical response code and body are unavailable. Independently read back the table and Solution membership before any next operation.
 
 **Sanitized evidence to retain for this one attempt**
 
-Record UTC request start/end timestamps; HTTP method and allowlisted API path; status; approved/sanitized Dataverse error code and safe summary; allowlisted authentication challenge scheme/error only; validated request/correlation GUIDs; token issuance/expiry timestamps and Boolean tenant/audience/scope/expiry checks; expected-environment match; Solution unique name; and whether a write may have occurred. Never retain Authorization or other full headers, raw token/claims, full response body, credentials, user email, or unfiltered exception text.
+The local mode emits the UTC attempt timestamp; environment and identity match Booleans; verified privilege names; state and state-transition timestamps; expected/actual payload hashes; response class/status; allowlisted Dataverse error code and safe summary; validated request/correlation GUIDs; reconciliation result; and whether a write may have occurred. Authentication tenant/audience/scope/expiry are validated in memory by the existing token helper and are not emitted as claims. Never retain Authorization or other full headers, raw token/claims, full response body, credentials, user email, or unfiltered exception text.
 
 **Stop, outcome handling, and reconciliation**
 
-- **401:** stop immediately. Preserve only sanitized diagnostics. Have the authorized administrator investigate identity membership, Conditional Access, token audience/scope/expiry, and the challenge using approved logs. Do not refresh into a different identity, switch auth surface, or retry.
-- **403:** stop. Request an administrator review of effective privileges and policy; do not self-elevate or retry after a privilege change without a separately approved plan.
-- **400 or other 4xx:** stop and inspect the sanitized error. Do not assume the metadata write did not occur; reconcile by GET before any recovery decision.
-- **429, 5xx, transport error, or timeout:** treat the write outcome as uncertain. Do not automatically retry. Reconcile table metadata and Solution membership using GET-only reads, including whether the table, primary column, or Solution component partially exists.
+- **401:** stop all writes and reconcile by GET only. Preserve sanitized diagnostics. Have the authorized administrator investigate identity membership, Conditional Access, token audience/scope/expiry, and the challenge using approved logs. Do not refresh into a different identity, switch auth surface, or retry.
+- **403:** stop all writes and reconcile by GET only. Request an administrator review of effective privileges and policy; do not self-elevate or retry after a privilege change without a separately approved plan.
+- **Deterministic request/schema 4xx other than 408/429:** stop and inspect the sanitized error. Do not assume the metadata write did not occur; reconcile by GET before any recovery decision.
+- **408, 429, 5xx, transport error, or timeout:** treat the write outcome as uncertain. Do not automatically retry. Reconcile table metadata and Solution membership using GET-only reads, including whether the table, primary column, or Solution component partially exists.
 - **Any 2xx:** issue no subsequent write until independent read-back verifies the exact table schema, generated primary ID/name, absence of unintended metadata, and project Solution root membership. Only a separate authorization may proceed to the next table.
 - **Partial or uncertain state:** the provisioner intentionally has no resume, delete, recreate, or automatic repair route. Preserve observed state and prepare a separately reviewed recovery plan. Do not delete or recreate the table; its name and ownership are durable creation-time decisions.
 
 The later `os_sr_csrc` and `os_sr_loc` tasks are independent schemas but remain serialized behind Position recovery by the approved runbook sequence. They require their own fresh preflight and explicit authorization; neither is implicitly authorized by a successful Position recovery. See [Current State](../docs/CURRENT_STATE.md) and [Phase 1D-B Reference Table Runbook](../docs/PHASE_1D_B_REFERENCE_TABLE_RUNBOOK.md).
 
-#### One-Attempt State Machine (Proposed)
+#### One-Attempt State Machine (Implemented Locally)
 
 ```text
-PRECHECK --all approved gates pass--> READY
-PRECHECK --any mismatch/approval missing--> BLOCKED
-READY --new written authorization + one guarded POST--> WRITE_ATTEMPTED
-WRITE_ATTEMPTED --> RECONCILING (GET only; never repeat the POST)
-RECONCILING --2xx + exact complete schema and Solution read-back--> VERIFIED_SUCCESS
-RECONCILING --401 and no unexpected metadata--> FAILED_AUTH
-RECONCILING --403 and no unexpected metadata--> FAILED_AUTHZ
-RECONCILING --deterministic invalid 4xx and no unexpected metadata--> FAILED_VALIDATION
-RECONCILING --429/5xx/timeout/transport ambiguity--> UNCERTAIN
-RECONCILING --any unexpected/partial metadata--> PARTIAL_STATE
+PRECHECK --all local/external gates and exact payload hash pass--> READY
+PRECHECK --any mismatch/unknown required fact/approval missing--> BLOCKED
+PRECHECK --payload fingerprint mismatch--> FAILED_VALIDATION
+READY --one guarded POST EntityDefinitions--> WRITE_ATTEMPTED
+WRITE_ATTEMPTED --any response/transport result--> RECONCILING (GET only)
+RECONCILING --exact schema and Solution membership--> VERIFIED_SUCCESS
+RECONCILING --unexpected/partial metadata--> PARTIAL_STATE
+RECONCILING --401 with no exact table--> FAILED_AUTH
+RECONCILING --403 with no exact table--> FAILED_AUTHZ
+RECONCILING --deterministic request/schema 4xx with no exact table--> FAILED_VALIDATION
+RECONCILING --429/408/5xx/timeout/transport ambiguity or unknown read-back--> UNCERTAIN
 ```
 
-`FAILED_AUTH`, `FAILED_AUTHZ`, `FAILED_VALIDATION`, `UNCERTAIN`, `PARTIAL_STATE`, `BLOCKED`, and `VERIFIED_SUCCESS` are terminal for this attempt. Reconciliation can classify the observed result but cannot authorize a second POST. `401`, `403`, and deterministic validation failures still receive GET-only reconciliation before recording terminal state; any unexpected object/component takes precedence as `PARTIAL_STATE`. `429`, `5xx`, timeout, or transport failure are always uncertain until metadata and Solution membership are reconciled. Do not publish, delete, recreate, compensate, or change roles/privileges. The only possible success for this bounded recovery is exact post-POST read-back of the table and Solution root; publication is explicitly outside scope and would require a separate authorization.
+All outcomes after WRITE_ATTEMPTED permit only GET reconciliation. `Invoke-RestMethod -MaximumRetryCount 0` is set for every request in this mode; the write guard also rejects every second POST and every path except `EntityDefinitions`. PATCH/DELETE are unsupported by the request wrapper. The recovery branch returns before the normal Apply continuation, so it cannot post additional attributes or call PublishXml. Terminal states cannot authorize another write. Any partial/unexpected metadata takes precedence; exact metadata and Solution membership are required for VERIFIED_SUCCESS. Do not publish, delete, recreate, compensate, or change roles/privileges. Local tests use mocked transport only; **remote execution remains unauthorized**.
 
 #### Sanitized Evidence Record (Template)
 
-Keep the record outside the repository unless organizational policy approves a sanitized incident artifact. Use null/omitted values when an item was not returned; never infer evidence. Record one UTC attempt timestamp generated immediately before the request.
+Keep any operational record outside the repository unless organizational policy approves a sanitized incident artifact. Use null/omitted values when an item was not returned; never infer evidence. The local mode's diagnostic is not an approval record.
 
 | Record area | Allowlisted fields |
 |---|---|
-| Preflight | `attemptTimestampUtc`; `environmentName` (`VN LMV IT`); `environmentMatch` Boolean; `identityMatch` Boolean (PAC/Az same approved user; no user identifier); `solutionUniqueName`; `solutionType` (`unmanaged`); `publisherUniqueName`; `publisherPrefix`; `targetTableAbsent` Boolean; `solutionComponentAbsent` Boolean; `privilegeChecks` keyed by required privilege with returned depth/result or `UNKNOWN`; `payloadSha256`. |
+| Preflight | `attemptTimestampUtc`; `environmentName` (`VN LMV IT`); `environmentMatch` Boolean; `identityMatch` Boolean (expected ID/PAC/Az same user; no user identifier); `solutionUniqueName`; `solutionType` (`unmanaged`); `publisherUniqueName`; `publisherPrefix`; `targetTableAbsent` Boolean; `solutionComponentAbsent` Boolean; effective privilege results; `payloadSha256`. |
 | Request/response | `method` (`POST`); relative `path` (`/api/data/v9.2/EntityDefinitions`); `httpStatus`; allowlisted sanitized Dataverse error code/message; valid request/correlation GUIDs only; selected safe challenge properties only; `tokenAudienceValid`, `tokenScopeValid`, `tokenExpiryValid` Booleans; `writesMayHaveOccurred` Boolean. |
 | Reconciliation | `reconciliationTimestampUtc`; GET-only results for target table and metadata, exact expected attributes, keys, relationships, and project Solution root; `outcome` (`VERIFIED_SUCCESS`, `FAILED_AUTH`, `FAILED_AUTHZ`, `FAILED_VALIDATION`, `UNCERTAIN`, or `PARTIAL_STATE`); concise sanitized notes. |
 
-Never include access/refresh tokens, Authorization or other full headers, JWT claims, user email, tenant ID, full organization URL, credentials, full response body, candidate data, or unfiltered exception text. The current provisioner’s existing diagnostic object is not by itself a complete evidence package: it does not persist a preflight identity record or payload fingerprint, and the historical incident was not captured with these fields.
+Never include access/refresh tokens, Authorization or other full headers, JWT claims, user email, tenant ID, full organization URL, credentials, full response body, candidate data, or unfiltered exception text. The emitted diagnostic includes redacted verification booleans and the Position fingerprint; it does not prove external authorization or emit raw identity/token claims. The historical incident was not captured with these fields.
 
 #### Position Payload Identity
 

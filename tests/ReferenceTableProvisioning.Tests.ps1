@@ -110,7 +110,7 @@ Assert-Rejected {Assert-TableMetadata $fixture} 'Custom active column' 'Unexpect
 $sourceAst=[System.Management.Automation.Language.Parser]::ParseFile($provisioner,[ref]$null,[ref]$null)
 $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList $sourceAst -ScriptBlock {
     param($sourceAst)
-    foreach ($functionName in @('Ensure-DataverseAccessToken','Invoke-PrivateOperation','Get-SafeDiagnosticText','Get-SafeErrorMessage','Get-SafeResponseHeader','New-SafeHttpFailure','Get-StoppedDetails','Get-ReconciliationSummary','Write-Result','Invoke-DataverseRequest')) {
+    foreach ($functionName in @('Ensure-DataverseAccessToken','Invoke-PrivateOperation','Get-SafeDiagnosticText','Get-SafeErrorMessage','Get-SafeResponseHeader','New-SafeHttpFailure','Get-StoppedDetails','Get-ReconciliationSummary','Write-Result','Get-PayloadFingerprint','Set-RecoveryState','Get-RecoveryFailureState','Assert-CreateOnlyRecoveryTable','Assert-PositionPayloadFingerprint','Assert-ExpectedRecoveryUser','Assert-RequiredPrivilegeSet','Assert-RecoveryInventory','Assert-RecoveryPrivileges','Invoke-PositionCreateOnlyRecovery','Invoke-DataverseRequest')) {
         $functionAst=$sourceAst.Find({param($node)$node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName},$true)
         Invoke-Expression $functionAst.Extent.Text
     }
@@ -132,23 +132,31 @@ $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList $sou
             $script:State=$state
             function Invoke-RestMethod {
                 [CmdletBinding()]
-                param($Method,$Uri,$Headers,$SkipHeaderValidation,$MaximumRedirection,$SkipHttpErrorCheck,$StatusCodeVariable,$ResponseHeadersVariable,$TimeoutSec,$ContentType,$Body)
+                param($Method,$Uri,$Headers,$SkipHeaderValidation,$MaximumRedirection,$MaximumRetryCount,$SkipHttpErrorCheck,$StatusCodeVariable,$ResponseHeadersVariable,$TimeoutSec,$ContentType,$Body)
                 $script:State.Calls++
                 if ($Method -eq 'POST') {
                     $script:State.PostCalls++
-                    $script:State.Request=[ordered]@{Method=$Method;Uri=[string]$Uri;ExactBearer=($Headers.Authorization -ceq ('Bearer '+$script:State.Secrets[0]));Fresh=($script:State.ExpiresOn -gt [DateTimeOffset]::UtcNow.AddMinutes(5));Solution=$Headers['MSCRM.SolutionUniqueName'];ContentType=$ContentType;Redirects=$MaximumRedirection;SkipHttpErrorCheck=$SkipHttpErrorCheck;Body=(ConvertFrom-Json $Body)}
+                    $script:State.Request=[ordered]@{Method=$Method;Uri=[string]$Uri;ExactBearer=($Headers.Authorization -ceq ('Bearer '+$script:State.Secrets[0]));Fresh=($script:State.ExpiresOn -gt [DateTimeOffset]::UtcNow.AddMinutes(5));Solution=$Headers['MSCRM.SolutionUniqueName'];ContentType=$ContentType;Redirects=$MaximumRedirection;MaximumRetryCount=$MaximumRetryCount;SkipHttpErrorCheck=$SkipHttpErrorCheck;Body=(ConvertFrom-Json $Body)}
+                }
+                if ($Method -eq 'GET') {
+                    $script:State.ReadUris.Add([string]$Uri)
+                    $script:State.ReadMethods.Add($Method)
                 }
                 Write-Warning $script:State.UnsafeText
                 Write-Information $script:State.UnsafeText
                 Write-Verbose $script:State.UnsafeText
-                if ($script:State.Timeout) { throw [TimeoutException]::new($script:State.UnsafeText) }
-                Set-Variable -Name $StatusCodeVariable -Value $script:State.Status -Scope 1
+                if ($script:State.Timeout -or $script:State.TransportException) { throw [IOException]::new($script:State.UnsafeText) }
+                $responseCode=if ($Method -eq 'GET') { $script:State.GetStatus } else { $script:State.Status }
+                Set-Variable -Name $StatusCodeVariable -Value $responseCode -Scope 1
                 Set-Variable -Name $ResponseHeadersVariable -Value @{
                     'WWW-Authenticate'=('Bearer error="'+$script:State.Secrets[0]+'", error_description="'+$script:State.UnsafeText+'"')
                     'Authorization'=$script:State.UnsafeText;'Set-Cookie'=$script:State.UnsafeText
                     'x-ms-service-request-id'='11111111-1111-4111-8111-111111111111'
                     'x-ms-correlation-request-id'='22222222-2222-4222-8222-222222222222'
                 } -Scope 1
+                if ($Method -eq 'GET' -and [string]$Uri -match 'RetrieveUserSetOfPrivilegesByNames') {
+                    return [pscustomobject]@{RolePrivileges=@(1..$script:State.PrivilegeCount | ForEach-Object { [pscustomobject]@{PrivilegeId=('synthetic-'+$_);Depth='Global'} })}
+                }
                 [pscustomobject]@{error=[pscustomobject]@{code='0x80040220';message=$script:State.UnsafeText};rawAuthentication=$script:State.UnsafeText}
             }
         }).AddArgument($script:TransportState)
@@ -157,6 +165,12 @@ $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList $sou
         $pipeline
     }
     function Get-TableMetadataIfPresent {
+        if ($script:CreateOnlyRecovery) {
+            if ($script:Outcome -eq 'UNKNOWN') { $script:TransportState.Timeout=$true }
+            Invoke-DataverseRequest -Method GET -Path "EntityDefinitions(LogicalName='os_sr_pos')" | Out-Null
+            if ($script:Outcome -eq 'ABSENT') { return $null }
+            return $script:ExpectedPositionMetadata
+        }
         if ($script:Outcome -eq 'UNKNOWN') {
             $script:TransportState.Timeout=$true
             Invoke-DataverseRequest -Method GET -Path EntityDefinitions | Out-Null
@@ -166,15 +180,42 @@ $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList $sou
     }
     function Assert-TableMetadata {
         param($Metadata)
-        if ($script:Outcome -eq 'PARTIAL') { throw 'Synthetic metadata is incomplete.' }
+        if (-not $script:CreateOnlyRecovery) {
+            if ($script:Outcome -eq 'PARTIAL') { throw 'Synthetic metadata is incomplete.' }
+            return
+        }
+        if ($script:Outcome -eq 'PARTIAL' -or $Metadata.LogicalName -cne 'os_sr_pos' -or
+            $Metadata.SchemaName -cne 'os_sr_pos' -or $Metadata.OwnershipType -cne 'OrganizationOwned' -or
+            $Metadata.DisplayName.UserLocalizedLabel.Label -cne 'Position' -or
+            $Metadata.DisplayCollectionName.UserLocalizedLabel.Label -cne 'Positions' -or
+            $Metadata.PrimaryIdAttribute -cne 'os_sr_posid' -or $Metadata.PrimaryNameAttribute -cne 'os_sr_pos_ttl' -or
+            @($Metadata.Attributes | Where-Object { $_.LogicalName -ceq 'os_sr_pos_ttl' -and $_.DisplayName.UserLocalizedLabel.Label -ceq 'Position Title' -and $_.AttributeType -ceq 'String' -and $_.FormatName.Value -ceq 'Text' -and $_.MaxLength -eq 200 -and $_.RequiredLevel.Value -ceq 'ApplicationRequired' -and $_.IsPrimaryName }).Count -ne 1 -or
+            @($Metadata.Attributes | Where-Object IsCustomAttribute).Count -ne 1 -or
+            @($Metadata.Keys).Count -ne 0 -or
+            @($Metadata.ManyToOneRelationships | Where-Object IsCustomRelationship).Count -ne 0 -or
+            @($Metadata.OneToManyRelationships | Where-Object IsCustomRelationship).Count -ne 0 -or
+            @($Metadata.ManyToManyRelationships | Where-Object IsCustomRelationship).Count -ne 0) {
+            throw 'Synthetic metadata is incomplete or differs from the exact Position schema.'
+        }
     }
-    function Assert-SolutionMembership { param($SolutionId,$Metadata) }
+    function Assert-SolutionMembership {
+        param($SolutionId,$Metadata)
+        if ($script:MembershipInvalid) { throw 'Synthetic Solution membership is incomplete.' }
+    }
     function Reset-SyntheticState {
         $script:Refreshes=0;$script:LastHttpFailure=$null
         $script:AccessToken='expired-synthetic';$script:AccessTokenExpiresOn=[DateTimeOffset]::UtcNow.AddMinutes(-1)
         $script:RequestCounts=@{GET=0;POST=0};$script:WriteResults=[System.Collections.Generic.List[object]]::new()
+        $script:Apply=$true;$script:CreateOnlyRecovery=$false;$script:RecoveryState=$null
+        $script:RecoveryTransitions=[System.Collections.Generic.List[object]]::new()
+        $script:RecoveryExpectedFingerprint='0f7372eeb66c0214ae08ed0dc74f82c981cc4cd73baa9156f16d6e1bd1f48e80'
+        $script:RecoveryActualFingerprint=$null;$script:RecoveryReconciliation=$null;$script:RecoveryResponseClass=$null
+        $script:RecoveryAttemptTimestampUtc=$null;$script:RecoveryEnvironmentVerified=$false
+        $script:RecoveryIdentityVerified=$false;$script:RecoveryVerifiedPrivileges=@()
+        $script:RecoveryPreflight=$null
+        $script:RecoveryRequestId=$null;$script:RecoveryCorrelationId=$null
         $script:WritesAllowed=$true;$script:WritesStarted=$false
-        $script:TransportState=@{Calls=0;PostCalls=0;Request=$null;Status=0;Timeout=$false;Secrets=$script:Secrets;UnsafeText=$script:UnsafeText;ExpiresOn=[DateTimeOffset]::MinValue}
+        $script:TransportState=@{Calls=0;PostCalls=0;Request=$null;ReadUris=[System.Collections.Generic.List[string]]::new();ReadMethods=[System.Collections.Generic.List[string]]::new();Status=0;GetStatus=200;Timeout=$false;TransportException=$false;PrivilegeCount=3;Secrets=$script:Secrets;UnsafeText=$script:UnsafeText;ExpiresOn=[DateTimeOffset]::MinValue}
     }
     function Test-SyntheticHttpChecks {
         $results=[System.Collections.Generic.List[object]]::new()
@@ -215,7 +256,130 @@ $httpModule=New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList $sou
         $unsafeCode=New-SafeHttpFailure -Method POST -Resource ('EntityDefinitions/'+$script:Secrets[0]) -Timestamp ([DateTimeOffset]::UtcNow) -StatusCode 400 -Response ([pscustomobject]@{error=[pscustomobject]@{code=$script:UnsafeText}}) -Headers @{'x-ms-request-id'=$script:Secrets[0]}
         [pscustomobject]@{Cases=$results.ToArray();Guards=$guardResults;UnsafeCode=$unsafeCode;OmittedText=(Get-SafeDiagnosticText $script:UnsafeText);OmittedException=(Get-SafeErrorMessage ([System.Management.Automation.ErrorRecord]::new([Exception]::new($script:UnsafeText),'Synthetic',[System.Management.Automation.ErrorCategory]::NotSpecified,$null)))}
     }
-    Export-ModuleMember -Function Test-SyntheticHttpChecks
+    function Test-SyntheticRecoveryChecks {
+        param([object]$RecoveryPayload,[object]$ExpectedPositionMetadata)
+        $results=[System.Collections.Generic.List[object]]::new()
+        $script:ExpectedPositionMetadata=$ExpectedPositionMetadata
+        foreach ($name in @('os_sr_csrc','os_sr_loc','os_sr_ta')) {
+            $rejected=$false
+            try { Assert-CreateOnlyRecoveryTable -Name $name } catch { $rejected=$true }
+            $results.Add([pscustomobject]@{Kind='TableGuard';Name=$name;Passed=$rejected})
+        }
+        Assert-CreateOnlyRecoveryTable -Name 'os_sr_pos'
+        $expectedUser='11111111-1111-4111-8111-111111111111'
+        $script:ExpectedUserId=$expectedUser
+        Assert-ExpectedRecoveryUser -ActualUserId $expectedUser
+        $identityMismatch=$false
+        try { Assert-ExpectedRecoveryUser -ActualUserId '22222222-2222-4222-8222-222222222222' } catch { $identityMismatch=$true }
+        $results.Add([pscustomobject]@{Kind='IdentityGuard';Passed=$identityMismatch})
+        $script:ExpectedUserId=$null
+        $required=@('prvCreateEntity','prvCreateAttribute','prvCreateCustomization')
+        Assert-RequiredPrivilegeSet -Privileges @([pscustomobject]@{Name='synthetic'},[pscustomobject]@{Name='synthetic'},[pscustomobject]@{Name='synthetic'}) -RequiredNames $required
+        $privilegeMissing=$false
+        try { Assert-RequiredPrivilegeSet -Privileges @([pscustomobject]@{Name='synthetic'}) -RequiredNames $required } catch { $privilegeMissing=$true }
+        $results.Add([pscustomobject]@{Kind='PrivilegeGuard';Passed=$privilegeMissing})
+        Assert-RecoveryInventory -ProjectTables @('os_sr_ta') -SolutionComponents @([pscustomobject]@{objectid='ta-id';componenttype=1}) -ExistingTableIds @('ta-id')
+        $inventoryMismatch=$false
+        try { Assert-RecoveryInventory -ProjectTables @('os_sr_ta') -SolutionComponents @([pscustomobject]@{objectid='orphan-id';componenttype=2}) -ExistingTableIds @('ta-id') } catch { $inventoryMismatch=$true }
+        $results.Add([pscustomobject]@{Kind='InventoryGuard';Passed=$inventoryMismatch})
+        Reset-SyntheticState
+        $script:CreateOnlyRecovery=$true;$script:Apply=$false;$script:PacUserId='11111111-1111-4111-8111-111111111111'
+        $script:TransportState.Status=200
+        $verifiedPrivileges=@(Assert-RecoveryPrivileges)
+        $privilegePath=$script:TransportState.ReadUris[0]
+        $privilegeCallPassed=($verifiedPrivileges.Count -eq 3 -and $script:RequestCounts.POST -eq 0 -and
+            $privilegePath -match 'RetrieveUserSetOfPrivilegesByNames' -and
+            $privilegePath -match 'prvCreateEntity' -and $privilegePath -match 'prvCreateAttribute' -and
+            $privilegePath -match 'prvCreateCustomization')
+        Reset-SyntheticState
+        $script:CreateOnlyRecovery=$true;$script:Apply=$false;$script:PacUserId='11111111-1111-4111-8111-111111111111'
+        $script:TransportState.Status=200;$script:TransportState.PrivilegeCount=2
+        $privilegeMissing=$false
+        try { Assert-RecoveryPrivileges | Out-Null } catch { $privilegeMissing=$true }
+        $results.Add([pscustomobject]@{Kind='PrivilegeEndpoint';Passed=($privilegeCallPassed -and $privilegeMissing)})
+        Reset-SyntheticState
+        $script:CreateOnlyRecovery=$true;$script:Apply=$false;$script:TableName='os_sr_pos'
+        $script:RecoveryState='PRECHECK';$script:RecoveryActualFingerprint=$null
+        $wrongPayload=[pscustomobject]@{SchemaName='os_sr_pos';DisplayName='Wrong'}
+        $wrongRejected=$false
+        try { Assert-PositionPayloadFingerprint -Payload $wrongPayload | Out-Null } catch { $wrongRejected=$true }
+        $wrongDetails=Get-StoppedDetails
+        $results.Add([pscustomobject]@{Kind='FingerprintMismatch';Passed=($wrongRejected -and $script:RecoveryState -eq 'FAILED_VALIDATION' -and $script:TransportState.Calls -eq 0 -and $script:Refreshes -eq 0 -and $wrongDetails.Recovery.ExpectedPayloadSha256 -ceq $script:RecoveryExpectedFingerprint -and $wrongDetails.Recovery.ActualPayloadSha256 -ceq $script:RecoveryActualFingerprint);Expected=$script:RecoveryExpectedFingerprint;Actual=$script:RecoveryActualFingerprint})
+
+        Reset-SyntheticState
+        $script:CreateOnlyRecovery=$true;$script:Apply=$false;$script:TableName='os_sr_pos'
+        $script:RecoveryState='PRECHECK'
+        $fingerprint=Assert-PositionPayloadFingerprint -Payload $RecoveryPayload
+        $results.Add([pscustomobject]@{Kind='FingerprintMatch';Passed=($fingerprint -ceq $script:RecoveryExpectedFingerprint)})
+
+        foreach ($case in @(
+            @{Status=401;Outcome='ABSENT';Expected='FAILED_AUTH'},
+            @{Status=403;Outcome='ABSENT';Expected='FAILED_AUTHZ'},
+            @{Status=400;Outcome='ABSENT';Expected='FAILED_VALIDATION'},
+            @{Status=408;Outcome='ABSENT';Expected='UNCERTAIN'},
+            @{Status=429;Outcome='ABSENT';Expected='UNCERTAIN'},
+            @{Status=500;Outcome='ABSENT';Expected='UNCERTAIN'},
+            @{Status=0;Outcome='ABSENT';Expected='UNCERTAIN'},
+            @{Status=201;Outcome='PRESENT';Expected='VERIFIED_SUCCESS'},
+            @{Status=201;Outcome='PRESENT';Expected='PARTIAL_STATE';MembershipInvalid=$true},
+            @{Status=401;Outcome='PRESENT';Expected='VERIFIED_SUCCESS'},
+            @{Status=500;Outcome='PARTIAL';Expected='PARTIAL_STATE'},
+            @{Status=200;Outcome='UNKNOWN';Expected='UNCERTAIN'}
+        )) {
+            Reset-SyntheticState
+            $script:CreateOnlyRecovery=$true;$script:Apply=$false;$script:TableName='os_sr_pos'
+            $script:RecoveryState='PRECHECK';$script:RecoveryActualFingerprint=$script:RecoveryExpectedFingerprint
+            $script:RecoveryTransitions.Add([ordered]@{State='READY';TimestampUtc=[DateTimeOffset]::UtcNow.ToString('o')})
+            $script:RecoveryState='READY';$script:WritesAllowed=$true
+            $script:TransportState.Status=$case.Status
+            $script:TransportState.Timeout=($case.Status -eq 0)
+            $script:Outcome=$case.Outcome
+            $script:MembershipInvalid=[bool]$case.MembershipInvalid
+            $result=Invoke-PositionCreateOnlyRecovery -Payload $RecoveryPayload -SolutionId 'synthetic-solution'
+            $attemptTime=[DateTimeOffset]::ParseExact($script:RecoveryAttemptTimestampUtc,'o',[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::None)
+            $states=(@($result.StateTransitions | ForEach-Object State) -join ',')
+            $valid=$result.State -ceq $case.Expected -and $script:TransportState.PostCalls -eq 1 -and
+                $script:RequestCounts.POST -eq 1 -and $script:RequestCounts.GET -ge 1 -and
+                @($script:TransportState.ReadMethods | Where-Object { $_ -ne 'GET' }).Count -eq 0 -and
+                $script:TransportState.Request.MaximumRetryCount -eq 0 -and
+                $attemptTime.Offset -eq [TimeSpan]::Zero -and
+                $states -match "WRITE_ATTEMPTED,RECONCILING,$($case.Expected)$"
+            $results.Add([pscustomobject]@{Kind='Response';Status=$case.Status;Outcome=$case.Outcome;Expected=$case.Expected;Actual=$result.State;Passed=$valid;Result=$result})
+        }
+
+        Reset-SyntheticState
+        $script:CreateOnlyRecovery=$true;$script:Apply=$false;$script:TableName='os_sr_pos'
+        $script:RecoveryActualFingerprint=$script:RecoveryExpectedFingerprint
+        $script:RecoveryState='READY';$script:WritesAllowed=$true
+        $script:Outcome='ABSENT';$script:TransportState.TransportException=$true
+        $null=Invoke-PositionCreateOnlyRecovery -Payload $RecoveryPayload -SolutionId 'synthetic-solution'
+        $results.Add([pscustomobject]@{Kind='TransportException';Passed=($script:RecoveryState -eq 'UNCERTAIN' -and $script:TransportState.PostCalls -eq 1)})
+
+        Reset-SyntheticState
+        $script:CreateOnlyRecovery=$true;$script:Apply=$false;$script:TableName='os_sr_pos'
+        $script:RecoveryActualFingerprint=$script:RecoveryExpectedFingerprint
+        $script:RecoveryState='READY';$script:WritesAllowed=$true
+        $script:Outcome='PRESENT';$script:TransportState.Status=201
+        $null=Invoke-PositionCreateOnlyRecovery -Payload $RecoveryPayload -SolutionId 'synthetic-solution'
+        $before=$script:TransportState.PostCalls
+        $blockedPaths=[ordered]@{}
+        foreach ($path in @("EntityDefinitions(LogicalName='os_sr_pos')/Attributes",'PublishXml')) {
+            try { Invoke-DataverseRequest -Method POST -Path $path -Body @{SchemaName='os_sr_pos'} -WithSolutionHeader | Out-Null }
+            catch { $blockedPaths[$path]=($script:TransportState.PostCalls -eq $before) }
+        }
+        $secondBlocked=$false
+        try { Invoke-DataverseRequest -Method POST -Path EntityDefinitions -Body $RecoveryPayload -WithSolutionHeader | Out-Null }
+        catch { $secondBlocked=($script:TransportState.PostCalls -eq $before) }
+        $deleteBlocked=$false
+        try { Invoke-DataverseRequest -Method DELETE -Path EntityDefinitions | Out-Null }
+        catch { $deleteBlocked=($script:TransportState.PostCalls -eq $before) }
+        $results.Add([pscustomobject]@{Kind='WriteGuards';Passed=($before -eq 1 -and $secondBlocked -and $deleteBlocked -and @($blockedPaths.Values | Where-Object { -not $_ }).Count -eq 0);Paths=$blockedPaths;SecondPostBlocked=$secondBlocked;DeleteBlocked=$deleteBlocked})
+
+        $safeDetails=Get-StoppedDetails | ConvertTo-Json -Depth 20 -Compress
+        $results.Add([pscustomobject]@{Kind='DiagnosticPrivacy';Passed=($safeDetails -notmatch 'synthetic\.access\.token-marker|synthetic-refresh-marker|"Authorization"\s*:|Bearer|User Email|https://synthetic\.crm\.dynamics\.com|11111111-1111-4111-8111-111111111111')})
+        $results.ToArray()
+    }
+    Export-ModuleMember -Function Test-SyntheticHttpChecks,Test-SyntheticRecoveryChecks
 }
 Import-Module $httpModule -Force
 $originalCulture = [System.Threading.Thread]::CurrentThread.CurrentCulture
@@ -236,11 +400,36 @@ finally {
 $transcript=[IO.Path]::GetTempFileName()
 try {
     Start-Transcript -LiteralPath $transcript -Force | Out-Null
-    try { $http=Test-SyntheticHttpChecks } finally { Stop-Transcript | Out-Null }
+    try {
+        $http=Test-SyntheticHttpChecks
+        $recovery=Test-SyntheticRecoveryChecks -RecoveryPayload $positionPayload -ExpectedPositionMetadata (New-Fixture os_sr_pos)
+    }
+    finally { Stop-Transcript | Out-Null }
     $transcriptText=Get-Content -LiteralPath $transcript -Raw
     Assert-Test ($transcriptText -notmatch 'synthetic\.(access\.token-marker)|synthetic-(refresh-marker|client-secret|auth-code|cookie-marker|basic-marker)') 'Transcript excludes synthetic secrets'
 }
 finally { Remove-Item -LiteralPath $transcript -Force; Remove-Module $httpModule }
+$tableGuards=@($recovery | Where-Object Kind -eq 'TableGuard')
+Assert-Test ($tableGuards.Count -eq 3 -and @($tableGuards | Where-Object { -not $_.Passed }).Count -eq 0) 'Recovery mode rejects Candidate Source, Location and TA'
+foreach ($kind in @('IdentityGuard','PrivilegeGuard','PrivilegeEndpoint','InventoryGuard')) {
+    $guard=@($recovery | Where-Object Kind -eq $kind)[0]
+    Assert-Test $guard.Passed "$kind fails closed on mismatch"
+}
+$fingerprintMismatch=@($recovery | Where-Object Kind -eq 'FingerprintMismatch')[0]
+Assert-Test ($fingerprintMismatch.Passed -and $fingerprintMismatch.Expected -ceq '0f7372eeb66c0214ae08ed0dc74f82c981cc4cd73baa9156f16d6e1bd1f48e80' -and $fingerprintMismatch.Actual -cne $fingerprintMismatch.Expected) 'Fingerprint mismatch fails validation before authentication or network'
+$fingerprintMatch=@($recovery | Where-Object Kind -eq 'FingerprintMatch')[0]
+Assert-Test $fingerprintMatch.Passed 'Exact Position payload fingerprint is accepted'
+$responseCases=@($recovery | Where-Object Kind -eq 'Response')
+Assert-Test ($responseCases.Count -eq 12 -and @($responseCases | Where-Object { -not $_.Passed }).Count -eq 0) 'Recovery state machine classifies HTTP and reconciliation outcomes'
+Assert-Test (@($responseCases | Where-Object { $_.Status -eq 429 -and $_.Actual -eq 'UNCERTAIN' }).Count -eq 1 -and
+    @($responseCases | Where-Object { $_.Status -eq 500 -and $_.Actual -eq 'UNCERTAIN' }).Count -eq 1 -and
+    @($responseCases | Where-Object { $_.Outcome -eq 'UNKNOWN' -and $_.Actual -eq 'UNCERTAIN' }).Count -eq 1) 'Throttling, server error and unknown reconciliation remain uncertain'
+$transportException=@($recovery | Where-Object Kind -eq 'TransportException')[0]
+Assert-Test $transportException.Passed 'Transport exception is uncertain and never retried'
+$writeGuards=@($recovery | Where-Object Kind -eq 'WriteGuards')[0]
+Assert-Test $writeGuards.Passed 'Recovery mode blocks second POST, attribute POST, PublishXml and DELETE'
+$privacy=@($recovery | Where-Object Kind -eq 'DiagnosticPrivacy')[0]
+Assert-Test $privacy.Passed 'Recovery diagnostics omit token, identity and environment URL'
 $diagnosticKeys=@('Operation','Method','ApiPath','TimestampUtc','StatusCode','DataverseErrorCode','ErrorSummary','RequestId','CorrelationId','WritesMayHaveOccurred','ReconciliationCompleted','ReconciliationOutcome') | Sort-Object
 foreach ($case in $http.Cases) {
     $failure=$case.Diagnostic.Details.HttpFailure

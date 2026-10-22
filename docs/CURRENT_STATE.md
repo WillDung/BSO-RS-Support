@@ -1,9 +1,10 @@
 # Current State
 
-**As of:** 21 October 2026. **Phase:** Phase 1D-D Apply remains blocked after the first Position metadata POST returned HTTP 401. Phase 1D-C's `os_sr_ta` remains the only deployed project table; no Phase 1D-D target exists. The owner has officially adopted the existing BSO-RS-Support AppModule with actual unique name `srapp`; it remains active but unpublished and unconfigured.
+**Environment evidence as of:** 21 October 2026. **Repository status updated:** 22 October 2026. **Phase:** Phase 1D-D Apply remains blocked after the first Position metadata POST returned HTTP 401. Phase 1D-C's `os_sr_ta` remains the only deployed project table; no Phase 1D-D target exists. The owner has officially adopted the existing BSO-RS-Support AppModule with actual unique name `srapp`; it remains active but unpublished and unconfigured.
 
 ## Facts
 
+- Sprint 02B.1 local implementation adds a Position-only `-CreateOnlyRecovery` path with a fixed SHA-256 payload guard, explicit expected-user and authorization-reference gates, one-POST/no-retry controls, and GET-only reconciliation. On 22 October 2026 the synthetic suites passed: 446 provisioning/recovery assertions, 32 app-composition assertions, and 11 readiness assertions. It is local code only; it has not been run against Dataverse and does not authorize or perform a retry. No remote preflight or request was run.
 - The repository initially contained only `BSO-RS-Support-Phase0-Blueprint.md` plus Git metadata. The blueprint is a draft for design review, not a record of deployed resources.
 - Phase 0 created the documentation and governance foundation. Phase 1B created only the project Publisher and an empty unmanaged Solution in the explicitly selected VN LMV IT Production environment for internal IT development.
 - Verified Publisher: **BSO-RS-Support Publisher**, unique name `os_bso_rs_support`, customization prefix `os`, option value prefix `10001`, ID `ee73e9f3-87cb-f111-a05a-000d3a64b349`.

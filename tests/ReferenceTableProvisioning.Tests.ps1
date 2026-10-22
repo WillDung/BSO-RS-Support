@@ -221,7 +221,8 @@ $httpModule = New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList @(
                     'x-ms-correlation-request-id'='22222222-2222-4222-8222-222222222222'
                 } -Scope 1
                 if ($Method -eq 'GET' -and [string]$Uri -match 'RetrieveUserSetOfPrivilegesByNames') {
-                    return [pscustomobject]@{RolePrivileges=@(1..$script:State.PrivilegeCount | ForEach-Object { [pscustomobject]@{PrivilegeId=('synthetic-'+$_);Depth='Global'} })}
+                    $names=@('prvCreateEntity','prvCreateAttribute','prvCreateCustomization')
+                    return [pscustomobject]@{RolePrivileges=@(0..($script:State.PrivilegeCount-1) | ForEach-Object { [pscustomobject]@{PrivilegeId=('synthetic-'+$_);PrivilegeName=$names[$_];Depth='Global'} })}
                 }
                 if ($Method -eq 'GET' -and [string]$Uri -match 'RetrieveEntity\(') {
                     if ($responseCode -lt 200 -or $responseCode -ge 300) {
@@ -431,7 +432,19 @@ $httpModule = New-Module -Name 'SyntheticProvisioningHttpTests' -ArgumentList @(
         $candidateSourceExpectedUserGuard=$pacEnvironmentAst.Extent.Text -match '(?s)if \(\$CreateOnlyRecovery -or \$CreateOnlyCandidateSource -or \$CreateOnlyLocation\)\s*\{\s*Assert-ProcessExpectedUserGuard\s+Assert-ExpectedRecoveryUser'
         $results.Add([pscustomobject]@{Kind='CandidateSourceExpectedUserGuard';Passed=$candidateSourceExpectedUserGuard})
         $required=@('prvCreateEntity','prvCreateAttribute','prvCreateCustomization')
-        Assert-RequiredPrivilegeSet -Privileges @([pscustomobject]@{Name='synthetic'},[pscustomobject]@{Name='synthetic'},[pscustomobject]@{Name='synthetic'}) -RequiredNames $required
+        $globalPrivileges=@($required | ForEach-Object { [pscustomobject]@{PrivilegeName=$_;Depth='Global'} })
+        $verifiedPrivilegeDepths=@(Assert-RequiredPrivilegeSet -Privileges $globalPrivileges -RequiredNames $required)
+        $privilegeDepthRejected=$false
+        try {
+            $limitedPrivileges=@($required | ForEach-Object { [pscustomobject]@{PrivilegeName=$_;Depth='Basic'} })
+            Assert-RequiredPrivilegeSet -Privileges $limitedPrivileges -RequiredNames $required | Out-Null
+        } catch { $privilegeDepthRejected=$true }
+        $privilegeNameRejected=$false
+        try {
+            $unmappedPrivileges=@($required | ForEach-Object { [pscustomobject]@{PrivilegeName='unmapped';Depth='Global'} })
+            Assert-RequiredPrivilegeSet -Privileges $unmappedPrivileges -RequiredNames $required | Out-Null
+        } catch { $privilegeNameRejected=$true }
+        $results.Add([pscustomobject]@{Kind='PrivilegeDepthGuard';Passed=($verifiedPrivilegeDepths.Count -eq 3 -and @($verifiedPrivilegeDepths | Where-Object Depth -ne 'Global').Count -eq 0 -and $privilegeDepthRejected -and $privilegeNameRejected)})
         $privilegeMissing=$false
         try { Assert-RequiredPrivilegeSet -Privileges @([pscustomobject]@{Name='synthetic'}) -RequiredNames $required } catch { $privilegeMissing=$true }
         $results.Add([pscustomobject]@{Kind='PrivilegeGuard';Passed=$privilegeMissing})
@@ -780,7 +793,7 @@ try {
 finally { Remove-Item -LiteralPath $transcript -Force; Remove-Module $httpModule }
 $tableGuards=@($recovery | Where-Object Kind -eq 'TableGuard')
 Assert-Test ($tableGuards.Count -eq 3 -and @($tableGuards | Where-Object { -not $_.Passed }).Count -eq 0) 'Recovery mode rejects Candidate Source, Location and TA'
-foreach ($kind in @('IdentityGuard','ProcessExpectedUserGuard','PrivilegeGuard','PrivilegeEndpoint','InventoryGuard')) {
+foreach ($kind in @('IdentityGuard','ProcessExpectedUserGuard','PrivilegeGuard','PrivilegeDepthGuard','PrivilegeEndpoint','InventoryGuard')) {
     $guard=@($recovery | Where-Object Kind -eq $kind)[0]
     Assert-Test $guard.Passed "$kind fails closed on mismatch"
 }
@@ -869,4 +882,12 @@ Assert-Test ($null -eq $http.UnsafeCode.DataverseErrorCode -and $null -eq $http.
 Assert-Test ($http.OmittedText -ceq 'Untrusted text omitted.' -and $http.OmittedException -notmatch 'synthetic-') 'Untrusted local text and exceptions omitted'
 $sourceText=$sourceAst.Extent.Text
 Assert-Test ($sourceText.IndexOf('$confirmation = Read-Host') -lt $sourceText.IndexOf('$script:WritesAllowed = $true') -and $sourceText -match 'Ensure-DataverseAccessToken\s+\$script:WritesAllowed = \$true') 'Interactive confirmation and final token check retained'
+Assert-Test ($sourceText -match '\[switch\]\$LocationPreflightOnly' -and $sourceText -match '\$LocationPreflightOnly -and \(\$Apply -or \$PlanOnly -or \$TableName -cne ''os_sr_loc''\)') 'Location preflight is a distinct Location-only mode'
+Assert-Test ($sourceText -match 'if \(\$LocationPreflightOnly -and \$Method -ne ''GET''\)\s*\{\s*throw ''Location preflight is GET-only; write methods are blocked\.''') 'Location preflight blocks every non-GET request'
+Assert-Test ($sourceText -match '\$boundedWrite -or \$VerifyPublicationOnly -or \$LocationPreflightOnly\) \{ \$request\.MaximumRetryCount = 0 \}') 'Location preflight GET requests explicitly disable retries'
+$identityPinIndex=$sourceText.IndexOf('[Environment]::SetEnvironmentVariable(''BSO_RS_EXPECTED_USER_ID'', $script:ExpectedUserId, ''Process'')')
+$whoAmIIndex=$sourceText.IndexOf('$who = Invoke-DataverseRequest -Method GET -Path ''WhoAmI''')
+Assert-Test ($whoAmIIndex -ge 0 -and $identityPinIndex -gt $whoAmIIndex -and $sourceText -match 'Assert-ExpectedRecoveryUser -ActualUserId \$who\.UserId') 'Expected-user guard is pinned only after PAC/Az/WhoAmI identity checks'
+Assert-Test ($sourceText -match '\$CreateOnlyLocation -or \$LocationPreflightOnly' -and $sourceText -match '\$script:IsBoundedWrite -or \$LocationPreflightOnly\) \{ @\(Assert-RecoveryPrivileges\) \}') 'Location preflight reuses bounded inventory, publication and privilege gates'
+Assert-Test ($sourceText -match 'Write-Result -Stage ''LocationPreflightOnly'' -Status \$script:LocationPreflightStatus' -and $sourceText -match 'WritesPerformed = 0') 'Location preflight reports readiness and zero writes without exposing identity values'
 Write-Output "PASS: $script:Passed synthetic provisioning assertions; no authentication, API calls, or Apply invocation."

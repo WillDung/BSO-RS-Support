@@ -8,6 +8,7 @@ param(
     [switch]$CreateOnlyLocation,
     [switch]$PublishOnly,
     [switch]$VerifyPublicationOnly,
+    [switch]$LocationPreflightOnly,
     [string]$AuthorizationReference,
     [string]$EnvironmentName = $env:BSO_RS_ENVIRONMENT_NAME,
     [string]$OrganizationUrl = $env:BSO_RS_ORG_URL,
@@ -49,6 +50,7 @@ $script:LocationWriteStep = $null
 $script:LocationStepState = $null
 $script:LocationWriteAttempts = @{}
 $script:StrongConsistencyReads = $false
+$script:LocationPreflightStatus = $null
 $script:RecoveryActualFingerprint = $null
 $script:RecoveryReconciliation = $null
 $script:RecoveryResponseClass = $null
@@ -260,6 +262,22 @@ function Assert-RequiredPrivilegeSet {
     if (@($Privileges).Count -ne @($RequiredNames).Count) {
         throw 'Current identity lacks one or more required metadata privileges; stop without writes.'
     }
+    $verified = [System.Collections.Generic.List[object]]::new()
+    foreach ($name in $RequiredNames) {
+        $matches = @($Privileges | Where-Object { $_.PrivilegeName -ceq $name })
+        if ($matches.Count -ne 1) {
+            throw 'Required privilege names are missing, duplicated, or unmapped; stop without writes.'
+        }
+        $depth = [string]$matches[0].Depth
+        $numericDepth = 0
+        $isGlobal = $depth -ceq 'Global' -or $depth -match "(?:^|')Global'$" -or
+            ([int]::TryParse($depth, [ref]$numericDepth) -and $numericDepth -eq 3)
+        if (-not $isGlobal) {
+            throw 'Required metadata privilege depth is not Global; stop without writes.'
+        }
+        $verified.Add([pscustomobject]@{ Name = $name; Depth = 'Global' })
+    }
+    $verified.ToArray()
 }
 
 function Assert-RecoveryInventory {
@@ -693,7 +711,7 @@ function Get-ValidatedAccessToken {
     }
     $authorizedTenants = @(Get-AzTenant -ErrorAction SilentlyContinue)
     if ($authorizedTenants.Count -eq 0) {
-        if ($script:IsBoundedWrite) { throw 'No existing Az user context is available; bounded metadata operations will not trigger interactive sign-in.' }
+        if ($script:IsBoundedWrite -or $LocationPreflightOnly) { throw 'No existing Az user context is available; this operation will not trigger interactive sign-in.' }
         Connect-AzAccount -ErrorAction Stop | Out-Null
     }
     $context = Get-AzContext -ErrorAction Stop
@@ -889,8 +907,7 @@ function Invoke-DataverseRequest {
         TimeoutSec = 120
         ErrorAction = 'Stop'
     }
-    if ($boundedWrite) { $request.MaximumRetryCount = 0 }
-    if ($VerifyPublicationOnly) { $request.MaximumRetryCount = 0 }
+    if ($boundedWrite -or $VerifyPublicationOnly -or $LocationPreflightOnly) { $request.MaximumRetryCount = 0 }
     if ($PSBoundParameters.ContainsKey('Body')) {
         $request.ContentType = 'application/json; charset=utf-8'
         $request.Body = ConvertTo-Json -InputObject $Body -Depth 40 -Compress
@@ -899,6 +916,9 @@ function Invoke-DataverseRequest {
     $responseStatusCode = 0
     $responseHeaders = $null
     $script:LastRequestDispatchStarted = $false
+    if ($LocationPreflightOnly -and $Method -ne 'GET') {
+        throw 'Location preflight is GET-only; write methods are blocked.'
+    }
     if ($Method -eq 'POST') {
         if ($boundedWrite) {
             if ($CreateOnlyLocation) {
@@ -1251,7 +1271,6 @@ function Assert-RecoveryPrivileges {
     $path = "systemusers($($script:PacUserId))/Microsoft.Dynamics.CRM.RetrieveUserSetOfPrivilegesByNames(PrivilegeNames=@p)?@p=$names"
     $result = Invoke-DataverseRequest -Method GET -Path $path
     Assert-RequiredPrivilegeSet -Privileges @($result.RolePrivileges) -RequiredNames $requiredPrivileges
-    $requiredPrivileges
 }
 
 function Get-AuditState {
@@ -1272,6 +1291,14 @@ function Get-Preflight {
     Get-InteractiveAccessToken
     $who = Invoke-DataverseRequest -Method GET -Path 'WhoAmI'
     if ($who.OrganizationId -ne $ExpectedOrganizationId -or $who.UserId -ne $script:PacUserId) { throw 'WhoAmI organization/user mismatch; stop without writes.' }
+    if ($LocationPreflightOnly) {
+        $script:ExpectedUserId = $script:PacUserId
+        [Environment]::SetEnvironmentVariable('BSO_RS_EXPECTED_USER_ID', $script:ExpectedUserId, 'Process')
+        Assert-ProcessExpectedUserGuard
+        Assert-ExpectedRecoveryUser -ActualUserId $who.UserId
+        $script:RecoveryIdentityVerified = $true
+        $script:RecoveryEnvironmentVerified = $true
+    }
     if ($script:IsBoundedWrite) {
         $script:RecoveryIdentityVerified = $true
         $script:RecoveryEnvironmentVerified = $true
@@ -1316,10 +1343,14 @@ function Get-Preflight {
         Assert-RecoveryInventory -ProjectTables $projectTables -SolutionComponents $solutionComponents -ExistingTableIds $existingTableIds.ToArray()
         if ($TableName -in $projectTables) { throw 'Position already exists; recovery will not update, delete, or recreate it.' }
     }
-    elseif ($CreateOnlyCandidateSource -or $CreateOnlyLocation -or $PublishOnly -or $VerifyPublicationOnly) {
+    elseif ($CreateOnlyCandidateSource -or $CreateOnlyLocation -or $LocationPreflightOnly -or $PublishOnly -or $VerifyPublicationOnly) {
         $script:PreflightStage = 'SOLUTION_COMPONENT_INVENTORY'
         $solutionComponents = @(Get-SolutionSchemaComponents -SolutionId $solutions[0].solutionid)
-        $expectedTables = if ($CreateOnlyLocation) {
+        if ($LocationPreflightOnly -and $TableName -in $projectTables) {
+            $script:LocationPreflightStatus = 'PARTIAL_STATE'
+            throw 'Location metadata already exists; read-only execution preflight reports PARTIAL_STATE.'
+        }
+        $expectedTables = if ($CreateOnlyLocation -or $LocationPreflightOnly) {
             @('os_sr_ta', 'os_sr_pos', 'os_sr_csrc')
         } elseif ($CreateOnlyCandidateSource -or $TableName -ceq 'os_sr_pos') {
             @('os_sr_pos', 'os_sr_ta')
@@ -1345,7 +1376,7 @@ function Get-Preflight {
                 throw 'Position is not verified as published; Candidate Source creation is blocked.'
             }
         }
-        if ($CreateOnlyLocation) {
+        if ($CreateOnlyLocation -or $LocationPreflightOnly) {
             foreach ($referenceName in @('os_sr_pos', 'os_sr_csrc')) {
                 $reference = Get-EntityMetadata -LogicalName $referenceName
                 $publicationState = Get-TablePublicationState -SolutionId $solutions[0].solutionid -Metadata $reference
@@ -1361,7 +1392,7 @@ function Get-Preflight {
     }
     elseif ($Apply -and $TableName -in $projectTables) { throw 'Target already exists; Apply will not update, delete, or recreate it.' }
     $script:PreflightStage = 'PRIVILEGES'
-    $verifiedPrivileges = if ($script:IsBoundedWrite) { @(Assert-RecoveryPrivileges) } else { @() }
+    $verifiedPrivileges = if ($script:IsBoundedWrite -or $LocationPreflightOnly) { @(Assert-RecoveryPrivileges) } else { @() }
     if ($script:IsBoundedWrite) { $script:RecoveryVerifiedPrivileges = $verifiedPrivileges }
     $script:PreflightStage = 'AUDIT'
     $audit = Get-AuditState
@@ -1734,9 +1765,9 @@ function Show-Plan {
     $preview = [ordered]@{
         Mode = if ($CreateOnlyRecovery) { 'CreateOnlyRecovery; Position-only; one POST maximum; GET-only reconciliation' } elseif ($CreateOnlyCandidateSource) { 'CreateOnlyCandidateSource; one EntityDefinitions POST maximum; GET-only reconciliation' } elseif ($CreateOnlyLocation) { 'CreateOnlyLocation; Location-only; one table POST plus two attribute POSTs maximum; Strong-consistency GET-only reconciliation; no publication' } elseif ($PublishOnly) { 'PublishOnly; table-scoped PublishXml only; one POST maximum; GET-only reconciliation' } elseif ($VerifyPublicationOnly) { 'VerifyPublicationOnly; Position-only; RetrieveEntity GET comparison; no writes' } elseif ($PlanOnly) { 'PlanOnly; no authentication/network calls' } elseif ($Apply) { 'Apply requested; preflight and typed confirmation required' } else { 'DryRun; interactive auth and GET-only preflight' }
         Environment = if ($EnvironmentName) { $EnvironmentName } else { 'NOT SUPPLIED' }
-        OrganizationUrl = if ($script:IsBoundedWrite -or $VerifyPublicationOnly) { '[omitted]' } elseif ($OrganizationUrl) { $OrganizationUrl.TrimEnd('/') } else { 'NOT SUPPLIED' }
-        ExpectedEnvironmentId = if ($script:IsBoundedWrite -or $VerifyPublicationOnly) { '[omitted]' } elseif ($ExpectedEnvironmentId) { $ExpectedEnvironmentId } else { 'NOT SUPPLIED' }
-        ExpectedOrganizationId = if ($script:IsBoundedWrite -or $VerifyPublicationOnly) { '[omitted]' } elseif ($ExpectedOrganizationId) { $ExpectedOrganizationId } else { 'NOT SUPPLIED' }
+        OrganizationUrl = if ($script:IsBoundedWrite -or $VerifyPublicationOnly -or $LocationPreflightOnly) { '[omitted]' } elseif ($OrganizationUrl) { $OrganizationUrl.TrimEnd('/') } else { 'NOT SUPPLIED' }
+        ExpectedEnvironmentId = if ($script:IsBoundedWrite -or $VerifyPublicationOnly -or $LocationPreflightOnly) { '[omitted]' } elseif ($ExpectedEnvironmentId) { $ExpectedEnvironmentId } else { 'NOT SUPPLIED' }
+        ExpectedOrganizationId = if ($script:IsBoundedWrite -or $VerifyPublicationOnly -or $LocationPreflightOnly) { '[omitted]' } elseif ($ExpectedOrganizationId) { $ExpectedOrganizationId } else { 'NOT SUPPLIED' }
         SolutionUniqueName = 'os_sr_bso_rs_support'
         PublisherUniqueName = 'os_bso_rs_support'
         PublisherPrefix = 'os'
@@ -1810,12 +1841,16 @@ function Show-Plan {
 }
 
 try {
-    $boundedModeCount = @(@($CreateOnlyRecovery, $CreateOnlyCandidateSource, $CreateOnlyLocation, $PublishOnly, $VerifyPublicationOnly) | Where-Object { $_ }).Count
+    $boundedModeCount = @(@($CreateOnlyRecovery, $CreateOnlyCandidateSource, $CreateOnlyLocation, $PublishOnly, $VerifyPublicationOnly, $LocationPreflightOnly) | Where-Object { $_ }).Count
     if (($Apply -and $PlanOnly) -or ($boundedModeCount -gt 1) -or
         ($script:IsBoundedWrite -and ($Apply -or $PlanOnly)) -or
-        ($VerifyPublicationOnly -and ($Apply -or $PlanOnly -or $TableName -notin @('os_sr_pos', 'os_sr_csrc')))) {
+        ($VerifyPublicationOnly -and ($Apply -or $PlanOnly -or $TableName -notin @('os_sr_pos', 'os_sr_csrc'))) -or
+        ($LocationPreflightOnly -and ($Apply -or $PlanOnly -or $TableName -cne 'os_sr_loc'))) {
         if ($script:IsBoundedWrite) { Set-RecoveryState -State 'BLOCKED' }
-        throw 'Choose exactly one supported mode; publication verification is Position-only and read-only.'
+        throw 'Choose exactly one supported mode; Location preflight is Location-only and GET-only.'
+    }
+    if ($LocationPreflightOnly -and (-not $collectionNameWasExplicit -or $DisplayCollectionName -cne 'Locations')) {
+        throw 'Location preflight requires -DisplayCollectionName Locations.'
     }
     if ($Apply -and $TableName -ceq 'os_sr_loc') {
         throw 'Generic Apply is disabled for Location; use its bounded three-step create mode.'
@@ -1877,7 +1912,7 @@ try {
     if ($CreateOnlyCandidateSource) {
         Assert-CandidateSourcePayloadFingerprint -Payload $payloads.Table | Out-Null
     }
-    if ($CreateOnlyLocation) {
+    if ($CreateOnlyLocation -or $LocationPreflightOnly) {
         Assert-LocationPayloadFingerprint -Step Table -Payload $payloads.Table | Out-Null
         Assert-LocationPayloadFingerprint -Step RoomEmail -Payload $payloads.Columns[0] | Out-Null
         Assert-LocationPayloadFingerprint -Step Details -Payload $payloads.Columns[1] | Out-Null
@@ -1894,6 +1929,47 @@ try {
 
     $preflight = Get-Preflight
     $script:ReconciliationSolutionId = $preflight.SolutionId
+    if ($LocationPreflightOnly) {
+        $authorizationReferenceValid = $AuthorizationReference -match '^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$'
+        $expectedTables = @('os_sr_csrc', 'os_sr_pos', 'os_sr_ta')
+        $ready = $script:RecoveryEnvironmentVerified -and $script:RecoveryIdentityVerified -and
+            -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable('BSO_RS_EXPECTED_USER_ID', 'Process')) -and
+            $preflight.SolutionUniqueName -ceq 'os_sr_bso_rs_support' -and
+            $preflight.PublisherPrefix -ceq 'os' -and
+            -not $preflight.TargetExists -and
+            ((@($preflight.ProjectTables | Sort-Object)) -join ',') -ceq (($expectedTables | Sort-Object) -join ',') -and
+            $script:LocationPrerequisitePublicationStates['os_sr_pos'] -ceq 'PUBLISHED_NO_PENDING_DELTA' -and
+            $script:LocationPrerequisitePublicationStates['os_sr_csrc'] -ceq 'PUBLISHED_NO_PENDING_DELTA' -and
+            @($preflight.VerifiedPrivileges).Count -eq 3 -and $authorizationReferenceValid
+        $script:LocationPreflightStatus = if ($ready) { 'READY_FOR_LOCATION_EXECUTION' } else { 'BLOCKED' }
+        Write-Result -Stage 'LocationPreflightOnly' -Status $script:LocationPreflightStatus -Details ([ordered]@{
+            EnvironmentName = 'VN LMV IT'
+            EnvironmentMatched = $script:RecoveryEnvironmentVerified
+            PacIdentityAvailable = $true
+            AzIdentityAvailable = $true
+            DataverseIdentityAvailable = $true
+            PacAzWhoAmIMatch = $script:RecoveryIdentityVerified
+            ExpectedUserConfigured = -not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable('BSO_RS_EXPECTED_USER_ID', 'Process'))
+            ExpectedUserMatch = $script:RecoveryIdentityVerified
+            SolutionUniqueName = $preflight.SolutionUniqueName
+            SolutionUnmanaged = $true
+            PublisherUniqueName = 'os_bso_rs_support'
+            PublisherPrefix = $preflight.PublisherPrefix
+            SolutionPublisherLinkageVerified = $true
+            ProjectTables = @($preflight.ProjectTables | Sort-Object)
+            LocationAbsent = -not $preflight.TargetExists
+            LocationComponentsAbsent = $true
+            PositionPublicationState = $script:LocationPrerequisitePublicationStates['os_sr_pos']
+            CandidateSourcePublicationState = $script:LocationPrerequisitePublicationStates['os_sr_csrc']
+            VerifiedPrivileges = $preflight.VerifiedPrivileges
+            AuthorizationReferenceFormatValid = $authorizationReferenceValid
+            PayloadFingerprints = $script:LocationExpectedFingerprints
+            RequestCounts = [ordered]@{ GET = $script:RequestCounts.GET; POST = $script:RequestCounts.POST }
+            Retries = 0
+            WritesPerformed = 0
+        })
+        return
+    }
     if ($VerifyPublicationOnly) {
         $metadata = Get-EntityMetadata -LogicalName $TableName
         $classification = Get-TablePublicationState -SolutionId $preflight.SolutionId -Metadata $metadata
@@ -2270,7 +2346,8 @@ catch {
     if ($script:IsBoundedWrite -and $script:RecoveryState -in @('PRECHECK', 'READY')) {
         Set-RecoveryState -State 'BLOCKED'
     }
-    Write-Result -Stage 'PreflightOrExecution' -Status 'Stopped' -Details (Get-StoppedDetails)
+    $status = if ($LocationPreflightOnly -and $script:LocationPreflightStatus) { $script:LocationPreflightStatus } else { 'BLOCKED' }
+    Write-Result -Stage 'PreflightOrExecution' -Status $status -Details (Get-StoppedDetails)
     exit 1
 }
 finally {

@@ -6,6 +6,10 @@ Scripts here support reviewed build, validation, migration, and ALM tasks. They 
 
 [Test-BsoVsCodeReadiness.ps1](Test-BsoVsCodeReadiness.ps1) performs local tool checks and read-only PAC environment/Solution checks. Its PAC app-authoring capability result is based on the `create` entry in successful `pac model help` output, not the literal phrase `model create`. Run the synthetic parser regression checks with `& ./tests/ReadinessChecks.Tests.ps1`; they do not invoke PAC or contact an environment.
 
+The script separately reports MCP configuration presence, runtime config source, discovery, callability, permission scope, wildcard tool selection, environment-specific endpoint presence, and skill-lock path alignment. Configuration presence is not treated as proof of a working server; endpoint values are never printed. During Sprint 02B inspection, root `.mcp.json` declared two servers with wildcard tool selection and an environment-specific HTTP endpoint, while `.vscode/mcp.json` had an empty `servers` object. VS Code log records from 20-21 October 2026 reported that PAC MCP was unsupported by the installed CLI and Dataverse authorization-server metadata discovery returned 404. The current VS Code MCP runtime source is **UNKNOWN**; neither server was started or called in Sprint 02B. Both configuration files are preserved because the supported configuration source/installer contract could not be proven. Do not add endpoint values to tracked files or infer read-only tool permissions from configuration.
+
+The `skills-lock.json` entries point to `.github/plugins/dataverse/skills`, which does not exist in this workspace. The corresponding nine skill files are under `.agents/skills`; five project skills are under `.github/skills`. No duplicate skill directory names were found across those roots. Whether the lockfile belongs to a separate plugin installer and whether Copilot discovers each local directory are **UNKNOWN**. The readiness check reports path mismatch but does not rewrite the lockfile or reinstall skills.
+
 ## Reference Table Provisioning
 
 [Provision-BsoRsTaTable.ps1](Provision-BsoRsTaTable.ps1) is the shared reference-table provisioner; its filename and default `os_sr_ta` selection remain for backward compatibility. [ReferenceTableDefinitions.psd1](ReferenceTableDefinitions.psd1) declares TA and three reference schemas. `-TableName` selects exactly one of `os_sr_ta`, `os_sr_pos`, `os_sr_csrc`, or `os_sr_loc`. The owner approved Phase 1D-D Apply and the three plural labels on 20 October 2026. The first Position Apply attempt returned HTTP 401 at the first metadata POST; immediate read-only reconciliation found no Position metadata. The script stopped; Candidate Source and Location Apply were not attempted. Do not rerun Apply or continue the sequence until the 401 is resolved and a recovery decision is recorded. TA remains the only project table.
@@ -54,7 +58,7 @@ This is a recovery proposal only. The 20 October 2026 Position POST must not be 
 2. Verify the active PAC target is still VN LMV IT and the same approved user identity is used by PAC and the existing Az user context. Use the existing process-scoped expected environment/organization configuration; do not print it, alter it, switch profiles, or trigger sign-in.
 3. Read-only preflight independently confirms `os_sr_pos` is absent from `EntityDefinitions` and the project Solution has no Position component. Reconfirm the `os_bso_rs_support` Publisher (`os` prefix), unmanaged `os_sr_bso_rs_support` Solution, current project inventory, and relevant metadata privileges. The prior effective-privilege result is historical and is not a substitute for this preflight.
 4. Check that the local payload still matches the declared schema: OrganizationOwned `os_sr_pos`, primary name `os_sr_pos_ttl` / Position Title / String-Text length 200 / ApplicationRequired, approved plural Positions, with no additional columns, keys, relationships, audit flags, or data rows.
-5. Confirm that the current provisioner has no retry path and that its safe diagnostic output is available. A typed confirmation in the script is an additional guard, not a substitute for the new operational authorization.
+5. Confirm that the current provisioner has no retry path and that its safe diagnostic output is available. The existing `-Apply` path is **not suitable** for this bounded attempt: after creating the table it invokes table-scoped `PublishXml`, a second POST. Do not invoke `-Apply` for the one-POST recovery. Before execution, either prepare and test a separately guarded create-only mode that performs exactly one metadata POST and GET-only reconciliation, or remain BLOCKED. A typed confirmation in the script is an additional guard, not a substitute for the new operational authorization.
 
 **Single intended request**
 
@@ -79,6 +83,51 @@ Record UTC request start/end timestamps; HTTP method and allowlisted API path; s
 - **Partial or uncertain state:** the provisioner intentionally has no resume, delete, recreate, or automatic repair route. Preserve observed state and prepare a separately reviewed recovery plan. Do not delete or recreate the table; its name and ownership are durable creation-time decisions.
 
 The later `os_sr_csrc` and `os_sr_loc` tasks are independent schemas but remain serialized behind Position recovery by the approved runbook sequence. They require their own fresh preflight and explicit authorization; neither is implicitly authorized by a successful Position recovery. See [Current State](../docs/CURRENT_STATE.md) and [Phase 1D-B Reference Table Runbook](../docs/PHASE_1D_B_REFERENCE_TABLE_RUNBOOK.md).
+
+#### One-Attempt State Machine (Proposed)
+
+```text
+PRECHECK --all approved gates pass--> READY
+PRECHECK --any mismatch/approval missing--> BLOCKED
+READY --new written authorization + one guarded POST--> WRITE_ATTEMPTED
+WRITE_ATTEMPTED --> RECONCILING (GET only; never repeat the POST)
+RECONCILING --2xx + exact complete schema and Solution read-back--> VERIFIED_SUCCESS
+RECONCILING --401 and no unexpected metadata--> FAILED_AUTH
+RECONCILING --403 and no unexpected metadata--> FAILED_AUTHZ
+RECONCILING --deterministic invalid 4xx and no unexpected metadata--> FAILED_VALIDATION
+RECONCILING --429/5xx/timeout/transport ambiguity--> UNCERTAIN
+RECONCILING --any unexpected/partial metadata--> PARTIAL_STATE
+```
+
+`FAILED_AUTH`, `FAILED_AUTHZ`, `FAILED_VALIDATION`, `UNCERTAIN`, `PARTIAL_STATE`, `BLOCKED`, and `VERIFIED_SUCCESS` are terminal for this attempt. Reconciliation can classify the observed result but cannot authorize a second POST. `401`, `403`, and deterministic validation failures still receive GET-only reconciliation before recording terminal state; any unexpected object/component takes precedence as `PARTIAL_STATE`. `429`, `5xx`, timeout, or transport failure are always uncertain until metadata and Solution membership are reconciled. Do not publish, delete, recreate, compensate, or change roles/privileges. The only possible success for this bounded recovery is exact post-POST read-back of the table and Solution root; publication is explicitly outside scope and would require a separate authorization.
+
+#### Sanitized Evidence Record (Template)
+
+Keep the record outside the repository unless organizational policy approves a sanitized incident artifact. Use null/omitted values when an item was not returned; never infer evidence. Record one UTC attempt timestamp generated immediately before the request.
+
+| Record area | Allowlisted fields |
+|---|---|
+| Preflight | `attemptTimestampUtc`; `environmentName` (`VN LMV IT`); `environmentMatch` Boolean; `identityMatch` Boolean (PAC/Az same approved user; no user identifier); `solutionUniqueName`; `solutionType` (`unmanaged`); `publisherUniqueName`; `publisherPrefix`; `targetTableAbsent` Boolean; `solutionComponentAbsent` Boolean; `privilegeChecks` keyed by required privilege with returned depth/result or `UNKNOWN`; `payloadSha256`. |
+| Request/response | `method` (`POST`); relative `path` (`/api/data/v9.2/EntityDefinitions`); `httpStatus`; allowlisted sanitized Dataverse error code/message; valid request/correlation GUIDs only; selected safe challenge properties only; `tokenAudienceValid`, `tokenScopeValid`, `tokenExpiryValid` Booleans; `writesMayHaveOccurred` Boolean. |
+| Reconciliation | `reconciliationTimestampUtc`; GET-only results for target table and metadata, exact expected attributes, keys, relationships, and project Solution root; `outcome` (`VERIFIED_SUCCESS`, `FAILED_AUTH`, `FAILED_AUTHZ`, `FAILED_VALIDATION`, `UNCERTAIN`, or `PARTIAL_STATE`); concise sanitized notes. |
+
+Never include access/refresh tokens, Authorization or other full headers, JWT claims, user email, tenant ID, full organization URL, credentials, full response body, candidate data, or unfiltered exception text. The current provisioner’s existing diagnostic object is not by itself a complete evidence package: it does not persist a preflight identity record or payload fingerprint, and the historical incident was not captured with these fields.
+
+#### Position Payload Identity
+
+The offline Position PlanOnly payload was serialized from `TablePayload` using `ConvertTo-Json -Depth 40 -Compress`, encoded as UTF-8 without a BOM, and hashed with SHA-256. Fingerprint: **`0f7372eeb66c0214ae08ed0dc74f82c981cc4cd73baa9156f16d6e1bd1f48e80`**. The synthetic provisioning test recalculates and asserts this value. It fingerprints the table-create payload (table plus primary-name attribute), not future requests, environment identity, or the entire Apply sequence. Recalculate after any payload/script change; a mismatch blocks use of the recorded approval until reviewed.
+
+#### Exact GET-Only Reconciliation
+
+After the single authorized POST—or any uncertain result—use only the existing verified Dataverse organization and the existing authenticated identity. Do not follow untrusted continuation URLs. Inspect:
+
+1. `GET EntityDefinitions(LogicalName='os_sr_pos')` for exact logical/schema name, metadata ID, `OrganizationOwned`, display `Position`, plural `Positions`, `PrimaryIdAttribute`, and `PrimaryNameAttribute`.
+2. `GET EntityDefinitions(LogicalName='os_sr_pos')/Attributes` and compare custom attributes with exactly one declared custom attribute: primary `os_sr_pos_ttl`, String/Text, length 200, `ApplicationRequired`, `IsPrimaryName=true`. Confirm the generated primary GUID attribute exists and is the PrimaryIdAttribute; ignore standard platform attributes only after classifying them as noncustom. Any other custom attribute means `PARTIAL_STATE`.
+3. `GET EntityDefinitions(LogicalName='os_sr_pos')/Keys` and all three relationship collections (`ManyToOneRelationships`, `OneToManyRelationships`, `ManyToManyRelationships`); expect no custom keys or relationships. Any unexpected custom metadata means `PARTIAL_STATE`.
+4. Query `solutioncomponents` read-only for the project Solution ID and the table MetadataId, component type Entity (`1`). Verify a Solution root component and `rootcomponentbehavior=0` (includes subcomponents), or the exact explicitly supported membership representation. No membership or conflicting membership blocks `VERIFIED_SUCCESS`.
+5. Reconfirm the project Solution identity and retrieve the selected table metadata a second time if the first read is inconsistent. Reads do not authorize writes.
+
+The table and names are durable creation-time metadata: there is no automatic rollback. Leave partial or unpublished metadata untouched pending a separate admin-reviewed recovery plan. Do not run `PublishXml` as part of this one-POST attempt.
 
 ### Declarative Payloads and Approval Boundary
 

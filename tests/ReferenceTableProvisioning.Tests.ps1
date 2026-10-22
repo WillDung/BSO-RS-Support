@@ -59,6 +59,12 @@ foreach ($name in $expected.Keys) {
     Assert-Test (@($plan.AdditionalColumnPayloads).Count -eq $row[5] -and $plan.PrimaryGuidLogicalName -ceq ($name+'id')) "$name additional count/GUID"
     if ($name -ne 'os_sr_ta') { Assert-Test ($plan.DisplayCollectionNameStatus -ceq 'Owner-approved Phase 1D-D') "$name approved plural" }
 }
+$positionPlan = (& $provisioner -TableName os_sr_pos -PlanOnly) | ConvertFrom-Json
+$positionPayload = $positionPlan.TablePayload
+$positionPayloadJson = ConvertTo-Json -InputObject $positionPayload -Depth 40 -Compress
+$positionPayloadHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($positionPayloadJson))).ToLowerInvariant()
+Assert-Test ($positionPayloadHash -ceq '0f7372eeb66c0214ae08ed0dc74f82c981cc4cd73baa9156f16d6e1bd1f48e80') 'Position PlanOnly payload matches the recovery SHA-256 fingerprint'
+Assert-Test ($positionPlan.Mode -like 'PlanOnly*' -and $positionPlan.OwnershipType -ceq 'OrganizationOwned' -and $positionPlan.TableDisplayName -ceq 'Position' -and $positionPlan.DisplayCollectionName -ceq 'Positions' -and @($positionPlan.AdditionalColumnPayloads).Count -eq 0 -and $positionPlan.AlternateKeys -ceq 'None' -and $positionPlan.DuplicateDetection -ceq 'None' -and $positionPlan.DataRowOperations -match 'no data-table requests') 'Position recovery plan excludes extra columns, keys, relationships and business rows'
 $loc = (& $provisioner -TableName os_sr_loc -PlanOnly) | ConvertFrom-Json
 $email, $memo = $loc.AdditionalColumnPayloads
 Assert-Test ($email.SchemaName -ceq 'os_sr_loc_rmeml' -and $email.DisplayName.LocalizedLabels[0].Label -ceq 'Room/Resource Email' -and $email.FormatName.Value -ceq 'Email' -and $email.MaxLength -eq 254 -and $email.RequiredLevel.Value -ceq 'None') 'Location email exact schema'

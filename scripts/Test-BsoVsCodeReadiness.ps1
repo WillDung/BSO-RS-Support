@@ -29,6 +29,37 @@ $hasOfficialSkill = (Test-Path (Join-Path $workspaceRoot '.github/skills/dv-meta
 Write-Check 'Local dv-metadata skill' $(if ($hasOfficialSkill) { 'Found' } else { 'Not detected locally; inspect VS Code plugin installation' })
 Write-Check 'Existing MCP config' $(if (Test-Path (Join-Path $workspaceRoot '.vscode/mcp.json')) { 'Found (not modified)' } else { 'Not found' })
 
+$rootMcpPath = Join-Path $workspaceRoot '.mcp.json'
+$vsCodeMcpPath = Join-Path $workspaceRoot '.vscode/mcp.json'
+$skillsLockPath = Join-Path $workspaceRoot 'skills-lock.json'
+if ((Test-Path $rootMcpPath) -and (Test-Path $vsCodeMcpPath) -and (Test-Path $skillsLockPath)) {
+    $rootMcp = Get-Content -LiteralPath $rootMcpPath -Raw | ConvertFrom-Json
+    $vsCodeMcp = Get-Content -LiteralPath $vsCodeMcpPath -Raw | ConvertFrom-Json
+    $skillsLock = Get-Content -LiteralPath $skillsLockPath -Raw | ConvertFrom-Json
+    $mcpAssessment = Get-McpConfigurationAssessment -RootConfiguration $rootMcp -VsCodeConfiguration $vsCodeMcp
+    $installedSkillPaths = @(
+        foreach ($relativeRoot in @('.agents/skills', '.github/skills')) {
+            $skillRoot = Join-Path $workspaceRoot $relativeRoot
+            if (Test-Path $skillRoot) {
+                Get-ChildItem -LiteralPath $skillRoot -Filter 'SKILL.md' -File -Recurse |
+                    ForEach-Object { [IO.Path]::GetRelativePath($workspaceRoot, $_.FullName) }
+            }
+        }
+    )
+    $skillsAssessment = Get-SkillsLockAssessment -LockedSkills $skillsLock.skills -InstalledSkillPaths $installedSkillPaths
+    Write-Check 'Root MCP configuration' ("{0} ({1} servers; endpoint values suppressed)" -f $mcpAssessment.RootConfigStatus, $mcpAssessment.RootServerCount)
+    Write-Check 'VS Code MCP configuration' ("{0} ({1} servers)" -f $mcpAssessment.VsCodeConfigStatus, $mcpAssessment.VsCodeServerCount)
+    Write-Check 'MCP runtime configuration source' $mcpAssessment.RuntimeConfigSource
+    Write-Check 'MCP tool discoverability' $mcpAssessment.Discoverability
+    Write-Check 'MCP callability' $mcpAssessment.Callability
+    Write-Check 'MCP tool permission scope' $mcpAssessment.ToolPermissionScope
+    Write-Check 'MCP wildcard tool selection' $(if ($mcpAssessment.WildcardToolExposure) { 'Present' } else { 'Not detected' })
+    Write-Check 'Environment-specific MCP endpoint' $(if ($mcpAssessment.EnvironmentSpecificEndpointPresent) { 'Present; value suppressed' } else { 'Not detected' })
+    Write-Check 'Skills lock/local path alignment' ("{0} ({1}/{2} locked paths unresolved; {3} local skills; {4} duplicate names)" -f $skillsAssessment.PathAlignment, $skillsAssessment.MismatchedPathCount, $skillsAssessment.LockedSkillCount, $skillsAssessment.InstalledSkillCount, $skillsAssessment.DuplicateSkillNameCount)
+} else {
+    Write-Check 'MCP/skills configuration assessment' 'UNKNOWN (one or more local configuration files are missing)'
+}
+
 if ($SkipOnlineChecks) {
     Write-Check 'Environment/Solution' 'Skipped (local-only)'
     exit 0

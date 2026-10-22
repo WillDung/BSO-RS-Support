@@ -10,7 +10,7 @@ The UTC diagnostic timestamp assertion reads the JSON string without PowerShell'
 
 ## Readiness Capability Check
 
-[ReadinessChecks.Tests.ps1](ReadinessChecks.Tests.ps1) is a dependency-free PowerShell 7.4+ assertion harness. Run `& ./tests/ReadinessChecks.Tests.ps1` from the repository root. Synthetic PAC help text verifies recognition of the model `create` command, rejects failed help commands, and rejects help without that command. It does not invoke PAC, authenticate, or access the network.
+[ReadinessChecks.Tests.ps1](ReadinessChecks.Tests.ps1) is a dependency-free PowerShell 7.4+ assertion harness. Run `& ./tests/ReadinessChecks.Tests.ps1` from the repository root. Synthetic PAC help text verifies recognition of the model `create` command, rejects failed help commands, and rejects help without that command. Synthetic MCP and skill-lock objects verify that configuration is distinguished from discoverability/callability, wildcard/endpoint presence is reported without returning values, lock-path mismatches are detected, and duplicate names can be counted. It does not invoke PAC, authenticate, read local secrets, or access the network.
 
 ## Model-Driven App Composition
 

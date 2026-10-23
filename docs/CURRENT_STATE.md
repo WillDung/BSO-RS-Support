@@ -1,6 +1,20 @@
 # Current State
 
-## Phase 2D.3K Update — SDK TA Entity Canary Produced Wrong System Root (2026-10-23)
+## Phase 2D.3L Update — Correct LogicalName SDK Canary Verified (2026-10-23)
+
+The owner-authorized Phase 2D.3L sequence removed the single confirmed system `entity` root, reconciled the exact protected nine-component interim state, and executed one SDK TA-table Add using the actual logical name and freshly resolved metadata identity. GET-only reconciliation verified the resulting root resolves through `appmodulecomponent.objectid` → `entities.entityid` to `os_sr_ta`. Outcome: **`CORRECT_LOGICALNAME_CANARY_VERIFIED`**.
+
+- The fresh target preflight matched the approved VN LMV IT name and organization URL against one PAC environment-list entry and `pac org who`; the guarded runner also verified PAC, existing Az, Dataverse WhoAmI, and the expected-user process pin. No environment switch or interactive login occurred.
+- Before removal, the direct inventory was one Site Map, one type-1 root resolving to system logical name `entity`, four approved Main forms, and four approved public views (10 total). The single `RemoveAppComponents` POST returned HTTP 204. A fresh GET-only reconciliation confirmed exactly one Site Map, zero entity roots, four forms, and four views (9 total); protected state remained unchanged.
+- The SDK canary independently resolved TA and system `entity` through `EntityDefinitions` and `/entities`. TA `MetadataId` matched the TA `entities.entityid`, its object type code was valid, and its metadata ID differed from system `entity`. The one-component `AddAppComponentsRequest` contained `EntityReference("os_sr_ta", TA MetadataId)`; the SDK component count was one. Its normalized request fingerprint was `b58ee28352aa3e562b299c3f7b1683dce7df51782e2e2ebfb823649b41efabdb`.
+- SDK Execute succeeded. Post-write GET-only inventory is one Site Map, one entity root, four forms, and four views (10 total). The root's logical name is exactly `os_sr_ta`; its object ID resolved and the direct app association matched. No additional entity root was created.
+- `ValidateApp` succeeded with zero blocking errors and six warnings, down from the prior nine-warning baseline. The sanitized execution summary retained the total warning count, not each warning's `RequiredComponents`; therefore the exact TA warning entries resolved cannot be identified from the retained report.
+- The Site Map identity, direct association, placeholder XML/navigation, all four approved forms, all four approved views, System Administrator and System Customizer roles, and Active/Unpublished `srapp` state were unchanged. No navigation PATCH, publish, or role operation occurred.
+- The guarded runner recorded **229 Dataverse GET**, **1 RemoveAppComponents POST** (HTTP 204), **0 raw AddAppComponents POST**, **1 SDK AddAppComponents Execute**, **0 Site Map PATCH**, **0 other writes**, **0 PublishXml**, **0 app publish**, **0 role changes**, and **0 retries**. The separate read-only PAC environment listing and `pac org who` checks are outside the Dataverse GET count. The remove payload's fingerprint was validated by the runner but was not retained in the sanitized output; do not substitute a historical fingerprint.
+- Regression validation passed **232** app-composition assertions, **550** provisioning assertions, **11** readiness assertions, PowerShell parser validation (**0 errors**), and `git diff --check`. Branch `main`, HEAD and `origin/main` remained `1574b6e4381e8f895a17c5f27967d20015a8c063`. No commit or push occurred.
+- **Recommended next task:** prepare a separately authorized, fresh-guarded composition step for the remaining approved table roots (`os_sr_pos`, `os_sr_csrc`, and `os_sr_loc`), using each table's actual logical name and freshly verified `EntityMetadata.MetadataId`. Keep the verified TA root and all protected components intact. Do not add those roots, patch navigation, publish, change roles, or retry without a new bounded authorization.
+
+## Historical — Phase 2D.3K Update — SDK TA Entity Canary Produced Wrong System Root (2026-10-23)
 
 The owner-authorized Phase 2D.3K sequence completed its single removal and single SDK Add attempt, but did **not** create the intended TA entity root. Stop here; no automatic repair or retry is permitted.
 

@@ -314,17 +314,19 @@ function Get-TACanarySdkAssemblyDirectory {
 function New-TACanarySdkRequest {
     param(
         [Parameter(Mandatory = $true)][string]$AppId,
-        [Parameter(Mandatory = $true)][string]$TaEntityId,
-        [Parameter(Mandatory = $true)][string]$SystemEntityId
+        [Parameter(Mandatory = $true)][string]$TaLogicalName,
+        [Parameter(Mandatory = $true)][string]$TaMetadataId,
+        [Parameter(Mandatory = $true)][string]$SystemEntityMetadataId
     )
-    $taGuid = [guid]::Empty
+    $taMetadataGuid = [guid]::Empty
     $appGuid = [guid]::Empty
-    $systemGuid = [guid]::Empty
+    $systemMetadataGuid = [guid]::Empty
     if (-not [guid]::TryParse($AppId, [ref]$appGuid) -or
-        -not [guid]::TryParse($TaEntityId, [ref]$taGuid) -or
-        -not [guid]::TryParse($SystemEntityId, [ref]$systemGuid) -or
-        $taGuid -eq $systemGuid) {
-        throw 'SDK canary requires distinct, valid app, TA table, and system entity identities.'
+        -not [guid]::TryParse($TaMetadataId, [ref]$taMetadataGuid) -or
+        -not [guid]::TryParse($SystemEntityMetadataId, [ref]$systemMetadataGuid) -or
+        $TaLogicalName -cne 'os_sr_ta' -or
+        $taMetadataGuid -eq $systemMetadataGuid) {
+        throw 'SDK canary requires the os_sr_ta logical name and distinct, valid TA/system EntityMetadata.MetadataId values.'
     }
     $sdkLocation = Get-TACanarySdkAssemblyDirectory
     if (-not $sdkLocation) { throw 'SDK_NOT_AVAILABLE: PAC-local Dataverse SDK assemblies were not found.' }
@@ -337,7 +339,7 @@ function New-TACanarySdkRequest {
     $requestType = [Type]::GetType('Microsoft.Crm.Sdk.Messages.AddAppComponentsRequest, Microsoft.Crm.Sdk.Proxy', $true)
     $entityReferenceConstructor = $entityReferenceType.GetConstructor([Type[]]@([string], [guid]))
     if (-not $entityReferenceConstructor) { throw 'SDK_CONSTRUCTION_INVALID: EntityReference(String, Guid) is unavailable.' }
-    $entityReference = $entityReferenceConstructor.Invoke(@('entity', $taGuid))
+    $entityReference = $entityReferenceConstructor.Invoke(@($TaLogicalName, $taMetadataGuid))
     $components = [Activator]::CreateInstance($entityReferenceCollectionType)
     $components.Add($entityReference)
     $request = [Activator]::CreateInstance($requestType)
@@ -355,7 +357,9 @@ function New-TACanarySdkRequest {
         ComponentsType = $request.Components.GetType().FullName
         ComponentCount = $request.Components.Count
         LogicalName = $request.Components[0].LogicalName
-        ComponentIdMatchesTaEntityId = $request.Components[0].Id -eq $taGuid
+        ComponentIdMatchesTaMetadataId = $request.Components[0].Id -eq $taMetadataGuid
+        ComponentIdDiffersFromSystemMetadataId = $request.Components[0].Id -ne $systemMetadataGuid
+        LogicalNameIsApprovedProjectTable = $request.Components[0].LogicalName -ceq 'os_sr_ta'
         AppIdMatches = $request.AppId -eq $appGuid
         CliToolBundleVersion = $sdkLocation.PackageVersion
         ClientAssemblyVersion = $clientAssemblyName.Version.ToString()
@@ -496,8 +500,8 @@ function New-TACanaryServiceClient {
 function Assert-SdkTaEntityCanaryRequest {
     param(
         [Parameter(Mandatory = $true)][object]$Request,
-        [Parameter(Mandatory = $true)][string]$TaEntityId,
-        [Parameter(Mandatory = $true)][string]$SystemEntityId
+        [Parameter(Mandatory = $true)][string]$TaMetadataId,
+        [Parameter(Mandatory = $true)][string]$SystemEntityMetadataId
     )
     $requestType = 'Microsoft.Crm.Sdk.Messages.AddAppComponentsRequest'
     $componentsType = 'Microsoft.Xrm.Sdk.EntityReferenceCollection'
@@ -505,12 +509,12 @@ function Assert-SdkTaEntityCanaryRequest {
         $Request.Components.GetType().FullName -cne $componentsType -or
         $Request.Components.Count -ne 1 -or
         [guid]$Request.AppId -ne [guid]$script:Target.AppModuleId -or
-        $Request.Components[0].LogicalName -cne 'entity' -or
-        [guid]$Request.Components[0].Id -ne [guid]$TaEntityId -or
-        [guid]$Request.Components[0].Id -eq [guid]$SystemEntityId) {
-        throw 'SDK request must contain exactly one `entity` reference to the freshly verified TA table and the existing srapp AppId.'
+        $Request.Components[0].LogicalName -cne 'os_sr_ta' -or
+        [guid]$Request.Components[0].Id -ne [guid]$TaMetadataId -or
+        [guid]$Request.Components[0].Id -eq [guid]$SystemEntityMetadataId) {
+        throw 'SDK request must contain exactly one os_sr_ta reference using the freshly verified TA MetadataId and existing srapp AppId.'
     }
-    $canonical = "$requestType|AppId=srapp|Count=1|LogicalName=entity|ComponentId=os_sr_ta"
+    $canonical = "$requestType|AppId=srapp|Count=1|LogicalName=os_sr_ta|ComponentId=os_sr_ta.MetadataId"
     $fingerprint = [Convert]::ToHexString(
         [System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes($canonical))
     ).ToLowerInvariant()
@@ -519,9 +523,11 @@ function Assert-SdkTaEntityCanaryRequest {
         RequestType = $requestType
         ComponentsType = $componentsType
         ComponentCount = 1
-        LogicalName = 'entity'
+        LogicalName = 'os_sr_ta'
         AppIdAlias = 'srapp'
-        ComponentIdAlias = 'os_sr_ta'
+        ComponentIdAlias = 'os_sr_ta.MetadataId'
+        ComponentIdMatchesTaMetadataId = $Request.Components[0].Id -eq [guid]$TaMetadataId
+        ComponentIdDiffersFromSystemMetadataId = $Request.Components[0].Id -ne [guid]$SystemEntityMetadataId
     }
 }
 
@@ -529,8 +535,8 @@ function Invoke-SdkTaEntityCanaryExecuteOnce {
     param(
         [Parameter(Mandatory = $true)][object]$Client,
         [Parameter(Mandatory = $true)][object]$Request,
-        [Parameter(Mandatory = $true)][string]$TaEntityId,
-        [Parameter(Mandatory = $true)][string]$SystemEntityId,
+        [Parameter(Mandatory = $true)][string]$TaMetadataId,
+        [Parameter(Mandatory = $true)][string]$SystemEntityMetadataId,
         [Parameter(Mandatory = $true)][string]$ExpectedFingerprint
     )
     if ($script:SdkExecuteCount -ne 0 -or
@@ -539,7 +545,7 @@ function Invoke-SdkTaEntityCanaryExecuteOnce {
         throw 'SDK execution guard requires a ready, zero-retry ServiceClient and no prior Execute.'
     }
     $requestEvidence = Assert-SdkTaEntityCanaryRequest -Request $Request `
-        -TaEntityId $TaEntityId -SystemEntityId $SystemEntityId
+        -TaMetadataId $TaMetadataId -SystemEntityMetadataId $SystemEntityMetadataId
     if ($requestEvidence.Fingerprint -cne $ExpectedFingerprint) {
         throw 'SDK request fingerprint changed; no Execute was attempted.'
     }
@@ -661,7 +667,8 @@ function Get-AddAppComponentsForensics {
     $sdkFailure = $null
     try {
         $sdk = New-TACanarySdkRequest -AppId $script:Target.AppModuleId `
-            -TaEntityId $identity.EntityId -SystemEntityId $systemEntityId
+            -TaLogicalName $identity.LogicalName -TaMetadataId $identity.MetadataId `
+            -SystemEntityMetadataId $systemEntityId
     }
     catch {
         $sdkFailure = if ($_.Exception.Message -like 'SDK_NOT_AVAILABLE:*') {
@@ -670,8 +677,8 @@ function Get-AddAppComponentsForensics {
     }
     $sdkValid = $null -ne $sdk -and $sdk.RequestType -ceq 'Microsoft.Crm.Sdk.Messages.AddAppComponentsRequest' -and
         $sdk.ComponentsType -ceq 'Microsoft.Xrm.Sdk.EntityReferenceCollection' -and
-        $sdk.ComponentCount -eq 1 -and $sdk.LogicalName -ceq 'entity' -and
-        $sdk.ComponentIdMatchesTaEntityId -and $sdk.AppIdMatches
+        $sdk.ComponentCount -eq 1 -and $sdk.LogicalName -ceq 'os_sr_ta' -and
+        $sdk.ComponentIdMatchesTaMetadataId -and $sdk.AppIdMatches
     $bodyValid = $idsMatch -and $parsed.AppId -ceq (ConvertTo-NormalizedGuid -Value $script:Target.AppModuleId) -and
         $parsed.ComponentCount -eq 1 -and $parsed.ODataType -ceq 'Microsoft.Dynamics.CRM.entity'
     $currentState = Get-TACanaryCurrentStateClassification -Snapshot $Snapshot
@@ -758,7 +765,7 @@ function Get-AddAppComponentsForensics {
                 ComponentsType = $sdk.ComponentsType
                 ComponentCount = $sdk.ComponentCount
                 LogicalName = $sdk.LogicalName
-                ComponentIdMatchesTaEntityId = $sdk.ComponentIdMatchesTaEntityId
+                ComponentIdMatchesTaMetadataId = $sdk.ComponentIdMatchesTaMetadataId
                 AppIdMatchesSrapp = $sdk.AppIdMatches
                 CliToolBundleVersion = $sdk.CliToolBundleVersion
                 ClientAssemblyVersion = $sdk.ClientAssemblyVersion
@@ -780,10 +787,10 @@ function Get-AddAppComponentsForensics {
             Recommended = $decision -ceq 'SDK_PIVOT_RECOMMENDED'
             Step1 = 'Separately authorized one-logical RemoveAppComponents for the current system entity root.'
             Step2 = 'GET-only reconcile to exactly one Site Map, zero entity roots, four forms, and four views.'
-            Step3 = 'Only after reconciliation and a separate authorization, locally build then execute one AddAppComponentsRequest.'
+            Step3 = 'Only after reconciliation and fresh metadata validation, build one AddAppComponentsRequest using EntityReference(os_sr_ta, TA MetadataId).'
             ComponentCount = 1
-            EntityReferenceLogicalName = 'entity'
-            ComponentIdMatchesApprovedTaTable = if ($sdkValid) { $sdk.ComponentIdMatchesTaEntityId } else { $false }
+            EntityReferenceLogicalName = 'os_sr_ta'
+            ComponentIdMatchesApprovedTaTableMetadataId = if ($sdkValid) { $sdk.ComponentIdMatchesTaMetadataId } else { $false }
             SeparateGatesBetweenWrites = $true
             CurrentRunExecutesSdkRequest = $false
         }
@@ -851,7 +858,7 @@ function Assert-ApplyAuthorization {
         'APPLY PHASE 2D.3I TA ENTITY CANARY IN VN LMV IT'
     }
     elseif ($SdkTaEntityCanary) {
-        'APPLY PHASE 2D.3K SDK TA ENTITY CANARY IN VN LMV IT'
+        'APPLY PHASE 2D.3L CORRECT LOGICALNAME SDK TA CANARY IN VN LMV IT'
     }
     elseif ($ReferenceUiCompositionOnly) {
         'APPLY PHASE 2D.3 IN VN LMV IT'
@@ -2651,6 +2658,7 @@ function Get-EntityRootRepairEvidence {
                 EntityTableRowCount = $_.EntityTableRowCount
                 EntityTableIdentityUnambiguous = $_.EntityTableIdentityUnambiguous
                 EntityId = $_.EntityId
+                MetadataId = $_.MetadataId
                 LogicalNamesAgree = $_.LogicalNamesAgree
                 MetadataObjectTypeCode = $_.MetadataObjectTypeCode
                 EntityObjectTypeCodes = $_.EntityTableObjectTypeCodes
@@ -2855,12 +2863,14 @@ function Get-TACanaryTableIdentity {
         @($evidence[0].EntityObjectTypeCodes).Count -ne 1 -or
         $evidence[0].ObjectTypeCodesAgree -ne $true -or
         -not $evidence[0].PayloadEntityIdMatchesMetadataId -or
-        -not $evidence[0].PayloadEntityIdMatchesEntityId) {
+        -not $evidence[0].PayloadEntityIdMatchesEntityId -or
+        [string]::IsNullOrWhiteSpace([string]$evidence[0].MetadataId)) {
         throw 'Fresh TA table metadata and entities identity evidence is missing, ambiguous, or inconsistent.'
     }
     $taId = ConvertTo-NormalizedGuid -Value ([string]$evidence[0].EntityId)
-    $metadataId = ConvertTo-NormalizedGuid -Value ([string]$references[0].TableMetadataId)
-    if ($taId -cne $metadataId) {
+    $metadataId = ConvertTo-NormalizedGuid -Value ([string]$evidence[0].MetadataId)
+    $referenceMetadataId = ConvertTo-NormalizedGuid -Value ([string]$references[0].TableMetadataId)
+    if ($taId -cne $metadataId -or $referenceMetadataId -cne $metadataId) {
         throw 'Fresh TA EntityDefinitions MetadataId and entities.entityid do not agree.'
     }
     [pscustomobject]@{
@@ -2868,6 +2878,53 @@ function Get-TACanaryTableIdentity {
         EntityId = $taId
         MetadataId = $metadataId
         EntitySetName = [string]$references[0].EntitySetName
+    }
+}
+
+function Get-SdkTaCanaryMetadataIdentity {
+    param([Parameter(Mandatory = $true)][object]$Snapshot)
+    $taMetadata = Get-EntityDefinitionByLogicalName -LogicalName 'os_sr_ta'
+    $systemMetadata = Get-EntityDefinitionByLogicalName -LogicalName 'entity'
+    $taRows = @(Get-EntityRowsByLogicalName -LogicalName 'os_sr_ta')
+    $systemRows = @(Get-EntityRowsByLogicalName -LogicalName 'entity')
+    $snapshotTa = Get-TACanaryTableIdentity -Snapshot $Snapshot
+    $taMetadataId = [string](Get-PropertyValue -Object $taMetadata -Name 'MetadataId')
+    $taObjectTypeCode = Get-PropertyValue -Object $taMetadata -Name 'ObjectTypeCode'
+    $systemMetadataId = [string](Get-PropertyValue -Object $systemMetadata -Name 'MetadataId')
+    $systemObjectTypeCode = Get-PropertyValue -Object $systemMetadata -Name 'ObjectTypeCode'
+    $taMetadataLogicalName = [string](Get-PropertyValue -Object $taMetadata -Name 'LogicalName')
+    $systemMetadataLogicalName = [string](Get-PropertyValue -Object $systemMetadata -Name 'LogicalName')
+    if ($taMetadataLogicalName -cne 'os_sr_ta' -or
+        $systemMetadataLogicalName -cne 'entity' -or
+        $taRows.Count -ne 1 -or $systemRows.Count -ne 1 -or
+        [string]$taRows[0].logicalname -cne 'os_sr_ta' -or
+        [string]$systemRows[0].logicalname -cne 'entity' -or
+        [string]::IsNullOrWhiteSpace($taMetadataId) -or
+        [string]::IsNullOrWhiteSpace($systemMetadataId) -or
+        [int]$taObjectTypeCode -le 0 -or [int]$systemObjectTypeCode -le 0) {
+        throw 'Fresh TA and system EntityDefinitions metadata identities are missing or invalid.'
+    }
+    $normalizedTaMetadataId = ConvertTo-NormalizedGuid -Value $taMetadataId
+    $normalizedSystemMetadataId = ConvertTo-NormalizedGuid -Value $systemMetadataId
+    $taEntityId = ConvertTo-NormalizedGuid -Value ([string]$taRows[0].entityid)
+    $systemEntityId = ConvertTo-NormalizedGuid -Value ([string]$systemRows[0].entityid)
+    if ($normalizedTaMetadataId -cne $snapshotTa.MetadataId -or
+        $normalizedTaMetadataId -cne $taEntityId -or
+        $normalizedSystemMetadataId -cne $systemEntityId -or
+        $normalizedTaMetadataId -ceq $normalizedSystemMetadataId -or
+        [int]$taRows[0].objecttypecode -ne [int]$taObjectTypeCode -or
+        [int]$systemRows[0].objecttypecode -ne [int]$systemObjectTypeCode) {
+        throw 'Fresh EntityDefinitions MetadataId values do not agree with their entities rows or approved TA metadata.'
+    }
+    [pscustomobject]@{
+        TaLogicalName = $taMetadataLogicalName
+        TaMetadataId = $normalizedTaMetadataId
+        TaObjectTypeCode = [int]$taObjectTypeCode
+        TaEntityId = $taEntityId
+        SystemLogicalName = $systemMetadataLogicalName
+        SystemMetadataId = $normalizedSystemMetadataId
+        SystemObjectTypeCode = [int]$systemObjectTypeCode
+        SystemEntityId = $systemEntityId
     }
 }
 
@@ -2949,11 +3006,13 @@ function Assert-TACanaryPreflight {
         throw 'Fresh system entity identity could not be resolved uniquely.'
     }
     $taIdentity = Get-TACanaryTableIdentity -Snapshot $Snapshot
-    if ($taIdentity.EntityId -ceq (ConvertTo-NormalizedGuid -Value $script:SystemEntityIdForRemoval)) {
+    if ($taIdentity.MetadataId -ceq (ConvertTo-NormalizedGuid -Value $script:SystemEntityIdForRemoval)) {
         throw 'Fresh os_sr_ta entityid equals the system entity identity.'
     }
     [pscustomobject]@{
+        TaLogicalName = $taIdentity.LogicalName
         TaEntityId = $taIdentity.EntityId
+        TaMetadataId = $taIdentity.MetadataId
         SystemEntityId = ConvertTo-NormalizedGuid -Value $script:SystemEntityIdForRemoval
     }
 }
@@ -4139,6 +4198,7 @@ function Invoke-RemoveWrongSystemEntityRoots {
 
 function Assert-SdkTaEntityCanaryWrongRootPreflight {
     param([Parameter(Mandatory = $true)][object]$Snapshot)
+    $taIdentity = Get-TACanaryTableIdentity -Snapshot $Snapshot
     $counts = $Snapshot.RawAppComponentTypeCounts
     $roots = @($Snapshot.EntityResolutionDiagnostics)
     if (-not $Snapshot.IdentityChecks.PacIdentityAvailable -or
@@ -4231,7 +4291,8 @@ function Assert-SdkTaEntityCanaryWrongRootPreflight {
     }
     [pscustomobject]@{
         SystemEntityId = ConvertTo-NormalizedGuid -Value $script:SystemEntityIdForRemoval
-        TaEntityId = (Get-TACanaryTableIdentity -Snapshot $Snapshot).EntityId
+        TaEntityId = $taIdentity.EntityId
+        TaMetadataId = $taIdentity.MetadataId
     }
 }
 
@@ -4271,7 +4332,7 @@ function Invoke-SdkTaEntityCanaryRemoval {
         -SystemEntityId $initialIdentity.SystemEntityId
     if ($script:RequestCounts.POST -ne 0 -or $script:RequestCounts.PATCH -ne 0 -or
         $script:WriteResults.Count -ne 0 -or $script:WritesStarted) {
-        throw 'Phase 2D.3K RemoveAppComponents requires a fresh no-write sequence.'
+        throw 'Phase 2D.3L RemoveAppComponents requires a fresh no-write sequence.'
     }
     $script:RemovalDispatchResult = [pscustomobject]@{
         Dispatched = $false
@@ -4371,24 +4432,24 @@ function Get-SdkTaEntityCanaryOutcome {
     }
     $counts = $After.RawAppComponentTypeCounts
     $roots = @($After.EntityResolutionDiagnostics)
-    if ($counts.Entity -gt 1) { return 'SDK_MULTIPLE_ROOTS_CREATED' }
+    if ($counts.Entity -gt 1) { return 'MULTIPLE_ROOTS_CREATED' }
     if ($counts.Entity -eq 1 -and $roots.Count -eq 1) {
         $root = $roots[0]
         if ($root.ReturnedRowCount -ne 1 -or
             @($root.EntityIdMatchesQueriedObjectId | Where-Object { $_ -eq $true }).Count -ne 1 -or
             -not $root.AppAssociationMatches) { return 'STATE_CHANGED' }
-        if ($root.NormalizedLogicalName -ceq 'entity') { return 'SDK_WRONG_SYSTEM_ROOT_CREATED' }
-        if ($root.NormalizedLogicalName -cne 'os_sr_ta') { return 'SDK_WRONG_ENTITY_ROOT_CREATED' }
+        if ($root.NormalizedLogicalName -ceq 'entity') { return 'SYSTEM_ENTITY_ROOT_RECREATED' }
+        if ($root.NormalizedLogicalName -cne 'os_sr_ta') { return 'WRONG_ENTITY_ROOT_CREATED' }
         if ($counts.SiteMap -ne 1 -or $counts.Form -ne 4 -or $counts.View -ne 4 -or
             $counts.Other -ne 0 -or $counts.Total -ne 10 -or
             $After.AppValidation.ValidationSuccess -ne $true -or
             $After.AppValidation.BlockingErrorCount -ne 0) { return 'SDK_FAILED_VALIDATION' }
         try { Get-TACanaryTableIdentity -Snapshot $After | Out-Null }
         catch { return 'STATE_CHANGED' }
-        return 'SDK_CANARY_ROOT_VERIFIED'
+        return 'CORRECT_LOGICALNAME_CANARY_VERIFIED'
     }
     if ($counts.Entity -eq 0) {
-        if ($ExecuteResult.Succeeded) { return 'SDK_NO_ROOT_CREATED' }
+        if ($ExecuteResult.Succeeded) { return 'NO_ROOT_CREATED' }
         return 'SDK_UNCERTAIN'
     }
     'STATE_CHANGED'
@@ -4435,20 +4496,28 @@ function Invoke-SdkTaEntityCanary {
         $script:LastStage = 'Fresh clean nine-component and protected-state reconciliation'
         $cleanSnapshot = Get-TargetSnapshot
         $cleanState = Assert-SdkTaEntityCanaryCleanState -Before $InitialSnapshot -After $cleanSnapshot
+        $metadataIdentity = Get-SdkTaCanaryMetadataIdentity -Snapshot $cleanSnapshot
         if ($cleanState.Identity.TaEntityId -cne $finalIdentity.TaEntityId -or
+            $cleanState.Identity.TaMetadataId -cne $metadataIdentity.TaMetadataId -or
+            $metadataIdentity.TaEntityId -cne $cleanState.Identity.TaEntityId -or
+            $metadataIdentity.SystemEntityId -cne $finalIdentity.SystemEntityId -or
             $cleanState.Identity.SystemEntityId -cne $finalIdentity.SystemEntityId) {
             throw 'STATE_CHANGED: freshly resolved TA/system entity identity changed after removal.'
         }
         $sdkRequest = New-TACanarySdkRequest -AppId $script:Target.AppModuleId `
-            -TaEntityId $cleanState.Identity.TaEntityId -SystemEntityId $cleanState.Identity.SystemEntityId
+            -TaLogicalName $metadataIdentity.TaLogicalName -TaMetadataId $metadataIdentity.TaMetadataId `
+            -SystemEntityMetadataId $metadataIdentity.SystemMetadataId
         $requestEvidence = Assert-SdkTaEntityCanaryRequest -Request $sdkRequest.Request `
-            -TaEntityId $cleanState.Identity.TaEntityId -SystemEntityId $cleanState.Identity.SystemEntityId
+            -TaMetadataId $metadataIdentity.TaMetadataId `
+            -SystemEntityMetadataId $metadataIdentity.SystemMetadataId
         $addFingerprint = $requestEvidence.Fingerprint
         $script:LastStage = 'Fresh immediate pre-Execute clean-state and identity guards'
         $immediateSnapshot = Get-TargetSnapshot
         $immediateState = Assert-SdkTaEntityCanaryCleanState -Before $InitialSnapshot -After $immediateSnapshot
-        if ($immediateState.Identity.TaEntityId -cne $cleanState.Identity.TaEntityId -or
-            $immediateState.Identity.SystemEntityId -cne $cleanState.Identity.SystemEntityId) {
+        if ($immediateState.Identity.TaEntityId -cne $metadataIdentity.TaEntityId -or
+            $immediateState.Identity.TaMetadataId -cne $metadataIdentity.TaMetadataId -or
+            $immediateState.Identity.SystemEntityId -cne $metadataIdentity.SystemEntityId -or
+            $immediateState.Identity.SystemEntityId -cne $metadataIdentity.SystemEntityId) {
             throw 'STATE_CHANGED: TA/system identity changed immediately before SDK Execute.'
         }
         if (-not $clientState.Client.IsReady -or
@@ -4463,8 +4532,9 @@ function Invoke-SdkTaEntityCanary {
         }
         $script:LastStage = 'Execute one SDK AddAppComponentsRequest'
         $executeResult = Invoke-SdkTaEntityCanaryExecuteOnce -Client $clientState.Client `
-            -Request $sdkRequest.Request -TaEntityId $cleanState.Identity.TaEntityId `
-            -SystemEntityId $cleanState.Identity.SystemEntityId -ExpectedFingerprint $addFingerprint
+            -Request $sdkRequest.Request -TaMetadataId $metadataIdentity.TaMetadataId `
+            -SystemEntityMetadataId $metadataIdentity.SystemMetadataId `
+            -ExpectedFingerprint $addFingerprint
         $script:LastStage = 'GET-only SDK AddAppComponents reconciliation'
         $postSnapshot = Get-TargetSnapshot
         $protected = Get-TACanaryProtectedStateUnchanged -Before $InitialSnapshot -After $postSnapshot
@@ -4495,6 +4565,12 @@ function Invoke-SdkTaEntityCanary {
                 CliToolBundleVersion = $clientState.CliToolBundleVersion
             }
             SdkRequest = $requestEvidence
+            TaMetadataIdentity = [pscustomobject]@{
+                LogicalName = $metadataIdentity.TaLogicalName
+                MetadataIdMatchesEntityId = $metadataIdentity.TaMetadataId -ceq $metadataIdentity.TaEntityId
+                MetadataIdDiffersFromSystemEntity = $metadataIdentity.TaMetadataId -cne $metadataIdentity.SystemMetadataId
+                ObjectTypeCodeValid = $metadataIdentity.TaObjectTypeCode -gt 0
+            }
             ExecuteResult = $executeResult
             PostExecuteInventory = $postSnapshot.RawAppComponentTypeCounts
             EntityRootResolution = @($postSnapshot.EntityResolutionDiagnostics | ForEach-Object {
@@ -4538,6 +4614,7 @@ function Invoke-SdkTaEntityCanary {
     catch {
         $status = if ($_.Exception.Message -like 'STATE_CHANGED:*') { 'STATE_CHANGED' }
             elseif ($script:SdkExecuteCount -gt 0) { 'SDK_UNCERTAIN' }
+            elseif ($remove -and $remove.Status -eq 'CLEAN_9_RECONCILED') { 'SDK_FAILED_VALIDATION' }
             else { 'REMOVE_STAGE_FAILED' }
         [pscustomobject]@{
             Status = $status
@@ -4591,7 +4668,7 @@ function Invoke-Main {
         }
         $snapshot = $null
         try {
-            $script:LastStage = 'Fresh guarded Phase 2D.3K preflight'
+            $script:LastStage = 'Fresh guarded Phase 2D.3L preflight'
             $snapshot = Get-TargetSnapshot
         }
         catch {

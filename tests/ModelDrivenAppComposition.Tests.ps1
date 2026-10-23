@@ -1224,7 +1224,7 @@ $canaryAfterFixture = [pscustomobject]@{
         ApprovedTables = @([pscustomobject]@{
             LogicalName = 'os_sr_ta'; MetadataSurfaceFound = $true
             EntityTableSurfaceFound = $true; EntityTableRowCount = 1
-            EntityTableIdentityUnambiguous = $true; EntityId = $taCanaryId
+            EntityTableIdentityUnambiguous = $true; EntityId = $taCanaryId; MetadataId = $taCanaryId
             LogicalNamesAgree = $true; MetadataIdEqualsEntityId = $true
             PayloadEntityIdMatchesMetadataId = $true; PayloadEntityIdMatchesEntityId = $true
             MetadataObjectTypeCode = 11005; EntityObjectTypeCodes = @(11005); ObjectTypeCodesAgree = $true
@@ -1280,8 +1280,8 @@ Assert-Test ($canaryForensics.Sdk.Available -and
     $canaryForensics.Sdk.RequestType -ceq 'Microsoft.Crm.Sdk.Messages.AddAppComponentsRequest' -and
     $canaryForensics.Sdk.ComponentsType -ceq 'Microsoft.Xrm.Sdk.EntityReferenceCollection' -and
     $canaryForensics.Sdk.ComponentCount -eq 1 -and
-    $canaryForensics.Sdk.LogicalName -ceq 'entity' -and
-    $canaryForensics.Sdk.ComponentIdMatchesTaEntityId -and
+    $canaryForensics.Sdk.LogicalName -ceq 'os_sr_ta' -and
+    $canaryForensics.Sdk.ComponentIdMatchesTaMetadataId -and
     $canaryForensics.Sdk.AppIdMatchesSrapp -and
     $canaryForensics.Sdk.ExecuteCalls -eq 0) `
     'Construct one real SDK EntityReferenceCollection and AddAppComponentsRequest without Execute'
@@ -1305,29 +1305,44 @@ $executeCalls = @($forensicsAst.FindAll({
 }, $true))
 Assert-Test ($executeCalls.Count -eq 0) 'Diagnostic and SDK construction helpers contain no Execute invocation'
 $sdkRequestFixture = New-TACanarySdkRequest -AppId $script:Target.AppModuleId `
-    -TaEntityId $taCanaryId -SystemEntityId $systemEntityCanaryId
+    -TaLogicalName 'os_sr_ta' -TaMetadataId $taCanaryId `
+    -SystemEntityMetadataId $systemEntityCanaryId
 $sdkRequestEvidence = Assert-SdkTaEntityCanaryRequest -Request $sdkRequestFixture.Request `
-    -TaEntityId $taCanaryId -SystemEntityId $systemEntityCanaryId
+    -TaMetadataId $taCanaryId -SystemEntityMetadataId $systemEntityCanaryId
 Assert-Test ($sdkRequestEvidence.ComponentCount -eq 1 -and
-    $sdkRequestEvidence.LogicalName -ceq 'entity' -and
-    $sdkRequestEvidence.ComponentIdAlias -ceq 'os_sr_ta' -and
+    $sdkRequestEvidence.LogicalName -ceq 'os_sr_ta' -and
+    $sdkRequestEvidence.ComponentIdAlias -ceq 'os_sr_ta.MetadataId' -and
+    $sdkRequestEvidence.ComponentIdMatchesTaMetadataId -and
+    $sdkRequestEvidence.ComponentIdDiffersFromSystemMetadataId -and
     $sdkRequestEvidence.AppIdAlias -ceq 'srapp' -and
     $sdkRequestEvidence.Fingerprint -match '^[0-9a-f]{64}$') `
-    'Fingerprint one SDK entity reference using safe logical aliases only'
+    'Fingerprint one os_sr_ta SDK EntityReference using MetadataId and safe aliases only'
 Assert-Rejected {
     $sdkRequestFixture.Request.Components[0].Id = [guid]$systemEntityCanaryId
     Assert-SdkTaEntityCanaryRequest -Request $sdkRequestFixture.Request `
-        -TaEntityId $taCanaryId -SystemEntityId $systemEntityCanaryId
-} 'Reject the system entity ID as the TA SDK component ID' 'freshly verified TA table'
+        -TaMetadataId $taCanaryId -SystemEntityMetadataId $systemEntityCanaryId
+} 'Reject the system entity MetadataId as the TA SDK component ID' 'freshly verified TA MetadataId'
 $sdkRequestFixture = New-TACanarySdkRequest -AppId $script:Target.AppModuleId `
-    -TaEntityId $taCanaryId -SystemEntityId $systemEntityCanaryId
+    -TaLogicalName 'os_sr_ta' -TaMetadataId $taCanaryId `
+    -SystemEntityMetadataId $systemEntityCanaryId
 Assert-Rejected {
-    $sdkRequestFixture.Request.Components[0].LogicalName = 'os_sr_ta'
+    $sdkRequestFixture.Request.Components[0].LogicalName = 'entity'
     Assert-SdkTaEntityCanaryRequest -Request $sdkRequestFixture.Request `
-        -TaEntityId $taCanaryId -SystemEntityId $systemEntityCanaryId
-} 'Require the SDK EntityReference logical name `entity`' 'freshly verified TA table'
+        -TaMetadataId $taCanaryId -SystemEntityMetadataId $systemEntityCanaryId
+} 'Reproduce and reject EntityReference(entity, TA MetadataId) from Phase 2D.3K' 'exactly one os_sr_ta reference'
+Assert-Rejected {
+    New-TACanarySdkRequest -AppId $script:Target.AppModuleId `
+        -TaLogicalName 'entity' -TaMetadataId $taCanaryId `
+        -SystemEntityMetadataId $systemEntityCanaryId
+} 'Reject system logical name before SDK request construction' 'os_sr_ta logical name'
+Assert-Rejected {
+    New-TACanarySdkRequest -AppId $script:Target.AppModuleId `
+        -TaLogicalName 'os_sr_ta' -TaMetadataId $systemEntityCanaryId `
+        -SystemEntityMetadataId $systemEntityCanaryId
+} 'Reject system MetadataId before SDK request construction' 'distinct, valid TA/system'
 $sdkRequestFixture = New-TACanarySdkRequest -AppId $script:Target.AppModuleId `
-    -TaEntityId $taCanaryId -SystemEntityId $systemEntityCanaryId
+    -TaLogicalName 'os_sr_ta' -TaMetadataId $taCanaryId `
+    -SystemEntityMetadataId $systemEntityCanaryId
 $dependencyFixtureRoot = Join-Path $env:TEMP "bso-sr-sdk-dependency-$([guid]::NewGuid().ToString('N'))"
 try {
     $standardDiPath = Join-Path $dependencyFixtureRoot `
@@ -1396,15 +1411,15 @@ $retryClientFixture | Add-Member -MemberType ScriptMethod -Name Execute -Value {
 }
 $script:SdkExecuteCount = 0
 $sdkExecuteResult = Invoke-SdkTaEntityCanaryExecuteOnce -Client $retryClientFixture `
-    -Request $sdkRequestFixture.Request -TaEntityId $taCanaryId `
-    -SystemEntityId $systemEntityCanaryId -ExpectedFingerprint $sdkRequestEvidence.Fingerprint
+    -Request $sdkRequestFixture.Request -TaMetadataId $taCanaryId `
+    -SystemEntityMetadataId $systemEntityCanaryId -ExpectedFingerprint $sdkRequestEvidence.Fingerprint
 Assert-Test ($sdkExecuteResult.Attempted -and $sdkExecuteResult.Succeeded -and
     $retryClientFixture.ExecuteCalls -eq 1 -and $script:SdkExecuteCount -eq 1) `
     'Execute the SDK request exactly once after validating zero retries and request shape'
 Assert-Rejected {
     Invoke-SdkTaEntityCanaryExecuteOnce -Client $retryClientFixture `
-        -Request $sdkRequestFixture.Request -TaEntityId $taCanaryId `
-        -SystemEntityId $systemEntityCanaryId -ExpectedFingerprint $sdkRequestEvidence.Fingerprint
+        -Request $sdkRequestFixture.Request -TaMetadataId $taCanaryId `
+        -SystemEntityMetadataId $systemEntityCanaryId -ExpectedFingerprint $sdkRequestEvidence.Fingerprint
 } 'Block a second SDK Execute attempt' 'no prior Execute'
 Assert-Test ($retryClientFixture.ExecuteCalls -eq 1) 'Second Execute guard does not call ServiceClient again'
 $retryClientFixture.ExecuteCalls = 0
@@ -1414,8 +1429,8 @@ $retryClientFixture | Add-Member -MemberType ScriptMethod -Name Execute -Value {
 } -Force
 $script:SdkExecuteCount = 0
 $sdkExceptionResult = Invoke-SdkTaEntityCanaryExecuteOnce -Client $retryClientFixture `
-    -Request $sdkRequestFixture.Request -TaEntityId $taCanaryId `
-    -SystemEntityId $systemEntityCanaryId -ExpectedFingerprint $sdkRequestEvidence.Fingerprint
+    -Request $sdkRequestFixture.Request -TaMetadataId $taCanaryId `
+    -SystemEntityMetadataId $systemEntityCanaryId -ExpectedFingerprint $sdkRequestEvidence.Fingerprint
 Assert-Test (-not $sdkExceptionResult.Succeeded -and $sdkExceptionResult.Attempted -and
     $retryClientFixture.ExecuteCalls -eq 1 -and $script:SdkExecuteCount -eq 1) `
     'SDK exception path records one attempt and never retries'
@@ -1448,7 +1463,7 @@ $sdkOutcomeProtected = [pscustomobject]@{
 }
 Assert-Test ((Get-SdkTaEntityCanaryOutcome -Before $canaryBeforeFixture -After $canaryAfterFixture `
     -ProtectedState $sdkOutcomeProtected -ExecuteResult ([pscustomobject]@{ Succeeded = $true; HttpStatus = $null })) -ceq
-    'SDK_CANARY_ROOT_VERIFIED') 'Reconcile one SDK TA root by the entities logical-name identity chain'
+    'CORRECT_LOGICALNAME_CANARY_VERIFIED') 'Reconcile one SDK TA root by the entities logical-name identity chain'
 $sdkWrongRootFixture = $canaryAfterFixture.PSObject.Copy()
 $sdkWrongRootFixture.EntityResolutionDiagnostics = @([pscustomobject]@{
     ReturnedRowCount = 1; NormalizedLogicalName = 'entity'; EntityIdMatchesQueriedObjectId = @($true)
@@ -1456,7 +1471,7 @@ $sdkWrongRootFixture.EntityResolutionDiagnostics = @([pscustomobject]@{
 })
 Assert-Test ((Get-SdkTaEntityCanaryOutcome -Before $canaryBeforeFixture -After $sdkWrongRootFixture `
     -ProtectedState $sdkOutcomeProtected -ExecuteResult ([pscustomobject]@{ Succeeded = $true; HttpStatus = $null })) -ceq
-    'SDK_WRONG_SYSTEM_ROOT_CREATED') 'Classify a recreated system entity root without automatic removal'
+    'SYSTEM_ENTITY_ROOT_RECREATED') 'Classify a recreated system entity root without automatic removal'
 $sdkWrongEntityFixture = $canaryAfterFixture.PSObject.Copy()
 $sdkWrongEntityFixture.EntityResolutionDiagnostics = @([pscustomobject]@{
     ReturnedRowCount = 1; NormalizedLogicalName = 'os_sr_pos'; EntityIdMatchesQueriedObjectId = @($true)
@@ -1464,14 +1479,14 @@ $sdkWrongEntityFixture.EntityResolutionDiagnostics = @([pscustomobject]@{
 })
 Assert-Test ((Get-SdkTaEntityCanaryOutcome -Before $canaryBeforeFixture -After $sdkWrongEntityFixture `
     -ProtectedState $sdkOutcomeProtected -ExecuteResult ([pscustomobject]@{ Succeeded = $true; HttpStatus = $null })) -ceq
-    'SDK_WRONG_ENTITY_ROOT_CREATED') 'Classify any non-TA table root'
+    'WRONG_ENTITY_ROOT_CREATED') 'Classify any non-TA table root'
 $sdkMultipleRootsFixture = $canaryAfterFixture.PSObject.Copy()
 $sdkMultipleRootsFixture.RawAppComponentTypeCounts = [pscustomobject]@{
     SiteMap = 1; Entity = 2; Form = 4; View = 4; Other = 0; Total = 11
 }
 Assert-Test ((Get-SdkTaEntityCanaryOutcome -Before $canaryBeforeFixture -After $sdkMultipleRootsFixture `
     -ProtectedState $sdkOutcomeProtected -ExecuteResult ([pscustomobject]@{ Succeeded = $true; HttpStatus = $null })) -ceq
-    'SDK_MULTIPLE_ROOTS_CREATED') 'Classify duplicate SDK entity roots'
+    'MULTIPLE_ROOTS_CREATED') 'Classify duplicate SDK entity roots'
 $sdkNoRootFixture = $canaryAfterFixture.PSObject.Copy()
 $sdkNoRootFixture.RawAppComponentTypeCounts = [pscustomobject]@{
     SiteMap = 1; Entity = 0; Form = 4; View = 4; Other = 0; Total = 9
@@ -1479,7 +1494,7 @@ $sdkNoRootFixture.RawAppComponentTypeCounts = [pscustomobject]@{
 $sdkNoRootFixture.EntityResolutionDiagnostics = @()
 Assert-Test ((Get-SdkTaEntityCanaryOutcome -Before $canaryBeforeFixture -After $sdkNoRootFixture `
     -ProtectedState $sdkOutcomeProtected -ExecuteResult ([pscustomobject]@{ Succeeded = $true; HttpStatus = $null })) -ceq
-    'SDK_NO_ROOT_CREATED') 'Classify a completed SDK Execute without a root'
+    'NO_ROOT_CREATED') 'Classify a completed SDK Execute without a root'
 Assert-Test ((Get-SdkTaEntityCanaryOutcome -Before $canaryBeforeFixture -After $sdkNoRootFixture `
     -ProtectedState $sdkOutcomeProtected -ExecuteResult ([pscustomobject]@{ HttpStatus = 401 })) -ceq
     'SDK_FAILED_AUTH') 'Classify SDK authentication failure'
@@ -1531,7 +1546,7 @@ $canaryPreflightFixture = [pscustomobject]@{
         ApprovedTables = @([pscustomobject]@{
             LogicalName = 'os_sr_ta'; MetadataSurfaceFound = $true
             EntityTableSurfaceFound = $true; EntityTableRowCount = 1
-            EntityTableIdentityUnambiguous = $true; EntityId = $taCanaryId
+            EntityTableIdentityUnambiguous = $true; EntityId = $taCanaryId; MetadataId = $taCanaryId
             LogicalNamesAgree = $true; MetadataIdEqualsEntityId = $true
             PayloadEntityIdMatchesMetadataId = $true; PayloadEntityIdMatchesEntityId = $true
             MetadataObjectTypeCode = 11005; EntityObjectTypeCodes = @(11005); ObjectTypeCodesAgree = $true
@@ -1542,6 +1557,69 @@ $canaryPreflightIdentity = Assert-TACanaryPreflight -Snapshot $canaryPreflightFi
 Assert-Test ($canaryPreflightIdentity.TaEntityId -ceq $taCanaryId -and
     $canaryPreflightIdentity.SystemEntityId -ceq $systemEntityCanaryId) `
     'Pass exact nine-component, identity, role, app, Site Map and TA metadata preflight'
+$originalGetEntityDefinitionByLogicalNameForSdk = (Get-Command Get-EntityDefinitionByLogicalName -CommandType Function).ScriptBlock
+$originalGetEntityRowsByLogicalNameForSdk = (Get-Command Get-EntityRowsByLogicalName -CommandType Function).ScriptBlock
+$script:SdkMetadataLookupNames = [System.Collections.Generic.List[string]]::new()
+Set-Item -Path Function:Get-EntityDefinitionByLogicalName -Value {
+    param([string]$LogicalName)
+    $script:SdkMetadataLookupNames.Add("metadata:$LogicalName")
+    if ($LogicalName -ceq 'os_sr_ta') {
+        return [pscustomobject]@{
+            MetadataId = $taCanaryId; LogicalName = 'os_sr_ta'; ObjectTypeCode = 11005
+        }
+    }
+    [pscustomobject]@{
+        MetadataId = $systemEntityCanaryId; LogicalName = 'entity'; ObjectTypeCode = 1
+    }
+}
+Set-Item -Path Function:Get-EntityRowsByLogicalName -Value {
+    param([string]$LogicalName)
+    $script:SdkMetadataLookupNames.Add("entities:$LogicalName")
+    if ($LogicalName -ceq 'os_sr_ta') {
+        return @([pscustomobject]@{
+            entityid = $taCanaryId; logicalname = 'os_sr_ta'; objecttypecode = 11005
+        })
+    }
+    @([pscustomobject]@{
+        entityid = $systemEntityCanaryId; logicalname = 'entity'; objecttypecode = 1
+    })
+}
+try {
+    $sdkMetadataIdentity = Get-SdkTaCanaryMetadataIdentity -Snapshot $canaryPreflightFixture
+    Assert-Test ($sdkMetadataIdentity.TaLogicalName -ceq 'os_sr_ta' -and
+        $sdkMetadataIdentity.TaMetadataId -ceq $taCanaryId -and
+        $sdkMetadataIdentity.TaEntityId -ceq $taCanaryId -and
+        $sdkMetadataIdentity.TaObjectTypeCode -eq 11005 -and
+        $sdkMetadataIdentity.SystemLogicalName -ceq 'entity' -and
+        $sdkMetadataIdentity.SystemMetadataId -ceq $systemEntityCanaryId -and
+        $sdkMetadataIdentity.SystemEntityId -ceq $systemEntityCanaryId -and
+        $sdkMetadataIdentity.TaMetadataId -cne $sdkMetadataIdentity.SystemMetadataId) `
+        'Resolve fresh TA/system MetadataId and entities identity from both GET-only surfaces'
+    Assert-Test ($script:SdkMetadataLookupNames.Count -eq 4 -and
+        @($script:SdkMetadataLookupNames | Where-Object { $_ -ceq 'metadata:os_sr_ta' }).Count -eq 1 -and
+        @($script:SdkMetadataLookupNames | Where-Object { $_ -ceq 'metadata:entity' }).Count -eq 1 -and
+        @($script:SdkMetadataLookupNames | Where-Object { $_ -ceq 'entities:os_sr_ta' }).Count -eq 1 -and
+        @($script:SdkMetadataLookupNames | Where-Object { $_ -ceq 'entities:entity' }).Count -eq 1) `
+        'Resolve both logical tables from EntityDefinitions and entities exactly once'
+    Set-Item -Path Function:Get-EntityDefinitionByLogicalName -Value {
+        param([string]$LogicalName)
+        if ($LogicalName -ceq 'os_sr_ta') {
+            return [pscustomobject]@{
+                MetadataId = $otherTableCanaryId; LogicalName = 'os_sr_ta'; ObjectTypeCode = 11005
+            }
+        }
+        [pscustomobject]@{
+            MetadataId = $systemEntityCanaryId; LogicalName = 'entity'; ObjectTypeCode = 1
+        }
+    }
+    Assert-Rejected {
+        Get-SdkTaCanaryMetadataIdentity -Snapshot $canaryPreflightFixture
+    } 'Reject MetadataId disagreement with the approved TA table identity' 'do not agree'
+}
+finally {
+    Set-Item -Path Function:Get-EntityDefinitionByLogicalName -Value $originalGetEntityDefinitionByLogicalNameForSdk
+    Set-Item -Path Function:Get-EntityRowsByLogicalName -Value $originalGetEntityRowsByLogicalNameForSdk
+}
 $sdkWrongRootPreflightFixture = $canaryPreflightFixture.PSObject.Copy()
 $sdkWrongRootPreflightFixture.SiteMap = [pscustomobject]@{
     Id = $script:Target.SiteMapId; UniqueName = 'srapp'; IsAppAware = $true
@@ -1565,7 +1643,8 @@ $sdkWrongRootPreflightFixture.EntityRootRepairEvidence = [pscustomobject]@{
             [pscustomobject]@{
                 LogicalName = $name; MetadataSurfaceFound = $true; EntityTableSurfaceFound = $true
                 EntityTableRowCount = 1; EntityTableIdentityUnambiguous = $true
-                LogicalNamesAgree = $true; MetadataIdEqualsEntityId = $true; EntityId = $reference.TableMetadataId
+                LogicalNamesAgree = $true; MetadataIdEqualsEntityId = $true
+                EntityId = $reference.TableMetadataId; MetadataId = $reference.TableMetadataId
                 PayloadEntityIdMatchesMetadataId = $true; PayloadEntityIdMatchesEntityId = $true
                 MetadataObjectTypeCode = 11005; EntityObjectTypeCodes = @(11005); ObjectTypeCodesAgree = $true
             }

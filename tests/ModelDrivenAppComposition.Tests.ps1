@@ -80,6 +80,16 @@ $syntheticExportViews = @(Get-ExportGuidIds -Document $syntheticExportXml -Paren
 Assert-Test ($syntheticTarget.MainFormId -in $syntheticExportForms -and $syntheticTarget.ActiveViewId -in $syntheticExportViews) 'Extract exact Main form and public view IDs from Solution XML'
 $payloads = @(Get-AppComponentPayloads -Target $syntheticTarget)
 Assert-Test ($payloads.Count -eq 3) 'Exactly three existing app components are planned'
+$fingerprintTestPayload = @([ordered]@{
+    entityid = '11111111-1111-4111-8111-111111111111'
+    '@odata.type' = 'Microsoft.Dynamics.CRM.entity'
+})
+$fingerprintTestVector = '00d78eda60324eb2545ee0915f974209286d7bfbc49881f67f2772a4ab52e50b'
+$actualFingerprint = Assert-ReferenceUiPayloadFingerprint -Payload $fingerprintTestPayload -ExpectedFingerprint $fingerprintTestVector
+Assert-Test ($actualFingerprint -ceq $fingerprintTestVector) 'Compute the deterministic approved-payload SHA-256 fingerprint'
+Assert-Rejected {
+    Assert-ReferenceUiPayloadFingerprint -Payload $fingerprintTestPayload -ExpectedFingerprint 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff'
+} 'Reject a payload with a mismatched approved fingerprint' 'fingerprint differs'
 Assert-Test ($payloads[0].'@odata.type' -ceq 'Microsoft.Dynamics.CRM.entity' -and $payloads[0].entityid -ceq $syntheticTarget.TableMetadataId) 'Entity component uses primary-key property and OData type'
 Assert-Test ($payloads[1].'@odata.type' -ceq 'Microsoft.Dynamics.CRM.systemform' -and $payloads[1].formid -ceq $syntheticTarget.MainFormId) 'Form component uses primary-key property and OData type'
 Assert-Test ($payloads[2].'@odata.type' -ceq 'Microsoft.Dynamics.CRM.savedquery' -and $payloads[2].savedqueryid -ceq $syntheticTarget.ActiveViewId) 'View component uses primary-key property and OData type'

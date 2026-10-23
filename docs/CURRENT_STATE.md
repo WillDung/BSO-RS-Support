@@ -1,6 +1,6 @@
 # Current State
 
-**Environment evidence:** Sprint 02F.3 performed a fresh authenticated preflight and final GET-only reconciliation on 22 October 2026. The verified project-table inventory is `os_sr_ta`, `os_sr_pos`, `os_sr_csrc`, and `os_sr_loc` in `os_sr_bso_rs_support`; all four tables have exact approved metadata and `PUBLISHED_NO_PENDING_DELTA`. The owner-approved AppModule `srapp` and its Site Map were freshly reverified during Phase 2D.3A below.
+**Environment evidence:** Sprint 02F.3 performed a fresh authenticated preflight and final GET-only reconciliation on 22 October 2026. The verified project-table inventory is `os_sr_ta`, `os_sr_pos`, `os_sr_csrc`, and `os_sr_loc` in `os_sr_bso_rs_support`; all four tables have exact approved metadata and `PUBLISHED_NO_PENDING_DELTA`. Phase 2D.3A freshly verified the owner-approved `srapp`; Phase 2D.3B added the 12 approved direct table/form/view components but stopped before the Site Map update, as recorded below.
 
 ## Sprint 02D Update — 22 October 2026
 
@@ -91,6 +91,18 @@ The approved VN LMV IT organization URL and environment/organization guards were
 - **Outcome: READY_FOR_REFERENCE_UI_EXECUTION.** The successful GET-only dry run used **27 Dataverse Web API GET** and **0 writes**. Across all guarded dry-run attempts and focused read-only diagnostics in this Phase 2D.3A continuation, the recorded total is **138 GET**; the five PAC Solution exports are separate read-only CLI operations and are excluded from the Web API counter. Cumulative counts: **0 AddAppComponents POST**, **0 Site Map PATCH**, **0 other POST**, **0 PublishXml**, **0 app publish**, **0 role changes**, and **0 retries**.
 - Regression validation passed: **89** app-composition assertions, **550** provisioning/recovery assertions, **11** readiness assertions, and `git diff --check`. No Dataverse write or publication was performed. The next task is the separately invoked, already-authorized bounded Phase 2D.3 Apply; it must stop on any changed preflight condition and must not publish `srapp`.
 
+## Phase 2D.3B Update — 23 October 2026 (Partial State)
+
+The owner-authorized Apply performed one bounded AddAppComponents operation after a fresh guarded preflight and exact payload fingerprint check. Its GET-only read-back confirmed all 12 approved components plus the existing Site Map. The operation then stopped at a pre-PATCH integrity gate. No Site Map PATCH, retry, or publication was performed.
+
+- The final preflight re-matched the VN LMV IT guards and PAC/Az/WhoAmI identities, process-pinned the verified expected user, confirmed the unmanaged Solution/Publisher/prefix, existing `srapp` Active/Unpublished, the existing Site Map, expected role associations, and the Site-Map-only starting direct component set. Freshly resolved payload SHA-256 matched the approved value `ac66583cc589e1da351cf95025e3a902d8aa54484e9e68f1ba10ee6569269a50`.
+- Exactly one AddAppComponents POST was dispatched. The guarded workflow proceeded to read-back, so it returned a 2xx response; the exact HTTP status was not retained in the sanitized execution summary. No retry occurred.
+- GET-only reconciliation found exactly 13 direct components: one Site Map, four entities, four Main forms, and four views. The existing roles remained System Administrator and System Customizer. `srapp` remains Active/Unpublished. The existing Site Map remains Published with its placeholder navigation; it was not patched.
+- The intermediate and subsequent GET-only `ValidateApp` reads reported `ValidationSuccess=true`, zero blocking errors, and nine warnings. Eight warning entries had empty Message and CRM error code `0`; one warning read: “Entity doesn’t reference a form or view. App users will see all forms and views.” The former `App does not reference at least one entity` warning and the Site Map blocker were not present.
+- The composition controller stopped before PATCH at a pre-PATCH integrity gate. The sanitized wrapper did not retain which exact local predicate triggered that stop; do not infer a concurrent Site Map change or a role change from the exception alone. A subsequent independent GET confirmed current component, app, Site Map, and role state. No automatic repair or second write was attempted.
+- **Outcome: PARTIAL_STATE.** Counts for this task, including GET-only reconciliation after the stop: **110 GET**, **1 AddAppComponents POST** (2xx; exact status not retained), **0 Site Map PATCH**, **0 other POST**, **0 PublishXml**, **0 app publish**, **0 role changes**, and **0 retries**. No additional write was made.
+- Post-execution regression validation passed: **91** app-composition assertions, **550** provisioning/recovery assertions, **11** readiness assertions, and `git diff --check`. The local guard now checks the exact approved SHA-256 before the POST and uses the freshly reread Site Map ETag if the PATCH gate is reached.
+
 ## Facts
 
 - Sprint 02B.1 added a Position-only `-CreateOnlyRecovery` path with a fixed SHA-256 payload guard, explicit expected-user and authorization-reference gates, one-POST/no-retry controls, and GET-only reconciliation. Its initial synthetic suites passed 446 provisioning/recovery, 32 app-composition, and 11 readiness assertions. The mode was subsequently used once under separate owner authorization in Sprint 02C; the response status was not retained, and its immediate reconciliation reported Position absent. At that time no further Position create/recovery POST was authorized; Sprint 02D later separately authorized a conditional publication, which was not executed because publication state remained UNKNOWN.
@@ -123,7 +135,7 @@ Schema owner approval and remaining field/choice decisions; dedicated Dev/Test a
 
 ## Current next authorized action
 
-Phase 2D.3A is **READY_FOR_REFERENCE_UI_EXECUTION** after a fresh guarded GET-only dry run. The next task is to invoke only the already-authorized Phase 2D.3 Apply: one exact 12-component AddAppComponents POST, GET-only reconciliation and intermediate `ValidateApp`, then at most one ETag-protected PATCH to the existing Site Map, followed by final GET-only reconciliation. Stop on any changed state or failed gate. Publication, role changes, retries, and other writes are not authorized.
+Phase 2D.3B ended in **PARTIAL_STATE**: the single authorized AddAppComponents POST has already been used and the 12 components are present, but navigation remains the placeholder because the pre-PATCH integrity gate stopped execution. The next task must be GET-only diagnosis of the precise stopped predicate and the nine `ValidateApp` warnings. Do not repeat AddAppComponents or attempt a Site Map PATCH until the discrepancy is understood and a separately bounded action is authorized. Do not publish `srapp`.
 
 ## Historical next-action statement (superseded)
 

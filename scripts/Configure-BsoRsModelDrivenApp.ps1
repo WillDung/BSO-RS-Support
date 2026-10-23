@@ -47,6 +47,7 @@ $script:Target = [ordered]@{
         SubArea = 'subarea_9787e9c1'
     }
 }
+$script:ApprovedReferenceUiPayloadFingerprint = 'ac66583cc589e1da351cf95025e3a902d8aa54484e9e68f1ba10ee6569269a50'
 $script:ApiRoot = $null
 $script:AccessToken = $null
 $script:AccessTokenExpiresOn = [DateTimeOffset]::MinValue
@@ -104,6 +105,21 @@ function Get-AppComponentPayloads {
             '@odata.type' = 'Microsoft.Dynamics.CRM.savedquery'
         }
     )
+}
+
+function Assert-ReferenceUiPayloadFingerprint {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Payload,
+        [string]$ExpectedFingerprint = $script:ApprovedReferenceUiPayloadFingerprint
+    )
+    $json = ConvertTo-Json -InputObject @($Payload) -Depth 10 -Compress
+    $actualFingerprint = [Convert]::ToHexString(
+        [System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes($json))
+    ).ToLowerInvariant()
+    if ($actualFingerprint -cne $ExpectedFingerprint) {
+        throw 'Reference UI component payload fingerprint differs from the explicitly approved set.'
+    }
+    $actualFingerprint
 }
 
 function Assert-ApplyAuthorization {
@@ -1343,6 +1359,7 @@ function Invoke-ReferenceUiComposition {
         throw 'Existing Site Map ETag is missing; stop before any write.'
     }
     $payload = @(Get-ReferenceUiComponentPayloads)
+    $payloadFingerprint = Assert-ReferenceUiPayloadFingerprint -Payload $payload
     $body = [ordered]@{ AppId = [string]$Snapshot.AppModule.Id; Components = $payload }
     Assert-ReferenceUiCompositionPayload -Body $body
     $expectedRoleSnapshot = ConvertTo-Json -InputObject @($Snapshot.AppModuleRoles) -Compress
@@ -1353,6 +1370,7 @@ function Invoke-ReferenceUiComposition {
             Preflight = $Snapshot
             StartingComponentState = $startingComponents
             AddAppComponentsPayload = $body
+            AddAppComponentsPayloadFingerprint = $payloadFingerprint
             SiteMapSemanticDiff = [pscustomobject]@{
                 Before = @($Snapshot.SiteMapNavigationBefore)
                 After = @($Snapshot.SiteMapNavigationAfter)
@@ -1405,7 +1423,7 @@ function Invoke-ReferenceUiComposition {
         $script:LastStage = 'PATCH existing Site Map with If-Match'
         Invoke-DataverseRequest -Method PATCH -Path "sitemaps($($script:Target.SiteMapId))" `
             -Body ([ordered]@{ sitemapxml = $Snapshot.ProposedSiteMapXml }) `
-            -ETag ([string]$Snapshot.SiteMap.ETag) | Out-Null
+            -ETag ([string]$afterComponents.SiteMap.ETag) | Out-Null
     }
     $script:WritesAllowed = $false
 

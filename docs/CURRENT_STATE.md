@@ -1,5 +1,19 @@
 # Current State
 
+## Phase 2D.4E - Initial App Publication Verified; Browser Smoke Pending (2026-10-23)
+
+Source: explicit owner acceptance of the complete initial-publication audience/exposure, designated existing test user, Phase 2D.4D read-only access verification, and separate Phase 2D.4E single-app PublishXml authorization. Outcome: **`VERIFIED_INITIAL_APP_PUBLICATION_SMOKE_PENDING`**.
+
+- Fresh guarded checks passed for VN LMV IT, PAC/Az/WhoAmI and expected-user agreement, unmanaged Solution `os_sr_bso_rs_support`, Publisher `os_bso_rs_support` / `os`, exact Active/Unpublished `srapp`, zero current published collection matches, exact 13-component reference composition, approved roots/assets/navigation, unchanged System Administrator/System Customizer associations, and clean ValidateApp.
+- The designated existing human test account was freshly resolved exactly once, enabled, Dataverse `islicensed=true`, Read-Write, and identical to the verified caller. Its existing team-derived System Administrator app-role-family match and Global Read on all four reference tables passed. No roles, memberships, sharing, or access were changed. The licensing flag is not independent SKU/Conditional Access certification.
+- Exactly **one** app-specific PublishXml returned **HTTP 204**. ParameterXml contained only the exact existing AppModule; normalized SHA-256 matched `1aa656f1282dc288aef1b9e72308de6c10c82cc721ffc1845db01c06f31218e9`. This was **INITIAL_CURRENT_APP_PUBLICATION** of the complete current 13-component app, not navigation-only publication.
+- GET-only reconciliation verified the exact Active/Published app (`componentstate=0`), one exact published collection match, PublishedOn `2026-10-23T12:49:34Z`, published Settings / Administration navigation for TA Directory, Positions, Candidate Sources, and Locations, unchanged 13-component inventory/four roots/approved forms/views, unchanged roles, and clean ValidateApp with zero issues/errors/warnings. Published RetrieveAppComponents also returned 13 component records.
+- Explicit script-dispatched counts: **77 Dataverse GET**, including **2 ValidateApp**, **1 PublishXml**, **0 PublishAllXml**, **0 AddAppComponents**, **0 RemoveAppComponents**, **0 Site Map PATCH**, **0 role/user/team/access changes**, **0 schema/data/other writes**, **0 SDK Execute**, **0 retries**. PAC discovery/export traffic is outside the explicit GET count.
+- Actual post-publication unmanaged Solution source was exported and unpacked through PAC into session-only storage. No raw tenant-bound source was added to tracked files, no import occurred, and no commit/push occurred.
+- **Browser smoke remains NOT VERIFIED.** The integrated browser attempt redirected to Microsoft sign-in and aborted before the designated account's browser identity or app launch could be established. No interactive login/account switch or business-row inspection occurred. API publication/access evidence is not UI acceptance.
+- Baseline/final regressions and completion verification are recorded in the [automation runbook](./MODEL_DRIVEN_APP_AUTOMATION_RUNBOOK.md). Broader Phase 2D and candidate workflow capabilities are not declared complete.
+- **Next task:** the owner/designated tester performs the read-only published-app navigation/view smoke checks in an authenticated designated-user browser session, opening Information forms only for approved safe existing/synthetic records. No data creation or access repair is authorized. The single PublishXml authorization is consumed; do not rerun or retry publication.
+
 ## Phase 2D.3P - Reference Navigation Verified; App Unpublished (2026-10-23)
 
 Source: the owner's explicit single-PATCH authorization and the guarded final-navigation execution/reconciliation. Outcome: **`VERIFIED_REFERENCE_NAVIGATION_UNPUBLISHED`**.

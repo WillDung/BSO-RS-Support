@@ -633,6 +633,17 @@ Assert-Test ($wrongSystemPlan.RemovePayloadFingerprint -match '^[0-9a-f]{64}$' -
     $wrongSystemPlan.AddRequestBodyFingerprint -match '^[0-9a-f]{64}$' -and
     $wrongSystemPlan.OriginalPayloadIdSource -ceq 'ENTITYDEFINITIONS_METADATA_ID' -and
     $wrongSystemPlan.OriginalPayloadRootCause -ceq 'NOT_ESTABLISHED_BY_AVAILABLE_PAYLOAD_AND_ROOT_EVIDENCE') 'Fingerprint repair payloads while preserving unresolved original root cause'
+$zeroEntityRootPlan = Get-EntityRootRepairPlan -Components @(
+    [pscustomobject]@{ componenttype = 62; objectid = $script:Target.SiteMapId }
+    [pscustomobject]@{ componenttype = 60; objectid = $script:ResolvedReferenceComponents[0].MainForm.Id }
+    [pscustomobject]@{ componenttype = 26; objectid = $script:ResolvedReferenceComponents[0].ActiveView.Id }
+) -SystemEntityIds @() -ReferenceIdentityEvidence $rootRepairReferences `
+    -OriginalPayloadFingerprintMatches $true -RemoveActionContractValid $true -AppId $script:Target.AppModuleId
+Assert-Test ($zeroEntityRootPlan.CurrentEntityComponentCount -eq 0 -and
+    $zeroEntityRootPlan.RootClassification -ceq 'UNKNOWN' -and
+    $zeroEntityRootPlan.RemovePayloadCount -eq 0) 'Reconcile a zero-entity interim app inventory without inventing a system entity identity'
+Assert-Test ((Get-EntityResolutionAggregateClassification -Diagnostics @()) -ceq 'UNKNOWN') `
+    'Classify an empty entity-resolution inventory without rejecting the interim zero-root state'
 $safeRootDiagnostic = $wrongSystemPlan | ConvertTo-Json -Depth 10 -Compress
 Assert-Test ($safeRootDiagnostic -notmatch '[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}' -and
     $safeRootDiagnostic -match 'WRONG_SYSTEM_ENTITY_ROOTS_CONFIRMED') 'Retain sanitized root classification without raw GUIDs'
@@ -700,6 +711,137 @@ $removeContractMetadata = [xml]@'
 '@
 $removeActionContract = Get-RemoveAppComponentsContract -Metadata $removeContractMetadata
 Assert-Test ($removeActionContract.Valid -and $removeActionContract.ComponentsType -ceq 'Collection(mscrm.crmbaseentity)') 'Verify RemoveAppComponents accepts typed component collections'
+$systemEntityIdForRemoval = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+$removeWrongEntityBody = New-RemoveWrongSystemEntityPayload -AppId $script:Target.AppModuleId `
+    -SystemEntityId $systemEntityIdForRemoval
+Assert-Test ($removeWrongEntityBody.AppId -ceq $script:Target.AppModuleId -and
+    $removeWrongEntityBody.Components.Count -eq 1 -and
+    $removeWrongEntityBody.Components[0].entityid -ceq $systemEntityIdForRemoval -and
+    $removeWrongEntityBody.Components[0]['@odata.type'] -ceq 'Microsoft.Dynamics.CRM.entity') 'Build exactly one system-entity typed RemoveAppComponents component'
+Assert-Test (@($removeWrongEntityBody.Components[0].Keys | Where-Object {
+    $_ -match 'appmodulecomponentid|formid|savedqueryid|sitemapid'
+}).Count -eq 0) 'Removal payload excludes appmodulecomponent rows and protected component IDs'
+Assert-Test (@($rootRepairReferences | Where-Object {
+    (ConvertTo-NormalizedGuid -Value $_.EntityId) -ceq (ConvertTo-NormalizedGuid -Value $removeWrongEntityBody.Components[0].entityid)
+}).Count -eq 0) 'Removal payload cannot target any approved project table ID'
+$singleRemoveFingerprint = Get-PayloadFingerprint -Payload @($removeWrongEntityBody)
+Assert-Test ($singleRemoveFingerprint -match '^[0-9a-f]{64}$' -and
+    $singleRemoveFingerprint -ceq (Get-PayloadFingerprint -Payload @(
+        New-RemoveWrongSystemEntityPayload -AppId $script:Target.AppModuleId -SystemEntityId $systemEntityIdForRemoval
+    ))) 'Single logical remove payload fingerprint is deterministic'
+Assert-Rejected {
+    $invalidRemoveBody = [ordered]@{
+        AppId = $script:Target.AppModuleId
+        Components = @($removeWrongEntityBody.Components[0], $removeWrongEntityBody.Components[0])
+    }
+    Assert-RemoveWrongSystemEntityPayload -Body $invalidRemoveBody -AppId $script:Target.AppModuleId `
+        -SystemEntityId $systemEntityIdForRemoval
+} 'Reject more than one RemoveAppComponents component' 'exactly one component'
+Assert-Rejected {
+    $invalidRemoveBody = [ordered]@{
+        AppId = $script:Target.AppModuleId
+        Components = @([ordered]@{
+            entityid = $rootRepairReferences[0].EntityId
+            '@odata.type' = 'Microsoft.Dynamics.CRM.entity'
+        })
+    }
+    Assert-RemoveWrongSystemEntityPayload -Body $invalidRemoveBody -AppId $script:Target.AppModuleId `
+        -SystemEntityId $systemEntityIdForRemoval
+} 'Reject a project table ID in the remove payload' 'only the verified system entity reference'
+
+$protectedRoleFixtures = @(
+    [pscustomobject]@{ Name = 'System Administrator'; IsManaged = $true }
+    [pscustomobject]@{ Name = 'System Customizer'; IsManaged = $true }
+)
+$protectedAssetFixtures = @(
+    [pscustomobject]@{ MainFormPresentDirectly = $true; MainFormDirectMatchCount = 1; ActiveViewPresentDirectly = $true; ActiveViewDirectMatchCount = 1 }
+    [pscustomobject]@{ MainFormPresentDirectly = $true; MainFormDirectMatchCount = 1; ActiveViewPresentDirectly = $true; ActiveViewDirectMatchCount = 1 }
+    [pscustomobject]@{ MainFormPresentDirectly = $true; MainFormDirectMatchCount = 1; ActiveViewPresentDirectly = $true; ActiveViewDirectMatchCount = 1 }
+    [pscustomobject]@{ MainFormPresentDirectly = $true; MainFormDirectMatchCount = 1; ActiveViewPresentDirectly = $true; ActiveViewDirectMatchCount = 1 }
+)
+$removalBeforeFixture = [pscustomobject]@{
+    SiteMap = [pscustomobject]@{ Id = 'sitemap-id'; UniqueName = 'srapp'; SitemapXml = '<SiteMap />'; ComponentState = 0 }
+    AppModule = [pscustomobject]@{ UniqueName = 'srapp'; StateCode = 0; ComponentState = 1 }
+    AppModuleRoles = $protectedRoleFixtures
+}
+$removalAfterFullFixture = [pscustomobject]@{
+    SiteMap = [pscustomobject]@{ Id = 'sitemap-id'; UniqueName = 'srapp'; SitemapXml = '<SiteMap />'; ComponentState = 0 }
+    AppModule = [pscustomobject]@{ UniqueName = 'srapp'; StateCode = 0; ComponentState = 1 }
+    AppModuleRoles = $protectedRoleFixtures
+    DirectReferenceUiAssociationEvidence = [pscustomobject]@{
+        IntendedSiteMapPresentDirectly = $true; SiteMapCount = 1; AppAssociationMatchesForEveryComponent = $true
+        Assets = $protectedAssetFixtures
+    }
+    RawAppComponentTypeCounts = [pscustomobject]@{ SiteMap = 1; Entity = 0; Form = 4; View = 4; Other = 0; Total = 9 }
+    EntityRootRepairEvidence = [pscustomobject]@{ Plan = [pscustomobject]@{
+        CurrentComponents = @(); ProjectTableRootCounts = @{ os_sr_ta = 0; os_sr_pos = 0; os_sr_csrc = 0; os_sr_loc = 0 }
+    } }
+}
+Assert-Test ((Get-WrongSystemEntityRemovalClassification -Before $removalBeforeFixture `
+    -After $removalAfterFullFixture -WriteStatus 204 -WriteDispatched $true) -ceq 'WRONG_ROOTS_FULLY_REMOVED') `
+    'Reconcile complete duplicate-root removal while preserving protected components'
+$removalAfterPartialFixture = $removalAfterFullFixture.PSObject.Copy()
+$removalAfterPartialFixture.RawAppComponentTypeCounts = [pscustomobject]@{ SiteMap = 1; Entity = 2; Form = 4; View = 4; Other = 0; Total = 11 }
+$removalAfterPartialFixture.EntityRootRepairEvidence = [pscustomobject]@{ Plan = [pscustomobject]@{
+    CurrentComponents = @(
+        [pscustomobject]@{ ObjectIdEqualsSystemEntityId = $true }
+        [pscustomobject]@{ ObjectIdEqualsSystemEntityId = $true }
+    )
+    ProjectTableRootCounts = @{ os_sr_ta = 0; os_sr_pos = 0; os_sr_csrc = 0; os_sr_loc = 0 }
+} }
+Assert-Test ((Get-WrongSystemEntityRemovalClassification -Before $removalBeforeFixture `
+    -After $removalAfterPartialFixture -WriteStatus 204 -WriteDispatched $true) -ceq 'WRONG_ROOTS_PARTIALLY_REMOVED') `
+    'Classify partial duplicate-root removal without retry'
+$removalAfterUnchangedFixture = $removalAfterFullFixture.PSObject.Copy()
+$removalAfterUnchangedFixture.RawAppComponentTypeCounts = [pscustomobject]@{ SiteMap = 1; Entity = 4; Form = 4; View = 4; Other = 0; Total = 13 }
+$removalAfterUnchangedFixture.EntityRootRepairEvidence = [pscustomobject]@{ Plan = [pscustomobject]@{
+    CurrentComponents = @(
+        [pscustomobject]@{ ObjectIdEqualsSystemEntityId = $true }
+        [pscustomobject]@{ ObjectIdEqualsSystemEntityId = $true }
+        [pscustomobject]@{ ObjectIdEqualsSystemEntityId = $true }
+        [pscustomobject]@{ ObjectIdEqualsSystemEntityId = $true }
+    )
+    ProjectTableRootCounts = @{ os_sr_ta = 0; os_sr_pos = 0; os_sr_csrc = 0; os_sr_loc = 0 }
+} }
+Assert-Test ((Get-WrongSystemEntityRemovalClassification -Before $removalBeforeFixture `
+    -After $removalAfterUnchangedFixture -WriteStatus 204 -WriteDispatched $true) -ceq 'WRONG_ROOTS_NOT_REMOVED') `
+    'Classify a successful but non-effective single logical remove'
+$removalAfterProtectedChangeFixture = $removalAfterFullFixture.PSObject.Copy()
+$removalAfterProtectedChangeFixture.SiteMap = [pscustomobject]@{
+    Id = 'sitemap-id'; UniqueName = 'srapp'; SitemapXml = '<SiteMap changed="true" />'; ComponentState = 0
+}
+Assert-Test ((Get-WrongSystemEntityRemovalClassification -Before $removalBeforeFixture `
+    -After $removalAfterProtectedChangeFixture -WriteStatus 204 -WriteDispatched $true) -ceq 'PROTECTED_COMPONENT_CHANGED') `
+    'Classify any protected Site Map change as a stop condition'
+$removalAfterProtectedFormChangeFixture = $removalAfterFullFixture.PSObject.Copy()
+$protectedAssetsChanged = @($protectedAssetFixtures | ForEach-Object { $_.PSObject.Copy() })
+$protectedAssetsChanged[0].MainFormPresentDirectly = $false
+$removalAfterProtectedFormChangeFixture.DirectReferenceUiAssociationEvidence = [pscustomobject]@{
+    IntendedSiteMapPresentDirectly = $true; SiteMapCount = 1; AppAssociationMatchesForEveryComponent = $true
+    Assets = $protectedAssetsChanged
+}
+Assert-Test ((Get-WrongSystemEntityRemovalClassification -Before $removalBeforeFixture `
+    -After $removalAfterProtectedFormChangeFixture -WriteStatus 204 -WriteDispatched $true) -ceq 'PROTECTED_COMPONENT_CHANGED') `
+    'Classify a missing protected form as a stop condition'
+Assert-Test ((Get-WrongSystemEntityRemovalClassification -Before $removalBeforeFixture `
+    -After $removalAfterUnchangedFixture -WriteStatus 401 -WriteDispatched $true) -ceq 'FAILED_AUTH') `
+    'Classify an unauthorized single removal without retry'
+Assert-Test ((Get-WrongSystemEntityRemovalClassification -Before $removalBeforeFixture `
+    -After $removalAfterUnchangedFixture -WriteStatus 403 -WriteDispatched $true) -ceq 'FAILED_AUTHZ') `
+    'Classify a forbidden single removal without retry'
+Assert-Test ((Get-WrongSystemEntityRemovalClassification -Before $removalBeforeFixture `
+    -After $removalAfterUnchangedFixture -WriteStatus 429 -WriteDispatched $true) -ceq 'UNCERTAIN') `
+    'Classify throttled removal as uncertain without retry'
+$script:RequestCounts = @{ GET = 0; PATCH = 0; POST = 0 }
+$script:WriteResults.Clear()
+$script:WritesStarted = $false
+Assert-RemoveWrongSystemEntityWriteSequence
+$script:RequestCounts.POST = 1
+Assert-Rejected { Assert-RemoveWrongSystemEntityWriteSequence } 'Block every second logical RemoveAppComponents attempt' 'exactly one RemoveAppComponents POST'
+$script:RequestCounts.POST = 0
+$script:WritesStarted = $true
+Assert-Rejected { Assert-RemoveWrongSystemEntityWriteSequence } 'Block removal after any dispatched write' 'no prior write'
+$script:WritesStarted = $false
 
 $rootRepairAssetComponents = @(
     [pscustomobject]@{

@@ -8,6 +8,7 @@ param(
     [switch]$ReferenceUiCompositionOnly,
     [switch]$EntityIdentityDiagnosticOnly,
     [switch]$EntityRootRepairDiagnosticOnly,
+    [switch]$RemoveWrongSystemEntityRoots,
     [string]$Confirmation,
     [string]$AuthorizationReference,
     [string]$EnvironmentName = $env:BSO_RS_ENVIRONMENT_NAME,
@@ -64,6 +65,8 @@ $script:LastPath = $null
 $script:LastHttpStatus = $null
 $script:LastErrorCode = $null
 $script:LastSafeError = $null
+$script:LastRequestId = $null
+$script:LastCorrelationId = $null
 $script:LastStage = 'Startup'
 $script:ExpectedUserGuardNeedsPin = $false
 $script:EntityResolutionDiagnostics = @()
@@ -73,18 +76,23 @@ $script:EntityRootRepairEvidence = $null
 $script:FirstFailingPredicate = $null
 $script:IdentityContractFailurePredicate = $null
 $script:PayloadFingerprintDiagnostic = $null
+$script:SystemEntityIdForRemoval = $null
+$script:CurrentRawAppComponents = @()
+$script:RemovalDispatchResult = $null
 
 if (($PlanOnly -and ($DryRun -or $Apply -or $SiteMapAssociationOnly)) -or
     ($DryRun -and $Apply) -or
     ($SiteMapAssociationOnly -and $ReferenceUiCompositionOnly) -or
-    (($EntityIdentityDiagnosticOnly -or $EntityRootRepairDiagnosticOnly) -and
+    (($EntityIdentityDiagnosticOnly -or $EntityRootRepairDiagnosticOnly -or $RemoveWrongSystemEntityRoots) -and
         ($PlanOnly -or $DryRun -or $Apply -or $SiteMapAssociationOnly -or $ReferenceUiCompositionOnly -or
-            ($EntityIdentityDiagnosticOnly -and $EntityRootRepairDiagnosticOnly))) -or
+            ($EntityIdentityDiagnosticOnly -and $EntityRootRepairDiagnosticOnly) -or
+            ($RemoveWrongSystemEntityRoots -and ($EntityIdentityDiagnosticOnly -or $EntityRootRepairDiagnosticOnly)))) -or
     ($SiteMapAssociationOnly -and -not ($DryRun -or $Apply))) {
     throw 'Choose exactly one supported execution mode.'
 }
 if (-not $PlanOnly -and -not $DryRun -and -not $Apply -and
-    -not $EntityIdentityDiagnosticOnly -and -not $EntityRootRepairDiagnosticOnly) { $PlanOnly = $true }
+    -not $EntityIdentityDiagnosticOnly -and -not $EntityRootRepairDiagnosticOnly -and
+    -not $RemoveWrongSystemEntityRoots) { $PlanOnly = $true }
 
 function Get-PropertyValue {
     param([object]$Object, [Parameter(Mandatory = $true)][string]$Name)
@@ -673,7 +681,7 @@ function Get-PacIdentity {
 
 function Test-AllowsProcessExpectedUserPin {
     [bool]($SiteMapAssociationOnly -or $ReferenceUiCompositionOnly -or $EntityIdentityDiagnosticOnly -or
-        $EntityRootRepairDiagnosticOnly)
+        $EntityRootRepairDiagnosticOnly -or $RemoveWrongSystemEntityRoots)
 }
 
 function Assert-TargetInputs {
@@ -821,6 +829,24 @@ function Get-AppComponentsContract {
     }
 }
 
+function Get-SanitizedResponseGuidHeader {
+    param([object]$Headers, [string[]]$Names)
+    if ($null -eq $Headers) { return $null }
+    foreach ($name in $Names) {
+        $value = $null
+        if ($Headers -is [System.Collections.IDictionary]) {
+            $headerKey = @($Headers.Keys | Where-Object { [string]$_ -ieq $name } | Select-Object -First 1)
+            if ($headerKey.Count -eq 1) { $value = [string]$Headers[$headerKey[0]] }
+        }
+        elseif ($Headers -is [System.Net.WebHeaderCollection]) {
+            $value = [string]$Headers[$name]
+        }
+        $parsed = [guid]::Empty
+        if ([guid]::TryParse($value, [ref]$parsed)) { return $parsed.ToString('D').ToLowerInvariant() }
+    }
+    $null
+}
+
 function Invoke-DataverseRequest {
     param(
         [Parameter(Mandatory = $true)][ValidateSet('GET', 'PATCH', 'POST')][string]$Method,
@@ -828,7 +854,8 @@ function Invoke-DataverseRequest {
         [object]$Body,
         [string]$ETag
     )
-    if ($Method -ne 'GET' -and (-not $Apply -or -not $script:WritesAllowed)) {
+    if ($Method -ne 'GET' -and
+        (-not ($Apply -or $RemoveWrongSystemEntityRoots) -or -not $script:WritesAllowed)) {
         throw 'Write blocked; explicit Apply authorization gate is required.'
     }
     $uri = [Uri]::new([Uri]$script:ApiRoot, $Path)
@@ -847,10 +874,18 @@ function Invoke-DataverseRequest {
     if ($ReferenceUiCompositionOnly -and $Method -in @('POST', 'PATCH')) {
         Assert-ReferenceUiWriteSequence -Method $Method
     }
-    if ($Method -eq 'POST' -and $resource -cne 'AddAppComponents') {
+    if ($Method -eq 'POST' -and $RemoveWrongSystemEntityRoots) {
+        if ($resource -cne 'RemoveAppComponents' -or $script:RequestCounts.POST -ne 0 -or
+            $script:RequestCounts.PATCH -ne 0 -or $script:WriteResults.Count -ne 0) {
+            throw 'Only one RemoveAppComponents POST is permitted in this mode; all other writes are blocked.'
+        }
+        Assert-RemoveWrongSystemEntityPayload -Body $Body -AppId $script:Target.AppModuleId `
+            -SystemEntityId $script:SystemEntityIdForRemoval
+    }
+    elseif ($Method -eq 'POST' -and $resource -cne 'AddAppComponents') {
         throw 'POST blocked: only AddAppComponents is allowed; no create, publish, or role endpoint is allowed.'
     }
-    if ($Method -eq 'POST') {
+    if ($Method -eq 'POST' -and -not $RemoveWrongSystemEntityRoots) {
         if ($SiteMapAssociationOnly) { Assert-SiteMapAssociationPayload -Body $Body }
         elseif ($ReferenceUiCompositionOnly) { Assert-ReferenceUiCompositionPayload -Body $Body }
         else { Assert-AppComponentsPayload -Body $Body }
@@ -875,6 +910,7 @@ function Invoke-DataverseRequest {
         SkipHeaderValidation = $true
         SkipHttpErrorCheck = $true
         StatusCodeVariable = 'responseStatusCode'
+        ResponseHeadersVariable = 'responseHeaders'
         TimeoutSec = 90
         MaximumRetryCount = 0
         ErrorAction = 'Stop'
@@ -884,14 +920,21 @@ function Invoke-DataverseRequest {
         $request.Body = ConvertTo-Json -InputObject $Body -Depth 30 -Compress
     }
     $responseStatusCode = 0
+    $responseHeaders = $null
     $script:LastHttpStatus = $null
     $script:LastErrorCode = $null
     $script:LastSafeError = $null
+    $script:LastRequestId = $null
+    $script:LastCorrelationId = $null
     $script:RequestCounts[$Method]++
     $script:LastPath = $resource
     if ($Method -ne 'GET') { $script:WritesStarted = $true }
     try {
         $response = Invoke-RestMethod @request
+        $script:LastRequestId = Get-SanitizedResponseGuidHeader -Headers $responseHeaders `
+            -Names @('x-ms-service-request-id', 'req_id', 'x-ms-request-id')
+        $script:LastCorrelationId = Get-SanitizedResponseGuidHeader -Headers $responseHeaders `
+            -Names @('x-ms-correlation-request-id', 'correlationid', 'x-ms-correlation-id')
         $status = [int]$responseStatusCode
         $script:LastHttpStatus = if ($status -ge 100 -and $status -le 599) { $status } else { $null }
         if ($status -lt 200 -or $status -ge 300) {
@@ -907,6 +950,10 @@ function Invoke-DataverseRequest {
         return $response
     }
     catch {
+        $script:LastRequestId = Get-SanitizedResponseGuidHeader -Headers $responseHeaders `
+            -Names @('x-ms-service-request-id', 'req_id', 'x-ms-request-id')
+        $script:LastCorrelationId = Get-SanitizedResponseGuidHeader -Headers $responseHeaders `
+            -Names @('x-ms-correlation-request-id', 'correlationid', 'x-ms-correlation-id')
         $status = Get-HttpStatusCode -ErrorRecord $_
         if ($status) { $script:LastHttpStatus = $status }
         if (-not $script:LastSafeError) { $script:LastSafeError = 'Dataverse request failed; response details omitted.' }
@@ -1418,7 +1465,7 @@ function Get-EntityResolutionDiagnosticRows {
 }
 
 function Get-EntityResolutionAggregateClassification {
-    param([Parameter(Mandatory = $true)][object[]]$Diagnostics)
+    param([Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Diagnostics)
     $failureCategories = @($Diagnostics | Where-Object { -not $_.PredicateResult } |
         ForEach-Object { [string]$_.FailureCategory } | Where-Object { $_ } | Select-Object -Unique)
     if ($Diagnostics.Count -eq 4 -and @($Diagnostics | Where-Object { $_.PredicateResult }).Count -eq 4 -and
@@ -1543,7 +1590,7 @@ function Get-DirectReferenceUiAssociationEvidence {
 function Get-EntityRootRepairPlan {
     param(
         [Parameter(Mandatory = $true)][object[]]$Components,
-        [Parameter(Mandatory = $true)][string[]]$SystemEntityIds,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$SystemEntityIds,
         [Parameter(Mandatory = $true)][object[]]$ReferenceIdentityEvidence,
         [Parameter(Mandatory = $true)][bool]$OriginalPayloadFingerprintMatches,
         [Parameter(Mandatory = $true)][bool]$RemoveActionContractValid,
@@ -1817,6 +1864,12 @@ function Get-EntityRootRepairEvidence {
         $referenceEvidence.Add($metadataEvidence)
     }
     $systemEntityIds = @(Get-NormalizedGuidCandidates -Rows @($entityRowsByName['entity']) -PropertyName 'entityid')
+    if ($entityRowsByName['entity'].Count -eq 1 -and $systemEntityIds.Count -eq 1) {
+        $script:SystemEntityIdForRemoval = $systemEntityIds[0]
+    }
+    else {
+        $script:SystemEntityIdForRemoval = $null
+    }
     $removeContract = Get-RemoveAppComponentsContract -Metadata $Metadata
     $plan = Get-EntityRootRepairPlan -Components $Components -SystemEntityIds $systemEntityIds `
         -ReferenceIdentityEvidence $referenceEvidence.ToArray() `
@@ -1864,6 +1917,163 @@ function Get-EntityRootRepairEvidence {
             Total = $referencePayloads.Count
         }
         Plan = $plan
+    }
+}
+
+function New-RemoveWrongSystemEntityPayload {
+    param(
+        [Parameter(Mandatory = $true)][string]$AppId,
+        [Parameter(Mandatory = $true)][string]$SystemEntityId
+    )
+    $body = [ordered]@{
+        AppId = $AppId
+        Components = @(
+            [ordered]@{
+                entityid = ConvertTo-NormalizedGuid -Value $SystemEntityId
+                '@odata.type' = 'Microsoft.Dynamics.CRM.entity'
+            }
+        )
+    }
+    Assert-RemoveWrongSystemEntityPayload -Body $body -AppId $AppId -SystemEntityId $SystemEntityId
+    $body
+}
+
+function Assert-RemoveWrongSystemEntityPayload {
+    param(
+        [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Body,
+        [Parameter(Mandatory = $true)][string]$AppId,
+        [Parameter(Mandatory = $true)][string]$SystemEntityId
+    )
+    if ([string]$Body.AppId -cne $AppId -or @($Body.Keys).Count -ne 2 -or
+        @($Body.Components).Count -ne 1) {
+        throw 'RemoveAppComponents must target the existing AppId with exactly one component.'
+    }
+    $component = @($Body.Components)[0]
+    $keys = @($component.Keys | ForEach-Object { [string]$_ } | Sort-Object)
+    if (($keys -join ',') -cne '@odata.type,entityid' -or
+        [string]$component['@odata.type'] -cne 'Microsoft.Dynamics.CRM.entity' -or
+        (ConvertTo-NormalizedGuid -Value ([string]$component.entityid)) -cne
+            (ConvertTo-NormalizedGuid -Value $SystemEntityId)) {
+        throw 'RemoveAppComponents must contain only the verified system entity reference.'
+    }
+}
+
+function Assert-WrongSystemEntityRemovalPreflight {
+    param([Parameter(Mandatory = $true)][object]$Snapshot)
+    $counts = $Snapshot.RawAppComponentTypeCounts
+    $plan = $Snapshot.EntityRootRepairEvidence.Plan
+    $association = $Snapshot.DirectReferenceUiAssociationEvidence
+    if ($counts.SiteMap -ne 1 -or $counts.Entity -ne 4 -or $counts.Form -ne 4 -or
+        $counts.View -ne 4 -or $counts.Other -ne 0 -or $counts.Total -ne 13) {
+        throw 'STATE_CHANGED: direct app component counts differ from the authorized baseline.'
+    }
+    if ($plan.RootClassification -cne 'WRONG_SYSTEM_ENTITY_ROOTS_CONFIRMED' -or
+        -not $plan.AllComponentRecordIdsDistinct -or -not $plan.AllObjectIdsEqual -or
+        @($plan.ProjectTableRootCounts.Values | Where-Object { $_ -ne 0 }).Count -gt 0 -or
+        @($plan.CurrentComponents | Where-Object {
+            -not $_.ObjectIdEqualsSystemEntityId -or
+            $_.os_sr_ta -or $_.os_sr_pos -or $_.os_sr_csrc -or $_.os_sr_loc
+        }).Count -ne 0) {
+        throw 'STATE_CHANGED: current entity roots do not exactly match the confirmed wrong system-entity state.'
+    }
+    $system = $Snapshot.EntityRootRepairEvidence.SystemEntity
+    if ($system.RowCount -ne 1 -or $system.UniqueIdCount -ne 1 -or
+        @($system.LogicalNames).Count -ne 1 -or $system.LogicalNames[0] -cne 'entity' -or
+        [string]::IsNullOrWhiteSpace($script:SystemEntityIdForRemoval)) {
+        throw 'FAILED_VALIDATION: the system entity identity is missing or ambiguous.'
+    }
+    if (-not $Snapshot.EntityRootRepairEvidence.RemoveAppComponentsContract.Valid -or
+        -not $Snapshot.EntityRootRepairEvidence.Plan.ReferenceIdentityComplete -or
+        $Snapshot.ReferencePayloadFingerprint -cne $script:ApprovedReferenceUiPayloadFingerprint) {
+        throw 'FAILED_VALIDATION: supported action contract, approved project IDs, or payload source did not validate.'
+    }
+    if ($Snapshot.AppModule.UniqueName -cne $script:Target.AppUniqueName -or
+        $Snapshot.AppModule.Name -cne $script:Target.AppName -or
+        [int]$Snapshot.AppModule.StateCode -ne 0 -or [int]$Snapshot.AppModule.ComponentState -ne 1 -or
+        $Snapshot.Solution.UniqueName -cne $script:Target.SolutionUniqueName -or
+        [bool]$Snapshot.Solution.IsManaged -or
+        $Snapshot.SolutionPublisher.UniqueName -cne $script:Target.SolutionPublisherUniqueName -or
+        $Snapshot.SolutionPublisher.CustomizationPrefix -cne 'os') {
+        throw 'STATE_CHANGED: target Solution, Publisher, or adopted app identity/state changed.'
+    }
+    if ($Snapshot.SiteMap.Id -cne $script:Target.SiteMapId -or
+        $Snapshot.SiteMap.UniqueName -cne $script:Target.SiteMapUniqueName -or
+        -not $Snapshot.SiteMap.IsAppAware -or [int]$Snapshot.SiteMap.ComponentState -ne 0 -or
+        -not $association.IntendedSiteMapPresentDirectly -or
+        $association.SiteMapCount -ne 1 -or
+        -not $association.AppAssociationMatchesForEveryComponent) {
+        throw 'STATE_CHANGED: the existing Site Map or direct app association changed.'
+    }
+    $navigation = @($Snapshot.SiteMapNavigationBefore)
+    if ($navigation.Count -ne 1 -or $navigation[0].AreaTitle -cne 'Area1' -or
+        $navigation[0].GroupTitle -cne 'Group1' -or $navigation[0].Title -cne 'Subarea1' -or
+        -not [string]::IsNullOrWhiteSpace([string]$navigation[0].Entity)) {
+        throw 'STATE_CHANGED: Site Map is not the verified placeholder navigation.'
+    }
+    foreach ($asset in @($association.Assets)) {
+        if (-not $asset.MainFormPresentDirectly -or $asset.MainFormDirectMatchCount -ne 1 -or
+            -not $asset.ActiveViewPresentDirectly -or $asset.ActiveViewDirectMatchCount -ne 1) {
+            throw 'PROTECTED_COMPONENT_CHANGED: an approved Main form or public view is missing or duplicated.'
+        }
+    }
+    Assert-ApprovedAppRoles -Roles $Snapshot.AppModuleRoles
+    if ($Snapshot.AppModuleRoles.Count -ne 2) {
+        throw 'PROTECTED_COMPONENT_CHANGED: app role associations differ from the protected baseline.'
+    }
+}
+
+function Get-WrongSystemEntityRemovalClassification {
+    param(
+        [Parameter(Mandatory = $true)][object]$Before,
+        [Parameter(Mandatory = $true)][object]$After,
+        [Nullable[int]]$WriteStatus,
+        [bool]$WriteDispatched
+    )
+    $beforeRoles = ConvertTo-Json -InputObject @($Before.AppModuleRoles | Select-Object Name, IsManaged | Sort-Object Name) -Compress
+    $afterRoles = ConvertTo-Json -InputObject @($After.AppModuleRoles | Select-Object Name, IsManaged | Sort-Object Name) -Compress
+    $protectedChanged = $Before.SiteMap.Id -cne $After.SiteMap.Id -or
+        $Before.SiteMap.UniqueName -cne $After.SiteMap.UniqueName -or
+        $Before.SiteMap.SitemapXml -cne $After.SiteMap.SitemapXml -or
+        [int]$Before.SiteMap.ComponentState -ne [int]$After.SiteMap.ComponentState -or
+        $beforeRoles -cne $afterRoles -or
+        @($After.DirectReferenceUiAssociationEvidence.Assets | Where-Object {
+            -not $_.MainFormPresentDirectly -or $_.MainFormDirectMatchCount -ne 1 -or
+            -not $_.ActiveViewPresentDirectly -or $_.ActiveViewDirectMatchCount -ne 1
+        }).Count -gt 0 -or
+        [int]$After.RawAppComponentTypeCounts.SiteMap -ne 1 -or
+        [int]$After.RawAppComponentTypeCounts.Form -ne 4 -or
+        [int]$After.RawAppComponentTypeCounts.View -ne 4 -or
+        [int]$After.RawAppComponentTypeCounts.Other -ne 0 -or
+        -not $After.DirectReferenceUiAssociationEvidence.IntendedSiteMapPresentDirectly -or
+        $After.DirectReferenceUiAssociationEvidence.SiteMapCount -ne 1 -or
+        -not $After.DirectReferenceUiAssociationEvidence.AppAssociationMatchesForEveryComponent -or
+        $After.AppModule.UniqueName -cne $Before.AppModule.UniqueName -or
+        [int]$After.AppModule.StateCode -ne [int]$Before.AppModule.StateCode -or
+        [int]$After.AppModule.ComponentState -ne [int]$Before.AppModule.ComponentState
+    if ($protectedChanged) { return 'PROTECTED_COMPONENT_CHANGED' }
+    if ($WriteStatus -eq 401) { return 'FAILED_AUTH' }
+    if ($WriteStatus -eq 403) { return 'FAILED_AUTHZ' }
+    if ($WriteStatus -eq 429 -or $WriteStatus -ge 500) { return 'UNCERTAIN' }
+    if ($WriteStatus -ge 400 -and $WriteStatus -lt 500) { return 'FAILED_VALIDATION' }
+    $remaining = [int]$After.RawAppComponentTypeCounts.Entity
+    $wrongRemaining = @($After.EntityRootRepairEvidence.Plan.CurrentComponents |
+        Where-Object ObjectIdEqualsSystemEntityId).Count
+    if ($WriteDispatched -and $null -eq $WriteStatus) { return 'UNCERTAIN' }
+    if ($remaining -eq 0 -and $wrongRemaining -eq 0 -and
+        [int]$After.RawAppComponentTypeCounts.Total -eq 9) { return 'WRONG_ROOTS_FULLY_REMOVED' }
+    if ($remaining -gt 0 -and $remaining -lt 4 -and $wrongRemaining -eq $remaining) {
+        return 'WRONG_ROOTS_PARTIALLY_REMOVED'
+    }
+    if ($remaining -eq 4 -and $wrongRemaining -eq 4 -and $WriteStatus -ge 200 -and $WriteStatus -lt 300) {
+        return 'WRONG_ROOTS_NOT_REMOVED'
+    }
+    'UNCERTAIN'
+}
+
+function Assert-RemoveWrongSystemEntityWriteSequence {
+    if ($script:RequestCounts.POST -ne 0 -or $script:RequestCounts.PATCH -ne 0 -or
+        $script:WriteResults.Count -ne 0 -or $script:WritesStarted) {
+        throw 'Removal mode permits exactly one RemoveAppComponents POST and no prior write.'
     }
 }
 
@@ -1929,6 +2139,8 @@ function New-SafeStoppedExecutionSummary {
         Status = 'Stopped'
         Error = 'Operation stopped; raw exception omitted. Do not retry. Reconcile with GET before recovery.'
         ExceptionType = $ErrorRecord.Exception.GetType().Name
+        FailedParameterName = if ($ErrorRecord.Exception.PSObject.Properties['ParameterName']) { [string]$ErrorRecord.Exception.ParameterName } else { $null }
+        FailureLine = if ($ErrorRecord.InvocationInfo.ScriptLineNumber -gt 0) { $ErrorRecord.InvocationInfo.ScriptLineNumber } else { $null }
         FailedCommand = if ($ErrorRecord.Exception -is [System.Management.Automation.CommandNotFoundException]) { $ErrorRecord.Exception.CommandName } else { $null }
         Stage = $script:LastStage
         LastApiPath = if ($EntityRootRepairDiagnosticOnly) { '[SUPPRESSED]' } else { $script:LastPath }
@@ -2109,7 +2321,7 @@ function Get-TargetSnapshot {
             }
         }
     }
-    if ($EntityIdentityDiagnosticOnly -or $EntityRootRepairDiagnosticOnly) {
+    if ($EntityIdentityDiagnosticOnly -or $EntityRootRepairDiagnosticOnly -or $RemoveWrongSystemEntityRoots) {
         $script:EntityResolutionDiagnostics = @(Get-EntityResolutionDiagnosticRows -Components $rawComponents -ReferenceComponents $referenceComponents)
         $script:EntityResolutionClassification = Get-EntityResolutionAggregateClassification -Diagnostics $script:EntityResolutionDiagnostics
         $payloadsForFingerprint = @($referenceComponents | ForEach-Object { $_.Payloads })
@@ -2120,7 +2332,8 @@ function Get-TargetSnapshot {
             $script:PayloadFingerprintDiagnostic = 'MISMATCH'
             if (-not $script:FirstFailingPredicate) { $script:FirstFailingPredicate = 'REFERENCE_PAYLOAD_FINGERPRINT_MATCHES_APPROVED' }
         }
-        if ($EntityRootRepairDiagnosticOnly) {
+        if ($EntityRootRepairDiagnosticOnly -or $RemoveWrongSystemEntityRoots) {
+            $script:LastStage = 'Build guarded entity-root reconciliation evidence'
             $script:EntityRootRepairEvidence = Get-EntityRootRepairEvidence -Components $rawComponents `
                 -ReferenceComponents $referenceComponents `
                 -OriginalPayloadFingerprintMatches ($script:PayloadFingerprintDiagnostic -ceq $script:ApprovedReferenceUiPayloadFingerprint) `
@@ -2179,7 +2392,7 @@ function Get-TargetSnapshot {
             throw "Solution export does not contain the exact Main form and public view for $($reference.LogicalName)."
         }
     }
-    if ($ReferenceUiCompositionOnly -or $EntityRootRepairDiagnosticOnly) {
+    if ($ReferenceUiCompositionOnly -or $EntityRootRepairDiagnosticOnly -or $RemoveWrongSystemEntityRoots) {
         Assert-ApprovedAppRoles -Roles $roleSnapshot
     }
     $script:LastStage = 'Read current app dependency validation'
@@ -2624,6 +2837,148 @@ function Invoke-ApplySequence {
     }
 }
 
+function Invoke-RemoveWrongSystemEntityRoots {
+    param([Parameter(Mandatory = $true)][object]$Preflight)
+
+    try {
+        Assert-WrongSystemEntityRemovalPreflight -Snapshot $Preflight
+        Assert-RemoveWrongSystemEntityWriteSequence
+    }
+    catch {
+        $classification = if ($_.Exception.Message -like 'STATE_CHANGED:*') {
+            'STATE_CHANGED'
+        }
+        else {
+            'FAILED_VALIDATION'
+        }
+        return [pscustomobject]@{
+            Status = $classification
+            WriteDispatched = $false
+            WriteMayHaveOccurred = $false
+            RequestCounts = [ordered]@{} + $script:RequestCounts
+            RetryCount = 0
+            SafeError = $_.Exception.Message
+        }
+    }
+
+    $body = New-RemoveWrongSystemEntityPayload -AppId $script:Target.AppModuleId `
+        -SystemEntityId $script:SystemEntityIdForRemoval
+    $payloadFingerprint = Get-PayloadFingerprint -Payload @($body)
+    $script:RemovalDispatchResult = [pscustomobject]@{
+        Dispatched = $false
+        HttpStatus = $null
+        ErrorCode = $null
+        RequestId = $null
+        CorrelationId = $null
+        SafeError = $null
+    }
+    $script:LastStage = 'Revalidate single RemoveAppComponents payload fingerprint'
+    if ($payloadFingerprint -notmatch '^[0-9a-f]{64}$') {
+        throw 'RemoveAppComponents request fingerprint is invalid; no request sent.'
+    }
+    Assert-RemoveWrongSystemEntityPayload -Body $body -AppId $script:Target.AppModuleId `
+        -SystemEntityId $script:SystemEntityIdForRemoval
+    Assert-RemoveWrongSystemEntityWriteSequence
+
+    $script:WritesAllowed = $true
+    try {
+        $script:LastStage = 'Dispatch the one authorized RemoveAppComponents request'
+        Invoke-DataverseRequest -Method POST -Path 'RemoveAppComponents' -Body $body | Out-Null
+        $script:RemovalDispatchResult.Dispatched = $true
+        $script:RemovalDispatchResult.HttpStatus = $script:LastHttpStatus
+    }
+    catch {
+        $script:RemovalDispatchResult.Dispatched = $script:RequestCounts.POST -eq 1
+        $script:RemovalDispatchResult.HttpStatus = $script:LastHttpStatus
+        $script:RemovalDispatchResult.ErrorCode = $script:LastErrorCode
+        $script:RemovalDispatchResult.RequestId = $script:LastRequestId
+        $script:RemovalDispatchResult.CorrelationId = $script:LastCorrelationId
+        $script:RemovalDispatchResult.SafeError = $script:LastSafeError
+    }
+    finally {
+        $script:WritesAllowed = $false
+    }
+    if ($null -eq $script:RemovalDispatchResult.RequestId) {
+        $script:RemovalDispatchResult.RequestId = $script:LastRequestId
+        $script:RemovalDispatchResult.CorrelationId = $script:LastCorrelationId
+    }
+
+    $script:LastStage = 'GET-only reconciliation after the single remove attempt'
+    try {
+        $after = Get-TargetSnapshot
+    }
+    catch {
+        return [pscustomobject]@{
+            Status = 'UNCERTAIN'
+            PreRemovalInventory = $Preflight.RawAppComponentTypeCounts
+            PostRemovalInventory = $null
+            WriteResult = $script:RemovalDispatchResult
+            RemovePayload = [pscustomobject]@{
+                ComponentCount = @($body.Components).Count
+                ODataType = [string]$body.Components[0]['@odata.type']
+                EntityIdPresent = -not [string]::IsNullOrWhiteSpace([string]$body.Components[0].entityid)
+                Fingerprint = $payloadFingerprint
+            }
+            ReconciliationError = 'Post-write GET reconciliation failed; raw details omitted.'
+            RequestCounts = [ordered]@{} + $script:RequestCounts
+            RetryCount = 0
+            WritesMayHaveOccurred = $script:WritesStarted
+        }
+    }
+
+    $outcome = Get-WrongSystemEntityRemovalClassification -Before $Preflight -After $after `
+        -WriteStatus $script:RemovalDispatchResult.HttpStatus -WriteDispatched $script:RemovalDispatchResult.Dispatched
+    [pscustomobject]@{
+        Status = $outcome
+        WriteDispatched = $script:RemovalDispatchResult.Dispatched
+        WriteMayHaveOccurred = $script:WritesStarted
+        PreRemovalInventory = $Preflight.RawAppComponentTypeCounts
+        PostRemovalInventory = $after.RawAppComponentTypeCounts
+        RemainingEntityClassification = [pscustomobject]@{
+            TotalEntityRows = [int]$after.RawAppComponentTypeCounts.Entity
+            WrongSystemEntityRows = @($after.EntityRootRepairEvidence.Plan.CurrentComponents |
+                Where-Object ObjectIdEqualsSystemEntityId).Count
+            ProjectTableRoots = $after.EntityRootRepairEvidence.Plan.ProjectTableRootCounts
+        }
+        RemovePayload = [pscustomobject]@{
+            ComponentCount = @($body.Components).Count
+            ODataType = [string]$body.Components[0]['@odata.type']
+            EntityIdPresent = -not [string]::IsNullOrWhiteSpace([string]$body.Components[0].entityid)
+            Fingerprint = $payloadFingerprint
+        }
+        WriteResult = $script:RemovalDispatchResult
+        ProtectedComponents = [pscustomobject]@{
+            SiteMapPresent = $after.DirectReferenceUiAssociationEvidence.IntendedSiteMapPresentDirectly
+            SiteMapXmlUnchanged = $after.SiteMap.SitemapXml -ceq $Preflight.SiteMap.SitemapXml
+            FormsAndViewsPresent = @($after.DirectReferenceUiAssociationEvidence.Assets | Where-Object {
+                -not $_.MainFormPresentDirectly -or $_.MainFormDirectMatchCount -ne 1 -or
+                -not $_.ActiveViewPresentDirectly -or $_.ActiveViewDirectMatchCount -ne 1
+            }).Count -eq 0
+        }
+        ValidateApp = [pscustomobject]@{
+            ValidationSuccess = $after.AppValidation.ValidationSuccess
+            BlockingErrors = $after.AppValidation.BlockingErrorCount
+            Warnings = @($after.AppValidation.Issues)
+            RequiredComponents = @($after.AppValidation.Issues | ForEach-Object { $_.RequiredComponents })
+        }
+        Roles = @($after.AppModuleRoles | ForEach-Object { $_.Name })
+        AppState = [pscustomobject]@{
+            UniqueName = $after.AppModule.UniqueName
+            Active = ([int]$after.AppModule.StateCode -eq 0)
+            Unpublished = ([int]$after.AppModule.ComponentState -eq 1)
+        }
+        SiteMapNavigation = @($after.SiteMapNavigationBefore | ForEach-Object {
+            [pscustomobject]@{ Area = $_.AreaTitle; Group = $_.GroupTitle; Title = $_.Title; Entity = $_.Entity }
+        })
+        RequestCounts = [ordered]@{} + $script:RequestCounts
+        RetryCount = 0
+        PublishXml = 0
+        AppPublish = 0
+        RoleChanges = 0
+        WritesMayHaveOccurred = $script:WritesStarted
+    }
+}
+
 function Invoke-Main {
     $plan = Get-AppCompositionPlan
     if ($PlanOnly) {
@@ -2632,6 +2987,11 @@ function Invoke-Main {
     }
     if ($Apply) { Assert-ApplyAuthorization -Phrase $Confirmation -Reference $AuthorizationReference }
     $snapshot = Get-TargetSnapshot
+    if ($RemoveWrongSystemEntityRoots) {
+        $result = Invoke-RemoveWrongSystemEntityRoots -Preflight $snapshot
+        Write-Output ($result | ConvertTo-Json -Depth 30 -Compress)
+        return
+    }
     if ($EntityRootRepairDiagnosticOnly) {
         $rootRepairPlan = $snapshot.EntityRootRepairEvidence.Plan
         $referenceAssets = @($snapshot.ReferenceComponents | ForEach-Object {
@@ -2677,7 +3037,19 @@ function Invoke-Main {
             $snapshot.AppValidation.BlockingErrorCount -eq 0
         $allRepairPreconditions = $directInventoryValid -and $assetInventoryValid -and
             $siteMapAssociationValid -and $appStateValid -and $validationHasNoBlockers
-        $finalClassification = if ($rootRepairPlan.RootClassification -eq 'WRONG_SYSTEM_ENTITY_ROOTS_CONFIRMED') {
+        $zeroEntityRootState = $snapshot.RawAppComponentTypeCounts.Total -eq 9 -and
+            $snapshot.RawAppComponentTypeCounts.SiteMap -eq 1 -and
+            $snapshot.RawAppComponentTypeCounts.Entity -eq 0 -and
+            $snapshot.RawAppComponentTypeCounts.Form -eq 4 -and
+            $snapshot.RawAppComponentTypeCounts.View -eq 4 -and
+            $snapshot.RawAppComponentTypeCounts.Other -eq 0 -and
+            $snapshot.DirectReferenceUiAssociationEvidence.AppAssociationMatchesForEveryComponent -and
+            @($rootRepairPlan.ProjectTableRootCounts.Values | Where-Object { $_ -ne 0 }).Count -eq 0 -and
+            $assetInventoryValid -and $siteMapAssociationValid -and $appStateValid -and $validationHasNoBlockers
+        $finalClassification = if ($zeroEntityRootState) {
+            'ZERO_ENTITY_ROOTS_CURRENTLY'
+        }
+        elseif ($rootRepairPlan.RootClassification -eq 'WRONG_SYSTEM_ENTITY_ROOTS_CONFIRMED') {
             if ($rootRepairPlan.RepairPlanStatus -eq 'READY' -and $allRepairPreconditions) {
                 'REPAIR_PLAN_READY'
             }

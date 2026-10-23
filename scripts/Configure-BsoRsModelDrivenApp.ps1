@@ -6,6 +6,7 @@ param(
     [switch]$Apply,
     [switch]$SiteMapAssociationOnly,
     [switch]$ReferenceUiCompositionOnly,
+    [switch]$EntityIdentityDiagnosticOnly,
     [string]$Confirmation,
     [string]$AuthorizationReference,
     [string]$EnvironmentName = $env:BSO_RS_ENVIRONMENT_NAME,
@@ -64,14 +65,21 @@ $script:LastErrorCode = $null
 $script:LastSafeError = $null
 $script:LastStage = 'Startup'
 $script:ExpectedUserGuardNeedsPin = $false
+$script:EntityResolutionDiagnostics = @()
+$script:EntityResolutionClassification = 'NOT_RUN'
+$script:RetrieveAppComponentsEvidence = $null
+$script:FirstFailingPredicate = $null
+$script:IdentityContractFailurePredicate = $null
+$script:PayloadFingerprintDiagnostic = $null
 
 if (($PlanOnly -and ($DryRun -or $Apply -or $SiteMapAssociationOnly)) -or
     ($DryRun -and $Apply) -or
     ($SiteMapAssociationOnly -and $ReferenceUiCompositionOnly) -or
+    ($EntityIdentityDiagnosticOnly -and ($PlanOnly -or $Apply -or $SiteMapAssociationOnly -or $ReferenceUiCompositionOnly)) -or
     ($SiteMapAssociationOnly -and -not ($DryRun -or $Apply))) {
-    throw 'Choose exactly one of PlanOnly, DryRun, or Apply.'
+    throw 'Choose exactly one supported execution mode.'
 }
-if (-not $PlanOnly -and -not $DryRun -and -not $Apply) { $PlanOnly = $true }
+if (-not $PlanOnly -and -not $DryRun -and -not $Apply -and -not $EntityIdentityDiagnosticOnly) { $PlanOnly = $true }
 
 function Get-PropertyValue {
     param([object]$Object, [Parameter(Mandatory = $true)][string]$Name)
@@ -654,7 +662,7 @@ function Get-PacIdentity {
 }
 
 function Test-AllowsProcessExpectedUserPin {
-    [bool]($SiteMapAssociationOnly -or $ReferenceUiCompositionOnly)
+    [bool]($SiteMapAssociationOnly -or $ReferenceUiCompositionOnly -or $EntityIdentityDiagnosticOnly)
 }
 
 function Assert-TargetInputs {
@@ -818,7 +826,7 @@ function Invoke-DataverseRequest {
         throw 'Dataverse request path is outside the verified organization origin.'
     }
     $resource = [Uri]::UnescapeDataString($uri.AbsolutePath.Substring('/api/data/v9.2/'.Length))
-    if ($Method -eq 'GET' -and $resource -notmatch '^(WhoAmI$|appmodules(\(|$)|appmodulecomponents$|entities$|sitemaps(\(|$)|sitemaps/Microsoft\.Dynamics\.CRM\.RetrieveUnpublishedMultiple\(|solutions$|publishers\(|solutioncomponents$|EntityDefinitions\(|systemforms(\(|$)|savedqueries(\(|$)|roles\(|RetrieveRequiredComponents\(|ValidateApp\()') {
+    if ($Method -eq 'GET' -and $resource -notmatch '^(WhoAmI$|appmodules(\(|$)|appmodulecomponents$|entities$|sitemaps(\(|$)|sitemaps/Microsoft\.Dynamics\.CRM\.RetrieveUnpublishedMultiple\(|solutions$|publishers\(|solutioncomponents$|EntityDefinitions\(|systemforms(\(|$)|savedqueries(\(|$)|roles\(|RetrieveRequiredComponents\(|RetrieveAppComponents\(|ValidateApp\()') {
         throw 'GET blocked: endpoint is outside the app and component metadata allowlist.'
     }
     if ($Method -eq 'PATCH' -and ($resource -cne "sitemaps($($script:Target.SiteMapId))" -or
@@ -1099,17 +1107,28 @@ function Assert-AppModuleEntityIdentityContract {
     param([Parameter(Mandatory = $true)][xml]$Metadata)
     $entitySet = $Metadata.SelectSingleNode("//*[local-name()='EntitySet' and @Name='entities']")
     $entityType = $Metadata.SelectSingleNode("//*[local-name()='EntityType' and @Name='entity']")
-    if (-not $entitySet -or
-        $entitySet.GetAttribute('EntityType') -cne 'Microsoft.Dynamics.CRM.entity' -or
-        -not $entityType) {
+    if (-not $entitySet) {
+        $script:IdentityContractFailurePredicate = 'ENTITIES_ENTITYSET_PRESENT'
+        throw 'Dataverse metadata does not expose the expected entities entity set.'
+    }
+    if ($entitySet.GetAttribute('EntityType') -cne 'Microsoft.Dynamics.CRM.entity') {
+        $script:IdentityContractFailurePredicate = 'ENTITIES_ENTITYSET_TYPE_IS_ENTITY'
+        throw 'Dataverse metadata does not expose the expected entities entity set.'
+    }
+    if (-not $entityType) {
+        $script:IdentityContractFailurePredicate = 'ENTITY_ENTITYTYPE_PRESENT'
         throw 'Dataverse metadata does not expose the expected entities entity set.'
     }
     $keys = @($entityType.SelectNodes("./*[local-name()='Key']/*[local-name()='PropertyRef']") |
         ForEach-Object { $_.GetAttribute('Name') })
     $properties = @($entityType.SelectNodes("./*[local-name()='Property']") |
         ForEach-Object { $_.GetAttribute('Name') })
-    if ($keys.Count -ne 1 -or $keys[0] -cne 'entityid' -or
-        @('entityid', 'logicalname', 'name', 'objecttypecode' | Where-Object { $_ -notin $properties }).Count -gt 0) {
+    if ($keys.Count -ne 1 -or $keys[0] -cne 'entityid') {
+        $script:IdentityContractFailurePredicate = 'ENTITY_PRIMARY_KEY_IS_ENTITYID'
+        throw 'Dataverse entity metadata lacks the expected entityid/logicalname identity contract.'
+    }
+    if (@('entityid', 'logicalname', 'name', 'objecttypecode' | Where-Object { $_ -notin $properties }).Count -gt 0) {
+        $script:IdentityContractFailurePredicate = 'ENTITY_REQUIRED_PROPERTIES_PRESENT'
         throw 'Dataverse entity metadata lacks the expected entityid/logicalname identity contract.'
     }
     [pscustomobject]@{ EntitySet = 'entities'; PrimaryKey = 'entityid' }
@@ -1221,6 +1240,270 @@ function Get-AppModuleEntityRecords {
         $records.Add($record)
     }
     $records.ToArray()
+}
+
+function Get-EntityResolutionDiagnosticRows {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Components,
+        [Parameter(Mandatory = $true)][object[]]$ReferenceComponents
+    )
+    $entityComponents = @($Components | Where-Object { [int]$_.componenttype -eq 1 })
+    $diagnostics = [System.Collections.Generic.List[object]]::new()
+    $payloadIdsByName = @{}
+    foreach ($reference in $ReferenceComponents) {
+        $entityPayload = @($reference.Payloads | Where-Object {
+            $_.'@odata.type' -ceq 'Microsoft.Dynamics.CRM.entity'
+        })
+        if ($entityPayload.Count -eq 1) {
+            $payloadIdsByName[[string]$reference.LogicalName] = [string]$entityPayload[0].entityid
+        }
+    }
+    for ($index = 0; $index -lt $entityComponents.Count; $index++) {
+        $component = $entityComponents[$index]
+        $alias = 'EntityComponent{0}' -f ($index + 1)
+        $objectId = [string](Get-PropertyValue -Object $component -Name 'objectid')
+        $componentId = [string](Get-PropertyValue -Object $component -Name 'appmodulecomponentid')
+        $associatedAppIdUnique = [string](Get-PropertyValue -Object $component -Name '_appmoduleidunique_value')
+        $parsedAssociatedAppIdUnique = [guid]::Empty
+        $appAssociationMatches = [guid]::TryParse($associatedAppIdUnique.Trim('{}'), [ref]$parsedAssociatedAppIdUnique) -and
+            $parsedAssociatedAppIdUnique.ToString('D').ToLowerInvariant() -ceq
+                (ConvertTo-NormalizedGuid -Value $script:Target.AppModuleIdUnique)
+        $parsedObjectId = [guid]::Empty
+        $isValidGuid = -not [string]::IsNullOrWhiteSpace($objectId) -and
+            [guid]::TryParse($objectId.Trim('{}'), [ref]$parsedObjectId)
+        $recordCount = $null
+        $httpStatus = $null
+        $logicalNames = @()
+        $entityIdMatches = @()
+        $failureCategory = $null
+        $normalizedLogicalName = $null
+        $predicateName = 'ENTITY_OBJECTID_RESOLVED_UNIQUELY'
+        $predicateResult = $false
+        $payloadEntityIdPresent = $false
+        $objectIdEqualsPayloadId = $null
+        $payloadIdEqualsEntityId = $null
+        $innerExceptionCategory = $null
+        if (-not $isValidGuid) {
+            $recordCount = 0
+            $failureCategory = if ([string]::IsNullOrWhiteSpace($objectId)) { 'OBJECTID_MISSING' } else { 'OBJECTID_INVALID_GUID' }
+            $predicateName = 'OBJECTID_IS_VALID_GUID'
+        }
+        else {
+            $validatedObjectId = $parsedObjectId.ToString('D').ToLowerInvariant()
+            $filter = 'entityid eq ' + $validatedObjectId
+            $path = New-CollectionPath -EntitySet 'entities' -Select 'entityid,logicalname,name,objecttypecode' -Filter $filter
+            $matches = @()
+            $querySucceeded = $false
+            try {
+                $matches = @(Get-ODataRows -Path $path)
+                $httpStatus = $script:LastHttpStatus
+                if ($null -eq $httpStatus) { $httpStatus = 200 }
+                $querySucceeded = $true
+            }
+            catch {
+                $httpStatus = $script:LastHttpStatus
+                $failureCategory = if ($httpStatus -and $httpStatus -ge 400) { 'ENTITY_QUERY_HTTP_FAILURE' } else { 'ENTITY_QUERY_FAILURE' }
+                $predicateName = 'ENTITIES_RETRIEVEMULTIPLE_SUCCEEDED'
+                $innerExceptionCategory = $_.Exception.GetType().Name
+            }
+            if ($querySucceeded) {
+                $recordCount = $matches.Count
+                try {
+                    $logicalNames = @($matches | ForEach-Object { [string](Get-PropertyValue -Object $_ -Name 'logicalname') })
+                    $entityIdMatches = @($matches | ForEach-Object {
+                        $returnedEntityId = [string](Get-PropertyValue -Object $_ -Name 'entityid')
+                        $parsedReturnedId = [guid]::Empty
+                        [guid]::TryParse($returnedEntityId.Trim('{}'), [ref]$parsedReturnedId) -and
+                            $parsedReturnedId.ToString('D').ToLowerInvariant() -ceq $validatedObjectId
+                    })
+                    if ($matches.Count -eq 0) {
+                        $failureCategory = 'ENTITY_OBJECTID_NOT_RESOLVED'
+                        $predicateName = 'ENTITY_OBJECTID_RESOLVED_UNIQUELY'
+                    }
+                    elseif ($matches.Count -gt 1) {
+                        $failureCategory = 'ENTITY_OBJECTID_AMBIGUOUS'
+                        $predicateName = 'ENTITY_OBJECTID_RESOLVED_UNIQUELY'
+                    }
+                    elseif (-not $entityIdMatches[0]) {
+                        $failureCategory = 'ENTITYID_MATCHES_QUERY'
+                        $predicateName = 'ENTITYID_EQUALS_QUERIED_OBJECTID'
+                    }
+                    else {
+                        $normalizedLogicalName = $logicalNames[0]
+                        $payloadEntityIdPresent = $payloadIdsByName.ContainsKey($normalizedLogicalName)
+                        if ($payloadEntityIdPresent) {
+                            $payloadId = ConvertTo-NormalizedGuid -Value $payloadIdsByName[$normalizedLogicalName]
+                            $objectIdEqualsPayloadId = $validatedObjectId -ceq $payloadId
+                            $payloadIdEqualsEntityId = $entityIdMatches[0]
+                        }
+                        if ($normalizedLogicalName -notin $script:Target.ReferenceTableNames) {
+                            $failureCategory = 'ENTITY_LOGICALNAME_UNEXPECTED'
+                            $predicateName = 'ENTITY_LOGICALNAME_IS_APPROVED'
+                        }
+                        else {
+                            $predicateResult = $true
+                        }
+                    }
+                }
+                catch {
+                    $failureCategory = 'ENTITY_RESPONSE_PREDICATE_EVALUATION_FAILED'
+                    $predicateName = 'ENTITY_RESPONSE_IS_WELL_FORMED'
+                    $recordCount = $matches.Count
+                    $logicalNames = @()
+                    $entityIdMatches = @()
+                    $innerExceptionCategory = $_.Exception.GetType().Name
+                }
+            }
+        }
+        if (-not $predicateResult -and -not $script:FirstFailingPredicate) {
+            $script:FirstFailingPredicate = if ($failureCategory) { $failureCategory } else { $predicateName }
+        }
+        $diagnostics.Add([pscustomobject]@{
+            Alias = $alias
+            ComponentType = [int]$component.componenttype
+            ObjectIdPresent = -not [string]::IsNullOrWhiteSpace($objectId)
+            ObjectIdSyntacticallyValidGuid = [bool]$isValidGuid
+            AppModuleComponentIdPresent = -not [string]::IsNullOrWhiteSpace($componentId)
+            RootAppModuleComponentIdPresent = -not [string]::IsNullOrWhiteSpace([string](Get-PropertyValue -Object $component -Name 'rootappmodulecomponentid'))
+            RootComponentBehavior = Get-PropertyValue -Object $component -Name 'rootcomponentbehavior'
+            IsDefault = Get-PropertyValue -Object $component -Name 'isdefault'
+            IsMetadata = Get-PropertyValue -Object $component -Name 'ismetadata'
+            AppAssociationMatches = $appAssociationMatches
+            HttpStatus = $httpStatus
+            ReturnedRowCount = $recordCount
+            ReturnedLogicalNames = $logicalNames
+            EntityIdMatchesQueriedObjectId = $entityIdMatches
+            NormalizedLogicalName = $normalizedLogicalName
+            PayloadEntityIdPresent = $payloadEntityIdPresent
+            ObjectIdEqualsPayloadEntityId = $objectIdEqualsPayloadId
+            PayloadEntityIdEqualsEntityId = $payloadIdEqualsEntityId
+            PredicateName = $predicateName
+            PredicateResult = $predicateResult
+            FailureCategory = $failureCategory
+            InnerExceptionCategory = $innerExceptionCategory
+        })
+    }
+    $result = $diagnostics.ToArray()
+    if ($entityComponents.Count -ne 4) {
+        if (-not $script:FirstFailingPredicate) { $script:FirstFailingPredicate = 'ENTITY_COMPONENT_COUNT_IS_FOUR' }
+    }
+    foreach ($diagnostic in $result) {
+        if ($diagnostic.PredicateResult -and
+            @($result | Where-Object { $_.NormalizedLogicalName -ceq $diagnostic.NormalizedLogicalName }).Count -gt 1) {
+            $diagnostic.PredicateName = 'ENTITY_LOGICALNAME_IS_UNIQUE'
+            $diagnostic.PredicateResult = $false
+            $diagnostic.FailureCategory = 'ENTITY_LOGICALNAME_DUPLICATE'
+            if (-not $script:FirstFailingPredicate) { $script:FirstFailingPredicate = $diagnostic.FailureCategory }
+        }
+    }
+    $resolvedNames = @($result | Where-Object PredicateResult | ForEach-Object { $_.NormalizedLogicalName })
+    foreach ($expectedName in $script:Target.ReferenceTableNames) {
+        if (@($resolvedNames | Where-Object { $_ -ceq $expectedName }).Count -ne 1 -and
+            -not $script:FirstFailingPredicate) {
+            $script:FirstFailingPredicate = 'APPROVED_ENTITY_LOGICALNAME_SET_IS_EXACT'
+        }
+    }
+    $result
+}
+
+function Get-EntityResolutionAggregateClassification {
+    param([Parameter(Mandatory = $true)][object[]]$Diagnostics)
+    $failureCategories = @($Diagnostics | Where-Object { -not $_.PredicateResult } |
+        ForEach-Object { [string]$_.FailureCategory } | Where-Object { $_ } | Select-Object -Unique)
+    if ($Diagnostics.Count -eq 4 -and @($Diagnostics | Where-Object { $_.PredicateResult }).Count -eq 4 -and
+        @($Diagnostics.NormalizedLogicalName | Select-Object -Unique).Count -eq 4) {
+        return 'ENTITYID_MAPPING_CONFIRMED'
+    }
+    if ($failureCategories.Count -gt 1) { return 'ENTITY_MAPPING_MIXED' }
+    if ($failureCategories -contains 'ENTITY_OBJECTID_AMBIGUOUS') { return 'ENTITY_MAPPING_AMBIGUOUS' }
+    if ($failureCategories -contains 'ENTITY_OBJECTID_NOT_RESOLVED') { return 'OBJECTID_NOT_ENTITYID' }
+    if ($failureCategories -contains 'ENTITY_LOGICALNAME_UNEXPECTED') { return 'ENTITY_MAPPING_WRONG_LOGICALNAME' }
+    if ($failureCategories -contains 'ENTITY_LOGICALNAME_DUPLICATE') { return 'ENTITY_MAPPING_DUPLICATE_LOGICALNAME' }
+    if ($failureCategories.Count -gt 0) { return $failureCategories[0] }
+    'UNKNOWN'
+}
+
+function Get-RetrieveAppComponentsSafeSummary {
+    param([object]$Response)
+    $summaries = [System.Collections.Generic.List[object]]::new()
+    $visited = [System.Collections.Generic.HashSet[int]]::new()
+    $walk = {
+        param([object]$Value)
+        if ($null -eq $Value -or $Value -is [string] -or $Value.GetType().IsValueType) { return }
+        $identity = [System.Runtime.CompilerServices.RuntimeHelpers]::GetHashCode($Value)
+        if (-not $visited.Add($identity)) { return }
+        if ($Value -is [System.Collections.IDictionary]) {
+            $properties = @($Value.Keys | ForEach-Object { [string]$_ })
+            $logicalName = if ($Value.Contains('logicalname')) { [string]$Value['logicalname'] } else { $null }
+            $name = if ($Value.Contains('name')) { [string]$Value['name'] } else { $null }
+            $typeName = if ($Value.Contains('@odata.type')) { [string]$Value['@odata.type'] } else { $null }
+            if ($logicalName -or $typeName -or @($properties | Where-Object { $_ -match '^(entityid|formid|savedqueryid|sitemapid|componenttype)$' }).Count) {
+                $summaries.Add([pscustomobject]@{
+                    ODataType = $typeName
+                    AvailablePrimaryKeyFields = @($properties | Where-Object { $_ -in @('entityid', 'formid', 'savedqueryid', 'sitemapid') })
+                    ComponentType = if ($Value.Contains('componenttype')) { $Value['componenttype'] } else { $null }
+                    LogicalName = $logicalName
+                    Name = $name
+                    EntityIdPresent = $Value.Contains('entityid')
+                    FormIdPresent = $Value.Contains('formid')
+                    SavedQueryIdPresent = $Value.Contains('savedqueryid')
+                    SiteMapIdPresent = $Value.Contains('sitemapid')
+                })
+            }
+            foreach ($key in $Value.Keys) { & $walk $Value[$key] }
+        }
+        elseif ($Value -is [System.Collections.IEnumerable]) {
+            foreach ($item in $Value) { & $walk $item }
+        }
+        else {
+            $properties = @($Value.PSObject.Properties | ForEach-Object { $_.Name })
+            $logicalName = [string](Get-PropertyValue -Object $Value -Name 'logicalname')
+            $typeName = [string](Get-PropertyValue -Object $Value -Name '@odata.type')
+            if ($logicalName -or $typeName -or @($properties | Where-Object { $_ -match '^(entityid|formid|savedqueryid|sitemapid|componenttype)$' }).Count) {
+                $summaries.Add([pscustomobject]@{
+                    ODataType = $typeName
+                    AvailablePrimaryKeyFields = @($properties | Where-Object { $_ -in @('entityid', 'formid', 'savedqueryid', 'sitemapid') })
+                    ComponentType = Get-PropertyValue -Object $Value -Name 'componenttype'
+                    LogicalName = $logicalName
+                    Name = [string](Get-PropertyValue -Object $Value -Name 'name')
+                    EntityIdPresent = $properties -contains 'entityid'
+                    FormIdPresent = $properties -contains 'formid'
+                    SavedQueryIdPresent = $properties -contains 'savedqueryid'
+                    SiteMapIdPresent = $properties -contains 'sitemapid'
+                })
+            }
+            foreach ($property in $Value.PSObject.Properties) { & $walk $property.Value }
+        }
+    }
+    & $walk $Response
+    $summaries.ToArray()
+}
+
+function New-SafeStoppedExecutionSummary {
+    param([Parameter(Mandatory = $true)][System.Management.Automation.ErrorRecord]$ErrorRecord)
+    [ordered]@{
+        Status = 'Stopped'
+        Error = 'Operation stopped; raw exception omitted. Do not retry. Reconcile with GET before recovery.'
+        ExceptionType = $ErrorRecord.Exception.GetType().Name
+        FailedCommand = if ($ErrorRecord.Exception -is [System.Management.Automation.CommandNotFoundException]) { $ErrorRecord.Exception.CommandName } else { $null }
+        Stage = $script:LastStage
+        LastApiPath = $script:LastPath
+        HttpStatus = $script:LastHttpStatus
+        DataverseErrorCode = $script:LastErrorCode
+        SafeError = $script:LastSafeError
+        FirstFailingPredicate = $script:FirstFailingPredicate
+        InnerExceptionCategory = if ($ErrorRecord.Exception.InnerException) { $ErrorRecord.Exception.InnerException.GetType().Name } else { $ErrorRecord.Exception.GetType().Name }
+        EntityIdentityContractFailurePredicate = $script:IdentityContractFailurePredicate
+        EntityResolutionDiagnostics = @($script:EntityResolutionDiagnostics)
+        EntityResolutionClassification = $script:EntityResolutionClassification
+        RetrieveAppComponentsEvidence = $script:RetrieveAppComponentsEvidence
+        ReferencePayloadFingerprint = $script:PayloadFingerprintDiagnostic
+        SafeExpectedValue = if ($script:FirstFailingPredicate) { 'Exactly one entity row per valid objectid; approved logical names exactly once' } else { $null }
+        SafeObservedCategory = if ($script:EntityResolutionDiagnostics.Count) { @($script:EntityResolutionDiagnostics | ForEach-Object { $_.FailureCategory } | Where-Object { $_ }) -join ',' } else { $null }
+        WritesMayHaveOccurred = $script:WritesStarted
+        WriteResults = $script:WriteResults.ToArray()
+        RequestCounts = [ordered]@{} + $script:RequestCounts
+    }
 }
 
 function ConvertTo-SafeValidationIssueSummaries {
@@ -1361,10 +1644,58 @@ function Get-TargetSnapshot {
     $rawComponents = @(Get-ODataRows -Path (New-CollectionPath -EntitySet 'appmodulecomponents' -Select 'appmodulecomponentid,_appmoduleidunique_value,componenttype,objectid,isdefault,ismetadata,rootappmodulecomponentid,rootcomponentbehavior' -Filter "_appmoduleidunique_value eq $($script:Target.AppModuleIdUnique)"))
     $script:LastStage = 'Verify AppModule entity identity contract'
     $metadata = Get-DataverseMetadataDocument
-    $entityIdentityContract = Assert-AppModuleEntityIdentityContract -Metadata $metadata
-    $entityRecords = @(Get-AppModuleEntityRecords -Components $rawComponents -IdentityContract $entityIdentityContract)
-    $components = @(ConvertTo-NormalizedAppModuleComponents -Components $rawComponents -EntityRecords $entityRecords `
-        -ReferenceComponents $referenceComponents -SiteMapId $script:Target.SiteMapId -AppModuleIdUnique $script:Target.AppModuleIdUnique)
+    $identityContract = $null
+    $identityContractCheck = 'NOT_RUN'
+    try {
+        $identityContract = Assert-AppModuleEntityIdentityContract -Metadata $metadata
+        $identityContractCheck = 'PASS'
+    }
+    catch {
+        $identityContractCheck = 'FAIL'
+        if (-not $script:FirstFailingPredicate) {
+            $script:FirstFailingPredicate = if ($script:IdentityContractFailurePredicate) {
+                $script:IdentityContractFailurePredicate
+            }
+            else {
+                'ENTITIES_METADATA_IDENTITY_CONTRACT'
+            }
+        }
+    }
+    if ($EntityIdentityDiagnosticOnly) {
+        $script:EntityResolutionDiagnostics = @(Get-EntityResolutionDiagnosticRows -Components $rawComponents -ReferenceComponents $referenceComponents)
+        $script:EntityResolutionClassification = Get-EntityResolutionAggregateClassification -Diagnostics $script:EntityResolutionDiagnostics
+        $payloadsForFingerprint = @($referenceComponents | ForEach-Object { $_.Payloads })
+        try {
+            $script:PayloadFingerprintDiagnostic = Assert-ReferenceUiPayloadFingerprint -Payload $payloadsForFingerprint
+        }
+        catch {
+            $script:PayloadFingerprintDiagnostic = 'MISMATCH'
+            if (-not $script:FirstFailingPredicate) { $script:FirstFailingPredicate = 'REFERENCE_PAYLOAD_FINGERPRINT_MATCHES_APPROVED' }
+        }
+        $retrieveAppComponents = $null
+        $retrieveAppComponentsStatus = $null
+        try {
+            $retrieveAppComponents = Invoke-DataverseRequest -Method GET -Path "RetrieveAppComponents(AppModuleId=$($script:Target.AppModuleId))"
+            $retrieveAppComponentsStatus = if ($script:LastHttpStatus) { $script:LastHttpStatus } else { 200 }
+        }
+        catch {
+            $retrieveAppComponentsStatus = $script:LastHttpStatus
+            if (-not $script:FirstFailingPredicate) { $script:FirstFailingPredicate = 'RETRIEVE_APP_COMPONENTS_READ' }
+        }
+        $script:RetrieveAppComponentsEvidence = [pscustomobject]@{
+            HttpStatus = $retrieveAppComponentsStatus
+            RequestSucceeded = ($null -ne $retrieveAppComponents -and $retrieveAppComponentsStatus -ge 200 -and $retrieveAppComponentsStatus -lt 300)
+            Components = if ($retrieveAppComponents) { @(Get-RetrieveAppComponentsSafeSummary -Response $retrieveAppComponents) } else { @() }
+        }
+        $components = @()
+        $entityRecords = @()
+    }
+    else {
+        if (-not $identityContract) { throw 'AppModule entity identity metadata contract could not be verified.' }
+        $entityRecords = @(Get-AppModuleEntityRecords -Components $rawComponents -IdentityContract $identityContract)
+        $components = @(ConvertTo-NormalizedAppModuleComponents -Components $rawComponents -EntityRecords $entityRecords `
+            -ReferenceComponents $referenceComponents -SiteMapId $script:Target.SiteMapId -AppModuleIdUnique $script:Target.AppModuleIdUnique)
+    }
     $roleSnapshot = @(Get-AppModuleRoleSnapshot)
     $script:LastStage = 'Inspect unpublished Site Map layer'
     $siteMapDraft = Get-UnpublishedSiteMap
@@ -1436,6 +1767,20 @@ function Get-TargetSnapshot {
         SolutionComponents = @($solutionComponents | ForEach-Object { [pscustomobject]@{ ComponentType = $_.componenttype; ObjectId = $_.objectid; RootComponentId = $_.rootsolutioncomponentid; RootComponentBehavior = $_.rootcomponentbehavior } })
         SolutionAppModuleRootCount = 1
         AppComponents = $components
+        RawAppComponentTypeCounts = [ordered]@{
+            SiteMap = @($rawComponents | Where-Object { [int]$_.componenttype -eq 62 }).Count
+            Entity = @($rawComponents | Where-Object { [int]$_.componenttype -eq 1 }).Count
+            Form = @($rawComponents | Where-Object { [int]$_.componenttype -eq 60 }).Count
+            View = @($rawComponents | Where-Object { [int]$_.componenttype -eq 26 }).Count
+            Other = @($rawComponents | Where-Object { [int]$_.componenttype -notin @(1, 26, 60, 62) }).Count
+            Total = $rawComponents.Count
+        }
+        EntityIdentityContractMetadataCheck = $identityContractCheck
+        EntityIdentityContractFailurePredicate = $script:IdentityContractFailurePredicate
+        EntityResolutionDiagnostics = @($script:EntityResolutionDiagnostics)
+        EntityResolutionClassification = $script:EntityResolutionClassification
+        RetrieveAppComponentsEvidence = $script:RetrieveAppComponentsEvidence
+        ReferencePayloadFingerprint = $script:PayloadFingerprintDiagnostic
         AppModuleRoles = $roleSnapshot
         AppValidation = [pscustomobject]@{
             ValidationSuccess = Get-PropertyValue -Object $validationResponse -Name 'ValidationSuccess'
@@ -1821,6 +2166,17 @@ function Invoke-Main {
     }
     if ($Apply) { Assert-ApplyAuthorization -Phrase $Confirmation -Reference $AuthorizationReference }
     $snapshot = Get-TargetSnapshot
+    if ($EntityIdentityDiagnosticOnly) {
+        Write-Output ([ordered]@{
+            Status = 'DIAGNOSTIC_COMPLETE_NO_WRITE'
+            Preflight = $snapshot
+            FirstFailingPredicate = $script:FirstFailingPredicate
+            RequestCounts = [ordered]@{} + $script:RequestCounts
+            RetryCount = 0
+            WritesMayHaveOccurred = $script:WritesStarted
+        } | ConvertTo-Json -Depth 40 -Compress)
+        return
+    }
     if ($SiteMapAssociationOnly) {
         $result = Invoke-SiteMapAssociationOnly -Snapshot $snapshot
         $result | Add-Member -NotePropertyName Mode -NotePropertyValue $(if ($Apply) { 'Site Map association Apply' } else { 'Site Map association DryRun; GET-only' })
@@ -1859,20 +2215,7 @@ function Invoke-Main {
 if ($MyInvocation.InvocationName -ne '.') {
     try { Invoke-Main }
     catch {
-        [ordered]@{
-            Status = 'Stopped'
-            Error = 'Operation stopped; raw exception omitted. Do not retry. Reconcile with GET before recovery.'
-            ExceptionType = $_.Exception.GetType().Name
-            FailedCommand = if ($_.Exception -is [System.Management.Automation.CommandNotFoundException]) { $_.Exception.CommandName } else { $null }
-            Stage = $script:LastStage
-            LastApiPath = $script:LastPath
-            HttpStatus = $script:LastHttpStatus
-            DataverseErrorCode = $script:LastErrorCode
-            SafeError = $script:LastSafeError
-            WritesMayHaveOccurred = $script:WritesStarted
-            WriteResults = $script:WriteResults.ToArray()
-            RequestCounts = $script:RequestCounts
-        } | ConvertTo-Json -Depth 12 -Compress | Write-Output
+        New-SafeStoppedExecutionSummary -ErrorRecord $_ | ConvertTo-Json -Depth 20 -Compress | Write-Output
         exit 1
     }
     finally {

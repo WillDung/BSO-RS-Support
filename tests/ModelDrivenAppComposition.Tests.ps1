@@ -233,6 +233,9 @@ Assert-Test ($ReferenceUiCompositionOnly -eq $false -and -not (Test-AllowsProces
 $ReferenceUiCompositionOnly = $true
 Assert-Test (Test-AllowsProcessExpectedUserPin) 'Allow process-only expected-user pin for guarded Phase 2D.3 identity verification'
 $ReferenceUiCompositionOnly = $false
+$EntityIdentityDiagnosticOnly = $true
+Assert-Test (Test-AllowsProcessExpectedUserPin) 'Allow process-only expected-user pin for guarded read-only identity diagnostics'
+$EntityIdentityDiagnosticOnly = $false
 Assert-Test ($phasePlan.MaximumWriteRequests -eq 2 -and $phasePlan.AutomaticRetries -eq 0) 'Phase 2D.3 plan caps writes at two and retries at zero'
 Assert-Test ($phasePlan.OrderedWriteOperations[0].Method -ceq 'POST' -and
     $phasePlan.OrderedWriteOperations[0].ComponentCount -eq 12 -and
@@ -418,6 +421,118 @@ try {
         Get-AppModuleEntityRecords -Components @($resolverComponent) -IdentityContract $identityContract
     } 'Fail closed on entities collection HTTP 400' 'Synthetic HTTP 400'
     Assert-Test (@($script:EntityResolverRequests | Where-Object Method -ne 'GET').Count -eq 0) 'Resolver failure paths remain GET-only'
+}
+finally {
+    Set-Item -Path Function:Invoke-DataverseRequest -Value $originalDataverseRequest
+}
+
+$script:ProbeRequests = [System.Collections.Generic.List[object]]::new()
+$script:ProbeResponses = @{}
+$script:LastHttpStatus = $null
+Set-Item -Path Function:Invoke-DataverseRequest -Value {
+    param([string]$Method, [string]$Path, [object]$Body, [string]$ETag)
+    $script:ProbeRequests.Add([pscustomobject]@{ Method = $Method; Path = $Path })
+    $decoded = [Uri]::UnescapeDataString($Path)
+    $idMatch = [regex]::Match($decoded, '\$filter=entityid eq ([0-9a-fA-F-]{36})')
+    if (-not $idMatch.Success) { throw 'Synthetic resolver did not receive entityid filter.' }
+    $id = $idMatch.Groups[1].Value.ToLowerInvariant()
+    $response = $script:ProbeResponses[$id]
+    $script:LastHttpStatus = if ($response.Contains('Status')) { $response.Status } else { 200 }
+    if ($response.Contains('Throw') -and $response.Throw) { throw 'Synthetic HTTP 400 from entities RetrieveMultiple.' }
+    @{ value = @($response.Rows) }
+}
+try {
+    $probeComponents = @($rawComposedComponents.ToArray() | Where-Object { $_.componenttype -eq 1 })
+    $probeIds = @($probeComponents | ForEach-Object { $_.objectid })
+    $script:ProbeResponses = @{}
+    for ($index = 0; $index -lt $probeComponents.Count; $index++) {
+        $entity = $syntheticEntityRecords[$index]
+        $script:ProbeResponses[$probeIds[$index].ToLowerInvariant()] = @{
+            Status = 200
+            Rows = @([pscustomobject]@{
+                entityid = $probeIds[$index]
+                logicalname = $entity.logicalname
+                name = $entity.name
+                objecttypecode = $entity.objecttypecode
+            })
+        }
+    }
+    $script:FirstFailingPredicate = $null
+    $orderedProbes = @(Get-EntityResolutionDiagnosticRows -Components @($probeComponents[3], $probeComponents[2], $probeComponents[1], $probeComponents[0]) `
+        -ReferenceComponents $script:ResolvedReferenceComponents)
+    Assert-Test (@($orderedProbes | Where-Object PredicateResult).Count -eq 4 -and
+        (Get-EntityResolutionAggregateClassification -Diagnostics $orderedProbes) -ceq 'ENTITYID_MAPPING_CONFIRMED') 'Accept exactly four approved logical names in any component order'
+    Assert-Test ($orderedProbes[0].Alias -ceq 'EntityComponent1' -and
+        $orderedProbes[0].NormalizedLogicalName -ceq 'os_sr_loc') 'Keep stable component aliases independent of expected table order'
+
+    $firstProbeId = $probeIds[0].ToLowerInvariant()
+    $script:ProbeResponses[$firstProbeId] = @{ Status = 200; Rows = @() }
+    $script:FirstFailingPredicate = $null
+    $zeroProbe = @(Get-EntityResolutionDiagnosticRows -Components $probeComponents -ReferenceComponents $script:ResolvedReferenceComponents)
+    Assert-Test ($zeroProbe[0].HttpStatus -eq 200 -and $zeroProbe[0].ReturnedRowCount -eq 0 -and
+        -not $zeroProbe[0].PredicateResult -and $zeroProbe[0].FailureCategory -ceq 'ENTITY_OBJECTID_NOT_RESOLVED' -and
+        (Get-EntityResolutionAggregateClassification -Diagnostics $zeroProbe) -ceq 'OBJECTID_NOT_ENTITYID') 'HTTP 200 with zero rows remains an unresolved identity'
+    $script:EntityResolutionDiagnostics = $zeroProbe
+    try { throw 'Synthetic outer wrapper test.' } catch {
+        $safeStopped = New-SafeStoppedExecutionSummary -ErrorRecord $_
+    }
+    Assert-Test ($safeStopped.FirstFailingPredicate -ceq 'ENTITY_OBJECTID_NOT_RESOLVED' -and
+        $safeStopped.EntityResolutionDiagnostics[0].FailureCategory -ceq 'ENTITY_OBJECTID_NOT_RESOLVED') 'Preserve exact inner entity predicate through sanitized wrapper'
+
+    $script:ProbeResponses[$firstProbeId] = @{ Status = 200; Rows = @(
+        [pscustomobject]@{ entityid = $probeIds[0]; logicalname = 'os_sr_ta'; name = 'TA'; objecttypecode = 1 }
+        [pscustomobject]@{ entityid = $probeIds[0]; logicalname = 'os_sr_ta'; name = 'TA'; objecttypecode = 1 }
+    ) }
+    $script:FirstFailingPredicate = $null
+    $multipleProbes = @(Get-EntityResolutionDiagnosticRows -Components $probeComponents -ReferenceComponents $script:ResolvedReferenceComponents)
+    Assert-Test ($multipleProbes[0].ReturnedRowCount -eq 2 -and
+        $multipleProbes[0].FailureCategory -ceq 'ENTITY_OBJECTID_AMBIGUOUS' -and
+        (Get-EntityResolutionAggregateClassification -Diagnostics $multipleProbes) -ceq 'ENTITY_MAPPING_AMBIGUOUS') 'Classify multiple entities rows as ambiguous'
+
+    $script:ProbeResponses[$firstProbeId] = @{ Status = 200; Rows = @(
+        [pscustomobject]@{ entityid = $probeIds[0]; logicalname = 'account'; name = 'Account'; objecttypecode = 1 }
+    ) }
+    $script:FirstFailingPredicate = $null
+    $wrongNameProbes = @(Get-EntityResolutionDiagnosticRows -Components $probeComponents -ReferenceComponents $script:ResolvedReferenceComponents)
+    Assert-Test ($wrongNameProbes[0].FailureCategory -ceq 'ENTITY_LOGICALNAME_UNEXPECTED' -and
+        (Get-EntityResolutionAggregateClassification -Diagnostics $wrongNameProbes) -ceq 'ENTITY_MAPPING_WRONG_LOGICALNAME') 'Reject resolved but unapproved logical name'
+
+    $script:ProbeResponses = @{}
+    for ($index = 0; $index -lt $probeComponents.Count; $index++) {
+        $entity = $syntheticEntityRecords[$index]
+        $name = if ($index -eq 1) { 'os_sr_ta' } else { $entity.logicalname }
+        $script:ProbeResponses[$probeIds[$index].ToLowerInvariant()] = @{
+            Status = 200
+            Rows = @([pscustomobject]@{
+                entityid = $probeIds[$index]
+                logicalname = $name
+                name = $name
+                objecttypecode = $entity.objecttypecode
+            })
+        }
+    }
+    $script:FirstFailingPredicate = $null
+    $duplicateProbes = @(Get-EntityResolutionDiagnosticRows -Components $probeComponents -ReferenceComponents $script:ResolvedReferenceComponents)
+    Assert-Test (@($duplicateProbes | Where-Object FailureCategory -eq 'ENTITY_LOGICALNAME_DUPLICATE').Count -eq 2 -and
+        (Get-EntityResolutionAggregateClassification -Diagnostics $duplicateProbes) -ceq 'ENTITY_MAPPING_DUPLICATE_LOGICALNAME') 'Reject duplicate normalized logical names'
+
+    foreach ($invalidObjectId in @($null, 'not-a-guid')) {
+        $invalidComponent = [pscustomobject]@{ componenttype = 1; objectid = $invalidObjectId; appmodulecomponentid = $null }
+        $beforeRequestCount = $script:ProbeRequests.Count
+        $script:FirstFailingPredicate = $null
+        $invalidProbe = @(Get-EntityResolutionDiagnosticRows -Components @($invalidComponent) -ReferenceComponents $script:ResolvedReferenceComponents)
+        Assert-Test (-not $invalidProbe[0].ObjectIdSyntacticallyValidGuid -and
+            $script:ProbeRequests.Count -eq $beforeRequestCount -and
+            $invalidProbe[0].FailureCategory -in @('OBJECTID_MISSING', 'OBJECTID_INVALID_GUID')) 'Reject missing or malformed objectid without issuing a request'
+    }
+
+    $script:ProbeResponses[$firstProbeId] = @{ Status = 400; Rows = @(); Throw = $true }
+    $script:FirstFailingPredicate = $null
+    $httpFailureProbe = @(Get-EntityResolutionDiagnosticRows -Components @($probeComponents[0]) -ReferenceComponents $script:ResolvedReferenceComponents)
+    Assert-Test ($httpFailureProbe[0].HttpStatus -eq 400 -and
+        $httpFailureProbe[0].FailureCategory -ceq 'ENTITY_QUERY_HTTP_FAILURE' -and
+        -not $httpFailureProbe[0].PredicateResult) 'Treat HTTP error as failure regardless of HTTP-stage reporting'
+    Assert-Test (@($script:ProbeRequests | Where-Object Method -ne 'GET').Count -eq 0) 'All diagnostic identity probes are GET-only'
 }
 finally {
     Set-Item -Path Function:Invoke-DataverseRequest -Value $originalDataverseRequest

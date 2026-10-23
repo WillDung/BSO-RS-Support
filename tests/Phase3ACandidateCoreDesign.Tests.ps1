@@ -15,6 +15,12 @@ function Assert-Test {
     $script:Passed++
 }
 
+function Test-ProposedAutoNumberFormat {
+    param([string]$Format)
+    $Format -cmatch '^[A-Z0-9-]*\{SEQNUM:[1-9][0-9]*\}$' -and
+        @([regex]::Matches($Format, '\{[^{}]*\}')).Count -eq 1
+}
+
 $expectedTables = @('os_sr_cand', 'os_sr_call', 'os_sr_csh')
 $actualTables = @($manifest.tables | ForEach-Object { $_.logicalName })
 Assert-Test ($manifest.phase -ceq '3A' -and $manifest.status -ceq 'PROPOSAL_NOT_AUTHORIZED') 'Phase and non-authorized proposal status'
@@ -29,6 +35,11 @@ $history = $manifest.tables | Where-Object logicalName -CEQ 'os_sr_csh'
 Assert-Test ($candidate.ownership -ceq 'UserOwned' -and $candidate.primaryName.logicalName -ceq 'os_sr_cand_cnum') 'Candidate ownership and primary name proposal'
 Assert-Test ($candidate.primaryName.type -ceq 'AutoNumber' -and $candidate.primaryName.generatedBy -ceq 'Dataverse' -and
     $candidate.primaryName.immutableAfterCreate -and -not $candidate.primaryName.containsPersonalInformation) 'Server-generated immutable nonpersonal Candidate Number'
+Assert-Test (Test-ProposedAutoNumberFormat $candidate.primaryName.format) 'Candidate Number uses the supported sequence placeholder shape'
+Assert-Test (-not (Test-ProposedAutoNumberFormat 'CAND-{SEQNUM:0}') -and
+    -not (Test-ProposedAutoNumberFormat 'CAND-{UNSUPPORTED:8}') -and
+    -not (Test-ProposedAutoNumberFormat 'CAND-{SEQNUM:8')) 'Malformed or unsupported Candidate Number placeholders are rejected'
+Assert-Test ($candidate.primaryName.maxLength -eq 100) 'Candidate AutoNumber uses the owner-approved String MaxLength'
 Assert-Test (@($candidate.columns | Where-Object logicalName -ceq 'os_sr_cand_eml').Count -eq 1 -and
     $candidate.columns.Where({ $_.logicalName -ceq 'os_sr_cand_eml' }).required -ceq 'Required' -and
     @($candidate.columns | Where-Object logicalName -ceq 'os_sr_cand_phn').Count -eq 1 -and
@@ -54,20 +65,26 @@ $expectedLabels = @(
     'Candidate Failed'
 )
 $expectedChoicePairs = @(
-    '100010000|Need Call Candidate',
-    '100010001|Candidate Answered',
-    '100010002|Waiting Manual Scheduling',
-    '100010003|Round 1 Scheduled',
-    '100010004|Offer Extended',
-    '100010005|Candidate Failed'
+    'Need Call Candidate',
+    'Candidate Answered',
+    'Waiting Manual Scheduling',
+    'Round 1 Scheduled',
+    'Offer Extended',
+    'Candidate Failed'
 )
 $choiceLabels = @($choice.options | ForEach-Object label)
 $choiceValues = @($choice.options | ForEach-Object value)
-$choicePairs = @($choice.options | ForEach-Object { "$($_.value)|$($_.label)" })
-Assert-Test ($choice.logicalName -ceq 'os_sr_candstat' -and $choice.defaultValue -eq 100010000) 'Choice identity and default'
+Assert-Test ($choice.logicalName -ceq 'os_sr_candstat' -and
+    $choice.valueStatus -match 'system-assigned' -and
+    ($null -eq $choice.defaultValue -or $choice.defaultValue -eq $choiceValues[0])) 'Choice identity and system-assigned default'
 Assert-Test ($choiceLabels.Count -eq 6 -and (Compare-Object $expectedLabels $choiceLabels).Count -eq 0) 'Exact six canonical status labels'
-Assert-Test ($choiceValues.Count -eq 6 -and @($choiceValues | Select-Object -Unique).Count -eq 6 -and
-    (Compare-Object $expectedChoicePairs $choicePairs).Count -eq 0) 'Exact stable status integer/label mapping'
+Assert-Test ($choiceValues.Count -eq 6 -and
+    (($choiceValues | Where-Object { $null -eq $_ }).Count -eq 6 -or
+        ((@($choiceValues | Where-Object { $null -ne $_ } | Select-Object -Unique).Count -eq 6) -and
+            @($choiceValues | Where-Object { [string]$_ -match '^[1-9][0-9]*$' }).Count -eq 6))) 'Status option values are either pending allocation or unique frozen integers'
+Assert-Test ($manifest.callOutcomeChoice.options.Count -eq 3 -and
+    @($manifest.callOutcomeChoice.options | Where-Object { $null -eq $_.value }).Count -eq 3 -and
+    $manifest.callOutcomeChoice.valueStatus -match 'system-assigned') 'Call Outcome values remain explicitly deferred to Dataverse allocation'
 Assert-Test ($choiceLabels -notcontains 'Draft Created' -and $choiceLabels -notcontains 'BSO Reviewing' -and
     $choiceLabels -notcontains 'Sent to TA' -and $choiceLabels -notcontains 'TA Approval') 'No deprecated approval stages in Choice'
 
@@ -112,9 +129,29 @@ Assert-Test (@($call.alternateKeys | Where-Object name -ceq 'os_sr_call_ak_cand_
     @($history.alternateKeys[0].columns | Where-Object { $_ -ceq 'os_sr_csh_corid' }).Count -eq 1) 'Call and History GUID correlation idempotency keys'
 Assert-Test (@($candidate.alternateKeys | Where-Object name -ceq 'os_sr_cand_ak_cnum').Count -eq 1 -and
     @($candidate.alternateKeys | Where-Object name -ceq 'os_sr_cand_ak_corid').Count -eq 1) 'Candidate Number uniqueness and creation idempotency keys'
+$candidateReferenceRelationships = @($manifest.relationships | Where-Object {
+    $_.child -ceq 'os_sr_cand' -and $_.parent -in @('os_sr_pos','os_sr_csrc','os_sr_ta')
+})
+Assert-Test (@($manifest.tables | Where-Object logicalName -ceq 'os_sr_cand').Count -eq 1 -and
+    $candidateReferenceRelationships.Count -eq 3 -and
+    @($manifest.relationships | Where-Object { $_.child -ceq 'os_sr_cand' -and $_.parent -in @('os_sr_call','os_sr_csh') }).Count -eq 0) 'Candidate-only projection excludes child activity tables and keeps only existing reference lookups'
+$candidateOnlyProjection = [ordered]@{
+    proposalType = 'Candidate-only schema proposal; non-dispatchable'
+    solutionUniqueName = $manifest.solutionUniqueName
+    publisherPrefix = $manifest.publisherPrefix
+    projectNamespace = $manifest.projectNamespace
+    table = $candidate
+    statusChoice = $choice
+    candidateReferenceRelationships = $candidateReferenceRelationships
+    excluded = @('os_sr_call','os_sr_csh','os_sr_callout','os_sr_cact','plug-in','roles','app navigation','business records')
+}
+$candidateOnlyJson = ConvertTo-Json -InputObject $candidateOnlyProjection -Depth 80 -Compress
+$candidateOnlyHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($candidateOnlyJson))).ToLowerInvariant()
+Assert-Test ($candidateOnlyHash -ceq 'a992f943e913bab7892223e75cc15489f7e35a153977cf846cd4cbd59b87c571') 'Candidate-only local proposal projection fingerprint is deterministic'
 
 $api = $manifest.customApi
 Assert-Test ($api.uniqueName -ceq 'os_sr_cact' -and $api.implementation -match 'Synchronous') 'Server operation name and synchronous implementation proposal'
+Assert-Test ($api.PSObject.Properties.Name -notcontains 'executePrivilegeName') 'Custom API ExecutePrivilegeName is not guessed before Candidate table privilege exists'
 Assert-Test (($api.inputs -join '|') -match 'CandidateId: Guid' -and
     ($api.inputs -join '|') -match 'ExpectedStatus: Integer' -and
     ($api.inputs -join '|') -match 'CorrelationId: Guid, caller-generated and required') 'Operation inputs include Candidate, expected state, and required caller GUID'

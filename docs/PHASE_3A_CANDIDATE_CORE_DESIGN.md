@@ -32,7 +32,7 @@ The Phase 3A.2 revision is local and uncommitted. No commit, push, restore, stas
 
 | Proposed column | Type / limit | Classification | Requiredness / rule |
 |---|---|---|---|
-| `os_sr_cand_cnum` — Candidate Number | Dataverse AutoNumber, `CAND-{SEQNUM:8}`; primary name | Required | Server-generated, immutable after creation, unique, nonpersonal; protected by a unique alternate key. Validate the proposed format and supported AutoNumber creation path before provisioning. |
+| `os_sr_cand_cnum` — Candidate Number | Dataverse AutoNumber, `CAND-{SEQNUM:8}`; String/Text, maximum length 100; primary name | Required | Server-generated, immutable after creation, unique, nonpersonal; protected by a unique alternate key. The length is owner-approved. Runtime generation remains unverified until a later authorized synthetic-row test. |
 | `os_sr_cand_nm` — Candidate Name | Text, 200 | Required | Personal information; required at Candidate creation. No column-level security in this initial slice; protect by table/row access and auditing. |
 | `os_sr_cand_eml` — Candidate Email | Email text, 254 | Required | Required at Candidate creation. No column-level security in this initial slice; not unique and not an alternate key. |
 | `os_sr_cand_phn` — Candidate Phone | Phone text, 50 | Optional | Optional at Candidate creation. No column-level security in this initial slice. |
@@ -50,18 +50,18 @@ Do not put candidate name, email, phone, CV URL, salary, interview result, or fr
 
 ## 4. Candidate Status Design
 
-**Representation:** proposed global Dataverse Choice `os_sr_candstat`, shared by Candidate and Status History. The labels are fixed requirements; numeric values below are deterministic proposals, not live metadata evidence.
+**Representation:** proposed global Dataverse Choice `os_sr_candstat`, shared by Candidate and Status History. Labels are fixed requirements; Dataverse allocates integer values in the verified Publisher context.
 
-| Proposed integer | Label | Default |
-|---:|---|---|
-| 100010000 | Need Call Candidate | Yes |
-| 100010001 | Candidate Answered | No |
-| 100010002 | Waiting Manual Scheduling | No |
-| 100010003 | Round 1 Scheduled | No |
-| 100010004 | Offer Extended | No |
-| 100010005 | Candidate Failed | No |
+| Allocated integer | Label | Default |
+|---|---|---|
+| GET-reconciled | Need Call Candidate | Yes |
+| GET-reconciled | Candidate Answered | No |
+| GET-reconciled | Waiting Manual Scheduling | No |
+| GET-reconciled | Round 1 Scheduled | No |
+| GET-reconciled | Offer Extended | No |
+| GET-reconciled | Candidate Failed | No |
 
-These values follow the `10001` publisher option-value prefix noted by the existing schema proposal; verify allocation and collisions before any future create. Treat assigned numeric values as immutable after approval/deployment. Application code should use these stable values, not compare localized labels. `statecode/statuscode` remain separate platform Active/Inactive fields.
+For a new Choice, pass null option values and let Dataverse allocate them. GET-reconcile the exact mapping and freeze it in the manifest before Custom API/plugin implementation. Never infer values from labels or recreate the Choice for preferred integers. Application code should use the frozen values, not compare localized labels. `statecode/statuscode` remain separate platform Active/Inactive fields.
 
 Block direct UI, Web API, and Flow status changes. Only the approved Dataverse business operation may transition state. Initial creation at the default status is not a transition and does not create a fabricated history row.
 
@@ -69,13 +69,13 @@ Block direct UI, Web API, and Flow status changes. Only the approved Dataverse b
 
 **Owner-approved initial outcomes:** global Choice `os_sr_callout`.
 
-| Proposed integer | Outcome | Candidate effect from Need Call Candidate |
-|---:|---|---|
-| 100010000 | Answered | Atomically create Call Log, transition to Candidate Answered, and create one Status History row. |
-| 100010001 | No Answer | Create Call Log only; Candidate remains Need Call Candidate; no Status History row. |
-| 100010002 | Call Back Requested | Create Call Log only; Candidate remains Need Call Candidate; no Status History row. |
+| Allocated integer | Outcome | Candidate effect from Need Call Candidate |
+|---|---|---|
+| GET-reconciled | Answered | Atomically create Call Log, transition to Candidate Answered, and create one Status History row. |
+| GET-reconciled | No Answer | Create Call Log only; Candidate remains Need Call Candidate; no Status History row. |
+| GET-reconciled | Call Back Requested | Create Call Log only; Candidate remains Need Call Candidate; no Status History row. |
 
-The three labels are owner-approved. Numeric option values are deterministic proposals and must be checked against the Publisher allocation before any write, then frozen after creation. No other initial outcome is allowed. Invalid outcome/status combinations fail closed.
+The three labels are owner-approved. Let Dataverse allocate values during the later Call Outcome Choice provisioning, then GET-reconcile and freeze them before Custom API/plugin implementation. No other initial outcome is allowed. Invalid outcome/status combinations fail closed.
 
 ## 5. Call Log Design
 
@@ -272,7 +272,7 @@ Separate Candidate/Call/History schema writes from API/plugin implementation for
 
 The reviewable, synthetic-only canonical proposal is [PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json](PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json). It defines the three tables, status and call-outcome Choices, lookups/relationships, proposed keys, transition matrix, Custom API contract, owner-decision record, and external prerequisites. It is **not** a Dataverse Web API payload, solution export, generated PAC artifact, or authorization to provision.
 
-Local manifest SHA-256: **8e035cc64451817efb8342fec245df2aa5e943eb3bd81fe3d5393ee9185d2e08**. This fingerprint identifies the exact JSON proposal file bytes only; it is not a request-body fingerprint. Re-check exact payload hashes immediately before any separately authorized dispatch.
+Local manifest SHA-256: **98f94a2886614afc95a6285b2335a1283d7415c91da4754e98f26d373af26f56**. This fingerprint identifies the exact JSON proposal file bytes only; it is not a request-body fingerprint. Re-check exact payload hashes immediately before any separately authorized dispatch.
 
 ## 18. Provisioning Safety Gates
 
@@ -321,7 +321,7 @@ External prerequisites remain:
 
 1. Enablement and governance for organization-level Dataverse auditing. The last documented environment review found auditing disabled; retention, authorized audit readers, legal-hold/DSR, and capacity ownership remain to be settled by IT/Compliance.
 2. Least-privilege Custom API Execute privilege/effective-access design and validation; preserve the authenticated initiating BSO without System Administrator or fixed Flow-owner impersonation.
-3. Verify global Choice option-value allocations and supported Candidate AutoNumber metadata creation in a fresh, separately authorized provisioning preflight.
+3. In the bounded Candidate-only provisioning, create the new Candidate Status Choice with system-assigned values, GET-reconcile and freeze its integers, and use the approved AutoNumber String/Text MaxLength 100. Defer Call Outcome Choice creation to its later table slice.
 4. Verify the exact target environment, publisher, solution, and existing reference-table targets during the future guarded preflight.
 5. Implement cancellation-attempt evidence before enabling the reschedule action in the later scheduling phase. This is an explicitly deferred implementation dependency, not an unresolved Candidate Core product choice.
 

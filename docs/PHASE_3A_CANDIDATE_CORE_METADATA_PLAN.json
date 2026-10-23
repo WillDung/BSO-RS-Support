@@ -27,6 +27,7 @@
         "displayName": "Candidate Number",
         "type": "AutoNumber",
         "format": "CAND-{SEQNUM:8}",
+        "maxLength": 100,
         "required": "Required",
         "keyRole": "PrimaryNameAndAlternateKey",
         "generatedBy": "Dataverse",
@@ -113,7 +114,7 @@
           "type": "GlobalChoice",
           "target": "os_sr_candstat",
           "required": "Required",
-          "defaultValue": 100010000,
+          "defaultValue": null,
           "directUserEditing": "Blocked; status changes use os_sr_cact."
         }
       ],
@@ -327,55 +328,55 @@
   "globalChoice": {
     "logicalName": "os_sr_candstat",
     "displayName": "Candidate Workflow Status",
-    "valuePrefix": 10001,
-    "defaultValue": 100010000,
+    "valuePrefix": null,
+    "defaultValue": null,
     "options": [
       {
-        "value": 100010000,
+        "value": null,
         "label": "Need Call Candidate"
       },
       {
-        "value": 100010001,
+        "value": null,
         "label": "Candidate Answered"
       },
       {
-        "value": 100010002,
+        "value": null,
         "label": "Waiting Manual Scheduling"
       },
       {
-        "value": 100010003,
+        "value": null,
         "label": "Round 1 Scheduled"
       },
       {
-        "value": 100010004,
+        "value": null,
         "label": "Offer Extended"
       },
       {
-        "value": 100010005,
+        "value": null,
         "label": "Candidate Failed"
       }
     ],
-    "valueStatus": "Proposed deterministic values; verify publisher option-value allocation before any future write."
+    "valueStatus": "Dataverse system-assigned values; reconcile and freeze exact integers before Custom API/plugin implementation."
   },
   "callOutcomeChoice": {
     "logicalName": "os_sr_callout",
     "displayName": "Call Outcome",
-    "valuePrefix": 10001,
+    "valuePrefix": null,
     "options": [
       {
-        "value": 100010000,
+        "value": null,
         "label": "Answered"
       },
       {
-        "value": 100010001,
+        "value": null,
         "label": "No Answer"
       },
       {
-        "value": 100010002,
+        "value": null,
         "label": "Call Back Requested"
       }
     ],
-    "valueStatus": "Proposed deterministic values; verify publisher option-value allocation before any future write."
+    "valueStatus": "Dataverse system-assigned values; reconcile and freeze exact integers before Custom API/plugin implementation."
   },
   "relationships": [
     {

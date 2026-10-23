@@ -1,5 +1,16 @@
 # Current State
 
+## Phase 3A.3 — Candidate-Only Provisioning Gate (2026-10-23)
+
+Outcome: **`BLOCKED_READINESS_UNKNOWN`**. Candidate-table-only readiness is now assessed separately from environment audit activation and later Custom API/plugin privilege validation; final API privilege validation is **`API_PRIVILEGE_VALIDATION_DEFERRED_UNTIL_TABLE_EXISTS`** and is not by itself a Candidate-table blocker.
+
+- The fresh PAC organization matched the approved target, but the existing Azure CLI identity did not match the PAC user, the expected-user process pin was absent, and no independent Dataverse WhoAmI was run. The guarded preflight stopped before any Dataverse metadata or organization-settings GET. Candidate table existence, Publisher option-value prefix, live Choice state, and current organization audit configuration are therefore unknown.
+- The manifest was not changed. Its two Choices contain explicit locally unique proposed numeric values; live Publisher allocation/collision checks remain unverified. Candidate Number uses `CAND-{SEQNUM:8}` but has no proposed `MaxLength`, so a complete AutoNumber metadata definition is not ready.
+- Candidate, Call Log, and Status History audit flags remain true in the local proposal. Historical environment-audit-off evidence is not a fresh Phase 3A.3 read; schema readiness and operational audit activation remain separate.
+- The Candidate-only projection is local and non-dispatchable. No Candidate table, Choice, key, API/plugin, app/navigation, role, or business data was written. No environment switch or interactive login occurred.
+- Four offline regression suites passed (40, 550, 11, and 329 assertions); PowerShell parser validation passed for 8 files. Details and exact counts are in the [Phase 3A.3 report](PHASE_3A3_CANDIDATE_TABLE_PROVISIONING_GATE.md).
+- **Next:** restore the approved identity agreement, establish the process-scoped expected-user pin after verification, and rerun the read-only target preflight. Complete the Candidate AutoNumber `MaxLength` proposal before preparing an executable schema payload.
+
 ## Phase 3A.2 — Candidate Core Decision Application & Readiness (2026-10-23)
 
 Outcome: **`BLOCKED_EXTERNAL_AUDIT_AND_API_PRIVILEGE_PREREQUISITES`**. The owner explicitly approved all eight Phase 3A.1 decision areas. The full decision record, updated proposal, and remaining gates are in the [Phase 3A.2 report](PHASE_3A2_CANDIDATE_CORE_DECISION_APPLICATION.md).

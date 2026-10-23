@@ -213,10 +213,18 @@ $metadataFixture = [xml]@'
                 <Parameter Name="AppId" Type="Edm.Guid" Nullable="false" />
                 <Parameter Name="Components" Type="Collection(mscrm.crmbaseentity)" Nullable="false" />
             </Action>
-            <EntityType Name="entity"><Key><PropertyRef Name="entityid" /></Key></EntityType>
+            <EntityType Name="entity" BaseType="Microsoft.Dynamics.CRM.crmbaseentity">
+                <Key><PropertyRef Name="entityid" /></Key>
+                <Property Name="entityid" Type="Edm.Guid" Nullable="false" />
+            </EntityType>
             <EntityType Name="sitemap"><Key><PropertyRef Name="sitemapid" /></Key></EntityType>
             <EntityType Name="systemform"><Key><PropertyRef Name="formid" /></Key></EntityType>
             <EntityType Name="savedquery"><Key><PropertyRef Name="savedqueryid" /></Key></EntityType>
+        </Schema>
+        <Schema xmlns="http://docs.oasis-open.org/odata/ns/edm" Namespace="Microsoft.Dynamics.CRM">
+            <EntityContainer Name="Organization">
+                <EntitySet Name="entities" EntityType="Microsoft.Dynamics.CRM.entity" />
+            </EntityContainer>
         </Schema>
     </edmx:DataServices>
 </edmx:Edmx>
@@ -224,6 +232,11 @@ $metadataFixture = [xml]@'
 $contract = Get-AppComponentsContract -Metadata $metadataFixture
 Assert-Test ($contract.AppIdType -ceq 'Edm.Guid' -and $contract.ComponentsType -ceq 'Collection(mscrm.crmbaseentity)') 'Validate AddAppComponents parameters from OData metadata'
 Assert-Test ($contract.ComponentEntityTypes.Count -eq 4) 'Validate all required component record types'
+Assert-Test ($contract.EntityType.PrimaryKey -ceq 'entityid' -and
+    $contract.EntityType.PrimaryKeyType -ceq 'Edm.Guid' -and
+    $contract.EntityType.EntitySetName -ceq 'entities' -and
+    $contract.EntityType.BaseType -ceq 'Microsoft.Dynamics.CRM.crmbaseentity') `
+    'Capture live entity key, GUID type, entity set, and base type'
 $wrongContract = [xml]$metadataFixture.OuterXml.Replace('PropertyRef Name="sitemapid"','PropertyRef Name="wrongid"')
 Assert-Rejected { Get-AppComponentsContract -Metadata $wrongContract } 'Reject invalid SiteMap primary key contract' 'lacks expected key sitemapid'
 Assert-Test ($script:ExternalCalls -eq 0) 'All PlanOnly and metadata contract tests remain offline'
@@ -1123,6 +1136,12 @@ Assert-Rejected {
     )) -AppId $script:Target.AppModuleId -TaEntityId $taCanaryId -SystemEntityId $systemEntityCanaryId
 } 'Reject duplicate top-level JSON keys in final wire body' 'only one AppId'
 Assert-Rejected {
+    Get-TACanaryWireBodyEvidence -Bytes ([System.Text.Encoding]::UTF8.GetBytes(
+        '{"AppId":"' + $script:Target.AppModuleId + '","Components":[{"entityid":"' + $taCanaryId +
+        '","entityid":"' + $taCanaryId + '","@odata.type":"Microsoft.Dynamics.CRM.entity"}]}'
+    )) -AppId $script:Target.AppModuleId -TaEntityId $taCanaryId -SystemEntityId $systemEntityCanaryId
+} 'Reject duplicate component JSON keys in final wire body' 'duplicate.*unexpected identity properties'
+Assert-Rejected {
     $systemWire = [System.Text.Encoding]::UTF8.GetBytes(
         '{"AppId":"' + $script:Target.AppModuleId + '","Components":[{"entityid":"' +
         $systemEntityCanaryId + '","@odata.type":"Microsoft.Dynamics.CRM.entity"}]}'
@@ -1157,6 +1176,16 @@ $canaryReferenceFixtures = @(
             EntitySetName = "synthetic_$index"
             MainForm = [pscustomobject]@{ Id = "form-$index" }
             ActiveView = [pscustomobject]@{ Id = "view-$index" }
+            Payloads = @(
+                [ordered]@{ entityid = @(
+                    $taCanaryId
+                    '33333333-aaaa-4bbb-8ccc-333333333333'
+                    '44444444-aaaa-4bbb-8ccc-444444444444'
+                    '55555555-aaaa-4bbb-8ccc-555555555555'
+                )[$index - 1]; '@odata.type' = 'Microsoft.Dynamics.CRM.entity' }
+                [ordered]@{ formid = "form-$index"; '@odata.type' = 'Microsoft.Dynamics.CRM.systemform' }
+                [ordered]@{ savedqueryid = "view-$index"; '@odata.type' = 'Microsoft.Dynamics.CRM.savedquery' }
+            )
         }
     }
 )
@@ -1191,6 +1220,7 @@ $canaryAfterFixture = [pscustomobject]@{
         ObjectIdEqualsPayloadEntityId = $true; PayloadEntityIdEqualsEntityId = $true
     })
     EntityRootRepairEvidence = [pscustomobject]@{
+        SystemEntity = [pscustomobject]@{ EntityId = $systemEntityCanaryId }
         ApprovedTables = @([pscustomobject]@{
             LogicalName = 'os_sr_ta'; MetadataSurfaceFound = $true
             EntityTableSurfaceFound = $true; EntityTableRowCount = 1
@@ -1206,6 +1236,74 @@ $canaryAfterFixture = [pscustomobject]@{
     }
 }
 $script:SystemEntityIdForRemoval = $systemEntityCanaryId
+$forensicsSnapshot = $canaryAfterFixture.PSObject.Copy()
+$forensicsSnapshot | Add-Member -NotePropertyName AddAppComponentsContract -NotePropertyValue ([pscustomobject]@{
+    Action = 'Microsoft.Dynamics.CRM.AddAppComponents'
+    AppIdType = 'Edm.Guid'
+    ComponentsType = 'Collection(mscrm.crmbaseentity)'
+    EntityType = [pscustomobject]@{
+        Name = 'Microsoft.Dynamics.CRM.entity'
+        BaseType = 'Microsoft.Dynamics.CRM.crmbaseentity'
+        PrimaryKey = 'entityid'
+        PrimaryKeyType = 'Edm.Guid'
+        EntitySetName = 'entities'
+        EntitySetType = 'Microsoft.Dynamics.CRM.entity'
+    }
+})
+$forensicsSnapshot.EntityResolutionDiagnostics = @([pscustomobject]@{
+    ReturnedRowCount = 1; NormalizedLogicalName = 'entity'; AppAssociationMatches = $true
+    EntityIdMatchesQueriedObjectId = @($true)
+})
+$forensicsSnapshot | Add-Member -NotePropertyName RequestCounts -NotePropertyValue ([ordered]@{ GET = 0; POST = 0; PATCH = 0 })
+$canaryForensics = Get-AddAppComponentsForensics -Snapshot $forensicsSnapshot
+Assert-Test ($canaryForensics.CurrentStateClassification -ceq 'WRONG_SYSTEM_ENTITY_ROOT_CURRENT') `
+    'Recognize the current ten-component wrong-canary-root state'
+Assert-Test ($canaryForensics.RawBuilder.AllStagesEqual -and
+    @($canaryForensics.RawBuilder.Stages).Count -eq 7 -and
+    @($canaryForensics.RawBuilder.Stages | Where-Object { $_.Sha256 -notmatch '^[0-9a-f]{64}$' }).Count -eq 0) `
+    'Prove TA identity survives every reconstructed raw body stage with sanitized hashes'
+Assert-Test ($canaryForensics.RawBuilder.ComponentCount -eq 1 -and
+    $canaryForensics.RawBuilder.ODataType -ceq 'Microsoft.Dynamics.CRM.entity' -and
+    $canaryForensics.RawBuilder.NoAdditionalIdentityProperties -and
+    $canaryForensics.RawBuilder.NoDuplicatePropertyNames -and
+    $canaryForensics.RawBuilder.TypeCoercionDetected -eq $false -and
+    $canaryForensics.RawBuilder.ObjectReplacementDetected -eq $false) `
+    'Reconstruct the exact one-component raw JSON contract locally without dispatch'
+Assert-Test ($canaryForensics.SerializerComparison.SameOrderedDictionaryConstruction -and
+    $canaryForensics.SerializerComparison.SamePropertyInsertionPattern -and
+    -not $canaryForensics.SerializerComparison.SameJsonDepth -and
+    $canaryForensics.SerializerComparison.CanaryJsonDepth -eq 10 -and
+    $canaryForensics.SerializerComparison.ExistingAddComponentsJsonDepth -eq 30 -and
+    $canaryForensics.SerializerComparison.CustomConverterUsed -eq $false) `
+    'Compare entity, form, and view object and serializer behavior'
+Assert-Test ($canaryForensics.Sdk.Available -and
+    $canaryForensics.Sdk.RequestType -ceq 'Microsoft.Crm.Sdk.Messages.AddAppComponentsRequest' -and
+    $canaryForensics.Sdk.ComponentsType -ceq 'Microsoft.Xrm.Sdk.EntityReferenceCollection' -and
+    $canaryForensics.Sdk.ComponentCount -eq 1 -and
+    $canaryForensics.Sdk.LogicalName -ceq 'entity' -and
+    $canaryForensics.Sdk.ComponentIdMatchesTaEntityId -and
+    $canaryForensics.Sdk.AppIdMatchesSrapp -and
+    $canaryForensics.Sdk.ExecuteCalls -eq 0) `
+    'Construct one real SDK EntityReferenceCollection and AddAppComponentsRequest without Execute'
+Assert-Test ($canaryForensics.RawSdkComparison -ceq 'CONTRACTS_SEMANTICALLY_EQUIVALENT' -and
+    $canaryForensics.RootCauseClassification -ceq 'RAW_WEBAPI_ENTITY_REFERENCE_UNTRUSTED' -and
+    $canaryForensics.Decision -ceq 'SDK_PIVOT_RECOMMENDED') `
+    'Recommend the SDK pivot only for equivalent raw semantics and the wrong current root'
+Assert-Test (@($canaryForensics.WriteCounts.Values | Where-Object { $_ -ne 0 }).Count -eq 0 -and
+    -not $canaryForensics.FutureSdkCanary.CurrentRunExecutesSdkRequest) `
+    'Forensics construction reports zero writes and never executes the SDK request'
+$forensicsAst = (Get-Command Get-AddAppComponentsForensics -CommandType Function).ScriptBlock.Ast
+$sdkConstructionAst = (Get-Command New-TACanarySdkRequest -CommandType Function).ScriptBlock.Ast
+$executeCalls = @($forensicsAst.FindAll({
+    param($node)
+    $node -is [System.Management.Automation.Language.InvokeMemberExpressionAst] -and
+        $node.Member.Value -ieq 'Execute'
+}, $true)) + @($sdkConstructionAst.FindAll({
+    param($node)
+    $node -is [System.Management.Automation.Language.InvokeMemberExpressionAst] -and
+        $node.Member.Value -ieq 'Execute'
+}, $true))
+Assert-Test ($executeCalls.Count -eq 0) 'Diagnostic and SDK construction helpers contain no Execute invocation'
 $canaryPreflightFixture = [pscustomobject]@{
     IdentityChecks = [pscustomobject]@{
         PacIdentityAvailable = $true; AzIdentityAvailable = $true; DataverseIdentityAvailable = $true

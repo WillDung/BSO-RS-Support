@@ -288,6 +288,302 @@ function New-TACanaryWireRequest {
     }
 }
 
+function Get-TACanarySdkAssemblyDirectory {
+    $packageRoot = Join-Path $env:USERPROFILE '.nuget\packages\microsoft.powerapps.cli.tool'
+    if (-not (Test-Path -LiteralPath $packageRoot)) { return $null }
+    $candidates = @(Get-ChildItem -LiteralPath $packageRoot -Filter 'Microsoft.Crm.Sdk.Proxy.dll' `
+        -File -Recurse -ErrorAction SilentlyContinue | Where-Object {
+            (Test-Path -LiteralPath (Join-Path $_.DirectoryName 'Microsoft.Xrm.Sdk.dll')) -and
+            (Test-Path -LiteralPath (Join-Path $_.DirectoryName 'Microsoft.PowerPlatform.Dataverse.Client.dll'))
+        } | ForEach-Object {
+            [pscustomobject]@{
+                Directory = $_.DirectoryName
+                PackageVersion = $_.Directory.Parent.Parent.Parent.Name
+            }
+        } | Sort-Object { try { [version]$_.PackageVersion } catch { [version]'0.0' } } -Descending)
+    if ($candidates.Count -eq 0) { return $null }
+    $candidates[0]
+}
+
+function New-TACanarySdkRequest {
+    param(
+        [Parameter(Mandatory = $true)][string]$AppId,
+        [Parameter(Mandatory = $true)][string]$TaEntityId,
+        [Parameter(Mandatory = $true)][string]$SystemEntityId
+    )
+    $taGuid = [guid]::Empty
+    $appGuid = [guid]::Empty
+    $systemGuid = [guid]::Empty
+    if (-not [guid]::TryParse($AppId, [ref]$appGuid) -or
+        -not [guid]::TryParse($TaEntityId, [ref]$taGuid) -or
+        -not [guid]::TryParse($SystemEntityId, [ref]$systemGuid) -or
+        $taGuid -eq $systemGuid) {
+        throw 'SDK canary requires distinct, valid app, TA table, and system entity identities.'
+    }
+    $sdkLocation = Get-TACanarySdkAssemblyDirectory
+    if (-not $sdkLocation) { throw 'SDK_NOT_AVAILABLE: PAC-local Dataverse SDK assemblies were not found.' }
+    $assemblyDirectory = $sdkLocation.Directory
+    foreach ($assemblyName in @('Microsoft.Xrm.Sdk.dll', 'Microsoft.Crm.Sdk.Proxy.dll')) {
+        [void][System.Reflection.Assembly]::LoadFrom((Join-Path $assemblyDirectory $assemblyName))
+    }
+    $entityReferenceType = [Type]::GetType('Microsoft.Xrm.Sdk.EntityReference, Microsoft.Xrm.Sdk', $true)
+    $entityReferenceCollectionType = [Type]::GetType('Microsoft.Xrm.Sdk.EntityReferenceCollection, Microsoft.Xrm.Sdk', $true)
+    $requestType = [Type]::GetType('Microsoft.Crm.Sdk.Messages.AddAppComponentsRequest, Microsoft.Crm.Sdk.Proxy', $true)
+    $entityReferenceConstructor = $entityReferenceType.GetConstructor([Type[]]@([string], [guid]))
+    if (-not $entityReferenceConstructor) { throw 'SDK_CONSTRUCTION_INVALID: EntityReference(String, Guid) is unavailable.' }
+    $entityReference = $entityReferenceConstructor.Invoke(@('entity', $taGuid))
+    $components = [Activator]::CreateInstance($entityReferenceCollectionType)
+    $components.Add($entityReference)
+    $request = [Activator]::CreateInstance($requestType)
+    $requestType.GetProperty('AppId').SetValue($request, $appGuid)
+    $requestType.GetProperty('Components').SetValue($request, $components)
+    $clientAssemblyPath = Join-Path $assemblyDirectory 'Microsoft.PowerPlatform.Dataverse.Client.dll'
+    $proxyAssemblyPath = Join-Path $assemblyDirectory 'Microsoft.Crm.Sdk.Proxy.dll'
+    $xrmAssemblyPath = Join-Path $assemblyDirectory 'Microsoft.Xrm.Sdk.dll'
+    $clientAssemblyName = [System.Reflection.AssemblyName]::GetAssemblyName($clientAssemblyPath)
+    $proxyAssemblyName = [System.Reflection.AssemblyName]::GetAssemblyName($proxyAssemblyPath)
+    $xrmAssemblyName = [System.Reflection.AssemblyName]::GetAssemblyName($xrmAssemblyPath)
+    [pscustomobject]@{
+        Request = $request
+        RequestType = $request.GetType().FullName
+        ComponentsType = $request.Components.GetType().FullName
+        ComponentCount = $request.Components.Count
+        LogicalName = $request.Components[0].LogicalName
+        ComponentIdMatchesTaEntityId = $request.Components[0].Id -eq $taGuid
+        AppIdMatches = $request.AppId -eq $appGuid
+        CliToolBundleVersion = $sdkLocation.PackageVersion
+        ClientAssemblyVersion = $clientAssemblyName.Version.ToString()
+        ProxyAssemblyVersion = $proxyAssemblyName.Version.ToString()
+        XrmAssemblyVersion = $xrmAssemblyName.Version.ToString()
+        ExecuteCalls = 0
+    }
+}
+
+function Get-TACanaryIdFingerprint {
+    param([Parameter(Mandatory = $true)][string]$Id)
+    $normalized = ConvertTo-NormalizedGuid -Value $Id
+    [Convert]::ToHexString(
+        [System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes($normalized))
+    ).ToLowerInvariant()
+}
+
+function Get-TACanaryComponentSerializationSummary {
+    param(
+        [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Component,
+        [int]$ActualJsonDepth = 10
+    )
+    $identityProperties = @($Component.Keys | Where-Object { $_ -ne '@odata.type' })
+    $identityName = if ($identityProperties.Count -eq 1) { [string]$identityProperties[0] } else { 'INVALID' }
+    $json = ConvertTo-Json -InputObject $Component -Depth 10 -Compress
+    $serialized = [System.Text.UTF8Encoding]::new($false, $true).GetBytes($json)
+    [pscustomobject]@{
+        ODataType = [string]$Component['@odata.type']
+        PowerShellObjectType = $Component.GetType().FullName
+        IdentityProperty = $identityName
+        IdentityValueType = if ($identityName -ne 'INVALID') { [string]$Component[$identityName].GetType().FullName } else { 'INVALID' }
+        JsonIdentityValueType = if ($identityName -ne 'INVALID') {
+            $document = [System.Text.Json.JsonDocument]::Parse([ReadOnlyMemory[byte]]::new($serialized))
+            try { [string]$document.RootElement.GetProperty($identityName).ValueKind } finally { $document.Dispose() }
+        } else { 'INVALID' }
+        JsonSha256 = [Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($serialized)).ToLowerInvariant()
+        InspectionJsonDepth = 10
+        ActualRequestJsonDepth = $ActualJsonDepth
+        CustomConverter = $false
+    }
+}
+
+function Get-TACanaryCurrentStateClassification {
+    param([Parameter(Mandatory = $true)][object]$Snapshot)
+    $counts = $Snapshot.RawAppComponentTypeCounts
+    $roots = @($Snapshot.EntityResolutionDiagnostics)
+    if ($counts.SiteMap -ne 1 -or $counts.Entity -ne 1 -or $counts.Form -ne 4 -or
+        $counts.View -ne 4 -or $counts.Other -ne 0 -or $counts.Total -ne 10) {
+        return 'STATE_CHANGED_OR_INCOMPLETE'
+    }
+    if ($roots.Count -ne 1 -or $roots[0].ReturnedRowCount -ne 1 -or
+        @($roots[0].EntityIdMatchesQueriedObjectId | Where-Object { $_ -eq $true }).Count -ne 1) {
+        return 'ENTITY_ROOT_IDENTITY_UNRESOLVED'
+    }
+    if ($roots[0].NormalizedLogicalName -ceq 'entity') { return 'WRONG_SYSTEM_ENTITY_ROOT_CURRENT' }
+    if ($roots[0].NormalizedLogicalName -ceq 'os_sr_ta') { return 'TA_ENTITY_ROOT_CURRENT' }
+    'OTHER_ENTITY_ROOT_CURRENT'
+}
+
+function Get-AddAppComponentsForensics {
+    param([Parameter(Mandatory = $true)][object]$Snapshot)
+    $identity = Get-TACanaryTableIdentity -Snapshot $Snapshot
+    $systemEntityId = ConvertTo-NormalizedGuid -Value ([string]$script:SystemEntityIdForRemoval)
+    if ([string]::IsNullOrWhiteSpace($systemEntityId)) {
+        throw 'Forensics requires the current system entity identity from GET-only resolution.'
+    }
+    $body = New-TACanaryPayload -AppId $script:Target.AppModuleId `
+        -TaEntityId $identity.EntityId -SystemEntityId $systemEntityId
+    $sourceComponent = $body.Components[0]
+    $wrapperComponent = @($body.Components)[0]
+    $componentReferencePreserved = [object]::ReferenceEquals($sourceComponent, $wrapperComponent)
+    $wireRequest = New-TACanaryWireRequest -Body $body -TaEntityId $identity.EntityId `
+        -SystemEntityId $systemEntityId
+    $parsed = Get-TACanaryWireBodyEvidence -Bytes $wireRequest.BodyBytes `
+        -AppId $script:Target.AppModuleId -TaEntityId $identity.EntityId -SystemEntityId $systemEntityId
+    $dispatchBytes = [byte[]]$wireRequest.BodyBytes.Clone()
+    $dispatchEvidence = Assert-TACanaryWireRequest -Bytes $dispatchBytes `
+        -ExpectedSemanticFingerprint $wireRequest.SemanticFingerprint `
+        -ExpectedSerializedBodySha256 $wireRequest.SerializedBodySha256 `
+        -TaEntityId $identity.EntityId -SystemEntityId $systemEntityId
+    $reference = @($Snapshot.ReferenceComponents | Where-Object { $_.LogicalName -ceq 'os_sr_ta' })[0]
+    $approvedSourceId = ConvertTo-NormalizedGuid -Value ([string]$reference.Payloads[0].entityid)
+    $componentId = ConvertTo-NormalizedGuid -Value ([string]$sourceComponent.entityid)
+    $preSerializationId = ConvertTo-NormalizedGuid -Value ([string]$wrapperComponent.entityid)
+    $parsedId = ConvertTo-NormalizedGuid -Value ([string]$parsed.EntityId)
+    $dispatchId = ConvertTo-NormalizedGuid -Value ([string]$dispatchEvidence.EntityId)
+    $idsMatch = $identity.EntityId -ceq $approvedSourceId -and
+        $approvedSourceId -ceq $componentId -and $componentId -ceq $preSerializationId -and
+        $preSerializationId -ceq $parsedId -and $parsedId -ceq $dispatchId
+    $formPayload = @($reference.Payloads | Where-Object { $_['@odata.type'] -ceq 'Microsoft.Dynamics.CRM.systemform' })[0]
+    $viewPayload = @($reference.Payloads | Where-Object { $_['@odata.type'] -ceq 'Microsoft.Dynamics.CRM.savedquery' })[0]
+    $sdk = $null
+    $sdkFailure = $null
+    try {
+        $sdk = New-TACanarySdkRequest -AppId $script:Target.AppModuleId `
+            -TaEntityId $identity.EntityId -SystemEntityId $systemEntityId
+    }
+    catch {
+        $sdkFailure = if ($_.Exception.Message -like 'SDK_NOT_AVAILABLE:*') {
+            'SDK_NOT_AVAILABLE'
+        } else { 'SDK_CONSTRUCTION_INVALID' }
+    }
+    $sdkValid = $null -ne $sdk -and $sdk.RequestType -ceq 'Microsoft.Crm.Sdk.Messages.AddAppComponentsRequest' -and
+        $sdk.ComponentsType -ceq 'Microsoft.Xrm.Sdk.EntityReferenceCollection' -and
+        $sdk.ComponentCount -eq 1 -and $sdk.LogicalName -ceq 'entity' -and
+        $sdk.ComponentIdMatchesTaEntityId -and $sdk.AppIdMatches
+    $bodyValid = $idsMatch -and $parsed.AppId -ceq (ConvertTo-NormalizedGuid -Value $script:Target.AppModuleId) -and
+        $parsed.ComponentCount -eq 1 -and $parsed.ODataType -ceq 'Microsoft.Dynamics.CRM.entity'
+    $currentState = Get-TACanaryCurrentStateClassification -Snapshot $Snapshot
+    $comparison = if (-not $bodyValid) {
+        'RAW_SERIALIZATION_BUG'
+    } elseif (-not $sdkValid) {
+        $sdkFailure
+    } else {
+        'CONTRACTS_SEMANTICALLY_EQUIVALENT'
+    }
+    $decision = if (-not $bodyValid) {
+        'RAW_SERIALIZATION_BUG_FOUND'
+    } elseif (-not $sdkValid) {
+        'SDK_NOT_AVAILABLE'
+    } elseif ($currentState -eq 'WRONG_SYSTEM_ENTITY_ROOT_CURRENT') {
+        'SDK_PIVOT_RECOMMENDED'
+    } else {
+        'BLOCKED_CONTRACT_UNKNOWN'
+    }
+    [pscustomobject]@{
+        CurrentStateClassification = $currentState
+        HistoricalCanaryWireBodyCaptured = $false
+        HistoricalCanaryBodyConclusion = 'NOT_VERIFIABLE_FROM_RETAINED_EVIDENCE'
+        LiveMetadata = [pscustomobject]@{
+            Action = $Snapshot.AddAppComponentsContract.Action
+            AppIdType = $Snapshot.AddAppComponentsContract.AppIdType
+            ComponentsType = $Snapshot.AddAppComponentsContract.ComponentsType
+            EntityType = $Snapshot.AddAppComponentsContract.EntityType
+        }
+        RawBuilder = [pscustomobject]@{
+            Stage = 'CURRENT_IMPLEMENTATION_RECONSTRUCTION_ONLY'
+            Stages = @(
+                [pscustomobject]@{ Alias = 'RESOLVED_TA_ID'; Sha256 = Get-TACanaryIdFingerprint -Id $identity.EntityId }
+                [pscustomobject]@{ Alias = 'COMPONENT_ENTITY_ID'; Sha256 = Get-TACanaryIdFingerprint -Id $componentId }
+                [pscustomobject]@{ Alias = 'COLLECTION_COMPONENT_ID'; Sha256 = Get-TACanaryIdFingerprint -Id $componentId }
+                [pscustomobject]@{ Alias = 'WRAPPER_COMPONENT_ID'; Sha256 = Get-TACanaryIdFingerprint -Id $componentId }
+                [pscustomobject]@{ Alias = 'PRE_SERIALIZATION_ID'; Sha256 = Get-TACanaryIdFingerprint -Id $preSerializationId }
+                [pscustomobject]@{ Alias = 'PARSED_SERIALIZED_ID'; Sha256 = Get-TACanaryIdFingerprint -Id $parsedId }
+                [pscustomobject]@{ Alias = 'DISPATCH_BODY_ID'; Sha256 = Get-TACanaryIdFingerprint -Id $dispatchId }
+            )
+            SourceObjectType = $body.Components[0].GetType().FullName
+            CollectionCount = @($body.Components).Count
+            WrapperObjectType = $body.GetType().FullName
+            ResolvedEqualsComponent = $identity.EntityId -ceq $componentId
+            ComponentEqualsPreSerialization = $componentId -ceq $preSerializationId
+            PreSerializationEqualsParsed = $preSerializationId -ceq $parsedId
+            ParsedEqualsDispatchBytes = $parsedId -ceq $dispatchId
+            AllStagesEqual = $idsMatch
+            SemanticFingerprint = $wireRequest.SemanticFingerprint
+            SerializedBodySha256 = $wireRequest.SerializedBodySha256
+            DispatchedBodySha256 = $dispatchEvidence.SerializedBodySha256
+            AppIdMatchesSrapp = $parsed.AppId -ceq (ConvertTo-NormalizedGuid -Value $script:Target.AppModuleId)
+            ComponentCount = $parsed.ComponentCount
+            ODataType = $parsed.ODataType
+            NoAdditionalIdentityProperties = $true
+            NoDuplicatePropertyNames = $true
+            TypeCoercionDetected = $false
+            ObjectReplacementDetected = -not $componentReferencePreserved
+            UTF8NoBom = $true
+            DispatchOperationCount = 0
+        }
+        SerializerComparison = [pscustomobject]@{
+            Entity = Get-TACanaryComponentSerializationSummary -Component $sourceComponent -ActualJsonDepth 10
+            SystemForm = Get-TACanaryComponentSerializationSummary -Component $formPayload -ActualJsonDepth 30
+            SavedQuery = Get-TACanaryComponentSerializationSummary -Component $viewPayload -ActualJsonDepth 30
+            SameOrderedDictionaryConstruction = $sourceComponent.GetType() -eq $formPayload.GetType() -and
+                $formPayload.GetType() -eq $viewPayload.GetType()
+            SamePropertyInsertionPattern = (
+                @($body.Components[0].Keys | Select-Object -Last 1)[0] -ceq '@odata.type' -and
+                @($formPayload.Keys | Select-Object -Last 1)[0] -ceq '@odata.type' -and
+                @($viewPayload.Keys | Select-Object -Last 1)[0] -ceq '@odata.type'
+            )
+            SameJsonDepth = $false
+            CanaryJsonDepth = 10
+            ExistingAddComponentsJsonDepth = 30
+            CustomConverterUsed = $false
+            CanaryTransportUsesByteArray = $true
+            OtherRawTransportUsesConvertToJsonString = $true
+        }
+        Sdk = if ($sdkValid) {
+            [pscustomobject]@{
+                Available = $true
+                RequestType = $sdk.RequestType
+                ComponentsType = $sdk.ComponentsType
+                ComponentCount = $sdk.ComponentCount
+                LogicalName = $sdk.LogicalName
+                ComponentIdMatchesTaEntityId = $sdk.ComponentIdMatchesTaEntityId
+                AppIdMatchesSrapp = $sdk.AppIdMatches
+                CliToolBundleVersion = $sdk.CliToolBundleVersion
+                ClientAssemblyVersion = $sdk.ClientAssemblyVersion
+                ProxyAssemblyVersion = $sdk.ProxyAssemblyVersion
+                XrmAssemblyVersion = $sdk.XrmAssemblyVersion
+                ExecuteCalls = $sdk.ExecuteCalls
+            }
+        } else {
+            [pscustomobject]@{ Available = $false; Failure = $sdkFailure; ExecuteCalls = 0 }
+        }
+        RawSdkComparison = $comparison
+        RootCauseClassification = if ($bodyValid -and $currentState -eq 'WRONG_SYSTEM_ENTITY_ROOT_CURRENT' -and $sdkValid) {
+            'RAW_WEBAPI_ENTITY_REFERENCE_UNTRUSTED'
+        } elseif (-not $bodyValid) { 'RAW_SERIALIZATION_BUG' }
+        elseif (-not $sdkValid) { $sdkFailure }
+        else { 'UNKNOWN' }
+        Decision = $decision
+        FutureSdkCanary = [pscustomobject]@{
+            Recommended = $decision -ceq 'SDK_PIVOT_RECOMMENDED'
+            Step1 = 'Separately authorized one-logical RemoveAppComponents for the current system entity root.'
+            Step2 = 'GET-only reconcile to exactly one Site Map, zero entity roots, four forms, and four views.'
+            Step3 = 'Only after reconciliation and a separate authorization, locally build then execute one AddAppComponentsRequest.'
+            ComponentCount = 1
+            EntityReferenceLogicalName = 'entity'
+            ComponentIdMatchesApprovedTaTable = if ($sdkValid) { $sdk.ComponentIdMatchesTaEntityId } else { $false }
+            SeparateGatesBetweenWrites = $true
+            CurrentRunExecutesSdkRequest = $false
+        }
+        RequestCounts = [ordered]@{} + $Snapshot.RequestCounts
+        WriteCounts = [ordered]@{
+            AddAppComponentsWebApiPost = 0
+            AddAppComponentsSdkExecute = 0
+            RemoveAppComponentsPost = 0
+            SiteMapPatch = 0
+            OtherWrites = 0
+            PublishOperations = 0
+            Retries = 0
+        }
+    }
+}
+
 function Assert-TACanaryPayloadObject {
     param(
         [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Body,
@@ -999,6 +1295,17 @@ function Get-AppComponentsContract {
         [pscustomobject]@{ Name = 'systemform'; Key = 'formid' }
         [pscustomobject]@{ Name = 'savedquery'; Key = 'savedqueryid' }
     )
+    $entityType = $schema.SelectSingleNode("./*[local-name()='EntityType' and @Name='entity']")
+    if (-not $entityType) { throw 'The live entity component type is absent from OData metadata.' }
+    $entityKeys = @($entityType.SelectNodes("./*[local-name()='Key']/*[local-name()='PropertyRef']") |
+        ForEach-Object { $_.GetAttribute('Name') })
+    $entityIdProperty = $entityType.SelectSingleNode("./*[local-name()='Property' and @Name='entityid']")
+    $entitySets = @($Metadata.SelectNodes("//*[local-name()='EntitySet' and @EntityType='Microsoft.Dynamics.CRM.entity']"))
+    if ($entityKeys.Count -ne 1 -or $entityKeys[0] -cne 'entityid' -or
+        -not $entityIdProperty -or $entityIdProperty.GetAttribute('Type') -cne 'Edm.Guid' -or
+        $entitySets.Count -ne 1) {
+        throw 'The live entity type key, key type, or entity set contract is missing or ambiguous.'
+    }
     $verified = foreach ($item in $expected) {
         $type = $schema.SelectSingleNode("./*[local-name()='EntityType' and @Name='$($item.Name)']")
         if (-not $type) { throw "Component entity type $($item.Name) is absent from live OData metadata." }
@@ -1011,6 +1318,14 @@ function Get-AppComponentsContract {
         AppIdType = $appIdParameter.GetAttribute('Type')
         ComponentsType = $componentsParameter.GetAttribute('Type')
         ComponentEntityTypes = $verified
+        EntityType = [pscustomobject]@{
+            Name = 'Microsoft.Dynamics.CRM.entity'
+            BaseType = $entityType.GetAttribute('BaseType')
+            PrimaryKey = $entityKeys[0]
+            PrimaryKeyType = $entityIdProperty.GetAttribute('Type')
+            EntitySetName = $entitySets[0].GetAttribute('Name')
+            EntitySetType = $entitySets[0].GetAttribute('EntityType')
+        }
     }
 }
 
@@ -3775,6 +4090,10 @@ function Invoke-Main {
             FirstFailingPredicate = $script:FirstFailingPredicate
             OriginalPayloadFingerprint = $snapshot.ReferencePayloadFingerprint
             RootRepairEvidence = $snapshot.EntityRootRepairEvidence
+            ContractForensics = if ($snapshot.RawAppComponentTypeCounts.Entity -eq 1 -and
+                -not [string]::IsNullOrWhiteSpace([string]$script:SystemEntityIdForRemoval)) {
+                Get-AddAppComponentsForensics -Snapshot $snapshot
+            } else { $null }
             FinalClassification = $finalClassification
             ValidateApp = [pscustomobject]@{
                 Calls = 1

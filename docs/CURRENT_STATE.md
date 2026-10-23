@@ -1,5 +1,17 @@
 # Current State
 
+## Phase 2D.4E - Designated-User Browser Follow-Up (2026-10-23)
+
+Primary publication classification: **`PUBLISHED_AND_VERIFIED`**. This maps the previously verified publication evidence to the owner's supplied Phase 2D.4E classification vocabulary; no second publication occurred.
+
+- The owner shared an authenticated browser after the initial browser limitation. Account-manager evidence in both the maker portal and launched app matched the designated Phase 2D.4D account. No sign-in, account switch, impersonation, or permission change was performed by the assistant.
+- The runbook-derived direct `main.aspx?appname=srapp` URL launched BSO-RS-Support with the exact adopted app identity. Administration, TA Directory / Active TA Directories, Positions / Active Positions, Candidate Sources / Active Candidate Sources, and Locations / Active Locations were verified in the browser. Each loaded active view displayed **Rows: 0**; this is a view-level observation, not proof that all table records are absent.
+- **UI smoke is partial, not fully accepted:** a Settings area label was not present in the rendered navigation; the global Settings command is not counted as that area label. Published API XML still verifies the intended Settings area. No root cause, UI suppression explanation, or repair is asserted. The owner must review this presentation difference.
+- Placeholder Area1 / Group1 / Subarea1 was absent and no unexpected business module appeared. Standard Home/Recent/Pinned and platform commands are not treated as future business modules. Information-form record testing: **`NOT_EXECUTED_NO_SAFE_ROW`** for all four tables; no record was created or opened.
+- The browser emitted platform console errors including `Result is not PredictAPI`, while the four views visibly loaded; their impact/root cause remains unproven. Do not claim an error-free console or infer a view-load failure solely from these messages.
+- Follow-up explicit Dataverse API dispatches: **0**; additional tenant writes/access changes/retries: **0**. Original publication counts remain **77 GET**, **2 ValidateApp** included, **1 PublishXml**, all other authorized write categories **0**. Browser-managed background requests/telemetry are outside that explicit API counter and were not exhaustively counted.
+- **Next task:** read-only owner review of the Settings label discrepancy and conditional form acceptance when approved safe existing rows are available. No full UI-smoke pass, broader Phase 2D completion, repair, new data, permission change, or further publication is implied.
+
 ## Phase 2D.4E - Initial App Publication Verified; Browser Smoke Pending (2026-10-23)
 
 Source: explicit owner acceptance of the complete initial-publication audience/exposure, designated existing test user, Phase 2D.4D read-only access verification, and separate Phase 2D.4E single-app PublishXml authorization. Outcome: **`VERIFIED_INITIAL_APP_PUBLICATION_SMOKE_PENDING`**.

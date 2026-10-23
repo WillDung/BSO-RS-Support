@@ -1,6 +1,6 @@
 # Current State
 
-**Environment evidence:** Sprint 02F.3 performed a fresh authenticated preflight and final GET-only reconciliation on 22 October 2026. The verified project-table inventory is `os_sr_ta`, `os_sr_pos`, `os_sr_csrc`, and `os_sr_loc` in `os_sr_bso_rs_support`; all four tables have exact approved metadata and `PUBLISHED_NO_PENDING_DELTA`. Phase 2D.3A freshly verified the owner-approved `srapp`; Phase 2D.3B sent one AddAppComponents request and stopped before the Site Map update. Phase 2D.3C found that the live 13-row count/type inventory does not prove exact composition: all four type-1 component IDs fail to match the four expected table metadata IDs, as recorded below.
+**Environment evidence:** Sprint 02F.3 performed a fresh authenticated preflight and final GET-only reconciliation on 22 October 2026. The verified project-table inventory is `os_sr_ta`, `os_sr_pos`, `os_sr_csrc`, and `os_sr_loc` in `os_sr_bso_rs_support`; all four tables have exact approved metadata and `PUBLISHED_NO_PENDING_DELTA`. Phase 2D.3A freshly verified the owner-approved `srapp`; Phase 2D.3B sent one AddAppComponents request and stopped before the Site Map update. Phase 2D.3C's comparison of AppModule component object IDs to `EntityDefinitions.MetadataId` used unlike identifiers and is not a valid composition test. On 23 October 2026, the Phase 2D.3D guarded live preflight passed target and identity checks but stopped with HTTP 400 during AppModule entity-identity verification. No complete composition, current Site Map state, or `ValidateApp` result was established; no Phase 2D.3D write occurred.
 
 ## Sprint 02D Update — 22 October 2026
 
@@ -147,7 +147,7 @@ Schema owner approval and remaining field/choice decisions; dedicated Dev/Test a
 
 ## Current next authorized action
 
-Phase 2D.3C found a **LIVE_STATE_INCONSISTENCY**: four direct type-1 component IDs do not match the expected table metadata IDs, and the app-component root links for forms/views are empty. The Site Map transform is locally valid but remains unpatched. The next task is to resolve the component identity and hierarchy discrepancy and propose a separately bounded recovery plan; obtain explicit authorization before any Dataverse write. Do not repeat AddAppComponents, patch the Site Map, or publish `srapp` based on the previous authorization.
+The Phase 2D.3C **LIVE_STATE_INCONSISTENCY** conclusion is withdrawn as unsupported: `appmodulecomponent.objectid` for a type-1 component must be resolved through `entities.entityid` to `logicalname`; it must not be compared with `EntityDefinitions.MetadataId` or `appmodulecomponentid`. The local normalizer, warning classifier, and PATCH-only guard have been updated and validated offline as described below. On 23 October 2026, the owner reconfirmed VN LMV IT. A guarded preflight passed target and PAC/Az/WhoAmI identity checks, then stopped with HTTP 400 during the `Verify AppModule entity identity contract` stage. The complete direct composition, roles, `ValidateApp`, current Site Map XML, and ETag were therefore not verified. No PATCH or other write was attempted. Do not retry or substitute a live endpoint until the HTTP 400 is resolved through a separately reviewed read-only approach; never repeat AddAppComponents or publish `srapp`.
 
 ## Historical next-action statement (superseded)
 

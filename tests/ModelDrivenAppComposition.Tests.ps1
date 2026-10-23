@@ -169,6 +169,9 @@ $script:ResolvedReferenceComponents = @(
         $viewId = '{0:x8}-2000-4000-8000-{1:x12}' -f $ordinal, $ordinal
         [pscustomobject]@{
             LogicalName = $table
+            TableMetadataId = $tableId
+            MainForm = [pscustomobject]@{ Id = $formId }
+            ActiveView = [pscustomobject]@{ Id = $viewId }
             Payloads = @(
                 [ordered]@{ entityid = $tableId; '@odata.type' = 'Microsoft.Dynamics.CRM.entity' }
                 [ordered]@{ formid = $formId; '@odata.type' = 'Microsoft.Dynamics.CRM.systemform' }
@@ -248,6 +251,9 @@ $script:ResolvedReferenceComponents = @(
         $viewId = '{0:x8}-2000-4000-8000-{1:x12}' -f $ordinal, $ordinal
         [pscustomobject]@{
             LogicalName = $table
+            TableMetadataId = $tableId
+            MainForm = [pscustomobject]@{ Id = $formId }
+            ActiveView = [pscustomobject]@{ Id = $viewId }
             Payloads = @(
                 [ordered]@{ entityid = $tableId; '@odata.type' = 'Microsoft.Dynamics.CRM.entity' }
                 [ordered]@{ formid = $formId; '@odata.type' = 'Microsoft.Dynamics.CRM.systemform' }
@@ -273,31 +279,101 @@ Assert-Rejected { Assert-ReferenceUiCompositionPayload -Body $mixedReferenceBody
 $shortReferenceBody = [ordered]@{ AppId = $script:Target.AppModuleId; Components = @($referencePayloads | Select-Object -First 11) }
 Assert-Rejected { Assert-ReferenceUiCompositionPayload -Body $shortReferenceBody } 'Reject incomplete 11-component payload' 'exactly twelve'
 
-$siteMapComponent = [pscustomobject]@{ ComponentType = 62; ObjectId = $script:Target.SiteMapId }
-$startingUiState = Assert-ReferenceUiComponentState -Components @($siteMapComponent)
-Assert-Test ($startingUiState.SiteMapCount -eq 1 -and $startingUiState.ReferenceComponentCount -eq 0 -and
-    $startingUiState.TotalComponentCount -eq 1) 'Require existing Site Map as the only starting app component'
-$composedUiComponents = @(
-    $siteMapComponent
-    foreach ($reference in $script:ResolvedReferenceComponents) {
-        foreach ($payload in $reference.Payloads) {
-            $componentType = switch ([string]$payload['@odata.type']) {
-                'Microsoft.Dynamics.CRM.entity' { 1 }
-                'Microsoft.Dynamics.CRM.systemform' { 60 }
-                'Microsoft.Dynamics.CRM.savedquery' { 26 }
-            }
-            $key = @($payload.Keys | Where-Object { $_ -ne '@odata.type' })[0]
-            [pscustomobject]@{ ComponentType = $componentType; ObjectId = $payload[$key] }
-        }
+$syntheticEntityRecords = [System.Collections.Generic.List[object]]::new()
+$rawComposedComponents = [System.Collections.Generic.List[object]]::new()
+$rawComposedComponents.Add([pscustomobject]@{
+    appmodulecomponentid = 'aaaaaaaa-0000-4000-8000-000000000001'
+    _appmoduleidunique_value = $script:Target.AppModuleIdUnique
+    componenttype = 62
+    objectid = $script:Target.SiteMapId
+    isdefault = $false
+    ismetadata = $false
+    rootappmodulecomponentid = $null
+    rootcomponentbehavior = $null
+})
+$entityOrdinal = 0
+foreach ($reference in $script:ResolvedReferenceComponents) {
+    $entityOrdinal++
+    $entityId = 'bbbbbbbb-0000-4000-8000-{0:D12}' -f $entityOrdinal
+    $entityComponentId = 'cccccccc-0000-4000-8000-{0:D12}' -f $entityOrdinal
+    $syntheticEntityRecords.Add([pscustomobject]@{
+        entityid = $entityId
+        logicalname = $reference.LogicalName
+        name = $reference.LogicalName
+        objecttypecode = 11000 + $entityOrdinal
+    })
+    $rawComposedComponents.Add([pscustomobject]@{
+        appmodulecomponentid = $entityComponentId
+        _appmoduleidunique_value = $script:Target.AppModuleIdUnique
+        componenttype = 1
+        objectid = $entityId
+        isdefault = $false
+        ismetadata = $false
+        rootappmodulecomponentid = $null
+        rootcomponentbehavior = $null
+    })
+    foreach ($payload in @($reference.Payloads | Where-Object { $_.'@odata.type' -ne 'Microsoft.Dynamics.CRM.entity' })) {
+        $componentType = if ($payload.'@odata.type' -ceq 'Microsoft.Dynamics.CRM.systemform') { 60 } else { 26 }
+        $key = @($payload.Keys | Where-Object { $_ -ne '@odata.type' })[0]
+        $formOrViewId = [string]$payload[$key]
+        $rawComposedComponents.Add([pscustomobject]@{
+            appmodulecomponentid = if ($componentType -eq 60) { 'dddddddd-0000-4000-8000-{0:D12}' -f $entityOrdinal } else { 'eeeeeeee-0000-4000-8000-{0:D12}' -f $entityOrdinal }
+            _appmoduleidunique_value = $script:Target.AppModuleIdUnique
+            componenttype = $componentType
+            objectid = $formOrViewId
+            isdefault = $false
+            ismetadata = $false
+            rootappmodulecomponentid = $null
+            rootcomponentbehavior = $null
+        })
     }
-)
+}
+$composedUiComponents = @(ConvertTo-NormalizedAppModuleComponents -Components $rawComposedComponents.ToArray() `
+    -EntityRecords $syntheticEntityRecords.ToArray() -ReferenceComponents $script:ResolvedReferenceComponents `
+    -SiteMapId $script:Target.SiteMapId -AppModuleIdUnique $script:Target.AppModuleIdUnique)
 $composedUiState = Assert-ReferenceUiComponentState -Components $composedUiComponents -RequireComposed
 Assert-Test ($composedUiState.SiteMapCount -eq 1 -and $composedUiState.TableCount -eq 4 -and
     $composedUiState.MainFormCount -eq 4 -and $composedUiState.PublicViewCount -eq 4 -and
-    $composedUiState.TotalComponentCount -eq 13) 'Require exact final 13-component AppModule inventory'
+    $composedUiState.TotalComponentCount -eq 13 -and
+    @($composedUiComponents | Where-Object { $_.ComponentType -eq 1 -and $_.RootClassification -eq 'UNKNOWN' }).Count -eq 4) 'Normalize distinct entity/component IDs and accept unknown root fields'
+Assert-Test (@($composedUiComponents | Where-Object {
+    $_.ComponentType -eq 1 -and $_.ComponentId -cne $_.ObjectId
+}).Count -eq 4) 'AppModule component IDs may differ from referenced entity IDs'
+$entityObjectIds = @($composedUiComponents | Where-Object { $_.ComponentType -eq 1 } | ForEach-Object { $_.ObjectId })
+$metadataIds = @($script:ResolvedReferenceComponents | ForEach-Object { $_.TableMetadataId })
+Assert-Test (@($entityObjectIds | Where-Object { $_ -in $metadataIds }).Count -eq 0) 'Entity IDs may differ from EntityDefinitions MetadataId'
+$siteMapComponent = @($composedUiComponents | Where-Object { $_.ComponentType -eq 62 })[0]
 Assert-Rejected { Assert-ReferenceUiComponentState -Components @() } 'Reject missing starting Site Map association' 'exactly the existing Site Map'
-Assert-Rejected { Assert-ReferenceUiComponentState -Components (@($composedUiComponents) + @([pscustomobject]@{ ComponentType = 1; ObjectId = 'unexpected' })) -RequireComposed } 'Reject unexpected final AppModule component' 'Unexpected direct AppModule component'
+Assert-Rejected { Assert-ReferenceUiComponentState -Components (@($composedUiComponents) + @([pscustomobject]@{ ComponentType = 1; EntityLogicalName = 'os_sr_unexpected'; ObjectId = 'ffffffff-0000-4000-8000-000000000001' })) -RequireComposed } 'Reject unexpected final entity logical name' 'approved table logical name'
 Assert-Rejected { Assert-ReferenceUiComponentState -Components (@($composedUiComponents) + @($siteMapComponent)) -RequireComposed } 'Reject duplicate Site Map component' 'exactly the existing Site Map'
+
+$wrongLogicalNameRecords = @($syntheticEntityRecords.ToArray())
+$wrongLogicalNameRecords[0] = [pscustomobject]@{
+    entityid = $wrongLogicalNameRecords[0].entityid
+    logicalname = 'os_sr_wrong'
+    name = 'Wrong'
+    objecttypecode = $wrongLogicalNameRecords[0].objecttypecode
+}
+Assert-Rejected {
+    ConvertTo-NormalizedAppModuleComponents -Components $rawComposedComponents.ToArray() -EntityRecords $wrongLogicalNameRecords `
+        -ReferenceComponents $script:ResolvedReferenceComponents -SiteMapId $script:Target.SiteMapId -AppModuleIdUnique $script:Target.AppModuleIdUnique
+} 'Reject an unapproved entity logical name' 'unapproved table logical name'
+$unresolvedEntityRecords = @($syntheticEntityRecords.ToArray() | Select-Object -Skip 1)
+Assert-Rejected {
+    ConvertTo-NormalizedAppModuleComponents -Components $rawComposedComponents.ToArray() -EntityRecords $unresolvedEntityRecords `
+        -ReferenceComponents $script:ResolvedReferenceComponents -SiteMapId $script:Target.SiteMapId -AppModuleIdUnique $script:Target.AppModuleIdUnique
+} 'Reject an unresolved entity objectid' 'did not resolve uniquely'
+$duplicateLogicalNameRecords = @($syntheticEntityRecords.ToArray())
+$duplicateLogicalNameRecords[1] = [pscustomobject]@{
+    entityid = $duplicateLogicalNameRecords[1].entityid
+    logicalname = $duplicateLogicalNameRecords[0].logicalname
+    name = $duplicateLogicalNameRecords[1].name
+    objecttypecode = $duplicateLogicalNameRecords[1].objecttypecode
+}
+Assert-Rejected {
+    ConvertTo-NormalizedAppModuleComponents -Components $rawComposedComponents.ToArray() -EntityRecords $duplicateLogicalNameRecords `
+        -ReferenceComponents $script:ResolvedReferenceComponents -SiteMapId $script:Target.SiteMapId -AppModuleIdUnique $script:Target.AppModuleIdUnique
+} 'Reject duplicate normalized entity logical names' 'duplicate table logical name'
 
 $approvedRoles = @(
     [pscustomobject]@{ Name = 'System Administrator'; RoleId = '11111111-1111-4111-8111-111111111111' }
@@ -319,18 +395,62 @@ $blockedUiValidation = Get-ReferenceUiValidationState -AppValidation ([pscustomo
     [pscustomobject]@{ ErrorType = 'Error'; Message = 'Unexpected validation blocker' }
 ) })
 Assert-Test ($blockedUiValidation.BlockingErrorCount -eq 1) 'Detect blocking ValidateApp error before Site Map PATCH'
+$warningSummaries = @(ConvertTo-SafeValidationIssueSummaries -Issues @(
+    [pscustomobject]@{
+        ErrorType = 'Warning'
+        CRMErrorCode = 0
+        Message = $null
+        RequiredComponents = @([pscustomobject]@{
+            DisplayName = 'TA Directory'
+            SchemaName = 'os_sr_ta'
+            ComponentType = 1
+            ComponentId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+        })
+    }
+    [pscustomobject]@{
+        ErrorType = 'Warning'
+        CRMErrorCode = -2147155691
+        Message = 'Entity does not reference a form or view.'
+        RequiredComponents = @()
+    }
+) -NormalizedComponents $composedUiComponents)
+$warningState = Get-ReferenceUiValidationState -AppValidation ([pscustomobject]@{
+    ValidationSuccess = $true
+    Issues = $warningSummaries
+})
+Assert-Test ($warningState.WarningCount -eq 2 -and $warningState.UnresolvedRequiredComponentCount -eq 0 -and
+    $warningState.FormViewSelectionWarningCount -eq 1 -and
+    $warningSummaries[0].RequiredComponents[0].ResolutionStatus -ceq 'SATISFIED') 'Classify satisfied code-0 and non-blocking form/view warnings'
+$missingWarning = @(ConvertTo-SafeValidationIssueSummaries -Issues @(
+    [pscustomobject]@{
+        ErrorType = 'Warning'
+        CRMErrorCode = -2147155691
+        RequiredComponents = @([pscustomobject]@{
+            SchemaName = 'os_sr_missing'
+            ComponentType = 1
+            ComponentId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'
+        })
+    }
+) -NormalizedComponents $composedUiComponents)
+$missingWarningState = Get-ReferenceUiValidationState -AppValidation ([pscustomobject]@{
+    ValidationSuccess = $true
+    Issues = $missingWarning
+})
+Assert-Test ($missingWarningState.UnresolvedRequiredComponentCount -eq 1 -and
+    $missingWarning[0].Classification -ceq 'UNRESOLVED_REQUIRED_COMPONENT') 'Block on genuinely missing required entity'
+$failedValidationState = Get-ReferenceUiValidationState -AppValidation ([pscustomobject]@{
+    ValidationSuccess = $false
+    Issues = @()
+})
+Assert-Test ($failedValidationState.BlockingErrorCount -eq 1) 'Treat ValidationSuccess false as a blocking condition'
 
 $script:RequestCounts = @{ GET = 0; PATCH = 0; POST = 0 }
 $script:WriteResults = [System.Collections.Generic.List[object]]::new()
-Assert-Rejected { Assert-ReferenceUiWriteSequence -Method PATCH } 'Reject Site Map PATCH before AddAppComponents' 'after the successful single component POST'
-$script:RequestCounts.POST = 1
-Assert-Rejected { Assert-ReferenceUiWriteSequence -Method PATCH } 'Reject PATCH after unsuccessful or unverified component POST' 'after the successful single component POST'
-$script:WriteResults.Add([pscustomobject]@{ Method = 'POST'; HttpStatus = 204 })
+Assert-Rejected { Assert-ReferenceUiWriteSequence -Method POST } 'Reject AddAppComponents in Phase 2D.3D' 'forbids AddAppComponents'
 Assert-ReferenceUiWriteSequence -Method PATCH
-Assert-Test $true 'Allow the single Site Map PATCH only after successful AddAppComponents'
-Assert-Rejected { Assert-ReferenceUiWriteSequence -Method POST } 'Reject second AddAppComponents operation' 'one AddAppComponents POST'
+Assert-Test $true 'Allow one Site Map PATCH without AddAppComponents'
 $script:RequestCounts.PATCH = 1
-Assert-Rejected { Assert-ReferenceUiWriteSequence -Method PATCH } 'Reject second Site Map PATCH' 'after the successful single component POST'
+Assert-Rejected { Assert-ReferenceUiWriteSequence -Method PATCH } 'Reject second Site Map PATCH' 'one Site Map PATCH'
 $script:RequestCounts = @{ GET = 0; PATCH = 0; POST = 0 }
 $script:WriteResults = [System.Collections.Generic.List[object]]::new()
 

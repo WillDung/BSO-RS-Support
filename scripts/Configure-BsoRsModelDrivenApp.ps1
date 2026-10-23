@@ -186,14 +186,27 @@ function Get-SiteMapValidationState {
 function Get-ReferenceUiValidationState {
     param([object]$AppValidation)
     $issues = @($AppValidation.Issues)
+    $validationFailed = $AppValidation.PSObject.Properties['ValidationSuccess'] -and
+        $AppValidation.ValidationSuccess -eq $false
+    $unresolvedRequiredComponents = @($issues | ForEach-Object {
+        @(Get-PropertyValue -Object $_ -Name 'RequiredComponents' | Where-Object {
+            (Get-PropertyValue -Object $_ -Name 'ResolutionStatus') -cne 'SATISFIED'
+        })
+    }).Count
     [pscustomobject]@{
+        ValidationSuccess = if ($AppValidation.PSObject.Properties['ValidationSuccess']) { $AppValidation.ValidationSuccess } else { $null }
         SiteMapErrorCount = @($issues | Where-Object {
             $_.ErrorType -ceq 'Error' -and $_.Message -ceq 'App does not contain Site Map'
         }).Count
         EntityReferenceWarningCount = @($issues | Where-Object {
             $_.Message -ceq 'App does not reference at least one entity'
         }).Count
-        BlockingErrorCount = @($issues | Where-Object { $_.ErrorType -ceq 'Error' }).Count
+        BlockingErrorCount = @($issues | Where-Object { $_.ErrorType -ceq 'Error' }).Count + [int]$validationFailed
+        UnresolvedRequiredComponentCount = $unresolvedRequiredComponents
+        WarningCount = @($issues | Where-Object { $_.ErrorType -ceq 'Warning' }).Count
+        FormViewSelectionWarningCount = @($issues | Where-Object {
+            (Get-PropertyValue -Object $_ -Name 'Classification') -ceq 'NON_BLOCKING_FUNCTIONAL_WARNING'
+        }).Count
         Issues = $issues
     }
 }
@@ -268,64 +281,66 @@ function Assert-ReferenceUiComponentState {
     if ($siteMaps.Count -ne 1 -or $expectedSiteMaps.Count -ne 1) {
         throw 'Direct AppModule inventory must contain exactly the existing Site Map component.'
     }
-    $matched = 0
-    $matchedByType = @{ 1 = 0; 60 = 0; 26 = 0 }
-    foreach ($item in $expected) {
-        $matches = @($Components | Where-Object {
-            [int]$_.ComponentType -eq $item.ComponentType -and
-            ([string]$_.ObjectId).Trim('{}') -ieq ([string]$item.ObjectId).Trim('{}')
+    $referenceTables = @($script:ResolvedReferenceComponents)
+    if ($referenceTables.Count -ne 4 -or
+        @($referenceTables.LogicalName | Select-Object -Unique).Count -ne 4) {
+        throw 'Resolved reference table logical names are missing or duplicated.'
+    }
+    $entityComponents = @($Components | Where-Object { [int]$_.ComponentType -eq 1 })
+    $forms = @($Components | Where-Object { [int]$_.ComponentType -eq 60 })
+    $views = @($Components | Where-Object { [int]$_.ComponentType -eq 26 })
+    $matchedTables = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($component in $entityComponents) {
+        $logicalName = [string]$component.EntityLogicalName
+        if ([string]::IsNullOrWhiteSpace($logicalName) -or
+            $logicalName -notin @($referenceTables | ForEach-Object { [string]$_.LogicalName })) {
+            throw 'Entity component did not resolve to an approved table logical name.'
+        }
+        if (-not $matchedTables.Add($logicalName)) {
+            throw 'Duplicate entity component logical name exists.'
+        }
+    }
+    if ($matchedTables.Count -ne 4 -or $entityComponents.Count -ne 4) {
+        throw 'Entity components do not resolve exactly once to all four approved table logical names.'
+    }
+    foreach ($reference in $referenceTables) {
+        $formId = ConvertTo-NormalizedGuid -Value ([string]$reference.MainForm.Id)
+        $viewId = ConvertTo-NormalizedGuid -Value ([string]$reference.ActiveView.Id)
+        $formMatches = @($forms | Where-Object {
+            (ConvertTo-NormalizedGuid -Value ([string]$_.ObjectId)) -ceq $formId -and
+            $_.ParentLogicalName -ceq $reference.LogicalName
         })
-        if ($matches.Count -gt 1) { throw 'Duplicate approved AppModule components exist.' }
-        if ($matches.Count -eq 1) {
-            $matched++
-            $matchedByType[$item.ComponentType]++
+        $viewMatches = @($views | Where-Object {
+            (ConvertTo-NormalizedGuid -Value ([string]$_.ObjectId)) -ceq $viewId -and
+            $_.ParentLogicalName -ceq $reference.LogicalName
+        })
+        if ($formMatches.Count -ne 1 -or $viewMatches.Count -ne 1) {
+            throw 'AppModule form/view components do not match the approved IDs and parent table identities.'
         }
     }
-    $unexpected = @($Components | Where-Object {
-        $component = $_
-        $known = ([int]$component.ComponentType -eq 62 -and
-            ([string]$component.ObjectId).Trim('{}') -ieq $script:Target.SiteMapId)
-        if (-not $known) {
-            foreach ($item in $expected) {
-                if ([int]$component.ComponentType -eq $item.ComponentType -and
-                    ([string]$component.ObjectId).Trim('{}') -ieq ([string]$item.ObjectId).Trim('{}')) {
-                    $known = $true
-                    break
-                }
-            }
-        }
-        -not $known
-    })
-    if ($unexpected.Count -gt 0) { throw 'Unexpected direct AppModule component exists.' }
-    $expectedCount = if ($RequireComposed) { 12 } else { 0 }
-    if ($matched -ne $expectedCount -or $Components.Count -ne (1 + $expectedCount)) {
-        throw "Direct AppModule component inventory is not the expected Site Map plus $expectedCount reference components."
-    }
-    if ($RequireComposed -and ($matchedByType[1] -ne 4 -or $matchedByType[60] -ne 4 -or $matchedByType[26] -ne 4)) {
-        throw 'Composed AppModule inventory does not contain exactly four tables, four forms, and four views.'
+    if ($forms.Count -ne 4 -or $views.Count -ne 4 -or
+        $Components.Count -ne 13 -or @($Components | Where-Object { [int]$_.ComponentType -notin @(1, 26, 60, 62) }).Count -ne 0) {
+        throw 'Direct AppModule inventory contains a missing or unintended component.'
     }
     [pscustomobject]@{
         SiteMapCount = 1
-        TableCount = $matchedByType[1]
-        MainFormCount = $matchedByType[60]
-        PublicViewCount = $matchedByType[26]
-        ReferenceComponentCount = $matched
+        TableCount = $entityComponents.Count
+        MainFormCount = $forms.Count
+        PublicViewCount = $views.Count
+        ReferenceComponentCount = $entityComponents.Count + $forms.Count + $views.Count
         TotalComponentCount = $Components.Count
-        Composed = [bool]$RequireComposed
+        Composed = $true
     }
 }
 
 function Assert-ReferenceUiWriteSequence {
     param([ValidateSet('POST', 'PATCH')][string]$Method)
-    if ($Method -eq 'POST' -and
-        ($script:RequestCounts.POST -ne 0 -or $script:RequestCounts.PATCH -ne 0 -or $script:WriteResults.Count -ne 0)) {
-        throw 'Phase 2D.3 permits one AddAppComponents POST only, before any Site Map PATCH.'
+    if ($Method -eq 'POST') {
+        throw 'Phase 2D.3D forbids AddAppComponents and all POST operations.'
     }
-    if ($Method -eq 'PATCH' -and
-        ($script:RequestCounts.POST -ne 1 -or $script:RequestCounts.PATCH -ne 0 -or
-            $script:WriteResults.Count -ne 1 -or $script:WriteResults[0].Method -cne 'POST' -or
-            [int]$script:WriteResults[0].HttpStatus -lt 200 -or [int]$script:WriteResults[0].HttpStatus -ge 300)) {
-        throw 'Phase 2D.3 Site Map PATCH is permitted only once, after the successful single component POST.'
+    if ($script:RequestCounts.POST -ne 0 -or $script:RequestCounts.PATCH -ne 0 -or
+        $script:WriteResults.Count -ne 0) {
+        throw 'Phase 2D.3D permits one Site Map PATCH only, with no prior writes.'
     }
 }
 
@@ -803,7 +818,7 @@ function Invoke-DataverseRequest {
         throw 'Dataverse request path is outside the verified organization origin.'
     }
     $resource = [Uri]::UnescapeDataString($uri.AbsolutePath.Substring('/api/data/v9.2/'.Length))
-    if ($Method -eq 'GET' -and $resource -notmatch '^(WhoAmI$|appmodules(\(|$)|appmodulecomponents$|sitemaps(\(|$)|sitemaps/Microsoft\.Dynamics\.CRM\.RetrieveUnpublishedMultiple\(|solutions$|publishers\(|solutioncomponents$|EntityDefinitions\(|systemforms(\(|$)|savedqueries(\(|$)|roles\(|RetrieveRequiredComponents\(|ValidateApp\()') {
+    if ($Method -eq 'GET' -and $resource -notmatch '^(WhoAmI$|appmodules(\(|$)|appmodulecomponents$|entities\(|sitemaps(\(|$)|sitemaps/Microsoft\.Dynamics\.CRM\.RetrieveUnpublishedMultiple\(|solutions$|publishers\(|solutioncomponents$|EntityDefinitions\(|systemforms(\(|$)|savedqueries(\(|$)|roles\(|RetrieveRequiredComponents\(|ValidateApp\()') {
         throw 'GET blocked: endpoint is outside the app and component metadata allowlist.'
     }
     if ($Method -eq 'PATCH' -and ($resource -cne "sitemaps($($script:Target.SiteMapId))" -or
@@ -1071,17 +1086,197 @@ function Get-AppModuleRoleSnapshot {
     @($roles | Sort-Object RoleId)
 }
 
+function ConvertTo-NormalizedGuid {
+    param([Parameter(Mandatory = $true)][string]$Value)
+    $parsed = [guid]::Empty
+    if (-not [guid]::TryParse($Value.Trim('{}'), [ref]$parsed)) {
+        throw 'A Dataverse component identity is not a valid GUID.'
+    }
+    $parsed.ToString('D').ToLowerInvariant()
+}
+
+function Assert-AppModuleEntityIdentityContract {
+    param([Parameter(Mandatory = $true)][xml]$Metadata)
+    $entitySet = $Metadata.SelectSingleNode("//*[local-name()='EntitySet' and @Name='entities']")
+    $entityType = $Metadata.SelectSingleNode("//*[local-name()='EntityType' and @Name='entity']")
+    if (-not $entitySet -or
+        $entitySet.GetAttribute('EntityType') -cne 'Microsoft.Dynamics.CRM.entity' -or
+        -not $entityType) {
+        throw 'Dataverse metadata does not expose the expected entities entity set.'
+    }
+    $keys = @($entityType.SelectNodes("./*[local-name()='Key']/*[local-name()='PropertyRef']") |
+        ForEach-Object { $_.GetAttribute('Name') })
+    $properties = @($entityType.SelectNodes("./*[local-name()='Property']") |
+        ForEach-Object { $_.GetAttribute('Name') })
+    if ($keys.Count -ne 1 -or $keys[0] -cne 'entityid' -or
+        @('entityid', 'logicalname', 'name', 'objecttypecode' | Where-Object { $_ -notin $properties }).Count -gt 0) {
+        throw 'Dataverse entity metadata lacks the expected entityid/logicalname identity contract.'
+    }
+    [pscustomobject]@{ EntitySet = 'entities'; PrimaryKey = 'entityid' }
+}
+
+function ConvertTo-NormalizedAppModuleComponents {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Components,
+        [Parameter(Mandatory = $true)][object[]]$EntityRecords,
+        [Parameter(Mandatory = $true)][object[]]$ReferenceComponents,
+        [Parameter(Mandatory = $true)][string]$SiteMapId,
+        [Parameter(Mandatory = $true)][string]$AppModuleIdUnique
+    )
+    $expectedNames = @($ReferenceComponents | ForEach-Object { [string]$_.LogicalName })
+    if ($expectedNames.Count -ne 4 -or @($expectedNames | Select-Object -Unique).Count -ne 4) {
+        throw 'Reference entity normalization requires four unique approved table logical names.'
+    }
+    $normalized = [System.Collections.Generic.List[object]]::new()
+    $seenEntityNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($component in $Components) {
+        $componentType = [int]$component.componenttype
+        $objectId = [string]$component.objectid
+        $logicalName = $null
+        $parentLogicalName = $null
+        if ($componentType -eq 1) {
+            $entityId = ConvertTo-NormalizedGuid -Value $objectId
+            $entityMatches = @($EntityRecords | Where-Object {
+                (ConvertTo-NormalizedGuid -Value ([string]$_.entityid)) -ceq $entityId
+            })
+            if ($entityMatches.Count -ne 1) {
+                throw 'An AppModule entity objectid did not resolve uniquely through entities.entityid.'
+            }
+            $logicalName = [string]$entityMatches[0].logicalname
+            if ($logicalName -notin $expectedNames) {
+                throw 'An AppModule entity component resolves to an unapproved table logical name.'
+            }
+            if (-not $seenEntityNames.Add($logicalName)) {
+                throw 'AppModule entity components resolve to a duplicate table logical name.'
+            }
+        }
+        elseif ($componentType -in @(26, 60)) {
+            $assetId = ConvertTo-NormalizedGuid -Value $objectId
+            $assetMatches = foreach ($reference in $ReferenceComponents) {
+                $approvedId = if ($componentType -eq 60) { $reference.MainForm.Id } else { $reference.ActiveView.Id }
+                if ((ConvertTo-NormalizedGuid -Value ([string]$approvedId)) -ceq $assetId) {
+                    $reference
+                }
+            }
+            if (@($assetMatches).Count -eq 1) { $parentLogicalName = [string]@($assetMatches)[0].LogicalName }
+        }
+        $appModuleComponentId = ConvertTo-NormalizedGuid -Value ([string]$component.appmodulecomponentid)
+        $rootComponentId = [string]$component.rootappmodulecomponentid
+        $rootClassification = 'UNKNOWN'
+        if (-not [string]::IsNullOrWhiteSpace($rootComponentId) -and $rootComponentId -ne [guid]::Empty.ToString()) {
+            $normalizedRootId = ConvertTo-NormalizedGuid -Value $rootComponentId
+            $rootMatches = @($Components | Where-Object {
+                (ConvertTo-NormalizedGuid -Value ([string]$_.appmodulecomponentid)) -ceq $normalizedRootId
+            })
+            if ($rootMatches.Count -eq 1) {
+                $rootClassification = if ($normalizedRootId -ceq $appModuleComponentId) {
+                    'DIRECT_ROOT_COMPONENT'
+                }
+                else {
+                    'SUBCOMPONENT'
+                }
+            }
+        }
+        $normalized.Add([pscustomobject]@{
+            ComponentId = $appModuleComponentId
+            ComponentType = $componentType
+            ObjectId = $objectId
+            EntityLogicalName = $logicalName
+            ParentLogicalName = $parentLogicalName
+            IsMetadata = $component.ismetadata
+            IsDefault = $component.isdefault
+            RootAppModuleComponentId = $component.rootappmodulecomponentid
+            RootComponentBehavior = $component.rootcomponentbehavior
+            RootClassification = $rootClassification
+            AppAssociationMatches = (ConvertTo-NormalizedGuid -Value ([string]$component._appmoduleidunique_value)) -ceq
+                (ConvertTo-NormalizedGuid -Value $AppModuleIdUnique)
+        })
+    }
+    $normalized.ToArray()
+}
+
+function Get-AppModuleEntityRecords {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Components,
+        [Parameter(Mandatory = $true)][object]$IdentityContract
+    )
+    if ($IdentityContract.EntitySet -cne 'entities' -or $IdentityContract.PrimaryKey -cne 'entityid') {
+        throw 'AppModule entity resolution contract is not verified.'
+    }
+    $records = [System.Collections.Generic.List[object]]::new()
+    foreach ($component in @($Components | Where-Object { [int]$_.componenttype -eq 1 })) {
+        $entityId = ConvertTo-NormalizedGuid -Value ([string]$component.objectid)
+        $record = Invoke-DataverseRequest -Method GET -Path "entities($entityId)?%24select=entityid,logicalname,name,objecttypecode"
+        if ((ConvertTo-NormalizedGuid -Value ([string]$record.entityid)) -cne $entityId -or
+            [string]::IsNullOrWhiteSpace([string]$record.logicalname)) {
+            throw 'An AppModule entity component did not resolve to its exact entities record.'
+        }
+        $records.Add($record)
+    }
+    $records.ToArray()
+}
+
 function ConvertTo-SafeValidationIssueSummaries {
-    param([object[]]$Issues)
+    param(
+        [object[]]$Issues,
+        [object[]]$NormalizedComponents = @()
+    )
     @($Issues | ForEach-Object {
         $message = [string](Get-PropertyValue -Object $_ -Name 'Message')
         $message = [regex]::Replace($message, '[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}', '[GUID]')
         $message = [regex]::Replace($message, 'https?://\S+', '[URL]')
         $message = [regex]::Replace($message, '[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}', '[EMAIL]', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+        $requiredComponents = @(Get-PropertyValue -Object $_ -Name 'RequiredComponents')
+        $requiredSummaries = @($requiredComponents | ForEach-Object {
+            $requiredType = Get-PropertyValue -Object $_ -Name 'ComponentType'
+            $schemaName = [string](Get-PropertyValue -Object $_ -Name 'SchemaName')
+            $resolutionStatus = 'UNRESOLVED'
+            if ([int]$requiredType -eq 1 -and -not [string]::IsNullOrWhiteSpace($schemaName)) {
+                $entityMatches = @($NormalizedComponents | Where-Object {
+                    [int]$_.ComponentType -eq 1 -and $_.EntityLogicalName -ceq $schemaName
+                })
+                if ($entityMatches.Count -eq 1) { $resolutionStatus = 'SATISFIED' }
+                elseif ($entityMatches.Count -gt 1) { $resolutionStatus = 'AMBIGUOUS' }
+                else { $resolutionStatus = 'MISSING' }
+            }
+            [pscustomobject]@{
+                DisplayName = Get-PropertyValue -Object $_ -Name 'DisplayName'
+                SchemaName = $schemaName
+                ComponentType = $requiredType
+                ParentEntityName = Get-PropertyValue -Object $_ -Name 'ParentEntityName'
+                ComponentIdPresent = -not [string]::IsNullOrWhiteSpace([string](Get-PropertyValue -Object $_ -Name 'ComponentId'))
+                ResolutionStatus = $resolutionStatus
+            }
+        })
+        $errorType = [string](Get-PropertyValue -Object $_ -Name 'ErrorType')
+        $errorCode = [string](Get-PropertyValue -Object $_ -Name 'CRMErrorCode')
+        $classification = if ($errorType -ceq 'Error') {
+            'BLOCKING'
+        }
+        elseif (@($requiredSummaries | Where-Object { $_.ResolutionStatus -cne 'SATISFIED' }).Count -gt 0) {
+            'UNRESOLVED_REQUIRED_COMPONENT'
+        }
+        elseif ($errorCode -ceq '-2147155691') {
+            'NON_BLOCKING_FUNCTIONAL_WARNING'
+        }
+        elseif ($errorType -ceq 'Warning' -and $requiredSummaries.Count -gt 0) {
+            'SATISFIED_NON_BLOCKING_WARNING'
+        }
+        else {
+            'NON_BLOCKING_WARNING'
+        }
         [pscustomobject]@{
-            ErrorType = [string](Get-PropertyValue -Object $_ -Name 'ErrorType')
+            ErrorType = $errorType
             Message = $message
-            ErrorCode = [string](Get-PropertyValue -Object $_ -Name 'CRMErrorCode')
+            ErrorCode = $errorCode
+            DisplayName = Get-PropertyValue -Object $_ -Name 'DisplayName'
+            ComponentType = Get-PropertyValue -Object $_ -Name 'ComponentType'
+            ComponentSubType = Get-PropertyValue -Object $_ -Name 'ComponentSubType'
+            ParentEntityName = Get-PropertyValue -Object $_ -Name 'ParentEntityName'
+            ComponentIdPresent = -not [string]::IsNullOrWhiteSpace([string](Get-PropertyValue -Object $_ -Name 'ComponentId'))
+            ParentEntityIdPresent = -not [string]::IsNullOrWhiteSpace([string](Get-PropertyValue -Object $_ -Name 'ParentEntityId'))
+            RequiredComponents = $requiredSummaries
+            Classification = $classification
         }
     })
 }
@@ -1156,14 +1351,20 @@ function Get-TargetSnapshot {
     }
 
     $script:LastStage = 'Read AppModule components'
-    $components = @(Get-ODataRows -Path (New-CollectionPath -EntitySet 'appmodulecomponents' -Select 'appmodulecomponentid,_appmoduleidunique_value,componenttype,objectid,isdefault,ismetadata,rootappmodulecomponentid,rootcomponentbehavior' -Filter "_appmoduleidunique_value eq $($script:Target.AppModuleIdUnique)"))
+    $rawComponents = @(Get-ODataRows -Path (New-CollectionPath -EntitySet 'appmodulecomponents' -Select 'appmodulecomponentid,_appmoduleidunique_value,componenttype,objectid,isdefault,ismetadata,rootappmodulecomponentid,rootcomponentbehavior' -Filter "_appmoduleidunique_value eq $($script:Target.AppModuleIdUnique)"))
+    $script:LastStage = 'Verify AppModule entity identity contract'
+    $metadata = Get-DataverseMetadataDocument
+    $entityIdentityContract = Assert-AppModuleEntityIdentityContract -Metadata $metadata
+    $entityRecords = @(Get-AppModuleEntityRecords -Components $rawComponents -IdentityContract $entityIdentityContract)
+    $components = @(ConvertTo-NormalizedAppModuleComponents -Components $rawComponents -EntityRecords $entityRecords `
+        -ReferenceComponents $referenceComponents -SiteMapId $script:Target.SiteMapId -AppModuleIdUnique $script:Target.AppModuleIdUnique)
     $roleSnapshot = @(Get-AppModuleRoleSnapshot)
     $script:LastStage = 'Inspect unpublished Site Map layer'
     $siteMapDraft = Get-UnpublishedSiteMap
     $sourceXml = if ($siteMapDraft -and $siteMapDraft.sitemapxml) { [string]$siteMapDraft.sitemapxml } else { [string]$siteMap.sitemapxml }
     $proposedXml = New-ProposedSiteMapXml -SiteMapXml $sourceXml
     $script:LastStage = 'Validate AddAppComponents OData contract'
-    $componentContract = Get-AppComponentsContract -Metadata (Get-DataverseMetadataDocument)
+    $componentContract = Get-AppComponentsContract -Metadata $metadata
     $script:LastStage = 'Export and verify Solution associations'
     $export = Get-SolutionExportSummary
     $script:LastStage = 'Verify exported Site Map binding'
@@ -1183,7 +1384,7 @@ function Get-TargetSnapshot {
     $validation = Invoke-DataverseRequest -Method GET -Path "ValidateApp(AppModuleId=$($script:Target.AppModuleId))"
     $validationResponse = Get-PropertyValue -Object $validation -Name 'AppValidationResponse'
     $validationIssues = @(Get-PropertyValue -Object $validationResponse -Name 'ValidationIssueList')
-    $validationIssueSummaries = @(ConvertTo-SafeValidationIssueSummaries -Issues $validationIssues)
+    $validationIssueSummaries = @(ConvertTo-SafeValidationIssueSummaries -Issues $validationIssues -NormalizedComponents $components)
     [pscustomobject]@{
         AppModule = [pscustomobject]@{
             Id = $app.appmoduleid
@@ -1227,7 +1428,7 @@ function Get-TargetSnapshot {
         ReferenceComponents = $referenceComponents
         SolutionComponents = @($solutionComponents | ForEach-Object { [pscustomobject]@{ ComponentType = $_.componenttype; ObjectId = $_.objectid; RootComponentId = $_.rootsolutioncomponentid; RootComponentBehavior = $_.rootcomponentbehavior } })
         SolutionAppModuleRootCount = 1
-        AppComponents = @($components | ForEach-Object { [pscustomobject]@{ ComponentId = $_.appmodulecomponentid; ComponentType = $_.componenttype; ObjectId = $_.objectid; IsMetadata = $_.ismetadata } })
+        AppComponents = $components
         AppModuleRoles = $roleSnapshot
         AppValidation = [pscustomobject]@{
             ValidationSuccess = Get-PropertyValue -Object $validationResponse -Name 'ValidationSuccess'
@@ -1334,11 +1535,13 @@ function Invoke-SiteMapAssociationOnly {
 
 function Invoke-ReferenceUiComposition {
     param([object]$Snapshot)
-    $startingComponents = Assert-ReferenceUiComponentState -Components $Snapshot.AppComponents
+    $componentState = Assert-ReferenceUiComponentState -Components $Snapshot.AppComponents -RequireComposed
     $startingValidation = Get-ReferenceUiValidationState -AppValidation $Snapshot.AppValidation
     Assert-SiteMapSemanticNodePreservation -Before $Snapshot.SiteMapNavigationBefore -After $Snapshot.SiteMapNavigationAfter
-    if ($startingValidation.SiteMapErrorCount -ne 0 -or $startingValidation.BlockingErrorCount -ne 0) {
-        throw 'Pre-write ValidateApp must have no Site Map error or other blocking error.'
+    Assert-SiteMapHasNoDuplicateNavigationIds -SiteMapXml $Snapshot.ProposedSiteMapXml
+    if ($startingValidation.ValidationSuccess -eq $false -or $startingValidation.SiteMapErrorCount -ne 0 -or
+        $startingValidation.BlockingErrorCount -ne 0 -or $startingValidation.UnresolvedRequiredComponentCount -ne 0) {
+        throw 'Pre-PATCH ValidateApp has a blocking error or unresolved required component.'
     }
     if ($Snapshot.AppModule.UniqueName -cne $script:Target.AppUniqueName -or
         $Snapshot.AppModule.Name -cne $script:Target.AppName -or
@@ -1358,19 +1561,15 @@ function Invoke-ReferenceUiComposition {
     if ($Snapshot.SiteMapNeedsUpdate -and [string]::IsNullOrWhiteSpace([string]$Snapshot.SiteMap.ETag)) {
         throw 'Existing Site Map ETag is missing; stop before any write.'
     }
-    $payload = @(Get-ReferenceUiComponentPayloads)
-    $payloadFingerprint = Assert-ReferenceUiPayloadFingerprint -Payload $payload
-    $body = [ordered]@{ AppId = [string]$Snapshot.AppModule.Id; Components = $payload }
-    Assert-ReferenceUiCompositionPayload -Body $body
+    Assert-ApprovedAppRoles -Roles $Snapshot.AppModuleRoles
     $expectedRoleSnapshot = ConvertTo-Json -InputObject @($Snapshot.AppModuleRoles) -Compress
 
     if ($DryRun) {
         return [pscustomobject]@{
-            Status = 'READY_FOR_PHASE_2D3_APPLY'
+            Status = 'READY_FOR_SITEMAP_PATCH'
             Preflight = $Snapshot
-            StartingComponentState = $startingComponents
-            AddAppComponentsPayload = $body
-            AddAppComponentsPayloadFingerprint = $payloadFingerprint
+            ComponentState = $componentState
+            ValidationState = $startingValidation
             SiteMapSemanticDiff = [pscustomobject]@{
                 Before = @($Snapshot.SiteMapNavigationBefore)
                 After = @($Snapshot.SiteMapNavigationAfter)
@@ -1382,64 +1581,56 @@ function Invoke-ReferenceUiComposition {
         }
     }
 
+    if (-not $Snapshot.SiteMapNeedsUpdate) {
+        throw 'The Site Map already matches the approved navigation; no PATCH is required.'
+    }
+    $script:LastStage = 'Fresh GET-only pre-PATCH gate'
+    $fresh = Get-TargetSnapshot
+    $freshComponents = Assert-ReferenceUiComponentState -Components $fresh.AppComponents -RequireComposed
+    $freshValidation = Get-ReferenceUiValidationState -AppValidation $fresh.AppValidation
+    $appUnchanged = $fresh.AppModule.Id -ceq $Snapshot.AppModule.Id -and
+        $fresh.AppModule.IdUnique -ceq $Snapshot.AppModule.IdUnique -and
+        $fresh.AppModule.UniqueName -ceq $script:Target.AppUniqueName -and
+        $fresh.AppModule.Name -ceq $script:Target.AppName -and
+        [int]$fresh.AppModule.StateCode -eq 0 -and [int]$fresh.AppModule.ComponentState -eq 1
+    $rolesUnchanged = (ConvertTo-Json -InputObject @($fresh.AppModuleRoles) -Compress) -ceq $expectedRoleSnapshot
+    if (-not $appUnchanged -or -not $rolesUnchanged -or
+        $fresh.SiteMap.Id -cne $Snapshot.SiteMap.Id -or
+        $fresh.SiteMap.UniqueName -cne $script:Target.SiteMapUniqueName -or
+        -not $fresh.SiteMap.IsAppAware -or [int]$fresh.SiteMap.ComponentState -ne 0 -or
+        $freshComponents.SiteMapCount -ne 1 -or
+        $freshValidation.ValidationSuccess -eq $false -or $freshValidation.SiteMapErrorCount -ne 0 -or
+        $freshValidation.BlockingErrorCount -ne 0 -or $freshValidation.UnresolvedRequiredComponentCount -ne 0) {
+        throw 'Fresh pre-PATCH identity, composition, role, Site Map, or ValidateApp gate failed.'
+    }
+    Assert-SiteMapSemanticNodePreservation -Before $fresh.SiteMapNavigationBefore -After $fresh.SiteMapNavigationAfter
+    Assert-SiteMapHasNoDuplicateNavigationIds -SiteMapXml $fresh.ProposedSiteMapXml
+    if (-not $fresh.SiteMapNeedsUpdate -or [string]::IsNullOrWhiteSpace([string]$fresh.SiteMap.ETag)) {
+        throw 'Fresh Site Map XML or ETag does not support the single authorized PATCH.'
+    }
+
     $script:WritesAllowed = $true
-    Invoke-DataverseRequest -Method POST -Path 'AddAppComponents' -Body $body | Out-Null
-
-    $script:LastStage = 'GET-only reconciliation after AddAppComponents and intermediate ValidateApp'
-    $afterComponents = Get-TargetSnapshot
-    $componentState = Assert-ReferenceUiComponentState -Components $afterComponents.AppComponents -RequireComposed
-    $rolesUnchanged = (ConvertTo-Json -InputObject @($afterComponents.AppModuleRoles) -Compress) -ceq $expectedRoleSnapshot
-    $appUnchanged = $afterComponents.AppModule.Id -ceq $Snapshot.AppModule.Id -and
-        $afterComponents.AppModule.UniqueName -ceq $Snapshot.AppModule.UniqueName -and
-        $afterComponents.AppModule.Name -ceq $Snapshot.AppModule.Name -and
-        [int]$afterComponents.AppModule.StateCode -eq 0 -and
-        [int]$afterComponents.AppModule.ComponentState -eq 1
-    $siteMapUnchanged = $afterComponents.SiteMap.Id -ceq $Snapshot.SiteMap.Id -and
-        $afterComponents.SiteMap.UniqueName -ceq $Snapshot.SiteMap.UniqueName -and
-        $afterComponents.SiteMap.SitemapXml -ceq $Snapshot.SiteMap.SitemapXml -and
-        $afterComponents.SiteMapSourceXml -ceq $Snapshot.SiteMapSourceXml -and
-        [int]$afterComponents.SiteMap.ComponentState -eq [int]$Snapshot.SiteMap.ComponentState -and
-        $afterComponents.SiteMap.ETag -ceq $Snapshot.SiteMap.ETag
-    if (-not $appUnchanged -or -not $siteMapUnchanged -or -not $rolesUnchanged) {
-        throw 'Component reconciliation found changed app identity/state, Site Map state, or roles; stop before PATCH.'
-    }
-    $intermediateValidation = Get-ReferenceUiValidationState -AppValidation $afterComponents.AppValidation
-    if ($intermediateValidation.SiteMapErrorCount -ne 0 -or $intermediateValidation.BlockingErrorCount -ne 0) {
-        throw 'Intermediate ValidateApp has a blocking error; stop before Site Map PATCH.'
-    }
-    if ($intermediateValidation.EntityReferenceWarningCount -ne 0) {
-        throw 'Intermediate ValidateApp still reports the entity-reference warning; stop before Site Map PATCH.'
-    }
-    if ($afterComponents.SiteMapNeedsUpdate -ne $Snapshot.SiteMapNeedsUpdate -or
-        $afterComponents.ProposedSiteMapXml -cne $Snapshot.ProposedSiteMapXml) {
-        throw 'Site Map transformation changed during component reconciliation; stop before PATCH.'
-    }
-
-    if ($Snapshot.SiteMapNeedsUpdate) {
-        if ([string]$afterComponents.SiteMap.ETag -cne [string]$Snapshot.SiteMap.ETag -or
-            $afterComponents.SiteMap.SitemapXml -cne $Snapshot.SiteMap.SitemapXml) {
-            throw 'Site Map changed concurrently before the authorized PATCH; stop without retry.'
-        }
-        $script:LastStage = 'PATCH existing Site Map with If-Match'
+    try {
+        $script:LastStage = 'PATCH existing Site Map with fresh If-Match'
         Invoke-DataverseRequest -Method PATCH -Path "sitemaps($($script:Target.SiteMapId))" `
-            -Body ([ordered]@{ sitemapxml = $Snapshot.ProposedSiteMapXml }) `
-            -ETag ([string]$afterComponents.SiteMap.ETag) | Out-Null
+            -Body ([ordered]@{ sitemapxml = $fresh.ProposedSiteMapXml }) -ETag ([string]$fresh.SiteMap.ETag) | Out-Null
     }
-    $script:WritesAllowed = $false
+    finally {
+        $script:WritesAllowed = $false
+    }
 
-    $script:LastStage = 'GET-only final Site Map, app, role, component, and ValidateApp reconciliation'
+    $script:LastStage = 'GET-only post-PATCH reconciliation'
     $final = Get-TargetSnapshot
     $finalComponents = Assert-ReferenceUiComponentState -Components $final.AppComponents -RequireComposed
     $finalValidation = Get-ReferenceUiValidationState -AppValidation $final.AppValidation
     $finalRolesUnchanged = (ConvertTo-Json -InputObject @($final.AppModuleRoles) -Compress) -ceq $expectedRoleSnapshot
     $finalAppUnchanged = $final.AppModule.Id -ceq $Snapshot.AppModule.Id -and
-        $final.AppModule.UniqueName -ceq $Snapshot.AppModule.UniqueName -and
-        $final.AppModule.Name -ceq $Snapshot.AppModule.Name -and
+        $final.AppModule.UniqueName -ceq $script:Target.AppUniqueName -and
         [int]$final.AppModule.StateCode -eq 0 -and [int]$final.AppModule.ComponentState -eq 1
     $finalNavigation = @($final.SiteMapNavigationBefore)
     Assert-SiteMapHasNoDuplicateNavigationIds -SiteMapXml $final.SiteMapSourceXml
-    if ($finalNavigation.Count -ne 4 -or $final.SiteMapSourceXml -cne $Snapshot.ProposedSiteMapXml) {
-        throw 'Final Site Map read-back does not contain the exact transformed XML/navigation; preserve partial state.'
+    if ($finalNavigation.Count -ne 4 -or $final.SiteMapSourceXml -cne $fresh.ProposedSiteMapXml) {
+        throw 'Post-PATCH Site Map read-back does not contain the exact transformed XML/navigation.'
     }
     for ($index = 0; $index -lt $script:Target.NavigationSubareas.Count; $index++) {
         $expectedNavigation = $script:Target.NavigationSubareas[$index]
@@ -1451,44 +1642,44 @@ function Invoke-ReferenceUiComposition {
             $actualNavigation.SubAreaId -cne $expectedNavigation.NodeId -or
             $actualNavigation.Title -cne $expectedNavigation.Title -or
             $actualNavigation.Entity -cne $expectedNavigation.LogicalName) {
-            throw 'Final Site Map navigation differs from the approved deterministic Settings/Admin reference navigation.'
+            throw 'Post-PATCH Site Map navigation differs from the approved four-table navigation.'
         }
     }
-    Assert-SiteMapSemanticNodePreservation -Before $Snapshot.SiteMapNavigationBefore -After $finalNavigation
-    $finalSiteMapUnpublished = $final.SiteMapUnpublishedQuery -and
-        [bool]$final.SiteMapUnpublishedQuery.IsUnpublishedLayer -and
-        $final.SiteMap.SitemapXml -ceq $Snapshot.SiteMap.SitemapXml
-    if (-not $finalAppUnchanged -or -not $finalRolesUnchanged -or -not $finalSiteMapUnpublished) {
-        throw 'Final reconciliation found changed app publication/identity, roles, or published Site Map layer.'
-    }
-    if ($finalValidation.SiteMapErrorCount -ne 0 -or
-        $finalValidation.EntityReferenceWarningCount -ne 0 -or
-        $finalValidation.BlockingErrorCount -ne 0) {
-        throw 'Final ValidateApp still contains an expected blocker/warning or another blocking error.'
+    Assert-SiteMapSemanticNodePreservation -Before $fresh.SiteMapNavigationBefore -After $finalNavigation
+    $publishedLayerUnchanged = $final.SiteMap.SitemapXml -ceq $fresh.SiteMap.SitemapXml
+    if (-not $finalAppUnchanged -or -not $finalRolesUnchanged -or -not $publishedLayerUnchanged -or
+        $finalValidation.ValidationSuccess -eq $false -or $finalValidation.SiteMapErrorCount -ne 0 -or
+        $finalValidation.BlockingErrorCount -ne 0 -or $finalValidation.UnresolvedRequiredComponentCount -ne 0) {
+        throw 'Post-PATCH AppModule, role, Site Map, or ValidateApp reconciliation failed.'
     }
 
     [pscustomobject]@{
-        Status = 'VERIFIED_COMPOSED_UNPUBLISHED'
+        Status = if ($finalValidation.FormViewSelectionWarningCount -gt 0) {
+            'VERIFIED_COMPOSED_UNPUBLISHED_WITH_WARNINGS'
+        }
+        else {
+            'VERIFIED_COMPOSED_UNPUBLISHED'
+        }
         Preflight = $Snapshot
-        ComponentPost = [pscustomobject]@{
-            State = $componentState
-            Validation = $afterComponents.AppValidation
-            AppRemainsUnpublished = $appUnchanged
+        FreshPrePatch = [pscustomobject]@{
+            ComponentState = $freshComponents
+            ValidationState = $freshValidation
             RolesUnchanged = $rolesUnchanged
+            AppRemainsUnpublished = $appUnchanged
         }
         SiteMapSemanticDiff = [pscustomobject]@{
-            Before = @($Snapshot.SiteMapNavigationBefore)
+            Before = @($fresh.SiteMapNavigationBefore)
             After = $finalNavigation
             PreservedExistingNodeIds = $true
-            PatchApplied = [bool]$Snapshot.SiteMapNeedsUpdate
+            PatchApplied = $true
         }
         FinalAppModule = $final.AppModule
         FinalSiteMap = [pscustomobject]@{
             Id = $final.SiteMap.Id
             UniqueName = $final.SiteMap.UniqueName
             ComponentState = $final.SiteMap.ComponentState
-            PublishedLayerUnchanged = $true
-            UnpublishedLayerContainsProposedNavigation = $final.SiteMapSourceXml -ceq $Snapshot.ProposedSiteMapXml
+            PublishedLayerUnchanged = $publishedLayerUnchanged
+            UnpublishedLayerContainsProposedNavigation = $final.SiteMapSourceXml -ceq $fresh.ProposedSiteMapXml
             DirectAssociationPresent = $finalComponents.SiteMapCount -eq 1
         }
         FinalComponentState = $finalComponents

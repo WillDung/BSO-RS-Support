@@ -1304,6 +1304,192 @@ $executeCalls = @($forensicsAst.FindAll({
         $node.Member.Value -ieq 'Execute'
 }, $true))
 Assert-Test ($executeCalls.Count -eq 0) 'Diagnostic and SDK construction helpers contain no Execute invocation'
+$sdkRequestFixture = New-TACanarySdkRequest -AppId $script:Target.AppModuleId `
+    -TaEntityId $taCanaryId -SystemEntityId $systemEntityCanaryId
+$sdkRequestEvidence = Assert-SdkTaEntityCanaryRequest -Request $sdkRequestFixture.Request `
+    -TaEntityId $taCanaryId -SystemEntityId $systemEntityCanaryId
+Assert-Test ($sdkRequestEvidence.ComponentCount -eq 1 -and
+    $sdkRequestEvidence.LogicalName -ceq 'entity' -and
+    $sdkRequestEvidence.ComponentIdAlias -ceq 'os_sr_ta' -and
+    $sdkRequestEvidence.AppIdAlias -ceq 'srapp' -and
+    $sdkRequestEvidence.Fingerprint -match '^[0-9a-f]{64}$') `
+    'Fingerprint one SDK entity reference using safe logical aliases only'
+Assert-Rejected {
+    $sdkRequestFixture.Request.Components[0].Id = [guid]$systemEntityCanaryId
+    Assert-SdkTaEntityCanaryRequest -Request $sdkRequestFixture.Request `
+        -TaEntityId $taCanaryId -SystemEntityId $systemEntityCanaryId
+} 'Reject the system entity ID as the TA SDK component ID' 'freshly verified TA table'
+$sdkRequestFixture = New-TACanarySdkRequest -AppId $script:Target.AppModuleId `
+    -TaEntityId $taCanaryId -SystemEntityId $systemEntityCanaryId
+Assert-Rejected {
+    $sdkRequestFixture.Request.Components[0].LogicalName = 'os_sr_ta'
+    Assert-SdkTaEntityCanaryRequest -Request $sdkRequestFixture.Request `
+        -TaEntityId $taCanaryId -SystemEntityId $systemEntityCanaryId
+} 'Require the SDK EntityReference logical name `entity`' 'freshly verified TA table'
+$sdkRequestFixture = New-TACanarySdkRequest -AppId $script:Target.AppModuleId `
+    -TaEntityId $taCanaryId -SystemEntityId $systemEntityCanaryId
+$dependencyFixtureRoot = Join-Path $env:TEMP "bso-sr-sdk-dependency-$([guid]::NewGuid().ToString('N'))"
+try {
+    $standardDiPath = Join-Path $dependencyFixtureRoot `
+        'microsoft.extensions.dependencyinjection\3.1.9\lib\netstandard2.0\Microsoft.Extensions.DependencyInjection.dll'
+    $frameworkDiPath = Join-Path $dependencyFixtureRoot `
+        'microsoft.extensions.dependencyinjection\3.1.9\lib\net461\Microsoft.Extensions.DependencyInjection.dll'
+    $loggingAbstractionsPath = Join-Path $dependencyFixtureRoot `
+        'microsoft.extensions.logging.abstractions\3.1.9\lib\netstandard2.0\Microsoft.Extensions.Logging.Abstractions.dll'
+    $loggingPath = Join-Path $dependencyFixtureRoot `
+        'microsoft.extensions.logging\3.1.9\lib\netcoreapp3.1\Microsoft.Extensions.Logging.dll'
+    foreach ($path in @($standardDiPath, $frameworkDiPath, $loggingAbstractionsPath, $loggingPath)) {
+        $directory = Split-Path -Parent $path
+        if (-not (Test-Path -LiteralPath $directory)) {
+            New-Item -ItemType Directory -Path $directory -Force | Out-Null
+        }
+        New-Item -ItemType File -Path $path -Force | Out-Null
+    }
+    $dependencyReferences = @(
+        [System.Reflection.AssemblyName]::new(
+            'Microsoft.Extensions.DependencyInjection, Version=3.1.9.0, Culture=neutral, PublicKeyToken=adb9793829ddae60'
+        ),
+        [System.Reflection.AssemblyName]::new(
+            'Microsoft.Extensions.Logging.Abstractions, Version=3.1.9.0, Culture=neutral, PublicKeyToken=adb9793829ddae60'
+        )
+    )
+    $dependencyPaths = @(Get-TACanaryServiceClientDependencyAssemblyPaths `
+        -AssemblyReferences $dependencyReferences -PackageRoot $dependencyFixtureRoot)
+    Assert-Test ($dependencyPaths.Count -eq 3 -and
+        $dependencyPaths -contains $standardDiPath -and
+        $dependencyPaths -notcontains $frameworkDiPath -and
+        $dependencyPaths -contains $loggingAbstractionsPath -and
+        $dependencyPaths -contains $loggingPath) `
+        'Resolve exact SDK dependency versions and prefer compatible assets, including transitive Microsoft.Extensions assemblies'
+    Assert-Rejected {
+        Get-TACanaryServiceClientDependencyAssemblyPaths `
+            -AssemblyReferences @([System.Reflection.AssemblyName]::new(
+                'Microsoft.Extensions.Http, Version=3.1.9.0, Culture=neutral, PublicKeyToken=adb9793829ddae60'
+            )) -PackageRoot $dependencyFixtureRoot
+    } 'Fail closed when an exact ServiceClient dependency asset is missing' 'exact package asset missing'
+    Assert-Rejected {
+        Get-TACanaryServiceClientDependencyAssemblyPaths -AssemblyReferences @(
+            [System.Reflection.AssemblyName]::new(
+                'Microsoft.Extensions.DependencyInjection, Version=3.1.9.0, Culture=neutral, PublicKeyToken=adb9793829ddae60'
+            ),
+            [System.Reflection.AssemblyName]::new(
+                'Microsoft.Extensions.Logging.Abstractions, Version=3.1.8.0, Culture=neutral, PublicKeyToken=adb9793829ddae60'
+            )
+        ) -PackageRoot $dependencyFixtureRoot
+    } 'Fail closed when ServiceClient dependency versions are mixed' 'do not share one package version'
+}
+finally {
+    if (Test-Path -LiteralPath $dependencyFixtureRoot) {
+        Remove-Item -LiteralPath $dependencyFixtureRoot -Recurse -Force
+    }
+}
+$retryClientFixture = [pscustomobject]@{
+    MaxRetryCount = 5; IsReady = $true; ExecuteCalls = 0; LastError = ''; LastException = $null
+    SessionTrackingId = $null
+}
+Assert-Test ((Set-SdkClientNoRetries -Client $retryClientFixture) -eq 0 -and
+    $retryClientFixture.MaxRetryCount -eq 0) 'Set ServiceClient MaxRetryCount to zero'
+$retryClientFixture | Add-Member -MemberType ScriptMethod -Name Execute -Value {
+    param($request)
+    $this.ExecuteCalls++
+    [pscustomobject]@{ Response = 'synthetic' }
+}
+$script:SdkExecuteCount = 0
+$sdkExecuteResult = Invoke-SdkTaEntityCanaryExecuteOnce -Client $retryClientFixture `
+    -Request $sdkRequestFixture.Request -TaEntityId $taCanaryId `
+    -SystemEntityId $systemEntityCanaryId -ExpectedFingerprint $sdkRequestEvidence.Fingerprint
+Assert-Test ($sdkExecuteResult.Attempted -and $sdkExecuteResult.Succeeded -and
+    $retryClientFixture.ExecuteCalls -eq 1 -and $script:SdkExecuteCount -eq 1) `
+    'Execute the SDK request exactly once after validating zero retries and request shape'
+Assert-Rejected {
+    Invoke-SdkTaEntityCanaryExecuteOnce -Client $retryClientFixture `
+        -Request $sdkRequestFixture.Request -TaEntityId $taCanaryId `
+        -SystemEntityId $systemEntityCanaryId -ExpectedFingerprint $sdkRequestEvidence.Fingerprint
+} 'Block a second SDK Execute attempt' 'no prior Execute'
+Assert-Test ($retryClientFixture.ExecuteCalls -eq 1) 'Second Execute guard does not call ServiceClient again'
+$retryClientFixture.ExecuteCalls = 0
+$retryClientFixture | Add-Member -MemberType ScriptMethod -Name Execute -Value {
+    $this.ExecuteCalls++
+    throw 'synthetic SDK failure'
+} -Force
+$script:SdkExecuteCount = 0
+$sdkExceptionResult = Invoke-SdkTaEntityCanaryExecuteOnce -Client $retryClientFixture `
+    -Request $sdkRequestFixture.Request -TaEntityId $taCanaryId `
+    -SystemEntityId $systemEntityCanaryId -ExpectedFingerprint $sdkRequestEvidence.Fingerprint
+Assert-Test (-not $sdkExceptionResult.Succeeded -and $sdkExceptionResult.Attempted -and
+    $retryClientFixture.ExecuteCalls -eq 1 -and $script:SdkExecuteCount -eq 1) `
+    'SDK exception path records one attempt and never retries'
+$script:SdkExecuteCount = 0
+$sdkModeWas = $SdkTaEntityCanary
+$organizationUrlWas = $OrganizationUrl
+$apiRootWas = $script:ApiRoot
+$writesAllowedWas = $script:WritesAllowed
+$requestCountsWas = $script:RequestCounts
+try {
+    $SdkTaEntityCanary = $true
+    $OrganizationUrl = 'https://org.synthetic.crm.dynamics.com/'
+    $script:ApiRoot = $OrganizationUrl + 'api/data/v9.2/'
+    $script:WritesAllowed = $true
+    Assert-Rejected {
+        Invoke-DataverseRequest -Method POST -Path 'AddAppComponents' -Body ([ordered]@{})
+    } 'Block raw AddAppComponents in the SDK TA canary mode' 'only one RemoveAppComponents POST'
+}
+finally {
+    $SdkTaEntityCanary = $sdkModeWas
+    $OrganizationUrl = $organizationUrlWas
+    $script:ApiRoot = $apiRootWas
+    $script:WritesAllowed = $writesAllowedWas
+    $script:RequestCounts = $requestCountsWas
+}
+Assert-Test ($script:ExternalCalls -eq 0) 'Blocked raw AddAppComponents guard makes no token or network call'
+$sdkOutcomeProtected = [pscustomobject]@{
+    SiteMapUnchanged = $true; ComponentAssociationsIntact = $true; FormsAndViewsUnchanged = $true
+    RolesUnchanged = $true; AppActiveUnpublished = $true
+}
+Assert-Test ((Get-SdkTaEntityCanaryOutcome -Before $canaryBeforeFixture -After $canaryAfterFixture `
+    -ProtectedState $sdkOutcomeProtected -ExecuteResult ([pscustomobject]@{ Succeeded = $true; HttpStatus = $null })) -ceq
+    'SDK_CANARY_ROOT_VERIFIED') 'Reconcile one SDK TA root by the entities logical-name identity chain'
+$sdkWrongRootFixture = $canaryAfterFixture.PSObject.Copy()
+$sdkWrongRootFixture.EntityResolutionDiagnostics = @([pscustomobject]@{
+    ReturnedRowCount = 1; NormalizedLogicalName = 'entity'; EntityIdMatchesQueriedObjectId = @($true)
+    AppAssociationMatches = $true
+})
+Assert-Test ((Get-SdkTaEntityCanaryOutcome -Before $canaryBeforeFixture -After $sdkWrongRootFixture `
+    -ProtectedState $sdkOutcomeProtected -ExecuteResult ([pscustomobject]@{ Succeeded = $true; HttpStatus = $null })) -ceq
+    'SDK_WRONG_SYSTEM_ROOT_CREATED') 'Classify a recreated system entity root without automatic removal'
+$sdkWrongEntityFixture = $canaryAfterFixture.PSObject.Copy()
+$sdkWrongEntityFixture.EntityResolutionDiagnostics = @([pscustomobject]@{
+    ReturnedRowCount = 1; NormalizedLogicalName = 'os_sr_pos'; EntityIdMatchesQueriedObjectId = @($true)
+    AppAssociationMatches = $true
+})
+Assert-Test ((Get-SdkTaEntityCanaryOutcome -Before $canaryBeforeFixture -After $sdkWrongEntityFixture `
+    -ProtectedState $sdkOutcomeProtected -ExecuteResult ([pscustomobject]@{ Succeeded = $true; HttpStatus = $null })) -ceq
+    'SDK_WRONG_ENTITY_ROOT_CREATED') 'Classify any non-TA table root'
+$sdkMultipleRootsFixture = $canaryAfterFixture.PSObject.Copy()
+$sdkMultipleRootsFixture.RawAppComponentTypeCounts = [pscustomobject]@{
+    SiteMap = 1; Entity = 2; Form = 4; View = 4; Other = 0; Total = 11
+}
+Assert-Test ((Get-SdkTaEntityCanaryOutcome -Before $canaryBeforeFixture -After $sdkMultipleRootsFixture `
+    -ProtectedState $sdkOutcomeProtected -ExecuteResult ([pscustomobject]@{ Succeeded = $true; HttpStatus = $null })) -ceq
+    'SDK_MULTIPLE_ROOTS_CREATED') 'Classify duplicate SDK entity roots'
+$sdkNoRootFixture = $canaryAfterFixture.PSObject.Copy()
+$sdkNoRootFixture.RawAppComponentTypeCounts = [pscustomobject]@{
+    SiteMap = 1; Entity = 0; Form = 4; View = 4; Other = 0; Total = 9
+}
+$sdkNoRootFixture.EntityResolutionDiagnostics = @()
+Assert-Test ((Get-SdkTaEntityCanaryOutcome -Before $canaryBeforeFixture -After $sdkNoRootFixture `
+    -ProtectedState $sdkOutcomeProtected -ExecuteResult ([pscustomobject]@{ Succeeded = $true; HttpStatus = $null })) -ceq
+    'SDK_NO_ROOT_CREATED') 'Classify a completed SDK Execute without a root'
+Assert-Test ((Get-SdkTaEntityCanaryOutcome -Before $canaryBeforeFixture -After $sdkNoRootFixture `
+    -ProtectedState $sdkOutcomeProtected -ExecuteResult ([pscustomobject]@{ HttpStatus = 401 })) -ceq
+    'SDK_FAILED_AUTH') 'Classify SDK authentication failure'
+$sdkSequenceText = (Get-Command Invoke-SdkTaEntityCanary -CommandType Function).ScriptBlock.Ast.Extent.Text
+$removeSequenceIndex = $sdkSequenceText.IndexOf('Invoke-SdkTaEntityCanaryRemoval', [StringComparison]::Ordinal)
+$cleanSequenceIndex = $sdkSequenceText.IndexOf('Assert-SdkTaEntityCanaryCleanState', [StringComparison]::Ordinal)
+$executeSequenceIndex = $sdkSequenceText.IndexOf('Invoke-SdkTaEntityCanaryExecuteOnce', [StringComparison]::Ordinal)
+Assert-Test ($removeSequenceIndex -ge 0 -and $removeSequenceIndex -lt $cleanSequenceIndex -and
+    $cleanSequenceIndex -lt $executeSequenceIndex) `
+    'Require RemoveAppComponents reconciliation to clean nine components before SDK Execute'
 $canaryPreflightFixture = [pscustomobject]@{
     IdentityChecks = [pscustomobject]@{
         PacIdentityAvailable = $true; AzIdentityAvailable = $true; DataverseIdentityAvailable = $true
@@ -1356,6 +1542,79 @@ $canaryPreflightIdentity = Assert-TACanaryPreflight -Snapshot $canaryPreflightFi
 Assert-Test ($canaryPreflightIdentity.TaEntityId -ceq $taCanaryId -and
     $canaryPreflightIdentity.SystemEntityId -ceq $systemEntityCanaryId) `
     'Pass exact nine-component, identity, role, app, Site Map and TA metadata preflight'
+$sdkWrongRootPreflightFixture = $canaryPreflightFixture.PSObject.Copy()
+$sdkWrongRootPreflightFixture.SiteMap = [pscustomobject]@{
+    Id = $script:Target.SiteMapId; UniqueName = 'srapp'; IsAppAware = $true
+    ComponentState = 0; SitemapXml = '<SiteMap />'
+}
+$sdkWrongRootPreflightFixture.RawAppComponentTypeCounts = [pscustomobject]@{
+    SiteMap = 1; Entity = 1; Form = 4; View = 4; Other = 0; Total = 10
+}
+$sdkWrongRootPreflightFixture | Add-Member -NotePropertyName EntityResolutionDiagnostics -Force -NotePropertyValue @([pscustomobject]@{
+    ReturnedRowCount = 1; NormalizedLogicalName = 'entity'
+    EntityIdMatchesQueriedObjectId = @($true); AppAssociationMatches = $true
+})
+$sdkWrongRootPreflightFixture.EntityRootRepairEvidence = [pscustomobject]@{
+    RemoveAppComponentsContract = [pscustomobject]@{ Valid = $true }
+    SystemEntity = [pscustomobject]@{
+        RowCount = 1; UniqueIdCount = 1; LogicalNames = @('entity')
+    }
+    ApprovedTables = @(
+        foreach ($name in @('os_sr_ta', 'os_sr_pos', 'os_sr_csrc', 'os_sr_loc')) {
+            $reference = @($canaryReferenceFixtures | Where-Object LogicalName -ceq $name)[0]
+            [pscustomobject]@{
+                LogicalName = $name; MetadataSurfaceFound = $true; EntityTableSurfaceFound = $true
+                EntityTableRowCount = 1; EntityTableIdentityUnambiguous = $true
+                LogicalNamesAgree = $true; MetadataIdEqualsEntityId = $true; EntityId = $reference.TableMetadataId
+                PayloadEntityIdMatchesMetadataId = $true; PayloadEntityIdMatchesEntityId = $true
+                MetadataObjectTypeCode = 11005; EntityObjectTypeCodes = @(11005); ObjectTypeCodesAgree = $true
+            }
+        }
+    )
+    Plan = [pscustomobject]@{
+        CurrentComponents = @([pscustomobject]@{
+            ObjectIdEqualsSystemEntityId = $true; os_sr_ta = $false; os_sr_pos = $false
+            os_sr_csrc = $false; os_sr_loc = $false
+        })
+        ProjectTableRootCounts = @{ os_sr_ta = 0; os_sr_pos = 0; os_sr_csrc = 0; os_sr_loc = 0 }
+    }
+}
+$sdkWrongRootIdentity = Assert-SdkTaEntityCanaryWrongRootPreflight -Snapshot $sdkWrongRootPreflightFixture
+Assert-Test ($sdkWrongRootIdentity.TaEntityId -ceq $taCanaryId -and
+    $sdkWrongRootIdentity.SystemEntityId -ceq $systemEntityCanaryId) `
+    'Require exactly one verified system entity root before the one logical removal'
+$sdkUnexpectedWrongRootFixture = $sdkWrongRootPreflightFixture.PSObject.Copy()
+$sdkUnexpectedWrongRootFixture.EntityResolutionDiagnostics = @([pscustomobject]@{
+    ReturnedRowCount = 1; NormalizedLogicalName = 'os_sr_pos'
+    EntityIdMatchesQueriedObjectId = @($true); AppAssociationMatches = $true
+})
+Assert-Rejected {
+    Assert-SdkTaEntityCanaryWrongRootPreflight -Snapshot $sdkUnexpectedWrongRootFixture
+} 'Stop removal if the root is not system entity' 'one verified system entity root'
+$sdkCleanStateFixture = $canaryPreflightFixture.PSObject.Copy()
+$sdkCleanStateFixture.SiteMap = [pscustomobject]@{
+    Id = $script:Target.SiteMapId; UniqueName = 'srapp'; IsAppAware = $true
+    ComponentState = 0; SitemapXml = '<SiteMap />'
+}
+$sdkCleanStateFixture.RawAppComponentTypeCounts = [pscustomobject]@{
+    SiteMap = 1; Entity = 0; Form = 4; View = 4; Other = 0; Total = 9
+}
+$sdkCleanStateFixture | Add-Member -NotePropertyName EntityResolutionDiagnostics -Force -NotePropertyValue @()
+$sdkCleanStateFixture.EntityRootRepairEvidence = [pscustomobject]@{
+    SystemEntity = [pscustomobject]@{
+        RowCount = 1; UniqueIdCount = 1; LogicalNames = @('entity')
+    }
+    ApprovedTables = $sdkWrongRootPreflightFixture.EntityRootRepairEvidence.ApprovedTables
+    Plan = [pscustomobject]@{
+        ProjectTableRootCounts = @{ os_sr_ta = 0; os_sr_pos = 0; os_sr_csrc = 0; os_sr_loc = 0 }
+    }
+}
+$sdkCleanState = Assert-SdkTaEntityCanaryCleanState -Before $sdkWrongRootPreflightFixture -After $sdkCleanStateFixture
+Assert-Test ($sdkCleanState.Identity.TaEntityId -ceq $taCanaryId -and
+    $sdkCleanState.ProtectedState.SiteMapUnchanged -and
+    $sdkCleanState.ProtectedState.FormsAndViewsUnchanged -and
+    $sdkCleanState.ProtectedState.RolesUnchanged) `
+    'Require exact clean nine-component reconciliation with all protected assets unchanged before SDK Add'
 $changedCanaryBaseline = $canaryPreflightFixture.PSObject.Copy()
 $changedCanaryBaseline.RawAppComponentTypeCounts = [pscustomobject]@{
     SiteMap = 1; Entity = 1; Form = 4; View = 4; Other = 0; Total = 10

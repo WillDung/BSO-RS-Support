@@ -13,6 +13,7 @@ param(
     [switch]$SdkTaEntityCanary,
     [switch]$SdkRemainingTableRoots,
     [switch]$FinalSiteMapNavigationOnly,
+    [switch]$ValidateAppDiagnosticOnly,
     [string]$Confirmation,
     [string]$AuthorizationReference,
     [string]$EnvironmentName = $env:BSO_RS_ENVIRONMENT_NAME,
@@ -71,7 +72,11 @@ $script:LastErrorCode = $null
 $script:LastSafeError = $null
 $script:LastRequestId = $null
 $script:LastCorrelationId = $null
+$script:LastTransportException = $null
+$script:LastValidateAppRawResponse = $null
 $script:LastStage = 'Startup'
+$script:EnvironmentIdentityVerified = $false
+$script:ValidateAppSdkExecuteCount = 0
 $script:ExpectedUserGuardNeedsPin = $false
 $script:EntityResolutionDiagnostics = @()
 $script:EntityResolutionClassification = 'NOT_RUN'
@@ -109,14 +114,20 @@ if (($PlanOnly -and ($DryRun -or $Apply -or $SiteMapAssociationOnly)) -or
         $RemoveWrongSystemEntityRoots -or $AddTaEntityCanary -or $SdkTaEntityCanary -or $FinalSiteMapNavigationOnly)) -or
     ($FinalSiteMapNavigationOnly -and ($PlanOnly -or $DryRun -or $Apply -or $SiteMapAssociationOnly -or
         $ReferenceUiCompositionOnly -or $EntityIdentityDiagnosticOnly -or $EntityRootRepairDiagnosticOnly -or
-        $RemoveWrongSystemEntityRoots -or $AddTaEntityCanary -or $SdkTaEntityCanary -or $SdkRemainingTableRoots)) -or
+        $RemoveWrongSystemEntityRoots -or $AddTaEntityCanary -or $SdkTaEntityCanary -or $SdkRemainingTableRoots -or
+        $ValidateAppDiagnosticOnly)) -or
+    ($ValidateAppDiagnosticOnly -and ($PlanOnly -or $DryRun -or $Apply -or $SiteMapAssociationOnly -or
+        $ReferenceUiCompositionOnly -or $EntityIdentityDiagnosticOnly -or $EntityRootRepairDiagnosticOnly -or
+        $RemoveWrongSystemEntityRoots -or $AddTaEntityCanary -or $SdkTaEntityCanary -or
+        $SdkRemainingTableRoots -or $FinalSiteMapNavigationOnly)) -or
     ($SiteMapAssociationOnly -and -not ($DryRun -or $Apply))) {
     throw 'Choose exactly one supported execution mode.'
 }
 if (-not $PlanOnly -and -not $DryRun -and -not $Apply -and
     -not $EntityIdentityDiagnosticOnly -and -not $EntityRootRepairDiagnosticOnly -and
     -not $RemoveWrongSystemEntityRoots -and -not $AddTaEntityCanary -and -not $SdkTaEntityCanary -and
-    -not $SdkRemainingTableRoots -and -not $FinalSiteMapNavigationOnly) { $PlanOnly = $true }
+    -not $SdkRemainingTableRoots -and -not $FinalSiteMapNavigationOnly -and
+    -not $ValidateAppDiagnosticOnly) { $PlanOnly = $true }
 
 function Get-PropertyValue {
     param([object]$Object, [Parameter(Mandatory = $true)][string]$Name)
@@ -1106,6 +1117,7 @@ function Get-ReferenceUiValidationState {
     $issues = @($AppValidation.Issues)
     $validationFailed = $AppValidation.PSObject.Properties['ValidationSuccess'] -and
         $AppValidation.ValidationSuccess -eq $false
+    $errorCount = @($issues | Where-Object { $_.ErrorType -ceq 'Error' }).Count
     $unresolvedRequiredComponents = @($issues | ForEach-Object {
         @(Get-PropertyValue -Object $_ -Name 'RequiredComponents' | Where-Object {
             (Get-PropertyValue -Object $_ -Name 'ResolutionStatus') -cne 'SATISFIED'
@@ -1119,7 +1131,7 @@ function Get-ReferenceUiValidationState {
         EntityReferenceWarningCount = @($issues | Where-Object {
             $_.Message -ceq 'App does not reference at least one entity'
         }).Count
-        BlockingErrorCount = @($issues | Where-Object { $_.ErrorType -ceq 'Error' }).Count + [int]$validationFailed
+        BlockingErrorCount = if ($errorCount -gt 0) { $errorCount } elseif ($validationFailed) { 1 } else { 0 }
         UnresolvedRequiredComponentCount = $unresolvedRequiredComponents
         WarningCount = @($issues | Where-Object { $_.ErrorType -ceq 'Warning' }).Count
         FormViewSelectionWarningCount = @($issues | Where-Object {
@@ -1759,7 +1771,8 @@ function Get-PacIdentity {
 function Test-AllowsProcessExpectedUserPin {
     [bool]($SiteMapAssociationOnly -or $ReferenceUiCompositionOnly -or $EntityIdentityDiagnosticOnly -or
         $EntityRootRepairDiagnosticOnly -or $RemoveWrongSystemEntityRoots -or $AddTaEntityCanary -or
-        $SdkTaEntityCanary -or $SdkRemainingTableRoots -or $FinalSiteMapNavigationOnly)
+        $SdkTaEntityCanary -or $SdkRemainingTableRoots -or $FinalSiteMapNavigationOnly -or
+        $ValidateAppDiagnosticOnly)
 }
 
 function Assert-TargetInputs {
@@ -1963,6 +1976,31 @@ function New-DataverseRequestHeaders {
     $headers
 }
 
+function ConvertTo-SanitizedDiagnosticText {
+    param([AllowNull()][string]$Value)
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $Value }
+    $sanitized = [regex]::Replace($Value, '[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}', '[GUID]')
+    $sanitized = [regex]::Replace($sanitized, 'https?://\S+', '[URL]')
+    $sanitized = [regex]::Replace($sanitized, '[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}', '[EMAIL]', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    $sanitized = [regex]::Replace($sanitized, '(?i)(bearer\s+)[A-Za-z0-9._~+/-]+=*', '$1[REDACTED]')
+    $sanitized = [regex]::Replace($sanitized, '(?i)(access[_ -]?token|client[_ -]?secret|authorization)\s*[:=]\s*\S+', '$1=[REDACTED]')
+    if ($sanitized.Length -gt 500) { $sanitized = $sanitized.Substring(0, 500) }
+    $sanitized
+}
+
+function Get-ResponseHeaderValue {
+    param([object]$Headers, [Parameter(Mandatory = $true)][string]$Name)
+    if ($null -eq $Headers) { return $null }
+    if ($Headers -is [System.Collections.IDictionary]) {
+        $keys = @($Headers.Keys | Where-Object { [string]$_ -ieq $Name })
+        if ($keys.Count -eq 1) { return [string]$Headers[$keys[0]] }
+    }
+    if ($Headers -is [System.Net.WebHeaderCollection]) { return [string]$Headers[$Name] }
+    $property = $Headers.PSObject.Properties[$Name]
+    if ($property) { return [string]$property.Value }
+    $null
+}
+
 function Invoke-DataverseRequest {
     param(
         [Parameter(Mandatory = $true)][ValidateSet('GET', 'PATCH', 'POST')][string]$Method,
@@ -1971,7 +2009,8 @@ function Invoke-DataverseRequest {
         [string]$ETag,
         [byte[]]$SerializedBodyBytes,
         [string]$ExpectedSemanticFingerprint,
-        [string]$ExpectedSerializedBodySha256
+        [string]$ExpectedSerializedBodySha256,
+        [switch]$CaptureRawResponse
     )
     if ($Method -ne 'GET' -and
         (-not ($Apply -or $RemoveWrongSystemEntityRoots -or $AddTaEntityCanary -or $SdkTaEntityCanary -or
@@ -1985,6 +2024,14 @@ function Invoke-DataverseRequest {
         throw 'Dataverse request path is outside the verified organization origin.'
     }
     $resource = [Uri]::UnescapeDataString($uri.AbsolutePath.Substring('/api/data/v9.2/'.Length))
+    if ($ValidateAppDiagnosticOnly -and $Method -ne 'GET') {
+        throw 'ValidateApp diagnostic mode is strictly GET-only.'
+    }
+    if ($CaptureRawResponse -and
+        (-not $ValidateAppDiagnosticOnly -or $Method -cne 'GET' -or
+            $resource -cne "ValidateApp(AppModuleId=$($script:Target.AppModuleId))")) {
+        throw 'Raw response capture is restricted to the guarded ValidateApp diagnostic GET.'
+    }
     if ($AddTaEntityCanary -and $Method -ne 'GET' -and
         ($Method -cne 'POST' -or $resource -cne 'AddAppComponents')) {
         throw 'TA canary mode permits only one AddAppComponents POST; all other writes are blocked.'
@@ -2065,6 +2112,7 @@ function Invoke-DataverseRequest {
         MaximumRetryCount = 0
         ErrorAction = 'Stop'
     }
+    if ($CaptureRawResponse) { $request.SkipHttpErrorCheck = $true }
     if ($null -ne $Body) {
         $request.ContentType = 'application/json; charset=utf-8'
         $request.Body = ConvertTo-Json -InputObject $Body -Depth 30 -Compress
@@ -2078,20 +2126,38 @@ function Invoke-DataverseRequest {
     $script:LastHttpStatus = $null
     $script:LastErrorCode = $null
     $script:LastSafeError = $null
+    $script:LastTransportException = $null
+    if ($CaptureRawResponse) { $script:LastValidateAppRawResponse = $null }
     $script:LastRequestId = $null
     $script:LastCorrelationId = $null
     $script:RequestCounts[$Method]++
     $script:LastPath = $resource
     if ($Method -ne 'GET') { $script:WritesStarted = $true }
     try {
-        $response = Invoke-RestMethod @request
+        $response = if ($CaptureRawResponse) { Invoke-WebRequest @request } else { Invoke-RestMethod @request }
         $script:LastRequestId = Get-SanitizedResponseGuidHeader -Headers $responseHeaders `
             -Names @('x-ms-service-request-id', 'req_id', 'x-ms-request-id')
         $script:LastCorrelationId = Get-SanitizedResponseGuidHeader -Headers $responseHeaders `
             -Names @('x-ms-correlation-request-id', 'correlationid', 'x-ms-correlation-id')
         $status = [int]$responseStatusCode
         $script:LastHttpStatus = if ($status -ge 100 -and $status -le 599) { $status } else { $null }
-        if ($status -lt 200 -or $status -ge 300) {
+        if ($CaptureRawResponse) {
+            $rawBody = [string]$response.Content
+            $contentType = Get-ResponseHeaderValue -Headers $response.Headers -Name 'Content-Type'
+            if ([string]::IsNullOrWhiteSpace($contentType)) {
+                $contentType = Get-ResponseHeaderValue -Headers $responseHeaders -Name 'Content-Type'
+            }
+            $rawBytes = [System.Text.UTF8Encoding]::new($false, $true).GetBytes($rawBody)
+            $script:LastValidateAppRawResponse = [pscustomobject]@{
+                TransportAttempted = $true
+                HttpStatus = $script:LastHttpStatus
+                ContentType = $contentType
+                ResponseBodyPresent = -not [string]::IsNullOrEmpty($rawBody)
+                ResponseBodySha256 = [Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($rawBytes)).ToLowerInvariant()
+                RawBody = $rawBody
+            }
+        }
+        if (($status -lt 200 -or $status -ge 300) -and -not $CaptureRawResponse) {
             $errorObject = Get-PropertyValue -Object $response -Name 'error'
             $errorCode = [string](Get-PropertyValue -Object $errorObject -Name 'code')
             if ($errorCode -match '^0x[0-9a-fA-F]{8}$') { $script:LastErrorCode = $errorCode.ToLowerInvariant() }
@@ -2101,6 +2167,7 @@ function Invoke-DataverseRequest {
         if ($Method -ne 'GET') {
             $script:WriteResults.Add([pscustomobject]@{ Method = $Method; ApiPath = $resource; HttpStatus = $status })
         }
+        if ($CaptureRawResponse) { return $script:LastValidateAppRawResponse }
         return $response
     }
     catch {
@@ -2110,6 +2177,20 @@ function Invoke-DataverseRequest {
             -Names @('x-ms-correlation-request-id', 'correlationid', 'x-ms-correlation-id')
         $status = Get-HttpStatusCode -ErrorRecord $_
         if ($status) { $script:LastHttpStatus = $status }
+        $script:LastTransportException = [pscustomobject]@{
+            ExceptionType = $_.Exception.GetType().FullName
+            SanitizedMessage = ConvertTo-SanitizedDiagnosticText -Value $_.Exception.Message
+        }
+        if ($CaptureRawResponse -and $null -eq $script:LastValidateAppRawResponse) {
+            $script:LastValidateAppRawResponse = [pscustomobject]@{
+                TransportAttempted = $true
+                HttpStatus = $script:LastHttpStatus
+                ContentType = $null
+                ResponseBodyPresent = $false
+                ResponseBodySha256 = $null
+                RawBody = $null
+            }
+        }
         if (-not $script:LastSafeError) { $script:LastSafeError = 'Dataverse request failed; response details omitted.' }
         if ($Method -ne 'GET') { $script:WritesStarted = $true }
         throw "Dataverse $Method failed at approved metadata path (HTTP $status); reconcile with GET before any retry. Raw response omitted."
@@ -4124,7 +4205,7 @@ function ConvertTo-SafeValidationIssueSummaries {
         [object[]]$Issues,
         [object[]]$NormalizedComponents = @()
     )
-    @($Issues | ForEach-Object {
+    @($Issues | Where-Object { $null -ne $_ } | ForEach-Object {
         $message = [string](Get-PropertyValue -Object $_ -Name 'Message')
         $message = [regex]::Replace($message, '[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}', '[GUID]')
         $message = [regex]::Replace($message, 'https?://\S+', '[URL]')
@@ -4184,6 +4265,335 @@ function ConvertTo-SafeValidationIssueSummaries {
     })
 }
 
+function Test-ObjectPropertyPresent {
+    param([object]$Object, [Parameter(Mandatory = $true)][string]$Name)
+    if ($Object -is [System.Collections.IDictionary]) {
+        return @($Object.Keys | Where-Object { [string]$_ -ceq $Name }).Count -eq 1
+    }
+    return $null -ne $Object -and $null -ne $Object.PSObject.Properties[$Name]
+}
+
+function Get-SafeValidateAppIssueSummaries {
+    param([AllowNull()][object[]]$Issues)
+    @($Issues | Where-Object { $null -ne $_ } | ForEach-Object {
+        $requiredComponents = Get-PropertyValue -Object $_ -Name 'RequiredComponents'
+        $requiredComponentsCount = if ($null -eq $requiredComponents) { 0 } else { @($requiredComponents).Count }
+        [pscustomobject]@{
+            ErrorType = ConvertTo-SanitizedDiagnosticText -Value ([string](Get-PropertyValue -Object $_ -Name 'ErrorType'))
+            CRMErrorCode = ConvertTo-SanitizedDiagnosticText -Value ([string](Get-PropertyValue -Object $_ -Name 'CRMErrorCode'))
+            Message = ConvertTo-SanitizedDiagnosticText -Value ([string](Get-PropertyValue -Object $_ -Name 'Message'))
+            ComponentType = Get-PropertyValue -Object $_ -Name 'ComponentType'
+            ComponentSubType = Get-PropertyValue -Object $_ -Name 'ComponentSubType'
+            ParentEntityName = ConvertTo-SanitizedDiagnosticText -Value ([string](Get-PropertyValue -Object $_ -Name 'ParentEntityName'))
+            RequiredComponentsCount = $requiredComponentsCount
+        }
+    })
+}
+
+function Get-ValidateAppGateCategory {
+    param(
+        [int]$HttpStatus,
+        [bool]$JsonParseSucceeded,
+        [bool]$AppValidationResponsePresent,
+        [bool]$ValidationSuccessPresent,
+        [bool]$ValidationIssueListPresent,
+        [bool]$ValidationSuccess,
+        [int]$ErrorCount,
+        [int]$WarningCount
+    )
+    if ($HttpStatus -eq 401) { return 'AUTH' }
+    if ($HttpStatus -eq 403) { return 'AUTHZ' }
+    if ($HttpStatus -eq 429) { return 'THROTTLED' }
+    if ($HttpStatus -ge 500) { return 'SERVICE_ERROR' }
+    if ($HttpStatus -lt 200 -or $HttpStatus -ge 300) { return 'HTTP_ERROR' }
+    if (-not $JsonParseSucceeded) { return 'PARSE_ERROR' }
+    if (-not $AppValidationResponsePresent -or -not $ValidationSuccessPresent -or -not $ValidationIssueListPresent) {
+        return 'RESPONSE_SHAPE_ERROR'
+    }
+    if (-not $ValidationSuccess -or $ErrorCount -gt 0) { return 'BLOCK' }
+    if ($WarningCount -gt 0) { return 'PASS_WITH_WARNINGS' }
+    'PASS'
+}
+
+function Get-ValidateAppDiagnosticEvaluation {
+    param(
+        [Parameter(Mandatory = $true)][object]$Transport,
+        [object[]]$NormalizedComponents = @(),
+        [object]$TransportException
+    )
+    $diagnostic = [ordered]@{
+        TransportAttempted = [bool]$Transport.TransportAttempted
+        HttpStatus = $Transport.HttpStatus
+        ContentType = ConvertTo-SanitizedDiagnosticText -Value ([string]$Transport.ContentType)
+        ResponseBodyPresent = [bool]$Transport.ResponseBodyPresent
+        ResponseBodySha256 = $Transport.ResponseBodySha256
+        TopLevelJsonPropertyNames = @()
+        JsonParseSucceeded = $false
+        AppValidationResponsePresent = $false
+        ValidationSuccessPresent = $false
+        ValidationSuccess = $null
+        ValidationSuccessBoolean = $false
+        ValidationIssueListPresent = $false
+        ValidationIssueListArray = $false
+        IssueCount = 0
+        ErrorCount = 0
+        WarningCount = 0
+        Issues = @()
+        ParserStage = 'NOT_STARTED'
+        FirstFailingPredicate = $null
+        ExceptionType = if ($TransportException) { [string]$TransportException.ExceptionType } else { $null }
+        SanitizedExceptionMessage = if ($TransportException) {
+            ConvertTo-SanitizedDiagnosticText -Value ([string]$TransportException.SanitizedMessage)
+        } else { $null }
+        Category = $null
+    }
+    if (-not $Transport.TransportAttempted) {
+        $diagnostic.ParserStage = 'TRANSPORT_NOT_ATTEMPTED'
+        $diagnostic.FirstFailingPredicate = 'VALIDATEAPP_TRANSPORT_ATTEMPTED'
+        $diagnostic.Category = 'TRANSPORT_ERROR'
+        return [pscustomobject]$diagnostic
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$Transport.HttpStatus)) {
+        $diagnostic.ParserStage = 'TRANSPORT_FAILED'
+        $diagnostic.FirstFailingPredicate = 'HTTP_RESPONSE_RECEIVED'
+        $diagnostic.Category = 'TRANSPORT_ERROR'
+        return [pscustomobject]$diagnostic
+    }
+    $diagnostic.ParserStage = 'HTTP_STATUS_CLASSIFICATION'
+    if (-not $Transport.ResponseBodyPresent) {
+        $diagnostic.FirstFailingPredicate = 'VALIDATEAPP_RESPONSE_BODY_PRESENT'
+        $diagnostic.Category = Get-ValidateAppGateCategory -HttpStatus ([int]$Transport.HttpStatus) `
+            -JsonParseSucceeded $false -AppValidationResponsePresent $false `
+            -ValidationSuccessPresent $false -ValidationIssueListPresent $false `
+            -ValidationSuccess $false -ErrorCount 0 -WarningCount 0
+        return [pscustomobject]$diagnostic
+    }
+    if ([int]$Transport.HttpStatus -lt 200 -or [int]$Transport.HttpStatus -ge 300) {
+        $diagnostic.ParserStage = 'HTTP_STATUS_CLASSIFICATION'
+        try {
+            $errorDocument = [System.Text.Json.JsonDocument]::Parse([string]$Transport.RawBody)
+            if ($errorDocument.RootElement.ValueKind -eq [System.Text.Json.JsonValueKind]::Object) {
+                $diagnostic.TopLevelJsonPropertyNames = @($errorDocument.RootElement.EnumerateObject() |
+                    ForEach-Object { ConvertTo-SanitizedDiagnosticText -Value $_.Name })
+            }
+            $diagnostic.JsonParseSucceeded = $errorDocument.RootElement.ValueKind -eq [System.Text.Json.JsonValueKind]::Object
+            $errorDocument.Dispose()
+        }
+        catch {
+            $diagnostic.ExceptionType = $_.Exception.GetType().FullName
+            $diagnostic.SanitizedExceptionMessage = ConvertTo-SanitizedDiagnosticText -Value $_.Exception.Message
+        }
+        $diagnostic.FirstFailingPredicate = 'HTTP_STATUS_IS_SUCCESS'
+        $diagnostic.Category = Get-ValidateAppGateCategory -HttpStatus ([int]$Transport.HttpStatus) `
+            -JsonParseSucceeded $diagnostic.JsonParseSucceeded -AppValidationResponsePresent $false `
+            -ValidationSuccessPresent $false -ValidationIssueListPresent $false `
+            -ValidationSuccess $false -ErrorCount 0 -WarningCount 0
+        $diagnostic.LocalInterpretation = [pscustomobject]@{
+            ParserStage = 'HTTP_STATUS_CLASSIFICATION'
+            ValidationState = $null
+            Category = $diagnostic.Category
+            ExceptionType = $null
+            SanitizedExceptionMessage = $null
+        }
+        $diagnostic.PredicateMatrix = @(
+            [pscustomobject]@{ Predicate = 'HTTP_STATUS_IS_SUCCESS'; RawValue = $false; LocalValue = $false; Matches = $true }
+            [pscustomobject]@{ Predicate = 'FINAL_GATE_CATEGORY'; RawValue = $diagnostic.Category; LocalValue = $diagnostic.Category; Matches = $true }
+        )
+        $diagnostic.FirstMismatch = $null
+        return [pscustomobject]$diagnostic
+    }
+
+    $parsed = $null
+    $jsonDocument = $null
+    try {
+        $diagnostic.ParserStage = 'STRICT_JSON_PARSE'
+        $bodyBytes = [System.Text.UTF8Encoding]::new($false, $true).GetBytes([string]$Transport.RawBody)
+        $jsonDocument = [System.Text.Json.JsonDocument]::Parse([ReadOnlyMemory[byte]]::new($bodyBytes))
+        if ($jsonDocument.RootElement.ValueKind -ne [System.Text.Json.JsonValueKind]::Object) {
+            throw [System.Text.Json.JsonException]::new('ValidateApp JSON root is not an object.')
+        }
+        $diagnostic.TopLevelJsonPropertyNames = @($jsonDocument.RootElement.EnumerateObject() |
+            ForEach-Object { ConvertTo-SanitizedDiagnosticText -Value $_.Name })
+        $parsed = ConvertFrom-Json -InputObject ([string]$Transport.RawBody) -AsHashtable -Depth 100 -ErrorAction Stop
+        $diagnostic.JsonParseSucceeded = $true
+    }
+    catch {
+        $diagnostic.FirstFailingPredicate = 'VALIDATEAPP_BODY_IS_JSON_OBJECT'
+        $diagnostic.ExceptionType = $_.Exception.GetType().FullName
+        $diagnostic.SanitizedExceptionMessage = ConvertTo-SanitizedDiagnosticText -Value $_.Exception.Message
+        $localExceptionType = $null
+        $localExceptionMessage = $null
+        try {
+            ConvertFrom-Json -InputObject ([string]$Transport.RawBody) -AsHashtable -Depth 100 -ErrorAction Stop | Out-Null
+        }
+        catch {
+            $localExceptionType = $_.Exception.GetType().FullName
+            $localExceptionMessage = ConvertTo-SanitizedDiagnosticText -Value $_.Exception.Message
+        }
+        $diagnostic.Category = Get-ValidateAppGateCategory -HttpStatus ([int]$Transport.HttpStatus) `
+            -JsonParseSucceeded $false -AppValidationResponsePresent $false `
+            -ValidationSuccessPresent $false -ValidationIssueListPresent $false `
+            -ValidationSuccess $false -ErrorCount 0 -WarningCount 0
+        if ($diagnostic.Category -eq 'HTTP_ERROR' -and [int]$Transport.HttpStatus -eq 200) {
+            $diagnostic.Category = 'PARSE_ERROR'
+        }
+        $diagnostic.LocalInterpretation = [pscustomobject]@{
+            ParserStage = 'CURRENT_PROJECT_JSON_PARSER'
+            ValidationState = $null
+            Category = 'PARSE_ERROR'
+            ExceptionType = $localExceptionType
+            SanitizedExceptionMessage = $localExceptionMessage
+        }
+        $diagnostic.PredicateMatrix = @(
+            [pscustomobject]@{ Predicate = 'HTTP_STATUS_IS_SUCCESS'; RawValue = $true; LocalValue = $true; Matches = $true }
+            [pscustomobject]@{ Predicate = 'JSON_PARSE_SUCCEEDED'; RawValue = $false; LocalValue = $false; Matches = $true }
+            [pscustomobject]@{ Predicate = 'FINAL_GATE_CATEGORY'; RawValue = $diagnostic.Category; LocalValue = 'PARSE_ERROR'; Matches = ($diagnostic.Category -ceq 'PARSE_ERROR') }
+        )
+        $parseMismatch = @($diagnostic.PredicateMatrix | Where-Object { -not $_.Matches } | Select-Object -First 1)
+        $diagnostic.FirstMismatch = if ($parseMismatch.Count -gt 0) { $parseMismatch[0].Predicate } else { $null }
+        return [pscustomobject]$diagnostic
+    }
+    finally {
+        if ($jsonDocument) { $jsonDocument.Dispose() }
+    }
+
+    $diagnostic.ParserStage = 'VALIDATEAPP_RESPONSE_SHAPE'
+    $responsePresent = Test-ObjectPropertyPresent -Object $parsed -Name 'AppValidationResponse'
+    $diagnostic.AppValidationResponsePresent = $responsePresent
+    if (-not $responsePresent) {
+        $diagnostic.FirstFailingPredicate = 'APPVALIDATIONRESPONSE_PRESENT'
+        $diagnostic.Category = Get-ValidateAppGateCategory -HttpStatus ([int]$Transport.HttpStatus) `
+            -JsonParseSucceeded $true -AppValidationResponsePresent $false `
+            -ValidationSuccessPresent $false -ValidationIssueListPresent $false `
+            -ValidationSuccess $false -ErrorCount 0 -WarningCount 0
+        $diagnostic.LocalInterpretation = [pscustomobject]@{
+            ParserStage = 'CURRENT_PROJECT_RESPONSE_PARSER'
+            ValidationState = $null
+            Category = 'RESPONSE_SHAPE_ERROR'
+            ExceptionType = $null
+            SanitizedExceptionMessage = $null
+        }
+        $diagnostic.PredicateMatrix = @(
+            [pscustomobject]@{ Predicate = 'HTTP_STATUS'; RawValue = $Transport.HttpStatus; LocalValue = $Transport.HttpStatus; Matches = $true }
+            [pscustomobject]@{ Predicate = 'APPVALIDATIONRESPONSE_PRESENT'; RawValue = $false; LocalValue = $false; Matches = $true }
+            [pscustomobject]@{ Predicate = 'FINAL_GATE_CATEGORY'; RawValue = $diagnostic.Category; LocalValue = 'RESPONSE_SHAPE_ERROR'; Matches = ($diagnostic.Category -ceq 'RESPONSE_SHAPE_ERROR') }
+        )
+        $shapeMismatch = @($diagnostic.PredicateMatrix | Where-Object { -not $_.Matches } | Select-Object -First 1)
+        $diagnostic.FirstMismatch = if ($shapeMismatch.Count -gt 0) { $shapeMismatch[0].Predicate } else { $null }
+        return [pscustomobject]$diagnostic
+    }
+    $appValidationResponse = Get-PropertyValue -Object $parsed -Name 'AppValidationResponse'
+    $successPropertyPresent = Test-ObjectPropertyPresent -Object $appValidationResponse -Name 'ValidationSuccess'
+    $successValue = $null
+    if ($successPropertyPresent) {
+        if ($appValidationResponse -is [System.Collections.IDictionary]) {
+            $successValue = $appValidationResponse['ValidationSuccess']
+        } else {
+            $successValue = $appValidationResponse.PSObject.Properties['ValidationSuccess'].Value
+        }
+    }
+    $successPresent = $successPropertyPresent -and $successValue -is [bool]
+    $issueListValue = $null
+    $issueListPropertyPresent = Test-ObjectPropertyPresent -Object $appValidationResponse -Name 'ValidationIssueList'
+    if ($appValidationResponse -is [System.Collections.IDictionary]) {
+        $issueListValue = $appValidationResponse['ValidationIssueList']
+    } else {
+        $issueListProperty = $appValidationResponse.PSObject.Properties['ValidationIssueList']
+        if ($issueListProperty) { $issueListValue = $issueListProperty.Value }
+    }
+    $issuesPresent = $issueListPropertyPresent -and $issueListValue -is [array]
+    $diagnostic.ValidationSuccessPresent = $successPropertyPresent
+    $diagnostic.ValidationSuccessBoolean = $successPresent
+    $diagnostic.ValidationIssueListPresent = $issueListPropertyPresent
+    $diagnostic.ValidationIssueListArray = $issuesPresent
+    if ($successPresent) { $diagnostic.ValidationSuccess = [bool]$successValue }
+    $rawIssues = @()
+    if ($issuesPresent) { $rawIssues = $issueListValue }
+    $safeIssues = @(Get-SafeValidateAppIssueSummaries -Issues $rawIssues)
+    $diagnostic.Issues = $safeIssues
+    $diagnostic.IssueCount = $safeIssues.Count
+    $diagnostic.ErrorCount = @($safeIssues | Where-Object { $_.ErrorType -ceq 'Error' }).Count
+    $diagnostic.WarningCount = @($safeIssues | Where-Object { $_.ErrorType -ceq 'Warning' }).Count
+    $diagnostic.ParserStage = 'VALIDATEAPP_ISSUE_SUMMARY'
+    if (-not $successPropertyPresent) { $diagnostic.FirstFailingPredicate = 'VALIDATIONSUCCESS_PRESENT' }
+    elseif (-not $successPresent) { $diagnostic.FirstFailingPredicate = 'VALIDATIONSUCCESS_BOOLEAN' }
+    elseif (-not $issueListPropertyPresent) { $diagnostic.FirstFailingPredicate = 'VALIDATIONISSUELIST_PRESENT' }
+    elseif (-not $issuesPresent) { $diagnostic.FirstFailingPredicate = 'VALIDATIONISSUELIST_ARRAY' }
+    elseif (-not $diagnostic.ValidationSuccess) { $diagnostic.FirstFailingPredicate = 'VALIDATIONSUCCESS_TRUE' }
+    elseif ($diagnostic.ErrorCount -gt 0) { $diagnostic.FirstFailingPredicate = 'ERROR_ISSUE_COUNT_IS_ZERO' }
+    elseif ($diagnostic.WarningCount -gt 0) { $diagnostic.FirstFailingPredicate = 'WARNING_COUNT_IS_ZERO' }
+    $diagnostic.Category = Get-ValidateAppGateCategory -HttpStatus ([int]$Transport.HttpStatus) `
+        -JsonParseSucceeded $true -AppValidationResponsePresent $true `
+        -ValidationSuccessPresent $successPresent -ValidationIssueListPresent $issuesPresent `
+        -ValidationSuccess ([bool]$diagnostic.ValidationSuccess) -ErrorCount $diagnostic.ErrorCount `
+        -WarningCount $diagnostic.WarningCount
+
+    $localInterpretation = [ordered]@{
+        ParserStage = 'NOT_RUN'
+        ValidationState = $null
+        Category = 'LOCAL_PARSER_ERROR'
+        ExceptionType = $null
+        SanitizedExceptionMessage = $null
+    }
+    if ($Transport.HttpStatus -ge 200 -and $Transport.HttpStatus -lt 300 -and $diagnostic.JsonParseSucceeded) {
+        try {
+            $localInterpretation.ParserStage = 'CURRENT_PROJECT_ISSUE_PARSER'
+            $localIssues = @(ConvertTo-SafeValidationIssueSummaries -Issues $rawIssues -NormalizedComponents $NormalizedComponents)
+            $localAppValidation = [pscustomobject]@{
+                ValidationSuccess = if ($successPresent) { [bool]$diagnostic.ValidationSuccess } else { $null }
+                Issues = $localIssues
+            }
+            $localState = Get-ReferenceUiValidationState -AppValidation $localAppValidation
+            $localInterpretation.ValidationState = [pscustomobject]@{
+                ValidationSuccess = $localState.ValidationSuccess
+                BlockingErrorCount = $localState.BlockingErrorCount
+                ErrorCount = @($localIssues | Where-Object { $_.ErrorType -ceq 'Error' }).Count
+                WarningCount = $localState.WarningCount
+                IssueCount = $localIssues.Count
+            }
+            $localInterpretation.Category = Get-ValidateAppGateCategory -HttpStatus ([int]$Transport.HttpStatus) `
+                -JsonParseSucceeded $true -AppValidationResponsePresent $true `
+                -ValidationSuccessPresent $successPresent -ValidationIssueListPresent $issuesPresent `
+                -ValidationSuccess ([bool]$diagnostic.ValidationSuccess) `
+                -ErrorCount $localInterpretation.ValidationState.ErrorCount `
+                -WarningCount $localInterpretation.ValidationState.WarningCount
+            if (-not $successPresent -or -not $issuesPresent) { $localInterpretation.Category = 'RESPONSE_SHAPE_ERROR' }
+        }
+        catch {
+            $localInterpretation.ParserStage = 'CURRENT_PROJECT_PARSER_EXCEPTION'
+            $localInterpretation.ExceptionType = $_.Exception.GetType().FullName
+            $localInterpretation.SanitizedExceptionMessage = ConvertTo-SanitizedDiagnosticText -Value $_.Exception.Message
+        }
+    }
+    elseif ($diagnostic.Category -in @('AUTH', 'AUTHZ', 'THROTTLED', 'SERVICE_ERROR', 'HTTP_ERROR')) {
+        $localInterpretation.ParserStage = 'HTTP_STATUS_CLASSIFICATION'
+        $localInterpretation.Category = $diagnostic.Category
+    }
+    elseif (-not $diagnostic.JsonParseSucceeded) {
+        $localInterpretation.ParserStage = 'STRICT_JSON_PARSE'
+        $localInterpretation.Category = 'PARSE_ERROR'
+    }
+
+    $localState = $localInterpretation.ValidationState
+    $matrix = @(
+        [pscustomobject]@{ Predicate = 'HTTP_STATUS'; RawValue = $Transport.HttpStatus; LocalValue = $Transport.HttpStatus; Matches = $true }
+        [pscustomobject]@{ Predicate = 'APPVALIDATIONRESPONSE_PRESENT'; RawValue = $responsePresent; LocalValue = $responsePresent; Matches = $true }
+        [pscustomobject]@{ Predicate = 'VALIDATIONSUCCESS_PARSED'; RawValue = $diagnostic.ValidationSuccess; LocalValue = if ($localState) { $localState.ValidationSuccess } else { $null }; Matches = ($null -eq $localState -or $diagnostic.ValidationSuccess -eq $localState.ValidationSuccess) }
+        [pscustomobject]@{ Predicate = 'VALIDATIONISSUELIST_PARSED'; RawValue = $diagnostic.IssueCount; LocalValue = if ($localState) { $localState.IssueCount } else { $null }; Matches = ($null -eq $localState -or $diagnostic.IssueCount -eq $localState.IssueCount) }
+        [pscustomobject]@{ Predicate = 'ERROR_COUNT'; RawValue = $diagnostic.ErrorCount; LocalValue = if ($localState) { $localState.ErrorCount } else { $null }; Matches = ($null -eq $localState -or $diagnostic.ErrorCount -eq $localState.ErrorCount) }
+        [pscustomobject]@{ Predicate = 'WARNING_COUNT'; RawValue = $diagnostic.WarningCount; LocalValue = if ($localState) { $localState.WarningCount } else { $null }; Matches = ($null -eq $localState -or $diagnostic.WarningCount -eq $localState.WarningCount) }
+        [pscustomobject]@{ Predicate = 'FINAL_GATE_CATEGORY'; RawValue = $diagnostic.Category; LocalValue = $localInterpretation.Category; Matches = ($diagnostic.Category -ceq $localInterpretation.Category) }
+    )
+    $firstMismatch = @($matrix | Where-Object { -not $_.Matches } | Select-Object -First 1)
+    $diagnostic.LocalInterpretation = [pscustomobject]$localInterpretation
+    $diagnostic.PredicateMatrix = $matrix
+    $diagnostic.FirstMismatch = if ($firstMismatch.Count) { $firstMismatch[0].Predicate } else { $null }
+    $diagnostic.FirstFailingPredicate = if ($diagnostic.FirstFailingPredicate) {
+        $diagnostic.FirstFailingPredicate
+    } elseif ($diagnostic.FirstMismatch) { $diagnostic.FirstMismatch } else { $null }
+    [pscustomobject]$diagnostic
+}
+
 function Assert-AppValidationAllowsApply {
     param([Parameter(Mandatory = $true)][object]$AppValidation)
     if (@($AppValidation.Issues | Where-Object { $_.ErrorType -ceq 'Error' }).Count -gt 0) {
@@ -4191,7 +4601,514 @@ function Assert-AppValidationAllowsApply {
     }
 }
 
+function New-SdkValidateAppRequest {
+    param([Parameter(Mandatory = $true)][string]$AppModuleId)
+    $requestType = [Type]::GetType(
+        'Microsoft.Crm.Sdk.Messages.ValidateAppRequest, Microsoft.Crm.Sdk.Proxy',
+        $false
+    )
+    if (-not $requestType) {
+        $sdkLocation = Get-TACanarySdkAssemblyDirectory
+        if (-not $sdkLocation) { throw 'SDK_NOT_AVAILABLE: cached PAC Dataverse SDK assemblies were not found.' }
+        $xrmPath = Join-Path $sdkLocation.Directory 'Microsoft.Xrm.Sdk.dll'
+        $proxyPath = Join-Path $sdkLocation.Directory 'Microsoft.Crm.Sdk.Proxy.dll'
+        if (-not (Test-Path -LiteralPath $xrmPath) -or -not (Test-Path -LiteralPath $proxyPath)) {
+            throw 'SDK_NOT_AVAILABLE: SDK message or Xrm assembly was not found.'
+        }
+        [void][System.Reflection.Assembly]::LoadFrom($xrmPath)
+        $proxyAssembly = [System.Reflection.Assembly]::LoadFrom($proxyPath)
+        $requestType = $proxyAssembly.GetType('Microsoft.Crm.Sdk.Messages.ValidateAppRequest', $false)
+    }
+    if (-not $requestType) { throw 'SDK_NOT_AVAILABLE: ValidateAppRequest type was not found.' }
+    $request = [Activator]::CreateInstance($requestType)
+    $request.AppModuleId = [guid]$AppModuleId
+    if ([guid]$request.AppModuleId -ne [guid]$AppModuleId) {
+        throw 'SDK_VALIDATION_REQUEST_INVALID: ValidateAppRequest AppModuleId did not match srapp.'
+    }
+    $request
+}
+
+function Invoke-ValidateAppDiagnosticRequest {
+    param([object[]]$NormalizedComponents = @())
+    $transport = $null
+    $transportException = $null
+    try {
+        $transport = Invoke-DataverseRequest -Method GET `
+            -Path "ValidateApp(AppModuleId=$($script:Target.AppModuleId))" -CaptureRawResponse
+    }
+    catch {
+        $transport = $script:LastValidateAppRawResponse
+        $transportException = $script:LastTransportException
+        if (-not $transportException) {
+            $transportException = [pscustomobject]@{
+                ExceptionType = $_.Exception.GetType().FullName
+                SanitizedMessage = ConvertTo-SanitizedDiagnosticText -Value $_.Exception.Message
+            }
+        }
+        if (-not $transport) {
+            $transport = [pscustomobject]@{
+                TransportAttempted = $script:RequestCounts.GET -gt 0 -and
+                    $script:LastPath -ceq "ValidateApp(AppModuleId=$($script:Target.AppModuleId))"
+                HttpStatus = $script:LastHttpStatus
+                ContentType = $null
+                ResponseBodyPresent = $false
+                ResponseBodySha256 = $null
+                RawBody = $null
+            }
+        }
+    }
+    if (-not $transport) {
+        $transport = [pscustomobject]@{
+            TransportAttempted = $false
+            HttpStatus = $null
+            ContentType = $null
+            ResponseBodyPresent = $false
+            ResponseBodySha256 = $null
+            RawBody = $null
+        }
+    }
+    try {
+        Get-ValidateAppDiagnosticEvaluation -Transport $transport `
+            -NormalizedComponents $NormalizedComponents -TransportException $transportException
+    }
+    finally {
+        if ($transport -and $transport.PSObject.Properties['RawBody']) { $transport.RawBody = $null }
+        if ($script:LastValidateAppRawResponse) { $script:LastValidateAppRawResponse.RawBody = $null }
+    }
+}
+
+function Get-SdkValidateAppResponseSummary {
+    param([Parameter(Mandatory = $true)][object]$Response)
+    $appValidation = Get-PropertyValue -Object $Response -Name 'AppValidationResponse'
+    if (-not $appValidation -and $Response.Results -is [System.Collections.IDictionary]) {
+        $appValidation = Get-PropertyValue -Object $Response.Results -Name 'AppValidationResponse'
+    }
+    if (-not $appValidation) {
+        return [pscustomobject]@{
+            ResponseType = $Response.GetType().FullName
+            AppValidationResponsePresent = $false
+            ValidationSuccessPresent = $false
+            ValidationSuccess = $null
+            ValidationSuccessBoolean = $false
+            ValidationIssueListPresent = $false
+            ValidationIssueListArray = $false
+            IssueCount = 0
+            ErrorCount = 0
+            WarningCount = 0
+            Issues = @()
+            Category = 'RESPONSE_SHAPE_ERROR'
+        }
+    }
+    $successPropertyPresent = Test-ObjectPropertyPresent -Object $appValidation -Name 'ValidationSuccess'
+    $successValue = $null
+    if ($successPropertyPresent) {
+        $successProperty = $appValidation.PSObject.Properties['ValidationSuccess']
+        if ($successProperty) { $successValue = $successProperty.Value }
+    }
+    $successPresent = $successPropertyPresent -and $successValue -is [bool]
+    $issuesProperty = $appValidation.PSObject.Properties['ValidationIssueList']
+    $issuesValue = $null
+    if ($issuesProperty) { $issuesValue = $issuesProperty.Value }
+    $issuesPropertyPresent = Test-ObjectPropertyPresent -Object $appValidation -Name 'ValidationIssueList'
+    $issuesPresent = $issuesPropertyPresent -and
+        $null -ne $issuesValue -and $issuesValue -is [System.Collections.IEnumerable] -and
+        $issuesValue -isnot [string]
+    $issues = @()
+    if ($null -ne $issuesValue) { $issues = @($issuesValue) }
+    $safeIssues = @(Get-SafeValidateAppIssueSummaries -Issues $issues)
+    $success = if ($successPresent) { [bool](Get-PropertyValue -Object $appValidation -Name 'ValidationSuccess') } else { $false }
+    [pscustomobject]@{
+        ResponseType = $Response.GetType().FullName
+        AppValidationResponsePresent = $true
+        ValidationSuccessPresent = $successPropertyPresent
+        ValidationSuccess = if ($successPresent) { $success } else { $null }
+        ValidationSuccessBoolean = $successPresent
+        ValidationIssueListPresent = $issuesPropertyPresent
+        ValidationIssueListArray = $issuesPresent
+        IssueCount = $safeIssues.Count
+        ErrorCount = @($safeIssues | Where-Object { $_.ErrorType -ceq 'Error' }).Count
+        WarningCount = @($safeIssues | Where-Object { $_.ErrorType -ceq 'Warning' }).Count
+        Issues = $safeIssues
+        Category = Get-ValidateAppGateCategory -HttpStatus 200 -JsonParseSucceeded $true `
+            -AppValidationResponsePresent $true -ValidationSuccessPresent $successPresent `
+            -ValidationIssueListPresent $issuesPresent -ValidationSuccess $success `
+            -ErrorCount @($safeIssues | Where-Object { $_.ErrorType -ceq 'Error' }).Count `
+            -WarningCount @($safeIssues | Where-Object { $_.ErrorType -ceq 'Warning' }).Count
+    }
+}
+
+function Invoke-SdkValidateAppExecuteOnce {
+    param(
+        [Parameter(Mandatory = $true)][object]$Client,
+        [Parameter(Mandatory = $true)][object]$Request
+    )
+    if ($script:ValidateAppSdkExecuteCount -ne 0 -or
+        (Set-SdkClientNoRetries -Client $Client) -ne 0 -or
+        -not $Client.IsReady -or
+        $Request.GetType().FullName -cne 'Microsoft.Crm.Sdk.Messages.ValidateAppRequest' -or
+        [guid]$Request.AppModuleId -ne [guid]$script:Target.AppModuleId) {
+        throw 'SDK_VALIDATEAPP_GUARD_FAILED: one ready, zero-retry ServiceClient request for srapp is required.'
+    }
+    $script:ValidateAppSdkExecuteCount++
+    try {
+        $response = $Client.Execute($Request)
+        $summary = if ($response) { Get-SdkValidateAppResponseSummary -Response $response } else { $null }
+        [pscustomobject]@{
+            Attempted = $true
+            Succeeded = $true
+            HttpStatus = $null
+            Summary = $summary
+            ExceptionType = $null
+            SanitizedExceptionMessage = $null
+            Category = if ($summary) { $summary.Category } else { 'RESPONSE_SHAPE_ERROR' }
+        }
+    }
+    catch {
+        $message = [string]$Client.LastError
+        if ([string]::IsNullOrWhiteSpace($message)) { $message = $_.Exception.Message }
+        $statusMatch = [regex]::Match($message, '(?<!\d)(401|403|429|5\d\d)(?!\d)')
+        $status = if ($statusMatch.Success) { [int]$statusMatch.Groups[1].Value } else { $null }
+        $category = if ($status -eq 401) { 'AUTH' }
+            elseif ($status -eq 403) { 'AUTHZ' }
+            elseif ($status -eq 429) { 'THROTTLED' }
+            elseif ($status -ge 500) { 'SERVICE_ERROR' }
+            else { 'SDK_ERROR' }
+        [pscustomobject]@{
+            Attempted = $true
+            Succeeded = $false
+            HttpStatus = $status
+            Summary = $null
+            ExceptionType = $_.Exception.GetType().FullName
+            SanitizedExceptionMessage = ConvertTo-SanitizedDiagnosticText -Value $message
+            Category = $category
+        }
+    }
+}
+
+function Get-ValidateAppPrimaryClassification {
+    param(
+        [Parameter(Mandatory = $true)][object]$WebApi,
+        [Parameter(Mandatory = $true)][object]$Sdk,
+        [Parameter(Mandatory = $true)][bool]$StateMatches
+    )
+    if (-not $StateMatches) { return 'STATE_CHANGED' }
+    $webCategory = [string]$WebApi.Category
+    $localInterpretation = Get-PropertyValue -Object $WebApi -Name 'LocalInterpretation'
+    $localCategory = [string](Get-PropertyValue -Object $localInterpretation -Name 'Category')
+    $sdkCategory = [string]$Sdk.Category
+    if ($webCategory -eq 'RESPONSE_SHAPE_ERROR') { return 'VALIDATEAPP_RESPONSE_SHAPE_CHANGED' }
+    if ($webCategory -in @('AUTH', 'AUTHZ', 'THROTTLED', 'SERVICE_ERROR', 'HTTP_ERROR', 'PARSE_ERROR', 'TRANSPORT_ERROR')) {
+        return 'BLOCKED_DIAGNOSTIC_UNKNOWN'
+    }
+    if ($webCategory -notin @('PASS', 'PASS_WITH_WARNINGS', 'BLOCK')) { return 'BLOCKED_DIAGNOSTIC_UNKNOWN' }
+    if ($sdkCategory -notin @('PASS', 'PASS_WITH_WARNINGS', 'BLOCK')) { return 'BLOCKED_DIAGNOSTIC_UNKNOWN' }
+    if ($webCategory -cne $sdkCategory) { return 'WEBAPI_SDK_VALIDATION_DISAGREE' }
+    if ($webCategory -eq 'BLOCK') { return 'LIVE_VALIDATION_BLOCKED' }
+    if ($webCategory -eq 'PASS_WITH_WARNINGS') { return 'LIVE_VALIDATION_HAS_WARNINGS_ONLY' }
+    if ($localCategory -ne $webCategory) { return 'LIVE_VALIDATION_CLEAN_LOCAL_PARSER_BUG' }
+    'BLOCKED_DIAGNOSTIC_UNKNOWN'
+}
+
+function Test-ValidateAppSnapshotBaseline {
+    param([Parameter(Mandatory = $true)][object]$Snapshot)
+    $counts = $Snapshot.RawAppComponentTypeCounts
+    $expectedRoots = @('os_sr_ta', 'os_sr_pos', 'os_sr_csrc', 'os_sr_loc')
+    $rootRows = @($Snapshot.EntityResolutionDiagnostics)
+    $rootNames = @($rootRows | ForEach-Object { [string]$_.NormalizedLogicalName })
+    $placeholderMatches = $false
+    try {
+        Assert-SiteMapPlaceholderNavigation -Navigation $Snapshot.SiteMapNavigationBefore
+        $placeholderMatches = $Snapshot.SiteMapSourceXml -ceq $Snapshot.SiteMap.SitemapXml
+    }
+    catch {
+        if ($_.Exception.Message -notlike 'STATE_CHANGED:*') { throw }
+    }
+    $rootsMatch = $rootRows.Count -eq 4 -and @($expectedRoots | Where-Object {
+        $expected = $_
+        @($rootNames | Where-Object { $_ -ceq $expected }).Count -ne 1
+    }).Count -eq 0 -and @($rootRows | Where-Object {
+        $_.ReturnedRowCount -ne 1 -or -not $_.AppAssociationMatches -or
+        @($_.EntityIdMatchesQueriedObjectId | Where-Object { $_ -eq $true }).Count -ne 1
+    }).Count -eq 0
+    [bool](
+        $Snapshot.IdentityChecks.PacIdentityAvailable -and
+        $Snapshot.IdentityChecks.AzIdentityAvailable -and
+        $Snapshot.IdentityChecks.DataverseIdentityAvailable -and
+        $Snapshot.IdentityChecks.PacAzWhoAmIMatch -and
+        $Snapshot.IdentityChecks.ExpectedUserConfigured -and
+        $Snapshot.IdentityChecks.ExpectedUserMatch -and
+        $Snapshot.Solution.UniqueName -ceq $script:Target.SolutionUniqueName -and
+        -not [bool]$Snapshot.Solution.IsManaged -and
+        $Snapshot.SolutionPublisher.UniqueName -ceq $script:Target.SolutionPublisherUniqueName -and
+        $Snapshot.SolutionPublisher.CustomizationPrefix -ceq 'os' -and
+        $Snapshot.AppModule.Id -ceq $script:Target.AppModuleId -and
+        $Snapshot.AppModule.IdUnique -ceq $script:Target.AppModuleIdUnique -and
+        $Snapshot.AppModule.UniqueName -ceq $script:Target.AppUniqueName -and
+        $Snapshot.AppModule.Name -ceq $script:Target.AppName -and
+        [int]$Snapshot.AppModule.StateCode -eq 0 -and
+        [int]$Snapshot.AppModule.ComponentState -eq 1 -and
+        $counts.SiteMap -eq 1 -and $counts.Entity -eq 4 -and
+        $counts.Form -eq 4 -and $counts.View -eq 4 -and
+        $counts.Other -eq 0 -and $counts.Total -eq 13 -and
+        $rootsMatch -and
+        $Snapshot.DirectReferenceUiAssociationEvidence.IntendedSiteMapPresentDirectly -and
+        $Snapshot.DirectReferenceUiAssociationEvidence.SiteMapCount -eq 1 -and
+        $Snapshot.DirectReferenceUiAssociationEvidence.AppAssociationMatchesForEveryComponent -and
+        $Snapshot.SiteMap.Id -ceq $script:Target.SiteMapId -and
+        $Snapshot.SiteMap.UniqueName -ceq $script:Target.SiteMapUniqueName -and
+        $Snapshot.SiteMap.IsAppAware -and
+        [int]$Snapshot.SiteMap.ComponentState -eq 0 -and
+        -not [string]::IsNullOrWhiteSpace([string]$Snapshot.SiteMap.ETag) -and
+        $placeholderMatches -and
+        $Snapshot.DirectReferenceUiAssociationEvidence.Assets.Count -eq 4 -and
+        @($Snapshot.DirectReferenceUiAssociationEvidence.Assets | Where-Object {
+            -not $_.MainFormPresentDirectly -or $_.MainFormDirectMatchCount -ne 1 -or
+            -not $_.ActiveViewPresentDirectly -or $_.ActiveViewDirectMatchCount -ne 1
+        }).Count -eq 0 -and
+        $Snapshot.AppModuleRoles.Count -eq 2 -and
+        @($Snapshot.AppModuleRoles.Name | Where-Object {
+            $_ -notin @('System Administrator', 'System Customizer')
+        }).Count -eq 0
+    )
+}
+
+function Invoke-ValidateAppDiagnosticOnly {
+    $snapshot = $null
+    $sdkClientState = $null
+    $sdk = [pscustomobject]@{
+        Attempted = $false
+        Succeeded = $false
+        HttpStatus = $null
+        Summary = $null
+        ExceptionType = $null
+        SanitizedExceptionMessage = $null
+        Category = 'NOT_RUN'
+    }
+    $webApi = $null
+    $siteMapReadiness = $null
+    $classification = 'BLOCKED_DIAGNOSTIC_UNKNOWN'
+    try {
+        $script:LastStage = 'Fresh guarded read-only Phase 2D.3O preflight'
+        $snapshot = Get-TargetSnapshot -SkipValidateApp
+        $stateMatches = Test-ValidateAppSnapshotBaseline -Snapshot $snapshot
+        $placeholderMatches = $false
+        try {
+            Assert-SiteMapPlaceholderNavigation -Navigation $snapshot.SiteMapNavigationBefore
+            $placeholderMatches = $snapshot.SiteMapSourceXml -ceq $snapshot.SiteMap.SitemapXml
+        }
+        catch {
+            if ($_.Exception.Message -notlike 'STATE_CHANGED:*') { throw }
+        }
+        $script:LastStage = 'Direct raw ValidateApp Web API GET'
+        $webApi = Invoke-ValidateAppDiagnosticRequest -NormalizedComponents $snapshot.AppComponents
+        if ($script:EnvironmentIdentityVerified) {
+            try {
+                $script:LastStage = 'Construct guarded zero-retry ValidateApp ServiceClient'
+                $sdkClientState = New-TACanaryServiceClient -VerifiedSnapshot $snapshot
+                $sdkRequest = New-SdkValidateAppRequest -AppModuleId $script:Target.AppModuleId
+                $script:LastStage = 'Execute independent SDK ValidateApp once'
+                $sdk = Invoke-SdkValidateAppExecuteOnce -Client $sdkClientState.Client -Request $sdkRequest
+            }
+            catch {
+                $sdk = [pscustomobject]@{
+                    Attempted = $script:ValidateAppSdkExecuteCount -eq 1
+                    Succeeded = $false
+                    HttpStatus = $null
+                    Summary = $null
+                    ExceptionType = $_.Exception.GetType().FullName
+                    SanitizedExceptionMessage = ConvertTo-SanitizedDiagnosticText -Value $_.Exception.Message
+                    Category = if ($script:ValidateAppSdkExecuteCount -eq 0) { 'SDK_NOT_EXECUTED' } else { 'SDK_ERROR' }
+                }
+            }
+        }
+        $classification = Get-ValidateAppPrimaryClassification -WebApi $webApi -Sdk $sdk `
+            -StateMatches $stateMatches
+        $bothValidationPathsClean = $webApi.Category -in @('PASS', 'PASS_WITH_WARNINGS') -and
+            $sdk.Category -in @('PASS', 'PASS_WITH_WARNINGS') -and
+            $webApi.Category -ceq $sdk.Category
+        if ($bothValidationPathsClean) {
+            $script:LastStage = 'GET current Site Map and confirm read-only readiness'
+            $freshSiteMap = Invoke-DataverseRequest -Method GET -Path `
+                "sitemaps($($script:Target.SiteMapId))?%24select=sitemapid,sitemapnameunique,isappaware,componentstate,sitemapxml"
+            $freshEtag = Get-PropertyValue -Object $freshSiteMap -Name '@odata.etag'
+            $freshXml = [string]$freshSiteMap.sitemapxml
+            $proposedXml = New-ProposedSiteMapXml -SiteMapXml $freshXml
+            $placeholderNavigationPresent = $false
+            try {
+                Assert-SiteMapPlaceholderNavigation -Navigation (Get-SiteMapSemanticNavigation -SiteMapXml $freshXml)
+                $placeholderNavigationPresent = $true
+            }
+            catch {
+                if ($_.Exception.Message -notlike 'STATE_CHANGED:*') { throw }
+            }
+            $siteMapReadiness = [pscustomobject]@{
+                IdentityMatches = $freshSiteMap.sitemapid -ceq $snapshot.SiteMap.Id -and
+                    $freshSiteMap.sitemapnameunique -ceq $snapshot.SiteMap.UniqueName
+                DirectAssociationIntact = $snapshot.DirectReferenceUiAssociationEvidence.IntendedSiteMapPresentDirectly -and
+                    $snapshot.DirectReferenceUiAssociationEvidence.SiteMapCount -eq 1
+                PlaceholderNavigationPresent = $placeholderNavigationPresent
+                ETagPresent = -not [string]::IsNullOrWhiteSpace([string]$freshEtag)
+                IsAppAware = [bool]$freshSiteMap.isappaware
+                ComponentState = $freshSiteMap.componentstate
+                SourceXmlSha256 = Get-SiteMapSha256 -Value $freshXml
+                ProposedXmlSha256 = Get-SiteMapSha256 -Value $proposedXml
+                SemanticTransformChangesNavigation = $freshXml -cne $proposedXml
+            }
+            $siteMapReadiness | Add-Member -NotePropertyName ReadyForPatchRetry -NotePropertyValue (
+                $siteMapReadiness.IdentityMatches -and $siteMapReadiness.DirectAssociationIntact -and
+                $siteMapReadiness.PlaceholderNavigationPresent -and $siteMapReadiness.ETagPresent -and
+                $siteMapReadiness.IsAppAware -and [int]$siteMapReadiness.ComponentState -eq 0 -and
+                $siteMapReadiness.SemanticTransformChangesNavigation
+            )
+        }
+        [pscustomobject]@{
+            Status = $classification
+            LastStage = $script:LastStage
+            EnvironmentGuards = [pscustomobject]@{
+                TargetName = $script:Target.EnvironmentName
+                TargetMatched = $script:EnvironmentIdentityVerified
+                EnvironmentSwitchPerformed = $false
+                InteractiveLoginPerformed = $false
+            }
+            IdentityChecks = if ($snapshot) { $snapshot.IdentityChecks } else { $null }
+            Solution = if ($snapshot) { [pscustomobject]@{
+                UniqueName = $snapshot.Solution.UniqueName
+                Unmanaged = -not [bool]$snapshot.Solution.IsManaged
+                Publisher = $snapshot.SolutionPublisher.UniqueName
+                Prefix = $snapshot.SolutionPublisher.CustomizationPrefix
+            } } else { $null }
+            AppModule = if ($snapshot) { [pscustomobject]@{
+                Name = $snapshot.AppModule.Name
+                UniqueName = $snapshot.AppModule.UniqueName
+                Active = [int]$snapshot.AppModule.StateCode -eq 0
+                Unpublished = [int]$snapshot.AppModule.ComponentState -eq 1
+            } } else { $null }
+            Roles = if ($snapshot) { @($snapshot.AppModuleRoles | ForEach-Object { $_.Name }) } else { @() }
+            DirectComponentCounts = if ($snapshot) { $snapshot.RawAppComponentTypeCounts } else { $null }
+            FourRootResolution = if ($snapshot) { @($snapshot.EntityResolutionDiagnostics | ForEach-Object {
+                [pscustomobject]@{
+                    LogicalName = $_.NormalizedLogicalName
+                    ReturnedRowCount = $_.ReturnedRowCount
+                    EntityIdMatchesObjectId = @($_.EntityIdMatchesQueriedObjectId |
+                        Where-Object { $_ -eq $true }).Count -eq 1
+                    AppAssociationMatches = $_.AppAssociationMatches
+                }
+            }) } else { @() }
+            StateMatchesPhase2D3M = if ($snapshot) { $stateMatches } else { $false }
+            ProtectedState = if ($snapshot) { [pscustomobject]@{
+                SiteMapIdentityMatches = $snapshot.SiteMap.Id -ceq $script:Target.SiteMapId -and
+                    $snapshot.SiteMap.UniqueName -ceq $script:Target.SiteMapUniqueName
+                SiteMapXmlSha256 = Get-SiteMapSha256 -Value $snapshot.SiteMap.SitemapXml
+                PlaceholderNavigationPresent = $placeholderMatches
+                SiteMapDirectAssociationIntact = $snapshot.DirectReferenceUiAssociationEvidence.IntendedSiteMapPresentDirectly -and
+                    $snapshot.DirectReferenceUiAssociationEvidence.SiteMapCount -eq 1
+                MainFormCount = @($snapshot.DirectReferenceUiAssociationEvidence.Assets |
+                    Where-Object { $_.MainFormPresentDirectly -and $_.MainFormDirectMatchCount -eq 1 }).Count
+                PublicViewCount = @($snapshot.DirectReferenceUiAssociationEvidence.Assets |
+                    Where-Object { $_.ActiveViewPresentDirectly -and $_.ActiveViewDirectMatchCount -eq 1 }).Count
+                AppRoles = @($snapshot.AppModuleRoles | ForEach-Object { $_.Name })
+                AppActive = [int]$snapshot.AppModule.StateCode -eq 0
+                AppUnpublished = [int]$snapshot.AppModule.ComponentState -eq 1
+            } } else { $null }
+            RawWebApiValidateApp = $webApi
+            SdkValidateApp = $sdk
+            SdkClient = if ($sdkClientState) { [pscustomobject]@{
+                Ready = $sdkClientState.Ready
+                ConnectedOrganizationMatches = $sdkClientState.ConnectedOrganizationMatches
+                ConnectedUserMatchesVerifiedTokenContext = $sdkClientState.ConnectedUserMatchesVerifiedTokenContext
+                RetryCount = $sdkClientState.RetryCount
+            } } else { $null }
+            SiteMapReadiness = $siteMapReadiness
+            PrePatchGateMatrix = [pscustomobject]@{
+                TargetIdentityVerified = [bool]$script:EnvironmentIdentityVerified
+                SolutionAndPublisherMatch = if ($snapshot) {
+                    $snapshot.Solution.UniqueName -ceq $script:Target.SolutionUniqueName -and
+                    $snapshot.SolutionPublisher.UniqueName -ceq $script:Target.SolutionPublisherUniqueName -and
+                    $snapshot.SolutionPublisher.CustomizationPrefix -ceq 'os' -and
+                    -not [bool]$snapshot.Solution.IsManaged
+                } else { $false }
+                AppActiveUnpublished = if ($snapshot) {
+                    [int]$snapshot.AppModule.StateCode -eq 0 -and [int]$snapshot.AppModule.ComponentState -eq 1
+                } else { $false }
+                ExactThirteenComponentComposition = if ($snapshot) {
+                    $snapshot.RawAppComponentTypeCounts.Total -eq 13 -and
+                    $snapshot.RawAppComponentTypeCounts.SiteMap -eq 1 -and
+                    $snapshot.RawAppComponentTypeCounts.Entity -eq 4 -and
+                    $snapshot.RawAppComponentTypeCounts.Form -eq 4 -and
+                    $snapshot.RawAppComponentTypeCounts.View -eq 4 -and
+                    $snapshot.RawAppComponentTypeCounts.Other -eq 0
+                } else { $false }
+                FourApprovedRootsResolved = if ($snapshot) { $stateMatches -and
+                    @($snapshot.EntityResolutionDiagnostics).Count -eq 4
+                } else { $false }
+                ProtectedAssetsAndRolesMatch = if ($snapshot) { $stateMatches } else { $false }
+                ValidateAppCleanOrWarningsOnly = [bool]$bothValidationPathsClean
+                SiteMapReadiness = if ($siteMapReadiness) { [bool]$siteMapReadiness.ReadyForPatchRetry } else { $false }
+                WriteAuthorization = 'NOT_REQUESTED'
+            }
+            SecondaryPatchRetryReadiness = if ($stateMatches -and $bothValidationPathsClean -and
+                $siteMapReadiness -and $siteMapReadiness.ReadyForPatchRetry) {
+                'READY_FOR_SITEMAP_PATCH_RETRY'
+            } else { 'NOT_READY' }
+            RequestCounts = [ordered]@{} + $script:RequestCounts
+            OperationCounts = [ordered]@{
+                DataverseGet = $script:RequestCounts.GET
+                ValidateAppWebApiCalls = if ($webApi -and $webApi.TransportAttempted) { 1 } else { 0 }
+                SdkValidateAppExecute = $script:ValidateAppSdkExecuteCount
+                AddAppComponents = 0
+                RemoveAppComponents = 0
+                SiteMapPatch = $script:RequestCounts.PATCH
+                OtherWrites = $script:RequestCounts.POST + $script:RequestCounts.PATCH
+                PublishXml = 0
+                AppPublish = 0
+                RoleChanges = 0
+                Retries = 0
+            }
+            WritesMayHaveOccurred = $script:WritesStarted
+        }
+    }
+    catch {
+        $classification = if ($script:LastHttpStatus -eq 401) { 'BLOCKED_DIAGNOSTIC_UNKNOWN' }
+            elseif ($script:LastHttpStatus -eq 403) { 'BLOCKED_DIAGNOSTIC_UNKNOWN' }
+            elseif ($_.Exception.Message -like 'STATE_CHANGED:*') { 'STATE_CHANGED' }
+            else { 'BLOCKED_DIAGNOSTIC_UNKNOWN' }
+        [pscustomobject]@{
+            Status = $classification
+            LastStage = $script:LastStage
+            SafeExceptionType = $_.Exception.GetType().FullName
+            SafeExceptionMessage = ConvertTo-SanitizedDiagnosticText -Value $_.Exception.Message
+            IdentityChecks = if ($snapshot) { $snapshot.IdentityChecks } else { $null }
+            DirectComponentCounts = if ($snapshot) { $snapshot.RawAppComponentTypeCounts } else { $null }
+            RawWebApiValidateApp = $webApi
+            SdkValidateApp = $sdk
+            RequestCounts = [ordered]@{} + $script:RequestCounts
+            OperationCounts = [ordered]@{
+                DataverseGet = $script:RequestCounts.GET
+                ValidateAppWebApiCalls = if ($webApi -and $webApi.TransportAttempted) { 1 } else { 0 }
+                SdkValidateAppExecute = $script:ValidateAppSdkExecuteCount
+                AddAppComponents = 0
+                RemoveAppComponents = 0
+                SiteMapPatch = $script:RequestCounts.PATCH
+                OtherWrites = $script:RequestCounts.POST + $script:RequestCounts.PATCH
+                PublishXml = 0
+                AppPublish = 0
+                RoleChanges = 0
+                Retries = 0
+            }
+            WritesMayHaveOccurred = $script:WritesStarted
+        }
+    }
+    finally {
+        $script:WritesAllowed = $false
+        if ($sdkClientState -and $sdkClientState.Client -is [System.IDisposable]) {
+            $sdkClientState.Client.Dispose()
+        }
+    }
+}
+
 function Get-TargetSnapshot {
+    param([switch]$SkipValidateApp)
+    $script:EnvironmentIdentityVerified = $false
     $script:LastStage = 'Verify PAC target'
     $script:PacIdentity = Assert-TargetInputs
     $script:AccessToken = Get-ValidatedAccessToken
@@ -4207,6 +5124,7 @@ function Get-TargetSnapshot {
     if ([string]$who.UserId -ine [string]([Environment]::GetEnvironmentVariable('BSO_RS_EXPECTED_USER_ID', 'Process'))) {
         throw 'Dataverse WhoAmI identity does not match the process-scoped expected-user guard.'
     }
+    $script:EnvironmentIdentityVerified = $true
 
     $script:LastStage = 'Verify project Solution and Publisher'
     $solutionRows = @(Get-ODataRows -Path (New-CollectionPath -EntitySet 'solutions' -Select 'solutionid,uniquename,friendlyname,ismanaged,_publisherid_value' -Filter "uniquename eq '$($script:Target.SolutionUniqueName)'"))
@@ -4278,7 +5196,8 @@ function Get-TargetSnapshot {
         }
     }
     if ($EntityIdentityDiagnosticOnly -or $EntityRootRepairDiagnosticOnly -or $RemoveWrongSystemEntityRoots -or
-        $AddTaEntityCanary -or $SdkTaEntityCanary -or $SdkRemainingTableRoots -or $FinalSiteMapNavigationOnly) {
+        $AddTaEntityCanary -or $SdkTaEntityCanary -or $SdkRemainingTableRoots -or $FinalSiteMapNavigationOnly -or
+        $ValidateAppDiagnosticOnly) {
         $script:EntityResolutionDiagnostics = @(Get-EntityResolutionDiagnosticRows -Components $rawComponents -ReferenceComponents $referenceComponents)
         $script:EntityResolutionClassification = Get-EntityResolutionAggregateClassification -Diagnostics $script:EntityResolutionDiagnostics
         $payloadsForFingerprint = @($referenceComponents | ForEach-Object { $_.Payloads })
@@ -4362,14 +5281,26 @@ function Get-TargetSnapshot {
         }
     }
     if ($ReferenceUiCompositionOnly -or $EntityRootRepairDiagnosticOnly -or $RemoveWrongSystemEntityRoots -or
-        $AddTaEntityCanary -or $FinalSiteMapNavigationOnly) {
+        $AddTaEntityCanary -or $FinalSiteMapNavigationOnly -or $ValidateAppDiagnosticOnly) {
         Assert-ApprovedAppRoles -Roles $roleSnapshot
     }
-    $script:LastStage = 'Read current app dependency validation'
-    $validation = Invoke-DataverseRequest -Method GET -Path "ValidateApp(AppModuleId=$($script:Target.AppModuleId))"
-    $validationResponse = Get-PropertyValue -Object $validation -Name 'AppValidationResponse'
-    $validationIssues = @(Get-PropertyValue -Object $validationResponse -Name 'ValidationIssueList')
-    $validationIssueSummaries = @(ConvertTo-SafeValidationIssueSummaries -Issues $validationIssues -NormalizedComponents $components)
+    $validation = $null
+    $validationResponse = $null
+    $validationIssues = @()
+    $validationIssueSummaries = @()
+    if (-not $SkipValidateApp) {
+        $script:LastStage = 'Read current app dependency validation'
+        $validation = Invoke-DataverseRequest -Method GET -Path "ValidateApp(AppModuleId=$($script:Target.AppModuleId))"
+        $validationResponse = Get-PropertyValue -Object $validation -Name 'AppValidationResponse'
+        $validationIssueListProperty = if ($validationResponse) {
+            $validationResponse.PSObject.Properties['ValidationIssueList']
+        } else { $null }
+        $validationIssues = @()
+        if ($validationIssueListProperty -and $null -ne $validationIssueListProperty.Value) {
+            $validationIssues = @($validationIssueListProperty.Value | Where-Object { $null -ne $_ })
+        }
+        $validationIssueSummaries = @(ConvertTo-SafeValidationIssueSummaries -Issues $validationIssues -NormalizedComponents $components)
+    }
     [pscustomobject]@{
         AppModule = [pscustomobject]@{
             Id = $app.appmoduleid
@@ -4431,11 +5362,13 @@ function Get-TargetSnapshot {
         EntityRootRepairEvidence = $script:EntityRootRepairEvidence
         ReferencePayloadFingerprint = $script:PayloadFingerprintDiagnostic
         AppModuleRoles = $roleSnapshot
-        AppValidation = [pscustomobject]@{
-            ValidationSuccess = Get-PropertyValue -Object $validationResponse -Name 'ValidationSuccess'
-            IssueCount = $validationIssues.Count
-            BlockingErrorCount = @($validationIssueSummaries | Where-Object { $_.ErrorType -ceq 'Error' }).Count
-            Issues = $validationIssueSummaries
+        AppValidation = if ($SkipValidateApp) { $null } else {
+            [pscustomobject]@{
+                ValidationSuccess = Get-PropertyValue -Object $validationResponse -Name 'ValidationSuccess'
+                IssueCount = $validationIssues.Count
+                BlockingErrorCount = @($validationIssueSummaries | Where-Object { $_.ErrorType -ceq 'Error' }).Count
+                Issues = $validationIssueSummaries
+            }
         }
         AppModuleSiteMapBinding = $export.AppModuleSiteMapEntries
         SolutionExport = $export
@@ -5735,6 +6668,11 @@ function Invoke-Main {
     $plan = Get-AppCompositionPlan
     if ($PlanOnly) {
         Write-Output ($plan | ConvertTo-Json -Depth 20 -Compress)
+        return
+    }
+    if ($ValidateAppDiagnosticOnly) {
+        $result = Invoke-ValidateAppDiagnosticOnly
+        Write-Output ($result | ConvertTo-Json -Depth 30 -Compress)
         return
     }
     if ($FinalSiteMapNavigationOnly) {

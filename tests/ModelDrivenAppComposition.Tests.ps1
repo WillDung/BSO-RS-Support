@@ -2396,6 +2396,238 @@ finally {
     $script:TACanaryFinalRequest = $savedCanaryDispatchState.CanaryFinalRequest
 }
 
+$validateAppTransport = {
+    param([int]$Status, [string]$Body)
+    [pscustomobject]@{
+        TransportAttempted = $true
+        HttpStatus = $Status
+        ContentType = 'application/json'
+        ResponseBodyPresent = -not [string]::IsNullOrEmpty($Body)
+        ResponseBodySha256 = if ($Body) {
+            [Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData(
+                [System.Text.Encoding]::UTF8.GetBytes($Body)
+            )).ToLowerInvariant()
+        } else { $null }
+        RawBody = $Body
+    }
+}
+$validateAppCleanBody = '{"AppValidationResponse":{"ValidationSuccess":true,"ValidationIssueList":[]}}'
+$validateAppClean = Get-ValidateAppDiagnosticEvaluation -Transport (& $validateAppTransport 200 $validateAppCleanBody)
+Assert-Test ($validateAppClean.Category -ceq 'PASS' -and $validateAppClean.IssueCount -eq 0 -and
+    $validateAppClean.JsonParseSucceeded -and $validateAppClean.ResponseBodySha256) `
+    'ValidateApp HTTP 200 success with empty issue list'
+$validateAppWarningBody = '{"AppValidationResponse":{"ValidationSuccess":true,"ValidationIssueList":[{"ErrorType":"Warning","CRMErrorCode":17,"Message":"Synthetic warning."}]}}'
+$validateAppWarning = Get-ValidateAppDiagnosticEvaluation -Transport (& $validateAppTransport 200 $validateAppWarningBody)
+Assert-Test ($validateAppWarning.Category -ceq 'PASS_WITH_WARNINGS' -and
+    $validateAppWarning.WarningCount -eq 1 -and
+    $validateAppWarning.LocalInterpretation.Category -ceq 'PASS_WITH_WARNINGS') `
+    'Treat a ValidateApp warning as non-blocking'
+$validateAppErrorBody = '{"AppValidationResponse":{"ValidationSuccess":false,"ValidationIssueList":[{"ErrorType":"Error","CRMErrorCode":1234,"Message":"Synthetic error."}]}}'
+$validateAppError = Get-ValidateAppDiagnosticEvaluation -Transport (& $validateAppTransport 200 $validateAppErrorBody)
+Assert-Test ($validateAppError.Category -ceq 'BLOCK' -and $validateAppError.ErrorCount -eq 1 -and
+    $validateAppError.Issues[0].CRMErrorCode -ceq '1234') `
+    'Block ValidateApp false with a true Error issue and preserve CRM error code'
+$validateAppMissingResponse = Get-ValidateAppDiagnosticEvaluation -Transport (
+    & $validateAppTransport 200 '{"OtherResponse":{}}'
+)
+Assert-Test ($validateAppMissingResponse.Category -ceq 'RESPONSE_SHAPE_ERROR' -and
+    -not $validateAppMissingResponse.AppValidationResponsePresent -and
+    $validateAppMissingResponse.PredicateMatrix.Count -gt 0) `
+    'Reject a missing AppValidationResponse'
+$validateAppMissingSuccess = Get-ValidateAppDiagnosticEvaluation -Transport (
+    & $validateAppTransport 200 '{"AppValidationResponse":{"ValidationIssueList":[]}}'
+)
+Assert-Test ($validateAppMissingSuccess.Category -ceq 'RESPONSE_SHAPE_ERROR' -and
+    -not $validateAppMissingSuccess.ValidationSuccessPresent) `
+    'Reject a missing ValidationSuccess property'
+$validateAppInvalidSuccessType = Get-ValidateAppDiagnosticEvaluation -Transport (
+    & $validateAppTransport 200 '{"AppValidationResponse":{"ValidationSuccess":"false","ValidationIssueList":[]}}'
+)
+Assert-Test ($validateAppInvalidSuccessType.Category -ceq 'RESPONSE_SHAPE_ERROR' -and
+    $validateAppInvalidSuccessType.ValidationSuccessPresent -and
+    -not $validateAppInvalidSuccessType.ValidationSuccessBoolean -and
+    $null -eq $validateAppInvalidSuccessType.ValidationSuccess) `
+    'Reject a non-Boolean ValidationSuccess without coercing the string false to true'
+$validateAppMalformed = Get-ValidateAppDiagnosticEvaluation -Transport (
+    & $validateAppTransport 200 '{not-json'
+)
+Assert-Test ($validateAppMalformed.Category -ceq 'PARSE_ERROR' -and
+    $validateAppMalformed.ParserStage -ceq 'STRICT_JSON_PARSE') `
+    'Classify malformed ValidateApp JSON as a parse error'
+foreach ($statusCase in @(
+    @{ Status = 401; Category = 'AUTH' },
+    @{ Status = 403; Category = 'AUTHZ' },
+    @{ Status = 429; Category = 'THROTTLED' },
+    @{ Status = 503; Category = 'SERVICE_ERROR' }
+)) {
+    $httpErrorBody = '{"error":{"code":"synthetic","message":"No identifiers."}}'
+    $statusEvaluation = Get-ValidateAppDiagnosticEvaluation -Transport (
+        & $validateAppTransport $statusCase.Status $httpErrorBody
+    )
+    Assert-Test ($statusEvaluation.Category -ceq $statusCase.Category -and
+        $statusEvaluation.FirstFailingPredicate -ceq 'HTTP_STATUS_IS_SUCCESS') `
+        "Classify HTTP $($statusCase.Status) without replacing transport category with response-shape error"
+}
+$validateAppTransportException = [pscustomobject]@{
+    ExceptionType = 'Synthetic.TransportException'
+    SanitizedMessage = 'Synthetic transport timeout.'
+}
+$validateAppTransportFailure = Get-ValidateAppDiagnosticEvaluation -Transport (
+    [pscustomobject]@{
+        TransportAttempted = $true; HttpStatus = $null; ContentType = $null
+        ResponseBodyPresent = $false; ResponseBodySha256 = $null; RawBody = $null
+    }
+) -TransportException $validateAppTransportException
+Assert-Test ($validateAppTransportFailure.Category -ceq 'TRANSPORT_ERROR' -and
+    $validateAppTransportFailure.ExceptionType -ceq 'Synthetic.TransportException' -and
+    $validateAppTransportFailure.SanitizedExceptionMessage -ceq 'Synthetic transport timeout.') `
+    'Preserve the inner transport failure category and sanitized exception through diagnostic evaluation'
+$originalValidateAppDiagnosticRequest = (Get-Command Invoke-DataverseRequest -CommandType Function).ScriptBlock
+$savedValidateAppTransportState = @{
+    LastValidateAppRawResponse = $script:LastValidateAppRawResponse
+    LastTransportException = $script:LastTransportException
+    LastHttpStatus = $script:LastHttpStatus
+    LastPath = $script:LastPath
+    RequestCounts = $script:RequestCounts
+}
+$script:LastValidateAppRawResponse = [pscustomobject]@{
+    TransportAttempted = $true; HttpStatus = $null; ContentType = $null
+    ResponseBodyPresent = $false; ResponseBodySha256 = $null; RawBody = $null
+}
+$script:LastTransportException = $validateAppTransportException
+$script:LastHttpStatus = $null
+$script:LastPath = "ValidateApp(AppModuleId=$($script:Target.AppModuleId))"
+$script:RequestCounts = @{ GET = 1; PATCH = 0; POST = 0 }
+Set-Item -Path Function:Invoke-DataverseRequest -Value {
+    throw 'Synthetic outer transport wrapper failure.'
+}
+try {
+    $validateAppWrappedFailure = Invoke-ValidateAppDiagnosticRequest
+    Assert-Test ($validateAppWrappedFailure.Category -ceq 'TRANSPORT_ERROR' -and
+        $validateAppWrappedFailure.ExceptionType -ceq 'Synthetic.TransportException' -and
+        $validateAppWrappedFailure.SanitizedExceptionMessage -ceq 'Synthetic transport timeout.') `
+        'Preserve the exact inner transport exception through the ValidateApp request wrapper'
+}
+finally {
+    Set-Item -Path Function:Invoke-DataverseRequest -Value $originalValidateAppDiagnosticRequest
+    $script:LastValidateAppRawResponse = $savedValidateAppTransportState.LastValidateAppRawResponse
+    $script:LastTransportException = $savedValidateAppTransportState.LastTransportException
+    $script:LastHttpStatus = $savedValidateAppTransportState.LastHttpStatus
+    $script:LastPath = $savedValidateAppTransportState.LastPath
+    $script:RequestCounts = $savedValidateAppTransportState.RequestCounts
+}
+Assert-Test ($validateAppWarning.LocalInterpretation.ValidationState.BlockingErrorCount -eq 0) `
+    'A warning alone never contributes to blocking errors'
+$validateAppHttp200Empty = Get-ValidateAppDiagnosticEvaluation -Transport (
+    & $validateAppTransport 200 ''
+)
+Assert-Test ($validateAppHttp200Empty.Category -notin @('PASS', 'PASS_WITH_WARNINGS') -and
+    -not $validateAppHttp200Empty.ValidationSuccess) `
+    'HTTP 200 alone is never interpreted as successful app validation'
+Assert-Test ($validateAppError.IssueCount -eq 1 -and $validateAppError.ErrorCount -eq 1 -and
+    $validateAppError.Issues[0].CRMErrorCode -ceq '1234') `
+    'Sanitized ValidateApp summary retains issue count and CRM error code'
+Assert-Test (@($validateAppClean.PredicateMatrix | Where-Object { -not $_.Matches }).Count -eq 0 -and
+    $validateAppClean.FirstMismatch -eq $null) `
+    'Compare the raw ValidateApp response with the current local parser'
+$validateAppMissingIssueList = Get-ValidateAppDiagnosticEvaluation -Transport (
+    & $validateAppTransport 200 '{"AppValidationResponse":{"ValidationSuccess":true}}'
+)
+Assert-Test ($validateAppMissingIssueList.Category -ceq 'RESPONSE_SHAPE_ERROR' -and
+    -not $validateAppMissingIssueList.ValidationIssueListPresent) `
+    'Reject a missing ValidationIssueList property'
+$validateAppInvalidIssueType = Get-ValidateAppDiagnosticEvaluation -Transport (
+    & $validateAppTransport 200 '{"AppValidationResponse":{"ValidationSuccess":true,"ValidationIssueList":{}}}'
+)
+Assert-Test ($validateAppInvalidIssueType.Category -ceq 'RESPONSE_SHAPE_ERROR' -and
+    $validateAppInvalidIssueType.ValidationIssueListPresent -and
+    -not $validateAppInvalidIssueType.ValidationIssueListArray) `
+    'Reject a non-array ValidationIssueList while retaining actual property presence'
+$sdkValidateAppClean = Get-SdkValidateAppResponseSummary -Response ([pscustomobject]@{
+    AppValidationResponse = [pscustomobject]@{ ValidationSuccess = $true; ValidationIssueList = @() }
+})
+Assert-Test ($sdkValidateAppClean.Category -ceq 'PASS' -and $sdkValidateAppClean.IssueCount -eq 0) `
+    'Summarize an independent SDK ValidateApp response'
+Assert-Test ((Get-ValidateAppPrimaryClassification -WebApi $validateAppClean -Sdk $sdkValidateAppClean `
+    -StateMatches $true) -ceq 'BLOCKED_DIAGNOSTIC_UNKNOWN') `
+    'Keep a clean present-day cross-check conservative when the historical failure cause is unproven'
+$sdkValidateAppWarning = Get-SdkValidateAppResponseSummary -Response ([pscustomobject]@{
+    AppValidationResponse = [pscustomobject]@{
+        ValidationSuccess = $true
+        ValidationIssueList = @([pscustomobject]@{ ErrorType = 'Warning'; CRMErrorCode = 17; Message = 'Synthetic warning.' })
+    }
+})
+Assert-Test ((Get-ValidateAppPrimaryClassification -WebApi $validateAppWarning `
+    -Sdk $sdkValidateAppWarning -StateMatches $true) -ceq 'LIVE_VALIDATION_HAS_WARNINGS_ONLY') `
+    'Classify matching Web API and SDK warning-only validation'
+Assert-Test ((Get-ValidateAppPrimaryClassification -WebApi $validateAppClean `
+    -Sdk $sdkValidateAppWarning -StateMatches $true) -ceq 'WEBAPI_SDK_VALIDATION_DISAGREE') `
+    'Detect material disagreement between independent validation paths'
+Assert-Test ((Get-ValidateAppPrimaryClassification -WebApi $validateAppClean `
+    -Sdk $sdkValidateAppClean -StateMatches $false) -ceq 'STATE_CHANGED') `
+    'Prioritize app composition drift over validation interpretation'
+$validateAppSdkRequest = New-SdkValidateAppRequest -AppModuleId $script:Target.AppModuleId
+$validateAppSdkClientFixture = [pscustomobject]@{
+    MaxRetryCount = 4
+    IsReady = $true
+    ExecuteCalls = 0
+    LastError = ''
+    LastException = $null
+}
+$validateAppSdkClientFixture | Add-Member -MemberType ScriptMethod -Name Execute -Value {
+    param($request)
+    $this.ExecuteCalls++
+    [pscustomobject]@{
+        AppValidationResponse = [pscustomobject]@{ ValidationSuccess = $true; ValidationIssueList = @() }
+    }
+}
+$savedValidateAppSdkExecuteCount = $script:ValidateAppSdkExecuteCount
+$script:ValidateAppSdkExecuteCount = 0
+$validateAppSdkExecuteResult = Invoke-SdkValidateAppExecuteOnce -Client $validateAppSdkClientFixture `
+    -Request $validateAppSdkRequest
+Assert-Test ($validateAppSdkExecuteResult.Attempted -and $validateAppSdkExecuteResult.Succeeded -and
+    $validateAppSdkExecuteResult.Category -ceq 'PASS' -and
+    $validateAppSdkClientFixture.ExecuteCalls -eq 1 -and
+    $script:ValidateAppSdkExecuteCount -eq 1 -and
+    $validateAppSdkClientFixture.MaxRetryCount -eq 0) `
+    'Execute one independent SDK ValidateApp request through a ready zero-retry client'
+Assert-Rejected {
+    Invoke-SdkValidateAppExecuteOnce -Client $validateAppSdkClientFixture -Request $validateAppSdkRequest
+} 'Block a second SDK ValidateApp Execute' 'SDK_VALIDATEAPP_GUARD_FAILED'
+Assert-Test ($validateAppSdkClientFixture.ExecuteCalls -eq 1) `
+    'The SDK ValidateApp second-execute guard does not dispatch again'
+$script:ValidateAppSdkExecuteCount = $savedValidateAppSdkExecuteCount
+$savedValidateAppModeState = @{
+    ValidateAppDiagnosticOnly = $ValidateAppDiagnosticOnly
+    Apply = $Apply
+    WritesAllowed = $script:WritesAllowed
+    ApiRoot = $script:ApiRoot
+    OrganizationUrl = $OrganizationUrl
+    RequestCounts = $script:RequestCounts
+}
+$ValidateAppDiagnosticOnly = $true
+$Apply = $true
+$script:WritesAllowed = $true
+$script:ApiRoot = 'https://synthetic.crm.dynamics.com/api/data/v9.2/'
+$OrganizationUrl = 'https://synthetic.crm.dynamics.com/'
+$script:RequestCounts = @{ GET = 0; PATCH = 0; POST = 0 }
+Assert-Rejected {
+    Invoke-DataverseRequest -Method POST -Path 'AddAppComponents'
+} 'Block all writes in ValidateApp diagnostic mode' 'strictly GET-only'
+Assert-Rejected {
+    Invoke-DataverseRequest -Method GET -Path 'ValidateApp(AppModuleId=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa)' `
+        -CaptureRawResponse
+} 'Restrict raw response capture to the exact guarded ValidateApp endpoint' 'restricted to the guarded ValidateApp'
+Assert-Test ($script:RequestCounts.GET -eq 0 -and $script:RequestCounts.POST -eq 0 -and
+    $script:RequestCounts.PATCH -eq 0 -and $script:ExternalCalls -eq 0) `
+    'ValidateApp diagnostic write and raw-capture guards stop before authentication or network dispatch'
+$ValidateAppDiagnosticOnly = $savedValidateAppModeState.ValidateAppDiagnosticOnly
+$Apply = $savedValidateAppModeState.Apply
+$script:WritesAllowed = $savedValidateAppModeState.WritesAllowed
+$script:ApiRoot = $savedValidateAppModeState.ApiRoot
+$OrganizationUrl = $savedValidateAppModeState.OrganizationUrl
+$script:RequestCounts = $savedValidateAppModeState.RequestCounts
+
 Assert-Test ($script:ExternalCalls -eq 0) 'All Phase 2D.3 regression coverage remains synthetic and offline'
 
 Write-Output "PASS: $script:Passed synthetic app-composition assertions; no authentication, API calls, PAC export, or Apply invocation."

@@ -1,5 +1,16 @@
 # Current State
 
+## Phase 2D.3O Update — Diagnostic Code Ready; Live Run Blocked by Local Guards (2026-10-23)
+
+The local GET-only ValidateApp diagnostic path and synthetic regression coverage are implemented. The live diagnostic was **not run**: the current PowerShell process has no configured `BSO_RS_ENVIRONMENT_NAME`, `BSO_RS_ORG_URL`, `BSO_RS_EXPECTED_ENVIRONMENT_ID`, or `BSO_RS_EXPECTED_ORG_ID`. No PAC/Az identity or Dataverse request was attempted, and no environment switch or interactive login occurred.
+
+- The diagnostic path retains sanitized transport, raw-body hash, response-shape, parser-stage, issue, predicate-comparison, and exception evidence. Its independent SDK ValidateApp cross-check uses the existing guarded ServiceClient and sets retries to zero. The mode is GET-only; no write or publish operation is authorized.
+- Synthetic offline validation passed **324** app-composition assertions, **550** reference-table provisioning assertions, **11** readiness assertions, PowerShell parser validation (**0 errors**), and `git diff --check`.
+- A local regression test exposed an empty-array flattening defect in the former issue-list parsing path: an empty `ValidationIssueList` could be represented as a null issue. The current parser preserves empty arrays and filters null placeholders. This is a confirmed local defect, but it is **not confirmed as the cause** of the Phase 2D.3N stop because that attempt's raw response and exact failing predicate were not retained.
+- This attempt's counts are **0 Dataverse GET**, **0 ValidateApp Web API calls**, **0 SDK ValidateApp Execute**, **0 AddAppComponents**, **0 RemoveAppComponents**, **0 Site Map PATCH**, **0 other writes**, **0 PublishXml**, **0 app publish**, **0 role changes**, and **0 retries**. Phase 2D.3O classification is **`BLOCKED_DIAGNOSTIC_UNKNOWN`** because the guarded preflight could not start; there is no live validation result, and no success, failure, or state drift is inferred.
+- Branch `main`, HEAD and `origin/main` remain `618d7825fdb1487182f76449d6cd11e4c34e6dc8`; no commit or push occurred.
+- **Next step:** configure the four approved target guard values in the intended PowerShell process without switching environments, then rerun the fresh guarded read-only diagnostic. The script may establish the expected-user process pin only after PAC, Az, and Dataverse identity checks match. Do not use alternate CLI/MCP paths to bypass these guards.
+
 ## Phase 2D.3N Update — Guarded Preflight Stopped (2026-10-23)
 
 The dedicated navigation-only runner and its synthetic regression coverage are implemented, but the owner-authorized Phase 2D.3N Site Map update was **not performed**. The fresh PAC checks matched the approved VN LMV IT environment by name, URL, and the active `pac org who` identities. The guarded runner then stopped with **`FAILED_VALIDATION`** at **Read current app dependency validation** after 32 Dataverse GET requests.

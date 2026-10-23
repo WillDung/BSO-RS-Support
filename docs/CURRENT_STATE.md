@@ -1,5 +1,15 @@
 # Current State
 
+## Phase 2D.3N Update — Guarded Preflight Stopped (2026-10-23)
+
+The dedicated navigation-only runner and its synthetic regression coverage are implemented, but the owner-authorized Phase 2D.3N Site Map update was **not performed**. The fresh PAC checks matched the approved VN LMV IT environment by name, URL, and the active `pac org who` identities. The guarded runner then stopped with **`FAILED_VALIDATION`** at **Read current app dependency validation** after 32 Dataverse GET requests.
+
+- The sanitized runner output did not retain the underlying ValidateApp response, HTTP status, or error code. The failure cause is therefore **unknown / not verified**; do not infer that ValidateApp returned warnings or that any specific live-state gate failed.
+- No Site Map PATCH was dispatched. Counts were **32 Dataverse GET**, **0 Site Map PATCH**, **0 POST**, **0 other writes**, **0 publish operations**, **0 role changes**, and **0 retries**. The attempted operation made no app/navigation change; post-attempt live state was not re-read after the runner stopped.
+- No interactive login or environment switch occurred. Branch `main`, HEAD and `origin/main` remained `885abd496c066444464e5898ac89bf2abd97c0eb`; no commit or push occurred.
+- Local validation passed: **294** app-composition assertions, **550** provisioning assertions, **11** readiness assertions, PowerShell parser validation (**0 errors**), and `git diff --check`.
+- **Next task:** diagnose the stopped GET-only app dependency-validation stage with sanitized HTTP/error and validation evidence. Do not retry the PATCH mode or change Site Map navigation until the failure is understood and a fresh preflight passes every gate. See the [model-driven app automation runbook](./MODEL_DRIVEN_APP_AUTOMATION_RUNBOOK.md).
+
 ## Phase 2D.3M Update — Remaining Table Roots Verified (2026-10-23)
 
 The owner-authorized Phase 2D.3M operation added only Position, Candidate Source, and Location as table roots to the existing `srapp` through one SDK `AddAppComponentsRequest`. The verified outcome is **`ALL_FOUR_TABLE_ROOTS_VERIFIED`**: the existing TA root and all three newly requested roots resolve through `appmodulecomponent.objectid` → `entities.entityid` to their exact project logical names.

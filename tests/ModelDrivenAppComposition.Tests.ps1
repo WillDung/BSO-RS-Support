@@ -42,6 +42,9 @@ Assert-Test ($script:ExternalCalls -eq 0) 'PlanOnly makes no auth, PAC, or netwo
 Assert-Rejected {
     & $scriptPath -SdkRemainingTableRoots -SdkTaEntityCanary
 } 'Reject combining Phase 2D.3M and the prior TA-canary execution modes' 'Choose exactly one supported execution mode'
+Assert-Rejected {
+    & $scriptPath -FinalSiteMapNavigationOnly -PlanOnly
+} 'Reject combining Phase 2D.3N live mode with PlanOnly' 'Choose exactly one supported execution mode'
 
 . $scriptPath -PlanOnly
 $syntheticTarget = [pscustomobject]@{
@@ -128,6 +131,11 @@ Assert-Rejected { Assert-ApplyAuthorization -Phrase 'APPLY PHASE 2D IN VN LMV IT
 $authorizationAccepted = $true
 try { Assert-ApplyAuthorization -Phrase 'APPLY PHASE 2D IN VN LMV IT' -Reference 'synthetic-approval' } catch { $authorizationAccepted = $false }
 Assert-Test $authorizationAccepted 'Accept only explicit phrase plus recorded synthetic authorization reference'
+$FinalSiteMapNavigationOnly = $true
+Assert-ApplyAuthorization -Phrase 'APPLY PHASE 2D.3N FINAL SITE MAP NAVIGATION PATCH IN VN LMV IT' `
+    -Reference 'synthetic-phase-2d-3n-approval'
+Assert-Test $true 'Accept the exact Phase 2D.3N authorization phrase'
+$FinalSiteMapNavigationOnly = $false
 Assert-Rejected { Assert-AppValidationAllowsApply -AppValidation ([pscustomobject]@{ Issues = @([pscustomobject]@{ ErrorType = 'Error'; Message = 'Missing sitemap' }) }) } 'Block Apply on a pre-existing ValidateApp error' 'blocking error outside the approved component plan'
 $warningValidationAccepted = $true
 try { Assert-AppValidationAllowsApply -AppValidation ([pscustomobject]@{ Issues = @([pscustomobject]@{ ErrorType = 'Warning'; Message = 'No component is referenced' }) }) } catch { $warningValidationAccepted = $false }
@@ -156,6 +164,135 @@ Assert-Test ($allSubAreas[2].GetAttribute('Id') -ceq 'subarea_03c7b614' -and $al
 Assert-Test ($allSubAreas[3].GetAttribute('Id') -ceq 'subarea_04e9c321' -and $allSubAreas[3].GetAttribute('Entity') -ceq 'os_sr_loc') 'Create Locations navigation entry'
 $idempotentXml = New-ProposedSiteMapXml -SiteMapXml $proposedXml -ExpectedNodeIds $testIds
 Assert-Test ($idempotentXml -ceq $proposedXml) 'Four-entry SiteMap transformation is idempotent'
+Assert-SiteMapUnrelatedXmlPreserved -BeforeXml $fixtureXml -AfterXml $proposedXml
+Assert-Test $true 'Preserve unrelated Site Map attributes and localized titles semantically'
+$badUnrelatedXml = $proposedXml.Replace('ResourceId="resource_area"', 'ResourceId="changed_area"')
+Assert-Rejected {
+    Assert-SiteMapUnrelatedXmlPreserved -BeforeXml $fixtureXml -AfterXml $badUnrelatedXml
+} 'Reject transformation changes to unrelated Site Map XML' 'changed XML outside'
+
+$targetPlaceholderXml = $fixtureXml.Replace('area_test', $script:Target.SiteMapNodeIds.Area).
+    Replace('group_test', $script:Target.SiteMapNodeIds.Group)
+$targetTransformedXml = New-ProposedSiteMapXml -SiteMapXml $targetPlaceholderXml
+$targetPlaceholderNavigation = @(Get-SiteMapSemanticNavigation -SiteMapXml $targetPlaceholderXml)
+Assert-SiteMapPlaceholderNavigation -Navigation $targetPlaceholderNavigation
+$targetNavigation = @(Assert-FinalSiteMapNavigation -SiteMapXml $targetTransformedXml)
+Assert-Test ($targetNavigation.Count -eq 4 -and
+    ($targetNavigation.Entity -join ',') -ceq 'os_sr_ta,os_sr_pos,os_sr_csrc,os_sr_loc') `
+    'Validate exactly the four approved reference table navigation entries'
+$badNavigationXml = $targetTransformedXml.Replace('Entity="os_sr_loc"', 'Entity="account"')
+Assert-Rejected {
+    Assert-FinalSiteMapNavigation -SiteMapXml $badNavigationXml
+} 'Reject an unexpected table in final Site Map navigation' 'incorrectly ordered'
+$duplicateNavigationXml = $targetTransformedXml.Replace('</Group>', '<SubArea Id="other"><Titles><Title LCID="1033" Title="Other"/></Titles></SubArea></Group>')
+Assert-Rejected {
+    Assert-FinalSiteMapNavigation -SiteMapXml $duplicateNavigationXml
+} 'Reject an extra Site Map SubArea' 'exactly one Area, one Group, and four SubAreas'
+$originalXmlFingerprint = Get-SiteMapSha256 -Value $targetPlaceholderXml
+$transformedXmlFingerprint = Get-SiteMapSha256 -Value $targetTransformedXml
+$semanticXmlFingerprint = Get-SiteMapSha256 -Value (ConvertTo-Json -InputObject @($targetNavigation) -Depth 10 -Compress)
+Assert-Test ($originalXmlFingerprint -match '^[0-9a-f]{64}$' -and
+    $transformedXmlFingerprint -match '^[0-9a-f]{64}$' -and
+    $semanticXmlFingerprint -match '^[0-9a-f]{64}$' -and
+    $originalXmlFingerprint -cne $transformedXmlFingerprint -and
+    (Get-SiteMapSha256 -Value $targetTransformedXml) -ceq $transformedXmlFingerprint) `
+    'Generate deterministic original XML, transformed XML, and semantic navigation fingerprints'
+
+$patchBodyFixture = [ordered]@{ sitemapxml = $targetTransformedXml }
+$script:RequestCounts = @{ GET = 0; PATCH = 0; POST = 0 }
+$script:WriteResults = [System.Collections.Generic.List[object]]::new()
+Assert-FinalSiteMapPatchRequest -Method PATCH -Path "sitemaps($($script:Target.SiteMapId))" `
+    -Body $patchBodyFixture -ETag 'W/"fresh-synthetic-etag"' `
+    -ExpectedXmlFingerprint $transformedXmlFingerprint
+$script:AccessToken = 'synthetic-token'
+$patchHeadersFixture = New-DataverseRequestHeaders -Method PATCH -ETag 'W/"fresh-synthetic-etag"'
+Assert-Test ($patchHeadersFixture['If-Match'] -ceq 'W/"fresh-synthetic-etag"') `
+    'Send the exact fresh ETag in the If-Match PATCH header'
+Assert-Rejected {
+    New-DataverseRequestHeaders -Method PATCH -ETag ''
+} 'Reject a Site Map PATCH without an ETag' 'requires the preflight ETag'
+Assert-Rejected {
+    Assert-FinalSiteMapPatchRequest -Method PATCH -Path "sitemaps($($script:Target.SiteMapId))" `
+        -Body ([ordered]@{ sitemapxml = $targetTransformedXml; name = 'forbidden' }) `
+        -ETag 'W/"fresh-synthetic-etag"' -ExpectedXmlFingerprint $transformedXmlFingerprint
+} 'Reject extra properties in the Site Map PATCH body' 'contract'
+Assert-Rejected {
+    Assert-FinalSiteMapPatchRequest -Method PATCH -Path 'sitemaps(wrong-id)' `
+        -Body $patchBodyFixture -ETag 'W/"fresh-synthetic-etag"' `
+        -ExpectedXmlFingerprint $transformedXmlFingerprint
+} 'Reject Site Map PATCH to another record' 'contract'
+Assert-Rejected {
+    Assert-FinalSiteMapPatchRequest -Method PATCH -Path "sitemaps($($script:Target.SiteMapId))" `
+        -Body $patchBodyFixture -ETag 'W/"fresh-synthetic-etag"' `
+        -ExpectedXmlFingerprint ('0' * 64)
+} 'Reject a mismatched Site Map XML fingerprint' 'contract'
+$script:RequestCounts.PATCH = 1
+Assert-Rejected {
+    Assert-FinalSiteMapPatchRequest -Method PATCH -Path "sitemaps($($script:Target.SiteMapId))" `
+        -Body $patchBodyFixture -ETag 'W/"fresh-synthetic-etag"' `
+        -ExpectedXmlFingerprint $transformedXmlFingerprint
+} 'Reject a second Site Map PATCH' 'one-write guard'
+$script:RequestCounts = @{ GET = 0; PATCH = 0; POST = 0 }
+$script:WriteResults = [System.Collections.Generic.List[object]]::new()
+$patchReconciliation = [pscustomobject]@{
+    StateExact = $true
+    CurrentNavigationIsPlaceholder = $false
+    PatchMayHaveOccurred = $true
+    WarningCount = 0
+    AllWarningsClassified = $true
+}
+Assert-Test ((Get-FinalSiteMapPatchOutcome -HttpStatus 412 -Reconciliation $patchReconciliation) -ceq
+    'PATCH_CONCURRENCY_BLOCKED') 'Classify HTTP 412 as concurrency blocked without retry'
+Assert-Test ((Get-FinalSiteMapPatchOutcome -HttpStatus 412 -Reconciliation $patchReconciliation `
+    -PostPatchReadFailure 'FAILED_AUTH') -ceq 'PATCH_CONCURRENCY_BLOCKED') `
+    'Retain definitive HTTP 412 classification when reconciliation authentication fails'
+Assert-Test ((Get-FinalSiteMapPatchOutcome -HttpStatus 204 -Reconciliation $patchReconciliation `
+    -PostPatchReadFailure 'FAILED_AUTH') -ceq 'UNCERTAIN') `
+    'Do not claim a completed PATCH when post-PATCH reconciliation fails'
+Assert-Test ((Get-FinalSiteMapPatchOutcome -HttpStatus 204 -Reconciliation $patchReconciliation) -ceq
+    'VERIFIED_REFERENCE_NAVIGATION_UNPUBLISHED') 'Classify exact successful zero-warning navigation reconciliation'
+$patchReconciliation.WarningCount = 1
+Assert-Test ((Get-FinalSiteMapPatchOutcome -HttpStatus 204 -Reconciliation $patchReconciliation) -ceq
+    'VERIFIED_REFERENCE_NAVIGATION_UNPUBLISHED_WITH_WARNINGS') 'Classify understood non-blocking post-PATCH warning'
+$patchReconciliation.AllWarningsClassified = $false
+Assert-Test ((Get-FinalSiteMapPatchOutcome -HttpStatus 204 -Reconciliation $patchReconciliation) -ceq
+    'UNCERTAIN') 'Do not report success with an unexplained post-PATCH warning'
+$patchReconciliation.StateExact = $false
+$patchReconciliation.CurrentNavigationIsPlaceholder = $true
+$patchReconciliation.PatchMayHaveOccurred = $false
+Assert-Test ((Get-FinalSiteMapPatchOutcome -HttpStatus 412 -Reconciliation $patchReconciliation) -ceq
+    'PATCH_CONCURRENCY_BLOCKED' -and
+    (Get-FinalSiteMapPatchOutcome -HttpStatus 400 -Reconciliation $patchReconciliation) -ceq 'PATCH_FAILED') `
+    'Classify precondition and deterministic unchanged-state failures without retry'
+$patchReconciliation.StateExact = $true
+Assert-Test ((Get-FinalSiteMapPatchOutcome -HttpStatus $null -Reconciliation $patchReconciliation) -ceq
+    'UNCERTAIN') 'Classify a missing PATCH status as uncertain'
+$script:ApiRoot = 'https://synthetic.example/api/data/v9.2/'
+$OrganizationUrl = 'https://synthetic.example'
+$FinalSiteMapNavigationOnly = $true
+$script:WritesAllowed = $true
+Assert-Rejected {
+    Invoke-DataverseRequest -Method POST -Path 'AddAppComponents' -Body ([ordered]@{})
+} 'Block AddAppComponents in final Site Map navigation mode' 'only one PATCH'
+Assert-Rejected {
+    Invoke-DataverseRequest -Method POST -Path 'RemoveAppComponents' -Body ([ordered]@{})
+} 'Block RemoveAppComponents in final Site Map navigation mode' 'only one PATCH'
+Assert-Rejected {
+    Invoke-DataverseRequest -Method PATCH -Path 'sitemaps(other-id)' `
+        -Body ([ordered]@{ sitemapxml = $targetTransformedXml }) -ETag 'W/"fresh-synthetic-etag"'
+} 'Block Site Map PATCH to another row in final mode' 'only one PATCH'
+$FinalSiteMapNavigationOnly = $false
+$script:WritesAllowed = $false
+$finalPatchAst = (Get-Command Invoke-FinalSiteMapNavigationOnly -CommandType Function).ScriptBlock.Ast
+$finalPatchExecuteCalls = @($finalPatchAst.FindAll({
+    param($node)
+    $node -is [System.Management.Automation.Language.InvokeMemberExpressionAst] -and
+        $node.Member.Value -ieq 'Execute'
+}, $true))
+$dataverseRequestAst = (Get-Command Invoke-DataverseRequest -CommandType Function).ScriptBlock.Ast.Extent.Text
+Assert-Test ($finalPatchExecuteCalls.Count -eq 0 -and
+    $dataverseRequestAst -match 'MaximumRetryCount\s*=\s*0') `
+    'Final navigation mode uses no SDK Execute and Web API dispatch disables automatic retries'
 
 $extraGroupXml = $fixtureXml.Replace('</Area>', '<Group Id="unexpected"><Titles><Title LCID="1033" Title="Keep"/></Titles></Group></Area>')
 Assert-Rejected { New-ProposedSiteMapXml -SiteMapXml $extraGroupXml -ExpectedNodeIds $testIds } 'Reject unexpected SiteMap groups' 'Group structure/ID'
@@ -249,6 +386,9 @@ Assert-Test ($ReferenceUiCompositionOnly -eq $false -and -not (Test-AllowsProces
 $ReferenceUiCompositionOnly = $true
 Assert-Test (Test-AllowsProcessExpectedUserPin) 'Allow process-only expected-user pin for guarded Phase 2D.3 identity verification'
 $ReferenceUiCompositionOnly = $false
+$FinalSiteMapNavigationOnly = $true
+Assert-Test (Test-AllowsProcessExpectedUserPin) 'Allow process-only expected-user pin for guarded Phase 2D.3N identity verification'
+$FinalSiteMapNavigationOnly = $false
 $EntityIdentityDiagnosticOnly = $true
 Assert-Test (Test-AllowsProcessExpectedUserPin) 'Allow process-only expected-user pin for guarded read-only identity diagnostics'
 $EntityIdentityDiagnosticOnly = $false
@@ -1166,6 +1306,71 @@ $canaryAssetFixtures = @(
         }
     }
 )
+$finalSiteMapRootFixtures = @(
+    foreach ($name in @('os_sr_ta', 'os_sr_pos', 'os_sr_csrc', 'os_sr_loc')) {
+        [pscustomobject]@{
+            NormalizedLogicalName = $name
+            PredicateResult = $true
+            ReturnedRowCount = 1
+            AppAssociationMatches = $true
+            EntityIdMatchesQueriedObjectId = @($true)
+        }
+    }
+)
+$finalSiteMapPlaceholderNavigation = @(Get-SiteMapSemanticNavigation -SiteMapXml $targetPlaceholderXml)
+$finalSiteMapPreflightFixture = [pscustomobject]@{
+    IdentityChecks = [pscustomobject]@{
+        PacIdentityAvailable = $true; AzIdentityAvailable = $true
+        DataverseIdentityAvailable = $true; PacAzWhoAmIMatch = $true
+        ExpectedUserConfigured = $true; ExpectedUserMatch = $true
+    }
+    Solution = [pscustomobject]@{ UniqueName = 'os_sr_bso_rs_support'; IsManaged = $false }
+    SolutionPublisher = [pscustomobject]@{ UniqueName = 'os_bso_rs_support'; CustomizationPrefix = 'os' }
+    AppModule = [pscustomobject]@{
+        Id = $script:Target.AppModuleId; IdUnique = $script:Target.AppModuleIdUnique
+        Name = 'BSO-RS-Support'; UniqueName = 'srapp'; StateCode = 0; ComponentState = 1
+    }
+    RawAppComponentTypeCounts = [pscustomobject]@{
+        SiteMap = 1; Entity = 4; Form = 4; View = 4; Other = 0; Total = 13
+    }
+    DirectReferenceUiAssociationEvidence = [pscustomobject]@{
+        IntendedSiteMapPresentDirectly = $true; SiteMapCount = 1
+        AppAssociationMatchesForEveryComponent = $true; Assets = $canaryAssetFixtures
+    }
+    AppComponents = $composedUiComponents
+    EntityResolutionDiagnostics = $finalSiteMapRootFixtures
+    AppModuleRoles = $canaryRoleFixtures
+    SiteMap = [pscustomobject]@{
+        Id = $script:Target.SiteMapId; UniqueName = 'srapp'; IsAppAware = $true
+        ComponentState = 0; ETag = 'W/"synthetic-etag"'
+        SitemapXml = $targetPlaceholderXml
+    }
+    SiteMapSourceXml = $targetPlaceholderXml
+    SiteMapNeedsUpdate = $true
+    SiteMapNavigationBefore = $finalSiteMapPlaceholderNavigation
+    AppValidation = [pscustomobject]@{
+        ValidationSuccess = $true; BlockingErrorCount = 0; IssueCount = 0; Issues = @()
+    }
+}
+$finalSiteMapPreflightState = Assert-FinalSiteMapNavigationPreflight -Snapshot $finalSiteMapPreflightFixture
+Assert-Test ($finalSiteMapPreflightState.ComponentState.TotalComponentCount -eq 13 -and
+    $finalSiteMapPreflightState.ComponentState.TableCount -eq 4 -and
+    $finalSiteMapPreflightState.RootLogicalNames -join ',' -ceq 'os_sr_ta,os_sr_pos,os_sr_csrc,os_sr_loc') `
+    'Require exact 13-component baseline and four uniquely resolved approved roots before navigation PATCH'
+$changedFinalRootFixture = $finalSiteMapPreflightFixture.PSObject.Copy()
+$changedFinalRootFixture.EntityResolutionDiagnostics = @($finalSiteMapRootFixtures | ForEach-Object { $_.PSObject.Copy() })
+$changedFinalRootFixture.EntityResolutionDiagnostics[0].NormalizedLogicalName = 'entity'
+Assert-Rejected {
+    Assert-FinalSiteMapNavigationPreflight -Snapshot $changedFinalRootFixture
+} 'Reject system entity root before Site Map PATCH' 'do not resolve exactly once'
+$warningFinalFixture = $finalSiteMapPreflightFixture.PSObject.Copy()
+$warningFinalFixture.AppValidation = [pscustomobject]@{
+    ValidationSuccess = $true; BlockingErrorCount = 0; IssueCount = 1
+    Issues = @([pscustomobject]@{ ErrorType = 'Warning'; Classification = 'SYNTHETIC' })
+}
+Assert-Rejected {
+    Assert-FinalSiteMapNavigationPreflight -Snapshot $warningFinalFixture
+} 'Stop before Site Map PATCH on any new ValidateApp warning' 'warning'
 $canaryReferenceFixtures = @(
     foreach ($index in 1..4) {
         [pscustomobject]@{

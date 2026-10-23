@@ -12,6 +12,7 @@ param(
     [switch]$AddTaEntityCanary,
     [switch]$SdkTaEntityCanary,
     [switch]$SdkRemainingTableRoots,
+    [switch]$FinalSiteMapNavigationOnly,
     [string]$Confirmation,
     [string]$AuthorizationReference,
     [string]$EnvironmentName = $env:BSO_RS_ENVIRONMENT_NAME,
@@ -87,6 +88,8 @@ $script:TACanaryWireRequest = $null
 $script:TACanaryFinalRequest = $null
 $script:SdkExecuteCount = 0
 $script:SdkAddDispatchResult = $null
+$script:FinalSiteMapExpectedXmlFingerprint = $null
+$script:FinalSiteMapLastSnapshot = $null
 
 if (($PlanOnly -and ($DryRun -or $Apply -or $SiteMapAssociationOnly)) -or
     ($DryRun -and $Apply) -or
@@ -103,14 +106,17 @@ if (($PlanOnly -and ($DryRun -or $Apply -or $SiteMapAssociationOnly)) -or
         $RemoveWrongSystemEntityRoots -or $AddTaEntityCanary -or $SdkRemainingTableRoots)) -or
     ($SdkRemainingTableRoots -and ($PlanOnly -or $DryRun -or $Apply -or $SiteMapAssociationOnly -or
         $ReferenceUiCompositionOnly -or $EntityIdentityDiagnosticOnly -or $EntityRootRepairDiagnosticOnly -or
-        $RemoveWrongSystemEntityRoots -or $AddTaEntityCanary -or $SdkTaEntityCanary)) -or
+        $RemoveWrongSystemEntityRoots -or $AddTaEntityCanary -or $SdkTaEntityCanary -or $FinalSiteMapNavigationOnly)) -or
+    ($FinalSiteMapNavigationOnly -and ($PlanOnly -or $DryRun -or $Apply -or $SiteMapAssociationOnly -or
+        $ReferenceUiCompositionOnly -or $EntityIdentityDiagnosticOnly -or $EntityRootRepairDiagnosticOnly -or
+        $RemoveWrongSystemEntityRoots -or $AddTaEntityCanary -or $SdkTaEntityCanary -or $SdkRemainingTableRoots)) -or
     ($SiteMapAssociationOnly -and -not ($DryRun -or $Apply))) {
     throw 'Choose exactly one supported execution mode.'
 }
 if (-not $PlanOnly -and -not $DryRun -and -not $Apply -and
     -not $EntityIdentityDiagnosticOnly -and -not $EntityRootRepairDiagnosticOnly -and
     -not $RemoveWrongSystemEntityRoots -and -not $AddTaEntityCanary -and -not $SdkTaEntityCanary -and
-    -not $SdkRemainingTableRoots) { $PlanOnly = $true }
+    -not $SdkRemainingTableRoots -and -not $FinalSiteMapNavigationOnly) { $PlanOnly = $true }
 
 function Get-PropertyValue {
     param([object]$Object, [Parameter(Mandatory = $true)][string]$Name)
@@ -1036,6 +1042,9 @@ function Assert-ApplyAuthorization {
     elseif ($SdkRemainingTableRoots) {
         'APPLY PHASE 2D.3M REMAINING TABLE ROOTS SDK IN VN LMV IT'
     }
+    elseif ($FinalSiteMapNavigationOnly) {
+        'APPLY PHASE 2D.3N FINAL SITE MAP NAVIGATION PATCH IN VN LMV IT'
+    }
     elseif ($ReferenceUiCompositionOnly) {
         'APPLY PHASE 2D.3 IN VN LMV IT'
     }
@@ -1318,6 +1327,191 @@ function Assert-SiteMapHasNoDuplicateNavigationIds {
     if (@($allIds | Select-Object -Unique).Count -ne $allIds.Count) { throw 'Site Map contains duplicate navigation IDs across node types.' }
 }
 
+function Get-SiteMapSha256 {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Value)
+    [Convert]::ToHexString(
+        [System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes($Value))
+    ).ToLowerInvariant()
+}
+
+function Assert-SiteMapUnrelatedXmlPreserved {
+    param(
+        [Parameter(Mandatory = $true)][string]$BeforeXml,
+        [Parameter(Mandatory = $true)][string]$AfterXml
+    )
+    $parse = {
+        param([string]$Xml)
+        $settings = [System.Xml.XmlReaderSettings]::new()
+        $settings.DtdProcessing = [System.Xml.DtdProcessing]::Prohibit
+        $settings.XmlResolver = $null
+        $readerInput = [System.IO.StringReader]::new($Xml)
+        $reader = [System.Xml.XmlReader]::Create($readerInput, $settings)
+        $document = [System.Xml.XmlDocument]::new()
+        $document.XmlResolver = $null
+        try { $document.Load($reader) }
+        finally { $reader.Dispose(); $readerInput.Dispose() }
+        $document
+    }
+    $before = & $parse $BeforeXml
+    $after = & $parse $AfterXml
+    $beforeAreas = @($before.DocumentElement.SelectNodes("./*[local-name()='Area']"))
+    $afterAreas = @($after.DocumentElement.SelectNodes("./*[local-name()='Area']"))
+    if ($beforeAreas.Count -ne 1 -or $afterAreas.Count -ne 1) {
+        throw 'Site Map transformation must preserve exactly one existing Area.'
+    }
+    $beforeGroups = @($beforeAreas[0].SelectNodes("./*[local-name()='Group']"))
+    $afterGroups = @($afterAreas[0].SelectNodes("./*[local-name()='Group']"))
+    if ($beforeGroups.Count -ne 1 -or $afterGroups.Count -ne 1) {
+        throw 'Site Map transformation must preserve exactly one existing Group.'
+    }
+    $beforeSubareas = @($beforeGroups[0].SelectNodes("./*[local-name()='SubArea']"))
+    $afterSubareas = @($afterGroups[0].SelectNodes("./*[local-name()='SubArea']"))
+    if ($beforeSubareas.Count -ne 1 -or $afterSubareas.Count -ne 4 -or
+        $beforeAreas[0].GetAttribute('Id') -cne $afterAreas[0].GetAttribute('Id') -or
+        $beforeGroups[0].GetAttribute('Id') -cne $afterGroups[0].GetAttribute('Id') -or
+        $beforeSubareas[0].GetAttribute('Id') -cne $afterSubareas[0].GetAttribute('Id')) {
+        throw 'Site Map transformation does not retain the placeholder node structure and identities.'
+    }
+    $beforeTitles = @(
+        $beforeAreas[0].SelectSingleNode("./*[local-name()='Titles']/*[local-name()='Title'][@LCID='1033']"),
+        $beforeGroups[0].SelectSingleNode("./*[local-name()='Titles']/*[local-name()='Title'][@LCID='1033']"),
+        $beforeSubareas[0].SelectSingleNode("./*[local-name()='Titles']/*[local-name()='Title'][@LCID='1033']")
+    )
+    $afterOriginalNodes = @($afterAreas[0], $afterGroups[0], $afterSubareas[0])
+    for ($index = 0; $index -lt $beforeTitles.Count; $index++) {
+        if ($null -eq $beforeTitles[$index]) { throw 'Original Site Map placeholder title is missing.' }
+        $afterTitle = $afterOriginalNodes[$index].SelectSingleNode(
+            "./*[local-name()='Titles']/*[local-name()='Title'][@LCID='1033']"
+        )
+        if ($null -eq $afterTitle) { throw 'Transformed Site Map placeholder title is missing.' }
+        $afterTitle.SetAttribute('Title', $beforeTitles[$index].GetAttribute('Title'))
+    }
+    $beforeEntity = $beforeSubareas[0].GetAttributeNode('Entity')
+    if ($beforeEntity) { $afterSubareas[0].SetAttribute('Entity', $beforeEntity.Value) }
+    else { $afterSubareas[0].RemoveAttribute('Entity') }
+    for ($index = $afterSubareas.Count - 1; $index -ge 1; $index--) {
+        [void]$afterGroups[0].RemoveChild($afterSubareas[$index])
+    }
+    if ($before.OuterXml -cne $after.OuterXml) {
+        throw 'Site Map transformation changed XML outside the approved titles, Entity targets, and three added SubAreas.'
+    }
+    for ($index = 1; $index -lt 4; $index++) {
+        $clone = [System.Xml.XmlElement]$afterSubareas[$index].CloneNode($true)
+        $clone.SetAttribute('Id', $beforeSubareas[0].GetAttribute('Id'))
+        $beforeClone = [System.Xml.XmlElement]$beforeSubareas[0].CloneNode($true)
+        $cloneTitle = $clone.SelectSingleNode("./*[local-name()='Titles']/*[local-name()='Title'][@LCID='1033']")
+        $beforeTitle = $beforeClone.SelectSingleNode("./*[local-name()='Titles']/*[local-name()='Title'][@LCID='1033']")
+        if ($null -eq $cloneTitle -or $null -eq $beforeTitle) {
+            throw 'Cloned Site Map SubArea lacks its expected localized title.'
+        }
+        $cloneTitle.SetAttribute('Title', $beforeTitle.GetAttribute('Title'))
+        if ($beforeEntity) { $clone.SetAttribute('Entity', $beforeEntity.Value) }
+        else { $clone.RemoveAttribute('Entity') }
+        if ($clone.OuterXml -cne $beforeClone.OuterXml) {
+            throw 'New Site Map SubArea did not preserve unrelated XML from the approved placeholder.'
+        }
+    }
+}
+
+function Assert-FinalSiteMapNavigation {
+    param([Parameter(Mandatory = $true)][string]$SiteMapXml)
+    Assert-SiteMapHasNoDuplicateNavigationIds -SiteMapXml $SiteMapXml
+    $settings = [System.Xml.XmlReaderSettings]::new()
+    $settings.DtdProcessing = [System.Xml.DtdProcessing]::Prohibit
+    $settings.XmlResolver = $null
+    $readerInput = [System.IO.StringReader]::new($SiteMapXml)
+    $reader = [System.Xml.XmlReader]::Create($readerInput, $settings)
+    $document = [System.Xml.XmlDocument]::new()
+    $document.XmlResolver = $null
+    try { $document.Load($reader) }
+    finally { $reader.Dispose(); $readerInput.Dispose() }
+    $areas = @($document.SelectNodes("//*[local-name()='Area']"))
+    $groups = @($document.SelectNodes("//*[local-name()='Group']"))
+    $subareas = @($document.SelectNodes("//*[local-name()='SubArea']"))
+    if ($document.DocumentElement.LocalName -cne 'SiteMap' -or
+        $areas.Count -ne 1 -or $groups.Count -ne 1 -or $subareas.Count -ne 4) {
+        throw 'Final Site Map must contain exactly one Area, one Group, and four SubAreas.'
+    }
+    $navigation = @(Get-SiteMapSemanticNavigation -SiteMapXml $SiteMapXml)
+    if ($navigation.Count -ne 4 -or
+        $areas[0].GetAttribute('Id') -cne $script:Target.SiteMapNodeIds.Area -or
+        $groups[0].GetAttribute('Id') -cne $script:Target.SiteMapNodeIds.Group) {
+        throw 'Final Site Map Area/Group identity or reference navigation count differs from the approved design.'
+    }
+    for ($index = 0; $index -lt $script:Target.NavigationSubareas.Count; $index++) {
+        $expected = $script:Target.NavigationSubareas[$index]
+        $actual = $navigation[$index]
+        if ($actual.AreaTitle -cne $script:Target.NavigationAreaTitle -or
+            $actual.GroupTitle -cne $script:Target.NavigationGroupTitle -or
+            $actual.SubAreaId -cne $expected.NodeId -or
+            $actual.Title -cne $expected.Title -or
+            $actual.Entity -cne $expected.LogicalName) {
+            throw 'Final Site Map contains an unexpected or incorrectly ordered reference navigation entry.'
+        }
+    }
+    $navigation
+}
+
+function Assert-SiteMapPlaceholderNavigation {
+    param([Parameter(Mandatory = $true)][object[]]$Navigation)
+    if ($Navigation.Count -ne 1 -or
+        $Navigation[0].AreaId -cne $script:Target.SiteMapNodeIds.Area -or
+        $Navigation[0].AreaTitle -cne 'Area1' -or
+        $Navigation[0].GroupId -cne $script:Target.SiteMapNodeIds.Group -or
+        $Navigation[0].GroupTitle -cne 'Group1' -or
+        $Navigation[0].SubAreaId -cne $script:Target.SiteMapNodeIds.SubArea -or
+        $Navigation[0].Title -cne 'Subarea1' -or
+        -not [string]::IsNullOrWhiteSpace([string]$Navigation[0].Entity)) {
+        throw 'STATE_CHANGED: Site Map no longer contains the exact approved placeholder navigation.'
+    }
+}
+
+function Assert-FinalSiteMapPatchRequest {
+    param(
+        [Parameter(Mandatory = $true)][string]$Method,
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Body,
+        [Parameter(Mandatory = $true)][string]$ETag,
+        [Parameter(Mandatory = $true)][string]$ExpectedXmlFingerprint
+    )
+    if ($Method -cne 'PATCH' -or $Path -cne "sitemaps($($script:Target.SiteMapId))" -or
+        @($Body.Keys).Count -ne 1 -or @($Body.Keys)[0] -cne 'sitemapxml' -or
+        [string]::IsNullOrWhiteSpace($ETag) -or
+        (Get-SiteMapSha256 -Value ([string]$Body['sitemapxml'])) -cne $ExpectedXmlFingerprint -or
+        $script:RequestCounts.PATCH -ne 0 -or $script:RequestCounts.POST -ne 0 -or
+        $script:WriteResults.Count -ne 0) {
+        throw 'Final Site Map PATCH contract, fresh ETag, XML fingerprint, or one-write guard failed.'
+    }
+}
+
+function Get-FinalSiteMapPatchOutcome {
+    param(
+        [Nullable[int]]$HttpStatus,
+        [Parameter(Mandatory = $true)][object]$Reconciliation,
+        [string]$PostPatchReadFailure
+    )
+    if ($HttpStatus -eq 412) { return 'PATCH_CONCURRENCY_BLOCKED' }
+    if ($HttpStatus -eq 401) { return 'FAILED_AUTH' }
+    if ($HttpStatus -eq 403) { return 'FAILED_AUTHZ' }
+    if (-not [string]::IsNullOrWhiteSpace($PostPatchReadFailure)) { return 'UNCERTAIN' }
+    if ($null -eq $HttpStatus) { return 'UNCERTAIN' }
+    if (-not $Reconciliation.StateExact) {
+        if ($HttpStatus -ge 200 -and $HttpStatus -lt 300) { return 'PARTIAL_STATE' }
+        if ($HttpStatus -ge 400 -and $HttpStatus -lt 500 -and
+            $Reconciliation.CurrentNavigationIsPlaceholder) {
+            return 'PATCH_FAILED'
+        }
+        if ($Reconciliation.CurrentNavigationIsPlaceholder -and -not $Reconciliation.PatchMayHaveOccurred) { return 'PATCH_FAILED' }
+        return 'PARTIAL_STATE'
+    }
+    if ($HttpStatus -lt 200 -or $HttpStatus -ge 300) { return 'UNCERTAIN' }
+    if ($Reconciliation.WarningCount -eq 0) { return 'VERIFIED_REFERENCE_NAVIGATION_UNPUBLISHED' }
+    if ($Reconciliation.AllWarningsClassified) {
+        return 'VERIFIED_REFERENCE_NAVIGATION_UNPUBLISHED_WITH_WARNINGS'
+    }
+    'UNCERTAIN'
+}
+
 function Get-SiteMapDirectComponentState {
     param([object[]]$Components)
     $siteMapComponents = @($Components | Where-Object { [int]$_.ComponentType -eq 62 })
@@ -1565,7 +1759,7 @@ function Get-PacIdentity {
 function Test-AllowsProcessExpectedUserPin {
     [bool]($SiteMapAssociationOnly -or $ReferenceUiCompositionOnly -or $EntityIdentityDiagnosticOnly -or
         $EntityRootRepairDiagnosticOnly -or $RemoveWrongSystemEntityRoots -or $AddTaEntityCanary -or
-        $SdkTaEntityCanary -or $SdkRemainingTableRoots)
+        $SdkTaEntityCanary -or $SdkRemainingTableRoots -or $FinalSiteMapNavigationOnly)
 }
 
 function Assert-TargetInputs {
@@ -1750,6 +1944,25 @@ function Get-SanitizedResponseGuidHeader {
     $null
 }
 
+function New-DataverseRequestHeaders {
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet('GET', 'PATCH', 'POST')][string]$Method,
+        [string]$ETag
+    )
+    $headers = @{
+        Authorization = 'Bearer ' + $script:AccessToken
+        Accept = 'application/json'
+        'OData-MaxVersion' = '4.0'
+        'OData-Version' = '4.0'
+        'If-None-Match' = 'null'
+    }
+    if ($Method -eq 'PATCH') {
+        if ([string]::IsNullOrWhiteSpace($ETag)) { throw 'PATCH requires the preflight ETag.' }
+        $headers['If-Match'] = $ETag
+    }
+    $headers
+}
+
 function Invoke-DataverseRequest {
     param(
         [Parameter(Mandatory = $true)][ValidateSet('GET', 'PATCH', 'POST')][string]$Method,
@@ -1761,7 +1974,8 @@ function Invoke-DataverseRequest {
         [string]$ExpectedSerializedBodySha256
     )
     if ($Method -ne 'GET' -and
-        (-not ($Apply -or $RemoveWrongSystemEntityRoots -or $AddTaEntityCanary -or $SdkTaEntityCanary -or $SdkRemainingTableRoots) -or
+        (-not ($Apply -or $RemoveWrongSystemEntityRoots -or $AddTaEntityCanary -or $SdkTaEntityCanary -or
+            $SdkRemainingTableRoots -or $FinalSiteMapNavigationOnly) -or
             -not $script:WritesAllowed)) {
         throw 'Write blocked; explicit Apply authorization gate is required.'
     }
@@ -1782,12 +1996,20 @@ function Invoke-DataverseRequest {
     if ($SdkRemainingTableRoots -and $Method -ne 'GET') {
         throw 'Remaining-table SDK mode is GET-only through Web API; component addition must use its single guarded SDK Execute.'
     }
+    if ($FinalSiteMapNavigationOnly -and $Method -ne 'GET' -and
+        ($Method -cne 'PATCH' -or $resource -cne "sitemaps($($script:Target.SiteMapId))")) {
+        throw 'Final Site Map navigation mode permits only one PATCH to the existing target Site Map.'
+    }
     if ($Method -eq 'GET' -and $resource -notmatch '^(WhoAmI$|appmodules(\(|$)|appmodulecomponents$|entities$|sitemaps(\(|$)|sitemaps/Microsoft\.Dynamics\.CRM\.RetrieveUnpublishedMultiple\(|solutions$|publishers\(|solutioncomponents$|EntityDefinitions\(|systemforms(\(|$)|savedqueries(\(|$)|roles\(|RetrieveRequiredComponents\(|RetrieveAppComponents\(|ValidateApp\()') {
         throw 'GET blocked: endpoint is outside the app and component metadata allowlist.'
     }
     if ($Method -eq 'PATCH' -and ($resource -cne "sitemaps($($script:Target.SiteMapId))" -or
-        @($Body.Keys) -ne @('sitemapxml'))) {
+        @($Body.Keys).Count -ne 1 -or @($Body.Keys)[0] -cne 'sitemapxml')) {
         throw 'PATCH blocked: only the sitemapxml field on the existing target Site Map is allowed.'
+    }
+    if ($FinalSiteMapNavigationOnly -and $Method -eq 'PATCH') {
+        Assert-FinalSiteMapPatchRequest -Method $Method -Path $resource -Body $Body `
+            -ETag $ETag -ExpectedXmlFingerprint $script:FinalSiteMapExpectedXmlFingerprint
     }
     if ($ReferenceUiCompositionOnly -and -not $AddTaEntityCanary -and $Method -in @('POST', 'PATCH')) {
         Assert-ReferenceUiWriteSequence -Method $Method
@@ -1823,23 +2045,13 @@ function Invoke-DataverseRequest {
         throw 'POST blocked: only AddAppComponents is allowed; no create, publish, or role endpoint is allowed.'
     }
     if ($Method -eq 'POST' -and -not ($RemoveWrongSystemEntityRoots -or $AddTaEntityCanary -or
-        $SdkTaEntityCanary -or $SdkRemainingTableRoots)) {
+        $SdkTaEntityCanary -or $SdkRemainingTableRoots -or $FinalSiteMapNavigationOnly)) {
         if ($SiteMapAssociationOnly) { Assert-SiteMapAssociationPayload -Body $Body }
         elseif ($ReferenceUiCompositionOnly) { Assert-ReferenceUiCompositionPayload -Body $Body }
         else { Assert-AppComponentsPayload -Body $Body }
     }
     Ensure-DataverseAccessToken
-    $headers = @{
-        Authorization = 'Bearer ' + $script:AccessToken
-        Accept = 'application/json'
-        'OData-MaxVersion' = '4.0'
-        'OData-Version' = '4.0'
-        'If-None-Match' = 'null'
-    }
-    if ($Method -eq 'PATCH') {
-        if ([string]::IsNullOrWhiteSpace($ETag)) { throw 'PATCH requires the preflight ETag.' }
-        $headers['If-Match'] = $ETag
-    }
+    $headers = New-DataverseRequestHeaders -Method $Method -ETag $ETag
     $request = @{
         Method = $Method
         Uri = $uri.AbsoluteUri
@@ -4066,7 +4278,7 @@ function Get-TargetSnapshot {
         }
     }
     if ($EntityIdentityDiagnosticOnly -or $EntityRootRepairDiagnosticOnly -or $RemoveWrongSystemEntityRoots -or
-        $AddTaEntityCanary -or $SdkTaEntityCanary -or $SdkRemainingTableRoots) {
+        $AddTaEntityCanary -or $SdkTaEntityCanary -or $SdkRemainingTableRoots -or $FinalSiteMapNavigationOnly) {
         $script:EntityResolutionDiagnostics = @(Get-EntityResolutionDiagnosticRows -Components $rawComponents -ReferenceComponents $referenceComponents)
         $script:EntityResolutionClassification = Get-EntityResolutionAggregateClassification -Diagnostics $script:EntityResolutionDiagnostics
         $payloadsForFingerprint = @($referenceComponents | ForEach-Object { $_.Payloads })
@@ -4149,7 +4361,8 @@ function Get-TargetSnapshot {
             throw "Solution export does not contain the exact Main form and public view for $($reference.LogicalName)."
         }
     }
-    if ($ReferenceUiCompositionOnly -or $EntityRootRepairDiagnosticOnly -or $RemoveWrongSystemEntityRoots -or $AddTaEntityCanary) {
+    if ($ReferenceUiCompositionOnly -or $EntityRootRepairDiagnosticOnly -or $RemoveWrongSystemEntityRoots -or
+        $AddTaEntityCanary -or $FinalSiteMapNavigationOnly) {
         Assert-ApprovedAppRoles -Roles $roleSnapshot
     }
     $script:LastStage = 'Read current app dependency validation'
@@ -5184,10 +5397,414 @@ function Invoke-SdkTaEntityCanary {
     }
 }
 
+function Get-FinalSiteMapComponentFingerprint {
+    param([Parameter(Mandatory = $true)][object[]]$Components)
+    $canonical = @($Components | ForEach-Object {
+        '{0}|{1}|{2}|{3}|{4}' -f [int]$_.ComponentType,
+            (ConvertTo-NormalizedGuid -Value ([string]$_.ObjectId)),
+            [string]$_.EntityLogicalName, [string]$_.ParentLogicalName,
+            [bool]$_.AppAssociationMatches
+    } | Sort-Object) -join "`n"
+    Get-SiteMapSha256 -Value $canonical
+}
+
+function Assert-FinalSiteMapNavigationPreflight {
+    param(
+        [Parameter(Mandatory = $true)][object]$Snapshot,
+        [switch]$PostPatch,
+        [switch]$AllowWarnings
+    )
+    if (-not $Snapshot.IdentityChecks.PacIdentityAvailable -or
+        -not $Snapshot.IdentityChecks.AzIdentityAvailable -or
+        -not $Snapshot.IdentityChecks.DataverseIdentityAvailable -or
+        -not $Snapshot.IdentityChecks.PacAzWhoAmIMatch -or
+        -not $Snapshot.IdentityChecks.ExpectedUserConfigured -or
+        -not $Snapshot.IdentityChecks.ExpectedUserMatch) {
+        throw 'FAILED_VALIDATION: PAC, Az, Dataverse WhoAmI, or expected-user identity guard failed.'
+    }
+    if ($Snapshot.Solution.UniqueName -cne $script:Target.SolutionUniqueName -or
+        [bool]$Snapshot.Solution.IsManaged -or
+        $Snapshot.SolutionPublisher.UniqueName -cne $script:Target.SolutionPublisherUniqueName -or
+        $Snapshot.SolutionPublisher.CustomizationPrefix -cne 'os') {
+        throw 'STATE_CHANGED: Solution or Publisher differs from the approved target.'
+    }
+    if ($Snapshot.AppModule.Id -cne $script:Target.AppModuleId -or
+        $Snapshot.AppModule.IdUnique -cne $script:Target.AppModuleIdUnique -or
+        $Snapshot.AppModule.Name -cne $script:Target.AppName -or
+        $Snapshot.AppModule.UniqueName -cne $script:Target.AppUniqueName -or
+        [int]$Snapshot.AppModule.StateCode -ne 0 -or
+        [int]$Snapshot.AppModule.ComponentState -ne 1) {
+        throw 'STATE_CHANGED: exact srapp identity or Active/Unpublished state changed.'
+    }
+    $counts = $Snapshot.RawAppComponentTypeCounts
+    if ($counts.SiteMap -ne 1 -or $counts.Entity -ne 4 -or $counts.Form -ne 4 -or
+        $counts.View -ne 4 -or $counts.Other -ne 0 -or $counts.Total -ne 13 -or
+        -not $Snapshot.DirectReferenceUiAssociationEvidence.IntendedSiteMapPresentDirectly -or
+        $Snapshot.DirectReferenceUiAssociationEvidence.SiteMapCount -ne 1 -or
+        -not $Snapshot.DirectReferenceUiAssociationEvidence.AppAssociationMatchesForEveryComponent) {
+        throw 'STATE_CHANGED: direct AppModule component inventory or Site Map association differs from the exact 13-component baseline.'
+    }
+    $components = Assert-ReferenceUiComponentState -Components $Snapshot.AppComponents -RequireComposed
+    $expectedRoots = @('os_sr_ta', 'os_sr_pos', 'os_sr_csrc', 'os_sr_loc')
+    $rootRows = @($Snapshot.EntityResolutionDiagnostics)
+    $resolvedNames = @($rootRows | ForEach-Object { [string]$_.NormalizedLogicalName })
+    $missingOrDuplicatedRoots = @($expectedRoots | Where-Object {
+        $expectedName = $_
+        @($resolvedNames | Where-Object { $_ -ceq $expectedName }).Count -ne 1
+    }).Count -gt 0
+    if ($rootRows.Count -ne 4 -or $missingOrDuplicatedRoots -or
+        @($rootRows | Where-Object { -not $_.PredicateResult -or $_.ReturnedRowCount -ne 1 -or
+            -not $_.AppAssociationMatches -or
+            @($_.EntityIdMatchesQueriedObjectId | Where-Object { $_ -eq $true }).Count -ne 1 }).Count -gt 0) {
+        throw 'STATE_CHANGED: entity roots do not resolve exactly once to the four approved project logical names.'
+    }
+    if ($Snapshot.DirectReferenceUiAssociationEvidence.Assets.Count -ne 4 -or @(
+        $Snapshot.DirectReferenceUiAssociationEvidence.Assets | Where-Object {
+            -not $_.MainFormPresentDirectly -or $_.MainFormDirectMatchCount -ne 1 -or
+            -not $_.ActiveViewPresentDirectly -or $_.ActiveViewDirectMatchCount -ne 1
+        }
+    ).Count -gt 0) {
+        throw 'STATE_CHANGED: one or more approved Main forms or public views are missing or duplicated.'
+    }
+    Assert-ApprovedAppRoles -Roles $Snapshot.AppModuleRoles
+    if ($Snapshot.AppModuleRoles.Count -ne 2 -or
+        @($Snapshot.AppModuleRoles.Name | Where-Object { $_ -notin @('System Administrator', 'System Customizer') }).Count -gt 0) {
+        throw 'STATE_CHANGED: expected app roles are not unchanged.'
+    }
+    if ($Snapshot.SiteMap.Id -cne $script:Target.SiteMapId -or
+        $Snapshot.SiteMap.UniqueName -cne $script:Target.SiteMapUniqueName -or
+        -not $Snapshot.SiteMap.IsAppAware -or [int]$Snapshot.SiteMap.ComponentState -ne 0 -or
+        [string]::IsNullOrWhiteSpace([string]$Snapshot.SiteMap.ETag)) {
+        throw 'STATE_CHANGED: existing Site Map identity, publication state, association, or ETag is invalid.'
+    }
+    if (-not $PostPatch) {
+        if ($Snapshot.SiteMapSourceXml -cne $Snapshot.SiteMap.SitemapXml) {
+            throw 'STATE_CHANGED: an unexpected unpublished Site Map layer is present before the authorized navigation update.'
+        }
+        Assert-SiteMapPlaceholderNavigation -Navigation $Snapshot.SiteMapNavigationBefore
+        if ($Snapshot.SiteMapNeedsUpdate -ne $true) {
+            throw 'STATE_CHANGED: expected placeholder Site Map does not require the approved navigation transformation.'
+        }
+    }
+    if ($Snapshot.AppValidation.ValidationSuccess -ne $true -or
+        $Snapshot.AppValidation.BlockingErrorCount -ne 0) {
+        throw 'FAILED_VALIDATION: ValidateApp has a failed validation result or blocking error.'
+    }
+    if (-not $AllowWarnings -and $Snapshot.AppValidation.IssueCount -ne 0) {
+        throw 'FAILED_VALIDATION: ValidateApp has warning(s); classify them before PATCH.'
+    }
+    [pscustomobject]@{
+        ComponentState = $components
+        RootLogicalNames = $expectedRoots
+        ComponentFingerprint = Get-FinalSiteMapComponentFingerprint -Components $Snapshot.AppComponents
+        Roles = @($Snapshot.AppModuleRoles | ForEach-Object { $_.Name })
+    }
+}
+
+function Invoke-FinalSiteMapNavigationOnly {
+    param([Parameter(Mandatory = $true)][object]$InitialSnapshot)
+    $script:FinalSiteMapLastSnapshot = $InitialSnapshot
+    $initialState = Assert-FinalSiteMapNavigationPreflight -Snapshot $InitialSnapshot
+    $initialRoleJson = ConvertTo-Json -InputObject @($InitialSnapshot.AppModuleRoles | Sort-Object Name) -Compress
+    $initialSourceXml = [string]$InitialSnapshot.SiteMapSourceXml
+    $initialProposedXml = New-ProposedSiteMapXml -SiteMapXml $initialSourceXml
+    Assert-SiteMapSemanticNodePreservation -Before $InitialSnapshot.SiteMapNavigationBefore `
+        -After $InitialSnapshot.SiteMapNavigationAfter
+    Assert-SiteMapUnrelatedXmlPreserved -BeforeXml $initialSourceXml -AfterXml $initialProposedXml
+    $expectedNavigation = @(Assert-FinalSiteMapNavigation -SiteMapXml $initialProposedXml)
+    $xmlFingerprints = [pscustomobject]@{
+        Original = Get-SiteMapSha256 -Value $initialSourceXml
+        Transformed = Get-SiteMapSha256 -Value $initialProposedXml
+        SemanticNavigation = Get-SiteMapSha256 -Value (
+            ConvertTo-Json -InputObject @($expectedNavigation) -Depth 10 -Compress
+        )
+    }
+    $script:FinalSiteMapExpectedXmlFingerprint = $xmlFingerprints.Transformed
+
+    $script:LastStage = 'Fresh guarded pre-PATCH state reconciliation'
+    $fresh = Get-TargetSnapshot
+    $script:FinalSiteMapLastSnapshot = $fresh
+    $freshState = Assert-FinalSiteMapNavigationPreflight -Snapshot $fresh
+    $freshSourceXml = [string]$fresh.SiteMapSourceXml
+    $freshProposedXml = New-ProposedSiteMapXml -SiteMapXml $freshSourceXml
+    if ($freshState.ComponentFingerprint -cne $initialState.ComponentFingerprint -or
+        $freshSourceXml -cne $initialSourceXml -or
+        $freshProposedXml -cne $initialProposedXml -or
+        (ConvertTo-Json -InputObject @($fresh.AppModuleRoles | Sort-Object Name) -Compress) -cne $initialRoleJson) {
+        throw 'STATE_CHANGED: direct composition, placeholder XML, proposed navigation, or role state changed before PATCH.'
+    }
+    Assert-SiteMapUnrelatedXmlPreserved -BeforeXml $freshSourceXml -AfterXml $freshProposedXml
+    $freshNavigation = @(Assert-FinalSiteMapNavigation -SiteMapXml $freshProposedXml)
+    $freshSemanticFingerprint = Get-SiteMapSha256 -Value (
+        ConvertTo-Json -InputObject @($freshNavigation) -Depth 10 -Compress
+    )
+    if ((Get-SiteMapSha256 -Value $freshProposedXml) -cne $xmlFingerprints.Transformed -or
+        $freshSemanticFingerprint -cne $xmlFingerprints.SemanticNavigation) {
+        throw 'FAILED_VALIDATION: transformed XML or semantic fingerprint changed before PATCH.'
+    }
+
+    $script:LastStage = 'Immediate pre-dispatch Site Map identity, XML, and ETag GET'
+    $immediateSiteMap = Invoke-DataverseRequest -Method GET -Path (
+        "sitemaps($($script:Target.SiteMapId))?%24select=sitemapid,sitemapnameunique,isappaware,componentstate,sitemapxml"
+    )
+    $freshETag = [string](Get-PropertyValue -Object $immediateSiteMap -Name '@odata.etag')
+    if ($immediateSiteMap.sitemapid -cne $script:Target.SiteMapId -or
+        $immediateSiteMap.sitemapnameunique -cne $script:Target.SiteMapUniqueName -or
+        -not $immediateSiteMap.isappaware -or [int]$immediateSiteMap.componentstate -ne 0 -or
+        [string]$immediateSiteMap.sitemapxml -cne $freshSourceXml -or
+        [string]::IsNullOrWhiteSpace($freshETag)) {
+        throw 'STATE_CHANGED: immediate Site Map identity, placeholder XML, or fresh ETag differs; PATCH not dispatched.'
+    }
+    $requestBody = [ordered]@{ sitemapxml = $freshProposedXml }
+    Assert-FinalSiteMapPatchRequest -Method PATCH `
+        -Path "sitemaps($($script:Target.SiteMapId))" -Body $requestBody `
+        -ETag $freshETag -ExpectedXmlFingerprint $xmlFingerprints.Transformed
+    $etagFingerprint = Get-SiteMapSha256 -Value $freshETag
+    $patchResult = [pscustomobject]@{
+        Attempted = $false
+        HttpStatus = $null
+        ErrorCode = $null
+        RequestId = $null
+        CorrelationId = $null
+        ETagFingerprint = $etagFingerprint
+        XmlFingerprint = $xmlFingerprints.Transformed
+        SafeError = $null
+    }
+    $script:WritesAllowed = $true
+    try {
+        $script:LastStage = 'Dispatch exactly one ETag-protected Site Map PATCH'
+        Assert-FinalSiteMapPatchRequest -Method PATCH `
+            -Path "sitemaps($($script:Target.SiteMapId))" -Body $requestBody `
+            -ETag $freshETag -ExpectedXmlFingerprint $xmlFingerprints.Transformed
+        $patchResult.Attempted = $true
+        Invoke-DataverseRequest -Method PATCH -Path "sitemaps($($script:Target.SiteMapId))" `
+            -Body $requestBody -ETag $freshETag | Out-Null
+        $patchResult.HttpStatus = $script:LastHttpStatus
+    }
+    catch {
+        $patchResult.Attempted = $script:RequestCounts.PATCH -eq 1
+        $patchResult.HttpStatus = $script:LastHttpStatus
+        $patchResult.ErrorCode = $script:LastErrorCode
+        $patchResult.RequestId = $script:LastRequestId
+        $patchResult.CorrelationId = $script:LastCorrelationId
+        $patchResult.SafeError = $script:LastSafeError
+    }
+    finally { $script:WritesAllowed = $false }
+    $patchResult.RequestId = if ($patchResult.RequestId) { $patchResult.RequestId } else { $script:LastRequestId }
+    $patchResult.CorrelationId = if ($patchResult.CorrelationId) { $patchResult.CorrelationId } else { $script:LastCorrelationId }
+
+    $final = $null
+    $finalReadError = $null
+    try {
+        $script:LastStage = 'GET-only post-PATCH reconciliation and ValidateApp'
+        $final = Get-TargetSnapshot
+        $script:FinalSiteMapLastSnapshot = $final
+    }
+    catch {
+        $finalReadError = if ($script:LastHttpStatus -eq 401) { 'FAILED_AUTH' }
+            elseif ($script:LastHttpStatus -eq 403) { 'FAILED_AUTHZ' }
+            else { 'UNCERTAIN' }
+    }
+    $reconciliation = [pscustomobject]@{
+        StateExact = $false
+        CurrentNavigationIsPlaceholder = $false
+        PatchMayHaveOccurred = ($script:WritesStarted -or $patchResult.Attempted)
+        WarningCount = $null
+        AllWarningsClassified = $false
+    }
+    $finalEvidence = $null
+    if ($final) {
+        try {
+            $finalState = Assert-FinalSiteMapNavigationPreflight -Snapshot $final -PostPatch -AllowWarnings
+            $finalNavigation = @()
+            try { $finalNavigation = @(Assert-FinalSiteMapNavigation -SiteMapXml $final.SiteMapSourceXml) }
+            catch { $finalNavigation = @($final.SiteMapNavigationBefore) }
+            $placeholderCurrent = $false
+            try {
+                Assert-SiteMapPlaceholderNavigation -Navigation $final.SiteMapNavigationBefore
+                $placeholderCurrent = $true
+            }
+            catch { $placeholderCurrent = $false }
+            $finalValidationState = Get-ReferenceUiValidationState -AppValidation $final.AppValidation
+            $warningIssues = @($final.AppValidation.Issues | Where-Object { $_.ErrorType -ceq 'Warning' })
+            $warningCount = $warningIssues.Count
+            $allWarningsClassified = $warningCount -eq 0 -or @(
+                $warningIssues | Where-Object {
+                    [string]::IsNullOrWhiteSpace([string]$_.Classification) -or
+                    $_.Classification -ceq 'UNCLASSIFIED'
+                }
+            ).Count -eq 0
+            $finalPublishedXmlUnchanged = [string]$final.SiteMap.SitemapXml -ceq [string]$InitialSnapshot.SiteMap.SitemapXml
+            $unpublishedDraftValid = $null -ne $final.SiteMapUnpublishedQuery -and
+                [int]$final.SiteMapUnpublishedQuery.ComponentState -eq 1
+            $finalRolesUnchanged = (ConvertTo-Json -InputObject @($final.AppModuleRoles | Sort-Object Name) -Compress) -ceq $initialRoleJson
+            $finalAppUnchanged = $final.AppModule.Id -ceq $InitialSnapshot.AppModule.Id -and
+                $final.AppModule.IdUnique -ceq $InitialSnapshot.AppModule.IdUnique -and
+                $final.AppModule.UniqueName -ceq $script:Target.AppUniqueName -and
+                $final.AppModule.Name -ceq $script:Target.AppName -and
+                [int]$final.AppModule.StateCode -eq 0 -and [int]$final.AppModule.ComponentState -eq 1
+            $reconciliation.StateExact = $final.SiteMapSourceXml -ceq $initialProposedXml -and
+                $finalNavigation.Count -eq 4 -and
+                $finalPublishedXmlUnchanged -and $unpublishedDraftValid -and
+                $finalState.ComponentFingerprint -ceq $initialState.ComponentFingerprint -and
+                $finalState.ComponentState.TotalComponentCount -eq 13 -and
+                $finalState.ComponentState.SiteMapCount -eq 1 -and
+                $finalState.ComponentState.TableCount -eq 4 -and
+                $finalState.ComponentState.MainFormCount -eq 4 -and
+                $finalState.ComponentState.PublicViewCount -eq 4 -and
+                $finalValidationState.ValidationSuccess -eq $true -and
+                $finalValidationState.BlockingErrorCount -eq 0 -and
+                $finalRolesUnchanged -and $finalAppUnchanged
+            $reconciliation.CurrentNavigationIsPlaceholder = $placeholderCurrent
+            $reconciliation.WarningCount = $warningCount
+            $reconciliation.AllWarningsClassified = $allWarningsClassified
+            $finalEvidence = [pscustomobject]@{
+                Inventory = $final.RawAppComponentTypeCounts
+                RootResolution = @($final.EntityResolutionDiagnostics | ForEach-Object {
+                    [pscustomobject]@{
+                        LogicalName = $_.NormalizedLogicalName
+                        ExactlyOne = ($_.ReturnedRowCount -eq 1 -and $_.PredicateResult -and
+                            $_.AppAssociationMatches -and
+                            @($_.EntityIdMatchesQueriedObjectId | Where-Object { $_ -eq $true }).Count -eq 1)
+                    }
+                })
+                Navigation = $finalNavigation
+                PublishedSiteMapUnchanged = $finalPublishedXmlUnchanged
+                UnpublishedDraftValid = $unpublishedDraftValid
+                ValidateApp = [pscustomobject]@{
+                    ValidationSuccess = $final.AppValidation.ValidationSuccess
+                    BlockingErrors = $final.AppValidation.BlockingErrorCount
+                    Warnings = $warningIssues
+                    WarningCount = $warningCount
+                    WarningsClassified = $allWarningsClassified
+                }
+                Roles = @($final.AppModuleRoles | ForEach-Object { $_.Name })
+                AppActive = ([int]$final.AppModule.StateCode -eq 0)
+                AppUnpublished = ([int]$final.AppModule.ComponentState -eq 1)
+            }
+        }
+        catch {
+            $reconciliation.StateExact = $false
+            $finalEvidence = [pscustomobject]@{ SafeError = 'Post-PATCH state did not pass exact reconciliation.' }
+        }
+    }
+    $status = Get-FinalSiteMapPatchOutcome -HttpStatus $patchResult.HttpStatus `
+        -Reconciliation $reconciliation -PostPatchReadFailure $finalReadError
+    [pscustomobject]@{
+        Status = $status
+        StartingInventory = $InitialSnapshot.RawAppComponentTypeCounts
+        StartingRootLogicalNames = @($InitialSnapshot.EntityResolutionDiagnostics |
+            ForEach-Object { $_.NormalizedLogicalName })
+        ProtectedFormsAndViews = $initialState.ComponentState
+        PrePatchValidateApp = [pscustomobject]@{
+            ValidationSuccess = $InitialSnapshot.AppValidation.ValidationSuccess
+            BlockingErrors = $InitialSnapshot.AppValidation.BlockingErrorCount
+            Warnings = @($InitialSnapshot.AppValidation.Issues | Where-Object { $_.ErrorType -ceq 'Warning' })
+        }
+        OriginalNavigation = @($InitialSnapshot.SiteMapNavigationBefore)
+        TransformedNavigation = $expectedNavigation
+        XmlFingerprints = $xmlFingerprints
+        SiteMapPatch = $patchResult
+        PostPatch = $finalEvidence
+        PostPatchReadFailure = $finalReadError
+        RequestCounts = [ordered]@{} + $script:RequestCounts
+        OperationCounts = [ordered]@{
+            GET = $script:RequestCounts.GET
+            SdkAddAppComponentsExecute = 0
+            RawAddAppComponentsPost = $script:RequestCounts.POST
+            RemoveAppComponentsPost = 0
+            SiteMapPatch = $script:RequestCounts.PATCH
+            OtherWrites = 0
+            PublishXml = 0
+            AppPublish = 0
+            RoleChanges = 0
+            Retries = 0
+        }
+        AuthorizedLimits = [pscustomobject]@{
+            SiteMapPatchMaximum = 1
+            AddAppComponents = 0
+            RemoveAppComponents = 0
+            OtherWrites = 0
+            Retries = 0
+        }
+        WritesMayHaveOccurred = $script:WritesStarted
+    }
+}
+
 function Invoke-Main {
     $plan = Get-AppCompositionPlan
     if ($PlanOnly) {
         Write-Output ($plan | ConvertTo-Json -Depth 20 -Compress)
+        return
+    }
+    if ($FinalSiteMapNavigationOnly) {
+        try { Assert-ApplyAuthorization -Phrase $Confirmation -Reference $AuthorizationReference }
+        catch {
+            Write-Output ([ordered]@{
+                Status = 'FAILED_VALIDATION'
+                LastStage = $script:LastStage
+                RequestCounts = [ordered]@{} + $script:RequestCounts
+                SiteMapPatchAttempted = $false
+                WritesMayHaveOccurred = $false
+                RetryCount = 0
+                SafeError = 'Phase 2D.3N authorization guard failed; no environment request was sent.'
+            } | ConvertTo-Json -Depth 12 -Compress)
+            return
+        }
+        $snapshot = $null
+        try {
+            $script:LastStage = 'Fresh guarded Phase 2D.3N preflight'
+            $snapshot = Get-TargetSnapshot
+        }
+        catch {
+            $status = if ($script:LastHttpStatus -eq 401) { 'FAILED_AUTH' }
+                elseif ($script:LastHttpStatus -eq 403) { 'FAILED_AUTHZ' }
+                elseif ($_.Exception.Message -like 'STATE_CHANGED:*') { 'STATE_CHANGED' }
+                elseif ($_.Exception.Message -like 'FAILED_VALIDATION:*') { 'FAILED_VALIDATION' }
+                else { 'STATE_CHANGED' }
+            Write-Output ([ordered]@{
+                Status = $status
+                LastStage = $script:LastStage
+                RequestCounts = [ordered]@{} + $script:RequestCounts
+                SiteMapPatchAttempted = $false
+                WritesMayHaveOccurred = $script:WritesStarted
+                RetryCount = 0
+                SafeError = 'Fresh guarded Phase 2D.3N preflight failed; no write was sent.'
+            } | ConvertTo-Json -Depth 12 -Compress)
+            return
+        }
+        try {
+            $result = Invoke-FinalSiteMapNavigationOnly -InitialSnapshot $snapshot
+        }
+        catch {
+            $status = if ($script:LastHttpStatus -eq 401) { 'FAILED_AUTH' }
+                elseif ($script:LastHttpStatus -eq 403) { 'FAILED_AUTHZ' }
+                elseif ($_.Exception.Message -like 'STATE_CHANGED:*') { 'STATE_CHANGED' }
+                elseif ($_.Exception.Message -like 'FAILED_VALIDATION:*') { 'FAILED_VALIDATION' }
+                elseif ($script:RequestCounts.PATCH -gt 0) { 'UNCERTAIN' }
+                else { 'FAILED_VALIDATION' }
+            Write-Output ([ordered]@{
+                Status = $status
+                LastStage = $script:LastStage
+                RequestCounts = [ordered]@{} + $script:RequestCounts
+                SiteMapPatchAttempted = ($script:RequestCounts.PATCH -eq 1)
+                WritesMayHaveOccurred = $script:WritesStarted
+                RetryCount = 0
+                DirectComponentInventory = if ($script:FinalSiteMapLastSnapshot) {
+                    $script:FinalSiteMapLastSnapshot.RawAppComponentTypeCounts
+                } else { $null }
+                ValidateApp = if ($script:FinalSiteMapLastSnapshot) {
+                    [pscustomobject]@{
+                        ValidationSuccess = $script:FinalSiteMapLastSnapshot.AppValidation.ValidationSuccess
+                        BlockingErrors = $script:FinalSiteMapLastSnapshot.AppValidation.BlockingErrorCount
+                        Issues = @($script:FinalSiteMapLastSnapshot.AppValidation.Issues)
+                    }
+                } else { $null }
+                SafeError = 'Phase 2D.3N stopped at a guarded stage; raw error details omitted.'
+            } | ConvertTo-Json -Depth 12 -Compress)
+            return
+        }
+        Write-Output ($result | ConvertTo-Json -Depth 30 -Compress)
         return
     }
     if ($SdkRemainingTableRoots) {

@@ -1,5 +1,25 @@
 # Current State
 
+## Phase 3A.1 — Candidate Core Decision Closure (2026-10-23)
+
+Outcome remains **`BLOCKED_PRODUCT_DECISION`**. No owner-authored decision choices were received for the eight requested decision areas; the system's generic fallback was not treated as approval, rejection, or deferral. The detailed [Phase 3A.1 report](PHASE_3A1_CANDIDATE_CORE_DECISION_CLOSURE.md) records each item as not decided.
+
+- Candidate Number, Call Outcome taxonomy, Email and Phone requiredness, BSO ownership, reschedule reason/evidence, Candidate/Call/History audit, contact column security, operation idempotency, and LEGO Career dependency remain open.
+- The Phase 3A design and metadata plan are unchanged; the plan hash remains `37da1392b2cfbd4a2886aa07886b00831775cc73c5f7bd65333ad70ceb334c0d`. No schema revision or provisioning payload was generated.
+- Phase 3A.1 made zero tenant connections/requests/writes, zero app or access changes, and zero retries. Phase 2D remains unchanged.
+- The unchanged Phase 3A offline suite passed 28 assertions; that validates proposal consistency only and does not close product decisions.
+- **Next:** obtain explicit owner selections and any IT/Compliance privacy/audit decisions, then revise the design and rerun tests before reconsidering readiness.
+
+## Phase 3A — Candidate Core Design Readiness (2026-10-23)
+
+Outcome: **`BLOCKED_PRODUCT_DECISION`**. Phase 3A is design/readiness only; no Candidate, Call Log, Candidate Status History, Choice, Custom API, or plug-in was provisioned or deployed.
+
+- The canonical six-state workflow and project naming family are defined in the [Phase 3A Candidate Core Design report](PHASE_3A_CANDIDATE_CORE_DESIGN.md). A synthetic-only proposal snapshot is in [the metadata plan](PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json); it is not a Web API payload, export, or authorization.
+- The report preserves the exact workflow but leaves Candidate Number source/format, Call Outcome taxonomy, contact-field requiredness, BSO ownership/transfer semantics, reschedule evidence/reason policy, security/audit decisions, and the proposed LEGO Career lookup target unresolved.
+- The published `srapp` reference app from Phase 2D remains unchanged. Phase 3A did not connect to a tenant, read metadata, create data, or make any other tenant request.
+- Local-only proposal checks passed **28** assertions for naming, Choice values, transitions, relationships, keys, operation-contract requirements, scope, and zero-tenant-operation claims. Existing regression suites passed **550** provisioning/recovery, **11** readiness, and **329** app-composition assertions. These are local tests only; Phase 3A does not claim runtime Custom API, plug-in, authorization, or Dataverse concurrency tests.
+- Next: obtain written owner/security/IT resolutions to the design report's open decisions, update the deterministic proposal and tests, and only then reconsider provisioning readiness. Provisioning still requires separate explicit authorization.
+
 ## Phase 2D.4F - Published UI Acceptance Closed (2026-10-23)
 
 Outcome: **`PUBLISHED_UI_ACCEPTED_WITH_DEFERRED_FORM_RECORD_TEST`**; reference-app build milestone **`PHASE_2D_COMPLETE`**. This is the read-only closeout after Phase 2D.4E.

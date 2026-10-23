@@ -1,6 +1,6 @@
 # Security Model
 
-**Status:** Security design proposal and constraints. Phase 2C-R2 read-only inspection found the adopted AppModule associated with System Administrator and System Customizer roles; no project-specific end-user app role was verified. No role assignment/change, tenant setting, connector grant, or DLP configuration was performed by Phase 2C-R3. Proposed table ownership and sensitive-field treatment are in [Dataverse Schema Specification](DATAVERSE_SCHEMA_SPECIFICATION.md).
+**Status:** Security design proposal and constraints. The published `srapp` reference app retains its accepted System Administrator and System Customizer associations; no project-specific BSO/Admin end-user role is established by that association. Phase 2D.4F made no access changes. Candidate-core effective privileges, operation execution identity, ownership, field security, and audit scope remain unapproved; see the [Phase 3A Candidate Core Design](PHASE_3A_CANDIDATE_CORE_DESIGN.md) and [Dataverse Schema Specification](DATAVERSE_SCHEMA_SPECIFICATION.md). No role or tenant setting was changed in Phase 3A.
 
 ## Identity and authentication
 

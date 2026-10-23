@@ -19,3 +19,7 @@ The UTC diagnostic timestamp assertion reads the JSON string without PowerShell'
 ## Model-Driven App Composition
 
 [ModelDrivenAppComposition.Tests.ps1](ModelDrivenAppComposition.Tests.ps1) is a dependency-free PowerShell 7.4+ assertion harness for the Phase 2D preparation script. Run `& ./tests/ModelDrivenAppComposition.Tests.ps1` from the repository root. It uses synthetic Site Map XML and synthetic OData metadata; PAC, Az token, and HTTP calls are mocked to fail if reached. It verifies PlanOnly default behavior, exact typed payload IDs/types, existing Site Map binding preservation, node ID/metadata preservation, localization preservation, and fail-closed handling of unexpected navigation. It does not call Apply or the live Dataverse environment.
+
+## Phase 3A Candidate Core Design
+
+[Phase3ACandidateCoreDesign.Tests.ps1](Phase3ACandidateCoreDesign.Tests.ps1) validates the synthetic proposal manifest at [PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json](../docs/PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json). Run `& ./tests/Phase3ACandidateCoreDesign.Tests.ps1` from the repository root with PowerShell 7.4+. It checks the exact three-table scope, naming, status Choice, allowed transitions, relationships, keys, Custom API contract, unresolved-decision gate, zero-tenant-operation declaration, and the report's manifest fingerprint. It makes no authentication, PAC, network, Dataverse, or business-data calls. Passing these assertions validates the proposal shape only; it is not a product-runtime or provisioning test.

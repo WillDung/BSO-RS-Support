@@ -1,6 +1,6 @@
 # Proposed Dataverse Schema Specification
 
-**Status:** Wider Phase 1C design proposal, 19 October 2026. Phase 1D-C separately approved and created only `os_sr_ta` and its two specified name/email columns, with approved plural **TA Directories**. Independent metadata/Solution reads passed; see [Data Model](DATA_MODEL.md#verified-ta-implementation) and [Current State](CURRENT_STATE.md). Other tables, keys, and relationships below remain unprovisioned proposals. This specification does not authorize additional work.
+**Status:** Wider Phase 1C design proposal, originally documented 19 October 2026, with current implementation reconciled through Phase 2D.4F on 23 October 2026. The verified reference-table set now includes `os_sr_ta`, `os_sr_pos`, `os_sr_csrc`, and `os_sr_loc`; approved columns and evidence are summarized in [Data Model](DATA_MODEL.md) and [Current State](CURRENT_STATE.md). Candidate, Call Log, Candidate Status History, their keys/relationships, and business operations remain unprovisioned proposals. The focused Phase 3A review is [here](PHASE_3A_CANDIDATE_CORE_DESIGN.md); it is blocked on product/security decisions and authorizes no writes.
 
 ## Evidence and Decision Labels
 

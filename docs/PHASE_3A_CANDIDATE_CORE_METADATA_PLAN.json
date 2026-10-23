@@ -1,0 +1,504 @@
+{
+  "phase": "3A",
+  "status": "PROPOSAL_NOT_AUTHORIZED",
+  "solutionUniqueName": "os_sr_bso_rs_support",
+  "publisherPrefix": "os",
+  "projectNamespace": "sr_",
+  "scope": [
+    "os_sr_cand",
+    "os_sr_call",
+    "os_sr_csh",
+    "os_sr_candstat",
+    "os_sr_cact"
+  ],
+  "tables": [
+    {
+      "logicalName": "os_sr_cand",
+      "displayName": "Candidate",
+      "ownership": "UserOwned",
+      "primaryName": {
+        "logicalName": "os_sr_cand_cnum",
+        "displayName": "Candidate Number",
+        "type": "String",
+        "maxLength": 100,
+        "required": "Required",
+        "keyRole": "PrimaryNameAndAlternateKey",
+        "decision": "Candidate number source, generation, format, and character set remain open."
+      },
+      "columns": [
+        {
+          "logicalName": "os_sr_cand_nm",
+          "displayName": "Candidate Name",
+          "type": "String",
+          "maxLength": 200,
+          "required": "Required",
+          "classification": "PersonalInformation",
+          "decision": "Confirm create-time requiredness and approved column security."
+        },
+        {
+          "logicalName": "os_sr_cand_eml",
+          "displayName": "Candidate Email",
+          "type": "String",
+          "format": "Email",
+          "maxLength": 254,
+          "required": "OptionalAtCreate",
+          "classification": "PersonalInformation",
+          "decision": "Confirm create-time requiredness; required before booking under current rules."
+        },
+        {
+          "logicalName": "os_sr_cand_phn",
+          "displayName": "Candidate Phone",
+          "type": "String",
+          "format": "Phone",
+          "maxLength": 50,
+          "required": "Optional",
+          "classification": "PersonalInformation",
+          "decision": "Confirm phone/contact-channel scope and conditional requirement."
+        },
+        {
+          "logicalName": "os_sr_cand_pos",
+          "displayName": "Position",
+          "type": "Lookup",
+          "target": "os_sr_pos",
+          "required": "Optional",
+          "relationship": "os_sr_pos_cand"
+        },
+        {
+          "logicalName": "os_sr_cand_csrc",
+          "displayName": "Candidate Source",
+          "type": "Lookup",
+          "target": "os_sr_csrc",
+          "required": "Optional",
+          "relationship": "os_sr_csrc_cand"
+        },
+        {
+          "logicalName": "os_sr_cand_ta",
+          "displayName": "Assigned TA",
+          "type": "Lookup",
+          "target": "os_sr_ta",
+          "required": "ConditionalBeforeBooking",
+          "relationship": "os_sr_ta_cand"
+        },
+        {
+          "logicalName": "os_sr_cand_lgcar",
+          "displayName": "LEGO Career",
+          "type": "Lookup",
+          "target": "os_sr_lgcar",
+          "required": "ConditionalBeforeBooking",
+          "relationship": "os_sr_lgcar_cand",
+          "decision": "Target table is proposed and not in the Phase 2D verified reference-table inventory."
+        },
+        {
+          "logicalName": "os_sr_cand_cvurl",
+          "displayName": "Candidate CV URL",
+          "type": "String",
+          "format": "Url",
+          "maxLength": 2000,
+          "required": "ConditionalBeforeBooking",
+          "classification": "SensitivePersonalInformation",
+          "decision": "Confirm approved host/access/retention and column security."
+        },
+        {
+          "logicalName": "os_sr_cand_stat",
+          "displayName": "Candidate Workflow Status",
+          "type": "GlobalChoice",
+          "target": "os_sr_candstat",
+          "required": "Required",
+          "defaultValue": 100010000,
+          "directUserEditing": "Blocked; status changes use os_sr_cact."
+        }
+      ],
+      "platformColumns": [
+        "createdon",
+        "createdby",
+        "modifiedon",
+        "modifiedby",
+        "ownerid",
+        "versionnumber",
+        "statecode",
+        "statuscode"
+      ],
+      "alternateKeys": [
+        {
+          "name": "os_sr_cand_ak_cnum",
+          "columns": [
+            "os_sr_cand_cnum"
+          ],
+          "status": "Proposed; candidate number policy and key-safe character set are unresolved."
+        }
+      ]
+    },
+    {
+      "logicalName": "os_sr_call",
+      "displayName": "Call Log",
+      "ownership": "UserOwned",
+      "primaryName": {
+        "logicalName": "os_sr_call_ref",
+        "displayName": "Call Reference",
+        "type": "AutoNumber",
+        "format": "CALL-{SEQNUM:8}",
+        "required": "SystemGenerated"
+      },
+      "columns": [
+        {
+          "logicalName": "os_sr_call_cand",
+          "displayName": "Candidate",
+          "type": "Lookup",
+          "target": "os_sr_cand",
+          "required": "Required",
+          "relationship": "os_sr_cand_call"
+        },
+        {
+          "logicalName": "os_sr_call_out",
+          "displayName": "Call Outcome",
+          "type": "String",
+          "maxLength": 100,
+          "required": "Required",
+          "decision": "Outcome taxonomy is explicitly unresolved; do not use arbitrary free text as a transition instruction."
+        },
+        {
+          "logicalName": "os_sr_call_ctat",
+          "displayName": "Contacted At",
+          "type": "DateTime",
+          "behavior": "UserLocal",
+          "required": "Required"
+        },
+        {
+          "logicalName": "os_sr_call_ctby",
+          "displayName": "Contacted By",
+          "type": "Lookup",
+          "target": "systemuser",
+          "required": "Required",
+          "valueSource": "AuthenticatedInitiatingUser"
+        },
+        {
+          "logicalName": "os_sr_call_nts",
+          "displayName": "Notes",
+          "type": "Memo",
+          "maxLength": 4000,
+          "required": "Optional",
+          "classification": "PotentialPersonalInformation",
+          "policy": "Minimize; do not record unnecessary candidate or sensitive details."
+        },
+        {
+          "logicalName": "os_sr_call_corid",
+          "displayName": "Correlation ID",
+          "type": "String",
+          "maxLength": 100,
+          "required": "Conditional",
+          "purpose": "Correlate the business action and its persisted effects."
+        },
+        {
+          "logicalName": "os_sr_call_actkey",
+          "displayName": "Action Idempotency Key",
+          "type": "String",
+          "maxLength": 100,
+          "required": "RequiredForOperationWrites",
+          "policy": "Opaque URL-safe identifier; never a credential."
+        }
+      ],
+      "alternateKeys": [
+        {
+          "name": "os_sr_call_ak_cand_action",
+          "columns": [
+            "os_sr_call_cand",
+            "os_sr_call_actkey"
+          ],
+          "status": "Proposed idempotency constraint."
+        }
+      ]
+    },
+    {
+      "logicalName": "os_sr_csh",
+      "displayName": "Candidate Status History",
+      "ownership": "UserOwned",
+      "primaryName": {
+        "logicalName": "os_sr_csh_ref",
+        "displayName": "Transition Reference",
+        "type": "AutoNumber",
+        "format": "HIST-{SEQNUM:8}",
+        "required": "SystemGenerated"
+      },
+      "columns": [
+        {
+          "logicalName": "os_sr_csh_cand",
+          "displayName": "Candidate",
+          "type": "Lookup",
+          "target": "os_sr_cand",
+          "required": "Required",
+          "relationship": "os_sr_cand_csh"
+        },
+        {
+          "logicalName": "os_sr_csh_prevstat",
+          "displayName": "Previous Status",
+          "type": "GlobalChoice",
+          "target": "os_sr_candstat",
+          "required": "Required"
+        },
+        {
+          "logicalName": "os_sr_csh_newstat",
+          "displayName": "New Status",
+          "type": "GlobalChoice",
+          "target": "os_sr_candstat",
+          "required": "Required"
+        },
+        {
+          "logicalName": "os_sr_csh_actr",
+          "displayName": "Actor",
+          "type": "Lookup",
+          "target": "systemuser",
+          "required": "Required",
+          "valueSource": "AuthenticatedInitiatingUser"
+        },
+        {
+          "logicalName": "os_sr_csh_chg",
+          "displayName": "Changed At",
+          "type": "DateTime",
+          "behavior": "UserLocal",
+          "required": "Required",
+          "valueSource": "ServerUtc"
+        },
+        {
+          "logicalName": "os_sr_csh_rsn",
+          "displayName": "Reason",
+          "type": "Memo",
+          "maxLength": 1000,
+          "required": "Conditional",
+          "decision": "Reason-required transitions and allowed reason content need owner policy."
+        },
+        {
+          "logicalName": "os_sr_csh_corid",
+          "displayName": "Correlation ID",
+          "type": "String",
+          "maxLength": 100,
+          "required": "Conditional",
+          "purpose": "Link related operation evidence without embedding external payloads."
+        },
+        {
+          "logicalName": "os_sr_csh_cact",
+          "displayName": "Candidate Action",
+          "type": "String",
+          "maxLength": 50,
+          "required": "Required",
+          "policy": "Server-allowlisted action name."
+        },
+        {
+          "logicalName": "os_sr_csh_actkey",
+          "displayName": "Transition Idempotency Key",
+          "type": "String",
+          "maxLength": 100,
+          "required": "Required"
+        }
+      ],
+      "alternateKeys": [
+        {
+          "name": "os_sr_csh_ak_cand_action",
+          "columns": [
+            "os_sr_csh_cand",
+            "os_sr_csh_actkey"
+          ],
+          "status": "Proposed exactly-once transition-history constraint."
+        }
+      ]
+    }
+  ],
+  "globalChoice": {
+    "logicalName": "os_sr_candstat",
+    "displayName": "Candidate Workflow Status",
+    "valuePrefix": 10001,
+    "defaultValue": 100010000,
+    "options": [
+      {
+        "value": 100010000,
+        "label": "Need Call Candidate"
+      },
+      {
+        "value": 100010001,
+        "label": "Candidate Answered"
+      },
+      {
+        "value": 100010002,
+        "label": "Waiting Manual Scheduling"
+      },
+      {
+        "value": 100010003,
+        "label": "Round 1 Scheduled"
+      },
+      {
+        "value": 100010004,
+        "label": "Offer Extended"
+      },
+      {
+        "value": 100010005,
+        "label": "Candidate Failed"
+      }
+    ],
+    "valueStatus": "Proposed deterministic values; verify publisher option-value allocation before any future write."
+  },
+  "relationships": [
+    {
+      "schemaName": "os_sr_cand_call",
+      "parent": "os_sr_cand",
+      "child": "os_sr_call",
+      "lookup": "os_sr_call_cand",
+      "required": true,
+      "delete": "Restrict",
+      "assignShareReparent": "NoCascade"
+    },
+    {
+      "schemaName": "os_sr_cand_csh",
+      "parent": "os_sr_cand",
+      "child": "os_sr_csh",
+      "lookup": "os_sr_csh_cand",
+      "required": true,
+      "delete": "Restrict",
+      "assignShareReparent": "NoCascade"
+    },
+    {
+      "schemaName": "os_sr_pos_cand",
+      "parent": "os_sr_pos",
+      "child": "os_sr_cand",
+      "lookup": "os_sr_cand_pos",
+      "required": false,
+      "delete": "Restrict",
+      "assignShareReparent": "NoCascade"
+    },
+    {
+      "schemaName": "os_sr_csrc_cand",
+      "parent": "os_sr_csrc",
+      "child": "os_sr_cand",
+      "lookup": "os_sr_cand_csrc",
+      "required": false,
+      "delete": "Restrict",
+      "assignShareReparent": "NoCascade"
+    },
+    {
+      "schemaName": "os_sr_ta_cand",
+      "parent": "os_sr_ta",
+      "child": "os_sr_cand",
+      "lookup": "os_sr_cand_ta",
+      "required": false,
+      "delete": "Restrict",
+      "assignShareReparent": "NoCascade"
+    },
+    {
+      "schemaName": "os_sr_lgcar_cand",
+      "parent": "os_sr_lgcar",
+      "child": "os_sr_cand",
+      "lookup": "os_sr_cand_lgcar",
+      "required": false,
+      "delete": "Restrict",
+      "assignShareReparent": "NoCascade",
+      "dependency": "LEGO Career target not provisioned in Phase 2D."
+    }
+  ],
+  "transitionMatrix": [
+    {
+      "from": "Need Call Candidate",
+      "action": "RecordCall",
+      "condition": "Approved outcome says candidate answered",
+      "to": "Candidate Answered",
+      "allowed": true
+    },
+    {
+      "from": "Candidate Answered",
+      "action": "ProceedToScheduling",
+      "condition": "Required CV URL and valid linked career are present",
+      "to": "Waiting Manual Scheduling",
+      "allowed": true
+    },
+    {
+      "from": "Waiting Manual Scheduling",
+      "action": "MarkRound1Scheduled",
+      "condition": "Future scheduler has a verified successful booking result",
+      "to": "Round 1 Scheduled",
+      "allowed": true
+    },
+    {
+      "from": "Round 1 Scheduled",
+      "action": "RecordPass",
+      "condition": "Future authorized interview-result evidence is Pass",
+      "to": "Offer Extended",
+      "allowed": true
+    },
+    {
+      "from": "Round 1 Scheduled",
+      "action": "RecordFail",
+      "condition": "Future authorized interview-result evidence is Fail",
+      "to": "Candidate Failed",
+      "allowed": true
+    },
+    {
+      "from": "Round 1 Scheduled",
+      "action": "RequestReschedule",
+      "condition": "Approved cancellation/reconciliation evidence is verified; no calendar call in Phase 3A",
+      "to": "Need Call Candidate",
+      "allowed": true
+    }
+  ],
+  "customApi": {
+    "uniqueName": "os_sr_cact",
+    "displayName": "Apply Candidate Action",
+    "kind": "Action",
+    "binding": "Unbound",
+    "implementation": "Synchronous main-operation plug-in",
+    "inputs": [
+      "CandidateId: Guid, required",
+      "ActionType: String allowlist, required",
+      "ExpectedStatus: Integer, required for transitions",
+      "IdempotencyKey: URL-safe opaque string, required",
+      "Reason: String, conditional",
+      "CorrelationId: String, conditional",
+      "CallOutcome: String, required for RecordCall pending approved taxonomy",
+      "ContactedAt: DateTime, required for RecordCall",
+      "Notes: String, optional",
+      "RescheduleEvidenceId: String, required for RequestReschedule"
+    ],
+    "outputs": [
+      "ResultCode: Applied or DuplicateReplay",
+      "PreviousStatus",
+      "CurrentStatus",
+      "CallLogId when created",
+      "StatusHistoryId when created"
+    ],
+    "rules": [
+      "Action allowlist maps to fixed transitions; caller cannot submit arbitrary target status.",
+      "Use authenticated initiating user as actor; never trust actor IDs supplied by clients.",
+      "Compare ExpectedStatus and Dataverse RowVersion; reject stale/conflicting updates.",
+      "Idempotent replay returns original result; same key with different payload is rejected.",
+      "Commit Candidate update, Call Log, and exactly one Status History row atomically when applicable.",
+      "No external provider call is made by this Phase 3A operation."
+    ]
+  },
+  "provisioning": {
+    "authorized": false,
+    "maximumTenantWrites": 0,
+    "sequence": [
+      "Create or verify global Choice",
+      "Create Candidate table",
+      "Add Candidate columns and lookups to existing approved reference tables",
+      "Resolve LEGO Career target dependency before creating that lookup",
+      "Create Call Log table and columns",
+      "Create Candidate Status History table and columns",
+      "Create alternate keys after table/column metadata propagation",
+      "Verify exact Solution membership",
+      "Use only separately approved bounded publication/reconciliation"
+    ],
+    "businessOperationSeparateFromSchema": true
+  },
+  "unresolvedDecisions": [
+    "Candidate Number source, generation, format, and allowed character set",
+    "Call outcome taxonomy and which non-answer outcomes create call rows without a status transition",
+    "Candidate create-time requiredness for email and phone",
+    "Candidate owner/BSO assignment and team/transfer semantics",
+    "Reason/correlation evidence requirements for reschedule and history rows",
+    "Field-security and audit-column policy for candidate contact and CV data",
+    "Available LEGO Career lookup target and its required metadata"
+  ],
+  "testSafety": {
+    "syntheticOnly": true,
+    "liveCandidateRecords": false,
+    "tenantRequests": 0,
+    "tenantWrites": 0
+  }
+}

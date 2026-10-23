@@ -1,6 +1,6 @@
 # Product Decisions and Open Items
 
-This log separates explicit product rules from choices requiring confirmation. Statuses reflect the supplied materials, verified environment metadata, and the owner-approved Phase 2C-R3 adoption decision as of 21 October 2026; a design proposal is not approval.
+This log separates explicit product rules from choices requiring confirmation. Statuses reflect the supplied materials and repository evidence through 23 October 2026; a design proposal is not approval.
 
 ## Established product rules
 
@@ -15,7 +15,7 @@ This log separates explicit product rules from choices requiring confirmation. S
 | Email outcome | Preserve sender/recipients/content; idempotency; distinguish Sent, Failed, Indeterminate. | Confirmed |
 | Platform | Premium/Dataverse production use approved in principle. | Confirmed; detailed tenant configuration not confirmed |
 | Technical naming | Dataverse Publisher Prefix `os` plus project namespace segment `sr_`; final technical names begin `os_sr_` and use the abbreviated dictionary. | Selected and implemented for the project Publisher on 19 October 2026; component naming remains subject to schema review |
-| Official model-driven app identity | Adopt the existing AppModule BSO-RS-Support, unique name `srapp`, ID `3709bb7c-28cd-f111-a05c-70a8a581cbfa`, in `os_sr_bso_rs_support`. | Project owner approved 21 October 2026. `srapp` is an app-only naming exception; the earlier `os_srapp` proposal is superseded for this app only. Do not rename or recreate it. Adoption does not imply composition, access grant, or publication. AppModule Publisher lookup remains unknown. |
+| Official model-driven app identity | Existing AppModule `srapp` is the BSO-RS-Support reference administration app. | Owner adopted it 21 October 2026; the complete 13-component initial app was separately published and accepted through Phase 2D.4F on 23 October. The app-only `srapp` name supersedes `os_srapp`; do not rename/recreate it. The approved app associations remain System Administrator/System Customizer; the Phase 2D publication authorization is consumed. See [Current State](CURRENT_STATE.md). |
 | Dataverse audit retention | Follow approved organizational IT/Compliance policy; current environment setting is not policy. | Confirmed decision; required retention value and audit scope remain unresolved. Current technical setting is 30 days. |
 
 ## Open decisions and external dependencies
@@ -23,9 +23,10 @@ This log separates explicit product rules from choices requiring confirmation. S
 | Item | Needed before | Current status |
 |---|---|---|
 | Dedicated Dev/Test environment(s), region, owners, and access; governance for continued development in Production | Further implementation | VN LMV IT is Production and was explicitly selected for Phase 1B internal IT development; existence/access of separate Dev/Test environments is unverified |
-| Phase 2D composition, app Publisher provenance, and end-user access | Composition implementation | Adoption of `srapp` is approved. The AppModule's own Publisher lookup remains unverified; do not infer it from the containing Solution Publisher. R2 found the App active but unpublished, no app components, a placeholder-only Site Map, and System Administrator/System Customizer roles only. Exact TA Main form and public Active view IDs are in the manifest. Phase 2D composition and any role/security changes require separate explicit authorization. Type 10091 remains identity-unknown and must be preserved; no publish or role changes are authorized by the adoption decision. |
-| Dataverse entity ownership, relationships, keys, audit/retention, concurrency, security boundary | Schema approval | Proposed in [Dataverse Schema Specification](DATAVERSE_SCHEMA_SPECIFICATION.md); owner/security review required |
-| Candidate number generation/format; candidate field requiredness; call outcome taxonomy; duplicate positions/sources; TA stable identity; room identity; interview result versioning/salary currency; visitor lifecycle; config table vs environment variables | Phase 1D schema implementation | Open; do not turn proposed defaults into business rules without approval |
+| Phase 2D composition, publication, and browser acceptance | Closed for reference-app milestone | Phase 2D.4F classified `PUBLISHED_UI_ACCEPTED_WITH_DEFERRED_FORM_RECORD_TEST` and `PHASE_2D_COMPLETE`; no more navigation or publication is authorized by that completed work. Existing app Publisher lookup and unrelated type-10091 identity remain unknown; no inference is made from the containing Solution Publisher. |
+| Dataverse entity ownership, relationships, keys, audit/retention, concurrency, security boundary | Schema approval | Proposed in [Dataverse Schema Specification](DATAVERSE_SCHEMA_SPECIFICATION.md); owner/security review required. Phase 3A specifically remains `BLOCKED_PRODUCT_DECISION`; see [Candidate Core Design](PHASE_3A_CANDIDATE_CORE_DESIGN.md). |
+| Candidate Number source/generation/format; Candidate create-time requiredness; call outcome taxonomy; Candidate BSO/owner semantics; reschedule evidence/reason; field-security/audit policy; operation idempotency contract; LEGO Career lookup dependency | Before Candidate-core provisioning | Unresolved. Phase 3A.1 requested explicit owner decisions but received no owner-authored selections; none of its recommendations is accepted. Preserve `BLOCKED_PRODUCT_DECISION` and do not turn proposal defaults into business rules. See [Phase 3A.1 Decision Closure](PHASE_3A1_CANDIDATE_CORE_DECISION_CLOSURE.md). |
+| Duplicate Position/Source policy; TA stable identity; room identity; interview result versioning/salary currency; visitor lifecycle; config table vs environment variables | Later schema implementation | Open; do not turn proposed defaults into business rules without approval |
 | TA, Position, Candidate Source, and Location duplicate/identity policies | Phase 1D-B reference table creation | No alternate keys proposed. TA email uniqueness, position title identity, source normalization/uniqueness, and room/location stable identity remain unresolved; see [Phase 1D-B Reference Table Runbook](PHASE_1D_B_REFERENCE_TABLE_RUNBOOK.md). |
 | BSO M365 connection model; whether per-user Outlook connection is permitted and can reliably expose intended From | Email implementation | Tenant policy and technical verification required |
 | TA and room mailbox availability permissions; test accounts; organizer policy | Scheduling implementation | Unknown |
@@ -42,4 +43,4 @@ This log separates explicit product rules from choices requiring confirmation. S
 
 ## Approval boundary
 
-Next recommended step is schema-owner/security review of the proposed Phase 1C design and resolution of the listed open decisions. Phase 1D implementation and table provisioning require separate explicit approval. See [Current State](CURRENT_STATE.md).
+Next recommended step for the core recruitment slice is to resolve the Phase 3A Candidate Number, Call Outcome, contact-requiredness, ownership, reschedule-evidence, privacy/audit, Custom API execution, and LEGO Career dependency decisions. Update and revalidate the proposal before any provisioning request. Every metadata write still requires separate explicit bounded authorization. See [Current State](CURRENT_STATE.md).

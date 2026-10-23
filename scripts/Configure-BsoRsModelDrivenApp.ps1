@@ -11,6 +11,7 @@ param(
     [switch]$RemoveWrongSystemEntityRoots,
     [switch]$AddTaEntityCanary,
     [switch]$SdkTaEntityCanary,
+    [switch]$SdkRemainingTableRoots,
     [string]$Confirmation,
     [string]$AuthorizationReference,
     [string]$EnvironmentName = $env:BSO_RS_ENVIRONMENT_NAME,
@@ -99,13 +100,17 @@ if (($PlanOnly -and ($DryRun -or $Apply -or $SiteMapAssociationOnly)) -or
         $RemoveWrongSystemEntityRoots -or $SdkTaEntityCanary)) -or
     ($SdkTaEntityCanary -and ($PlanOnly -or $DryRun -or $Apply -or $SiteMapAssociationOnly -or
         $ReferenceUiCompositionOnly -or $EntityIdentityDiagnosticOnly -or $EntityRootRepairDiagnosticOnly -or
-        $RemoveWrongSystemEntityRoots -or $AddTaEntityCanary)) -or
+        $RemoveWrongSystemEntityRoots -or $AddTaEntityCanary -or $SdkRemainingTableRoots)) -or
+    ($SdkRemainingTableRoots -and ($PlanOnly -or $DryRun -or $Apply -or $SiteMapAssociationOnly -or
+        $ReferenceUiCompositionOnly -or $EntityIdentityDiagnosticOnly -or $EntityRootRepairDiagnosticOnly -or
+        $RemoveWrongSystemEntityRoots -or $AddTaEntityCanary -or $SdkTaEntityCanary)) -or
     ($SiteMapAssociationOnly -and -not ($DryRun -or $Apply))) {
     throw 'Choose exactly one supported execution mode.'
 }
 if (-not $PlanOnly -and -not $DryRun -and -not $Apply -and
     -not $EntityIdentityDiagnosticOnly -and -not $EntityRootRepairDiagnosticOnly -and
-    -not $RemoveWrongSystemEntityRoots -and -not $AddTaEntityCanary -and -not $SdkTaEntityCanary) { $PlanOnly = $true }
+    -not $RemoveWrongSystemEntityRoots -and -not $AddTaEntityCanary -and -not $SdkTaEntityCanary -and
+    -not $SdkRemainingTableRoots) { $PlanOnly = $true }
 
 function Get-PropertyValue {
     param([object]$Object, [Parameter(Mandatory = $true)][string]$Name)
@@ -581,6 +586,174 @@ function Invoke-SdkTaEntityCanaryExecuteOnce {
     }
 }
 
+    function New-SdkRemainingTableRootsRequest {
+        param(
+            [Parameter(Mandatory = $true)][string]$AppId,
+            [Parameter(Mandatory = $true)][object[]]$TableIdentities,
+            [Parameter(Mandatory = $true)][string]$SystemEntityMetadataId
+        )
+        $expectedNames = @('os_sr_pos', 'os_sr_csrc', 'os_sr_loc')
+        $appGuid = [guid]::Empty
+        $systemGuid = [guid]::Empty
+        if (-not [guid]::TryParse($AppId, [ref]$appGuid) -or
+            -not [guid]::TryParse($SystemEntityMetadataId, [ref]$systemGuid) -or
+            $TableIdentities.Count -ne $expectedNames.Count) {
+            throw 'SDK request requires srapp and exactly three verified remaining-table identities.'
+        }
+        $identitiesByName = @{}
+        foreach ($identity in $TableIdentities) {
+            $logicalName = [string]$identity.LogicalName
+            $metadataGuid = [guid]::Empty
+            if ($logicalName -notin $expectedNames -or $identitiesByName.ContainsKey($logicalName) -or
+                -not [guid]::TryParse([string]$identity.MetadataId, [ref]$metadataGuid) -or
+                $metadataGuid -eq $systemGuid) {
+                throw 'SDK request table identity is unexpected, duplicated, invalid, or matches system entity.'
+            }
+            $identitiesByName[$logicalName] = [pscustomobject]@{
+                LogicalName = $logicalName
+                MetadataId = $metadataGuid
+            }
+        }
+        if (@($identitiesByName.Keys | Where-Object { $_ -in $expectedNames }).Count -ne 3) {
+            throw 'SDK request must contain Position, Candidate Source, and Location only.'
+        }
+        $sdkLocation = Get-TACanarySdkAssemblyDirectory
+        if (-not $sdkLocation) { throw 'SDK_NOT_AVAILABLE: PAC-local Dataverse SDK assemblies were not found.' }
+        foreach ($assemblyName in @('Microsoft.Xrm.Sdk.dll', 'Microsoft.Crm.Sdk.Proxy.dll')) {
+            [void][System.Reflection.Assembly]::LoadFrom((Join-Path $sdkLocation.Directory $assemblyName))
+        }
+        $entityReferenceType = [Type]::GetType('Microsoft.Xrm.Sdk.EntityReference, Microsoft.Xrm.Sdk', $true)
+        $collectionType = [Type]::GetType('Microsoft.Xrm.Sdk.EntityReferenceCollection, Microsoft.Xrm.Sdk', $true)
+        $requestType = [Type]::GetType('Microsoft.Crm.Sdk.Messages.AddAppComponentsRequest, Microsoft.Crm.Sdk.Proxy', $true)
+        $constructor = $entityReferenceType.GetConstructor([Type[]]@([string], [guid]))
+        if (-not $constructor) { throw 'SDK_CONSTRUCTION_INVALID: EntityReference(String, Guid) is unavailable.' }
+        $components = [Activator]::CreateInstance($collectionType)
+        foreach ($logicalName in $expectedNames) {
+            $identity = $identitiesByName[$logicalName]
+            $components.Add($constructor.Invoke(@($logicalName, [guid]$identity.MetadataId)))
+        }
+        $request = [Activator]::CreateInstance($requestType)
+        $requestType.GetProperty('AppId').SetValue($request, $appGuid)
+        $requestType.GetProperty('Components').SetValue($request, $components)
+        [pscustomobject]@{
+            Request = $request
+            RequestType = $request.GetType().FullName
+            ComponentsType = $request.Components.GetType().FullName
+            ComponentCount = $request.Components.Count
+        }
+    }
+
+    function Assert-SdkRemainingTableRootsRequest {
+        param(
+            [Parameter(Mandatory = $true)][object]$Request,
+            [Parameter(Mandatory = $true)][object[]]$TableIdentities,
+            [Parameter(Mandatory = $true)][string]$SystemEntityMetadataId
+        )
+        $requestType = 'Microsoft.Crm.Sdk.Messages.AddAppComponentsRequest'
+        $componentsType = 'Microsoft.Xrm.Sdk.EntityReferenceCollection'
+        $expectedNames = @('os_sr_pos', 'os_sr_csrc', 'os_sr_loc')
+        $identitiesByName = @{}
+        foreach ($identity in $TableIdentities) {
+            if ($identitiesByName.ContainsKey([string]$identity.LogicalName)) {
+                throw 'SDK metadata identity list contains duplicate logical names.'
+            }
+            $identitiesByName[[string]$identity.LogicalName] = [guid]$identity.MetadataId
+        }
+        $systemGuid = [guid]$SystemEntityMetadataId
+        if ($Request.GetType().FullName -cne $requestType -or
+            $Request.Components.GetType().FullName -cne $componentsType -or
+            $Request.Components.Count -ne 3 -or
+            [guid]$Request.AppId -ne [guid]$script:Target.AppModuleId -or
+            $TableIdentities.Count -ne 3 -or
+            @($expectedNames | Where-Object { -not $identitiesByName.ContainsKey($_) }).Count -ne 0) {
+            throw 'SDK request must contain exactly three approved references for the existing srapp AppId.'
+        }
+        $seenNames = [System.Collections.Generic.List[string]]::new()
+        $seenIds = [System.Collections.Generic.List[guid]]::new()
+        foreach ($component in $Request.Components) {
+            $logicalName = [string]$component.LogicalName
+            $componentId = [guid]$component.Id
+            if ($logicalName -notin $expectedNames -or
+                -not $identitiesByName.ContainsKey($logicalName) -or
+                $componentId -ne $identitiesByName[$logicalName] -or
+                $componentId -eq $systemGuid -or
+                $seenNames.Contains($logicalName) -or
+                $seenIds.Contains($componentId)) {
+                throw 'SDK request contains a forbidden logical name, cross-paired MetadataId, duplicate, or system entity ID.'
+            }
+            $seenNames.Add($logicalName)
+            $seenIds.Add($componentId)
+        }
+        if ($seenNames.Count -ne 3 -or $seenIds.Count -ne 3) {
+            throw 'SDK request must contain three unique table names and MetadataIds.'
+        }
+        $canonical = "$requestType|AppId=srapp|Count=3|" + (@(
+            foreach ($logicalName in $expectedNames) {
+                "${logicalName}=${logicalName}.MetadataId"
+            }
+        ) -join '|')
+        $fingerprint = [Convert]::ToHexString(
+            [System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes($canonical))
+        ).ToLowerInvariant()
+        [pscustomobject]@{
+            Fingerprint = $fingerprint
+            RequestType = $requestType
+            ComponentsType = $componentsType
+            ComponentCount = 3
+            LogicalNames = $expectedNames
+            ComponentIdAliases = @($expectedNames | ForEach-Object { "$($_).MetadataId" })
+            AppIdAlias = 'srapp'
+        }
+    }
+
+    function Invoke-SdkRemainingTableRootsExecuteOnce {
+        param(
+            [Parameter(Mandatory = $true)][object]$Client,
+            [Parameter(Mandatory = $true)][object]$Request,
+            [Parameter(Mandatory = $true)][object[]]$TableIdentities,
+            [Parameter(Mandatory = $true)][string]$SystemEntityMetadataId,
+            [Parameter(Mandatory = $true)][string]$ExpectedFingerprint
+        )
+        if ($script:SdkExecuteCount -ne 0 -or
+            (Set-SdkClientNoRetries -Client $Client) -ne 0 -or
+            -not $Client.IsReady) {
+            throw 'SDK execution guard requires a ready, zero-retry ServiceClient and no prior Execute.'
+        }
+        $requestEvidence = Assert-SdkRemainingTableRootsRequest -Request $Request `
+            -TableIdentities $TableIdentities -SystemEntityMetadataId $SystemEntityMetadataId
+        if ($requestEvidence.Fingerprint -cne $ExpectedFingerprint) {
+            throw 'SDK request fingerprint changed; no Execute was attempted.'
+        }
+        $script:SdkExecuteCount++
+        try {
+            $response = $Client.Execute($Request)
+            [pscustomobject]@{
+                Attempted = $true
+                Succeeded = $true
+                ResponseType = if ($null -eq $response) { $null } else { $response.GetType().FullName }
+                HttpStatus = $null
+                SafeExceptionCategory = $null
+                ErrorCode = $null
+                SessionTrackingId = if ($Client.SessionTrackingId) { [string]$Client.SessionTrackingId } else { $null }
+            }
+        }
+        catch {
+            $safeError = [string]$Client.LastError
+            $statusMatch = [regex]::Match($safeError, '(?<!\d)(401|403|4\d\d)(?!\d)')
+            $status = if ($statusMatch.Success) { [int]$statusMatch.Groups[1].Value } else { $null }
+            $lastException = $Client.LastException
+            $errorCode = Get-PropertyValue -Object (Get-PropertyValue -Object $lastException -Name 'Detail') -Name 'ErrorCode'
+            [pscustomobject]@{
+                Attempted = $true
+                Succeeded = $false
+                ResponseType = $null
+                HttpStatus = $status
+                SafeExceptionCategory = $_.Exception.GetType().Name
+                ErrorCode = if ($errorCode -is [int] -and $errorCode -ne 0) { $errorCode } else { $null }
+                SessionTrackingId = if ($Client.SessionTrackingId) { [string]$Client.SessionTrackingId } else { $null }
+            }
+        }
+    }
 function Get-TACanaryIdFingerprint {
     param([Parameter(Mandatory = $true)][string]$Id)
     $normalized = ConvertTo-NormalizedGuid -Value $Id
@@ -859,6 +1032,9 @@ function Assert-ApplyAuthorization {
     }
     elseif ($SdkTaEntityCanary) {
         'APPLY PHASE 2D.3L CORRECT LOGICALNAME SDK TA CANARY IN VN LMV IT'
+    }
+    elseif ($SdkRemainingTableRoots) {
+        'APPLY PHASE 2D.3M REMAINING TABLE ROOTS SDK IN VN LMV IT'
     }
     elseif ($ReferenceUiCompositionOnly) {
         'APPLY PHASE 2D.3 IN VN LMV IT'
@@ -1389,7 +1565,7 @@ function Get-PacIdentity {
 function Test-AllowsProcessExpectedUserPin {
     [bool]($SiteMapAssociationOnly -or $ReferenceUiCompositionOnly -or $EntityIdentityDiagnosticOnly -or
         $EntityRootRepairDiagnosticOnly -or $RemoveWrongSystemEntityRoots -or $AddTaEntityCanary -or
-        $SdkTaEntityCanary)
+        $SdkTaEntityCanary -or $SdkRemainingTableRoots)
 }
 
 function Assert-TargetInputs {
@@ -1585,7 +1761,7 @@ function Invoke-DataverseRequest {
         [string]$ExpectedSerializedBodySha256
     )
     if ($Method -ne 'GET' -and
-        (-not ($Apply -or $RemoveWrongSystemEntityRoots -or $AddTaEntityCanary -or $SdkTaEntityCanary) -or
+        (-not ($Apply -or $RemoveWrongSystemEntityRoots -or $AddTaEntityCanary -or $SdkTaEntityCanary -or $SdkRemainingTableRoots) -or
             -not $script:WritesAllowed)) {
         throw 'Write blocked; explicit Apply authorization gate is required.'
     }
@@ -1602,6 +1778,9 @@ function Invoke-DataverseRequest {
     if ($SdkTaEntityCanary -and $Method -ne 'GET' -and
         ($Method -cne 'POST' -or $resource -cne 'RemoveAppComponents')) {
         throw 'SDK TA canary mode permits only one RemoveAppComponents POST through Web API; all other Web API writes are blocked.'
+    }
+    if ($SdkRemainingTableRoots -and $Method -ne 'GET') {
+        throw 'Remaining-table SDK mode is GET-only through Web API; component addition must use its single guarded SDK Execute.'
     }
     if ($Method -eq 'GET' -and $resource -notmatch '^(WhoAmI$|appmodules(\(|$)|appmodulecomponents$|entities$|sitemaps(\(|$)|sitemaps/Microsoft\.Dynamics\.CRM\.RetrieveUnpublishedMultiple\(|solutions$|publishers\(|solutioncomponents$|EntityDefinitions\(|systemforms(\(|$)|savedqueries(\(|$)|roles\(|RetrieveRequiredComponents\(|RetrieveAppComponents\(|ValidateApp\()') {
         throw 'GET blocked: endpoint is outside the app and component metadata allowlist.'
@@ -1643,7 +1822,8 @@ function Invoke-DataverseRequest {
     elseif ($Method -eq 'POST' -and $resource -cne 'AddAppComponents') {
         throw 'POST blocked: only AddAppComponents is allowed; no create, publish, or role endpoint is allowed.'
     }
-    if ($Method -eq 'POST' -and -not ($RemoveWrongSystemEntityRoots -or $AddTaEntityCanary -or $SdkTaEntityCanary)) {
+    if ($Method -eq 'POST' -and -not ($RemoveWrongSystemEntityRoots -or $AddTaEntityCanary -or
+        $SdkTaEntityCanary -or $SdkRemainingTableRoots)) {
         if ($SiteMapAssociationOnly) { Assert-SiteMapAssociationPayload -Body $Body }
         elseif ($ReferenceUiCompositionOnly) { Assert-ReferenceUiCompositionPayload -Body $Body }
         else { Assert-AppComponentsPayload -Body $Body }
@@ -2928,6 +3108,366 @@ function Get-SdkTaCanaryMetadataIdentity {
     }
 }
 
+function Get-SdkRemainingTableRootsMetadataIdentities {
+    param([Parameter(Mandatory = $true)][object]$Snapshot)
+    $expectedNames = @('os_sr_pos', 'os_sr_csrc', 'os_sr_loc')
+    $approvedTables = @($Snapshot.EntityRootRepairEvidence.ApprovedTables)
+    $systemMetadata = Get-EntityDefinitionByLogicalName -LogicalName 'entity'
+    $systemRows = @(Get-EntityRowsByLogicalName -LogicalName 'entity')
+    $systemMetadataId = ConvertTo-NormalizedGuid -Value ([string](Get-PropertyValue -Object $systemMetadata -Name 'MetadataId'))
+    $systemObjectTypeCode = [int](Get-PropertyValue -Object $systemMetadata -Name 'ObjectTypeCode')
+    if ([string](Get-PropertyValue -Object $systemMetadata -Name 'LogicalName') -cne 'entity' -or
+        $systemRows.Count -ne 1 -or [string]$systemRows[0].logicalname -cne 'entity' -or
+        $systemMetadataId -cne (ConvertTo-NormalizedGuid -Value ([string]$systemRows[0].entityid)) -or
+        $systemObjectTypeCode -le 0 -or [int]$systemRows[0].objecttypecode -ne $systemObjectTypeCode) {
+        throw 'Fresh system entity MetadataId and entities identity could not be independently verified.'
+    }
+    $identities = [System.Collections.Generic.List[object]]::new()
+    foreach ($logicalName in $expectedNames) {
+        $metadata = Get-EntityDefinitionByLogicalName -LogicalName $logicalName
+        $rows = @(Get-EntityRowsByLogicalName -LogicalName $logicalName)
+        $approved = @($approvedTables | Where-Object LogicalName -CEQ $logicalName)
+        $reference = @($Snapshot.ReferenceComponents | Where-Object LogicalName -CEQ $logicalName)
+        $metadataLogicalName = [string](Get-PropertyValue -Object $metadata -Name 'LogicalName')
+        $metadataId = ConvertTo-NormalizedGuid -Value ([string](Get-PropertyValue -Object $metadata -Name 'MetadataId'))
+        $objectTypeCode = [int](Get-PropertyValue -Object $metadata -Name 'ObjectTypeCode')
+        if ($metadataLogicalName -cne $logicalName -or $rows.Count -ne 1 -or
+            [string]$rows[0].logicalname -cne $logicalName -or
+            $metadataId -cne (ConvertTo-NormalizedGuid -Value ([string]$rows[0].entityid)) -or
+            $objectTypeCode -le 0 -or [int]$rows[0].objecttypecode -ne $objectTypeCode -or
+            $metadataId -ceq $systemMetadataId -or $approved.Count -ne 1 -or $reference.Count -ne 1 -or
+            -not $approved[0].MetadataSurfaceFound -or -not $approved[0].EntityTableSurfaceFound -or
+            -not $approved[0].EntityTableIdentityUnambiguous -or
+            -not $approved[0].LogicalNamesAgree -or -not $approved[0].MetadataIdEqualsEntityId -or
+            $metadataId -cne (ConvertTo-NormalizedGuid -Value ([string]$approved[0].MetadataId)) -or
+            $metadataId -cne (ConvertTo-NormalizedGuid -Value ([string]$reference[0].TableMetadataId))) {
+            throw "Fresh $logicalName EntityDefinitions and entities identities are missing, ambiguous, or inconsistent."
+        }
+        $identities.Add([pscustomobject]@{
+            LogicalName = $logicalName
+            MetadataId = $metadataId
+            EntityId = ConvertTo-NormalizedGuid -Value ([string]$rows[0].entityid)
+            ObjectTypeCode = $objectTypeCode
+        })
+    }
+    [pscustomobject]@{
+        TableIdentities = $identities.ToArray()
+        SystemLogicalName = 'entity'
+        SystemMetadataId = $systemMetadataId
+        SystemObjectTypeCode = $systemObjectTypeCode
+    }
+}
+
+function Assert-SdkRemainingTableRootsPreflight {
+    param([Parameter(Mandatory = $true)][object]$Snapshot)
+    $counts = $Snapshot.RawAppComponentTypeCounts
+    $roots = @($Snapshot.EntityResolutionDiagnostics)
+    if (-not $Snapshot.IdentityChecks.PacIdentityAvailable -or
+        -not $Snapshot.IdentityChecks.AzIdentityAvailable -or
+        -not $Snapshot.IdentityChecks.DataverseIdentityAvailable -or
+        -not $Snapshot.IdentityChecks.PacAzWhoAmIMatch -or
+        -not $Snapshot.IdentityChecks.ExpectedUserConfigured -or
+        -not $Snapshot.IdentityChecks.ExpectedUserMatch) {
+        throw 'Fresh PAC, Az, Dataverse WhoAmI, or expected-user identity guard failed.'
+    }
+    if ($Snapshot.Solution.UniqueName -cne $script:Target.SolutionUniqueName -or
+        [bool]$Snapshot.Solution.IsManaged -or
+        $Snapshot.SolutionPublisher.UniqueName -cne $script:Target.SolutionPublisherUniqueName -or
+        $Snapshot.SolutionPublisher.CustomizationPrefix -cne 'os') {
+        throw 'Fresh Solution or Publisher differs from the approved target.'
+    }
+    if ($Snapshot.AppModule.Id -cne $script:Target.AppModuleId -or
+        $Snapshot.AppModule.IdUnique -cne $script:Target.AppModuleIdUnique -or
+        $Snapshot.AppModule.Name -cne $script:Target.AppName -or
+        $Snapshot.AppModule.UniqueName -cne $script:Target.AppUniqueName -or
+        [int]$Snapshot.AppModule.StateCode -ne 0 -or [int]$Snapshot.AppModule.ComponentState -ne 1) {
+        throw 'Fresh srapp identity/state is not the approved Active/Unpublished target.'
+    }
+    if ($Snapshot.SiteMap.Id -cne $script:Target.SiteMapId -or
+        $Snapshot.SiteMap.UniqueName -cne $script:Target.SiteMapUniqueName -or
+        [int]$Snapshot.SiteMap.ComponentState -ne 0 -or
+        -not $Snapshot.DirectReferenceUiAssociationEvidence.IntendedSiteMapPresentDirectly -or
+        $Snapshot.DirectReferenceUiAssociationEvidence.SiteMapCount -ne 1 -or
+        -not $Snapshot.DirectReferenceUiAssociationEvidence.AppAssociationMatchesForEveryComponent) {
+        throw 'Fresh existing Site Map identity or direct app association changed.'
+    }
+    $navigation = @($Snapshot.SiteMapNavigationBefore)
+    if ($navigation.Count -ne 1 -or $navigation[0].AreaTitle -cne 'Area1' -or
+        $navigation[0].GroupTitle -cne 'Group1' -or $navigation[0].Title -cne 'Subarea1' -or
+        -not [string]::IsNullOrWhiteSpace([string]$navigation[0].Entity)) {
+        throw 'Fresh Site Map no longer contains only the approved placeholder navigation.'
+    }
+    if ($counts.SiteMap -ne 1 -or $counts.Entity -ne 1 -or $counts.Form -ne 4 -or
+        $counts.View -ne 4 -or $counts.Other -ne 0 -or $counts.Total -ne 10 -or
+        $roots.Count -ne 1 -or $roots[0].ReturnedRowCount -ne 1 -or
+        $roots[0].NormalizedLogicalName -cne 'os_sr_ta' -or
+        @($roots[0].EntityIdMatchesQueriedObjectId | Where-Object { $_ -eq $true }).Count -ne 1 -or
+        -not $roots[0].AppAssociationMatches) {
+        throw 'STATE_CHANGED: direct inventory is not one verified os_sr_ta root and its nine protected components.'
+    }
+    $taIdentity = Get-TACanaryTableIdentity -Snapshot $Snapshot
+    if ($Snapshot.EntityRootRepairEvidence.Plan.CurrentComponents.Count -ne 1 -or
+        -not $Snapshot.EntityRootRepairEvidence.Plan.CurrentComponents[0].os_sr_ta -or
+        $Snapshot.EntityRootRepairEvidence.Plan.CurrentComponents[0].os_sr_pos -or
+        $Snapshot.EntityRootRepairEvidence.Plan.CurrentComponents[0].os_sr_csrc -or
+        $Snapshot.EntityRootRepairEvidence.Plan.CurrentComponents[0].os_sr_loc) {
+        throw 'STATE_CHANGED: current root mapping does not contain TA alone.'
+    }
+    if ($Snapshot.DirectReferenceUiAssociationEvidence.Assets.Count -ne 4 -or @(
+        $Snapshot.DirectReferenceUiAssociationEvidence.Assets | Where-Object {
+            -not $_.MainFormPresentDirectly -or $_.MainFormDirectMatchCount -ne 1 -or
+            -not $_.ActiveViewPresentDirectly -or $_.ActiveViewDirectMatchCount -ne 1
+        }
+    ).Count -gt 0) {
+        throw 'A protected approved Main form or public view is missing or duplicated.'
+    }
+    Assert-ApprovedAppRoles -Roles $Snapshot.AppModuleRoles
+    if ($Snapshot.AppModuleRoles.Count -ne 2 -or
+        $Snapshot.AppValidation.ValidationSuccess -ne $true -or
+        $Snapshot.AppValidation.BlockingErrorCount -ne 0) {
+        throw 'Protected roles or the no-blocking-error ValidateApp gate changed.'
+    }
+    [pscustomobject]@{ TaIdentity = $taIdentity }
+}
+
+function Get-SdkRemainingTableRootsOutcome {
+    param(
+        [Parameter(Mandatory = $true)][object]$After,
+        [Parameter(Mandatory = $true)][object]$ProtectedState,
+        [Parameter(Mandatory = $true)][object]$ExecuteResult
+    )
+    if (-not $ProtectedState.SiteMapUnchanged -or
+        -not $ProtectedState.ComponentAssociationsIntact -or
+        -not $ProtectedState.FormsAndViewsUnchanged -or
+        -not $ProtectedState.RolesUnchanged -or
+        -not $ProtectedState.AppActiveUnpublished) { return 'STATE_CHANGED' }
+    if ($ExecuteResult.HttpStatus -eq 401) { return 'SDK_FAILED_AUTH' }
+    if ($ExecuteResult.HttpStatus -eq 403) { return 'SDK_FAILED_AUTHZ' }
+    if ($ExecuteResult.HttpStatus -ge 400 -and $ExecuteResult.HttpStatus -lt 500) {
+        return 'SDK_FAILED_VALIDATION'
+    }
+    $counts = $After.RawAppComponentTypeCounts
+    $roots = @($After.EntityResolutionDiagnostics)
+    $names = @($roots | ForEach-Object { [string]$_.NormalizedLogicalName })
+    if (@($names | Group-Object | Where-Object Count -gt 1).Count -gt 0) { return 'DUPLICATE_ROOTS_CREATED' }
+    if ($names -contains 'entity') { return 'WRONG_SYSTEM_ROOT_CREATED' }
+    $expectedNames = @('os_sr_ta', 'os_sr_pos', 'os_sr_csrc', 'os_sr_loc')
+    if (@($names | Where-Object { $_ -notin $expectedNames }).Count -gt 0) { return 'WRONG_TABLE_ROOT_CREATED' }
+    if ($names.Count -eq 1 -and $names[0] -ceq 'os_sr_ta') {
+        if ($ExecuteResult.Succeeded) { return 'SDK_NO_ROOTS_CREATED' }
+        return 'SDK_UNCERTAIN'
+    }
+    if ($names.Count -gt 1 -and @($names | Where-Object { $_ -in $expectedNames }).Count -lt 4) {
+        return 'PARTIAL_ROOT_CREATION'
+    }
+    if ($names.Count -ne 4 -or
+        @($expectedNames | Where-Object { $_ -notin $names }).Count -gt 0 -or
+        @($roots | Where-Object {
+            $_.ReturnedRowCount -ne 1 -or
+            @($_.EntityIdMatchesQueriedObjectId | Where-Object { $_ -eq $true }).Count -ne 1 -or
+            -not $_.AppAssociationMatches
+        }).Count -gt 0) { return 'PARTIAL_ROOT_CREATION' }
+    $hasForbiddenValidationIssue = @($After.AppValidation.Issues | Where-Object {
+        $message = [string]$_.Message
+        $_.ErrorType -ceq 'Error' -or
+        $message -match '(?i)does not contain site map|does not reference at least one entity'
+    }).Count -gt 0
+    if ($counts.SiteMap -ne 1 -or $counts.Entity -ne 4 -or $counts.Form -ne 4 -or
+        $counts.View -ne 4 -or $counts.Other -ne 0 -or $counts.Total -ne 13 -or
+        $After.AppValidation.ValidationSuccess -ne $true -or
+        $After.AppValidation.BlockingErrorCount -ne 0 -or $hasForbiddenValidationIssue -or
+        [int]$After.AppModule.StateCode -ne 0 -or [int]$After.AppModule.ComponentState -ne 1) {
+        return 'SDK_FAILED_VALIDATION'
+    }
+    'ALL_FOUR_TABLE_ROOTS_VERIFIED'
+}
+
+function Invoke-SdkRemainingTableRoots {
+    param([Parameter(Mandatory = $true)][object]$InitialSnapshot)
+    $clientState = $null
+    $executeResult = $null
+    $requestEvidence = $null
+    $initialIdentities = $null
+    $postSnapshot = $null
+    try {
+        $script:LastStage = 'Verify exact Phase 2D.3M starting state'
+        $initialState = Assert-SdkRemainingTableRootsPreflight -Snapshot $InitialSnapshot
+        $clientState = New-TACanaryServiceClient -VerifiedSnapshot $InitialSnapshot
+
+        $script:LastStage = 'Fresh guarded pre-Execute preflight'
+        $finalSnapshot = Get-TargetSnapshot
+        $finalState = Assert-SdkRemainingTableRootsPreflight -Snapshot $finalSnapshot
+        $initialProtected = Get-TACanaryProtectedStateUnchanged -Before $InitialSnapshot -After $finalSnapshot
+        if (-not $initialProtected.SiteMapUnchanged -or
+            -not $initialProtected.ComponentAssociationsIntact -or
+            -not $initialProtected.FormsAndViewsUnchanged -or
+            -not $initialProtected.RolesUnchanged -or
+            -not $initialProtected.AppActiveUnpublished -or
+            $finalState.TaIdentity.MetadataId -cne $initialState.TaIdentity.MetadataId) {
+            throw 'STATE_CHANGED: protected state or existing TA root changed during preflight.'
+        }
+        $initialIdentities = Get-SdkRemainingTableRootsMetadataIdentities -Snapshot $finalSnapshot
+        $request = New-SdkRemainingTableRootsRequest -AppId $script:Target.AppModuleId `
+            -TableIdentities $initialIdentities.TableIdentities `
+            -SystemEntityMetadataId $initialIdentities.SystemMetadataId
+        $requestEvidence = Assert-SdkRemainingTableRootsRequest -Request $request.Request `
+            -TableIdentities $initialIdentities.TableIdentities `
+            -SystemEntityMetadataId $initialIdentities.SystemMetadataId
+
+        $script:LastStage = 'Immediate final state, metadata, and request fingerprint verification'
+        $immediateSnapshot = Get-TargetSnapshot
+        $immediateState = Assert-SdkRemainingTableRootsPreflight -Snapshot $immediateSnapshot
+        $immediateProtected = Get-TACanaryProtectedStateUnchanged -Before $InitialSnapshot -After $immediateSnapshot
+        if (-not $immediateProtected.SiteMapUnchanged -or
+            -not $immediateProtected.ComponentAssociationsIntact -or
+            -not $immediateProtected.FormsAndViewsUnchanged -or
+            -not $immediateProtected.RolesUnchanged -or
+            -not $immediateProtected.AppActiveUnpublished -or
+            $immediateState.TaIdentity.MetadataId -cne $initialState.TaIdentity.MetadataId) {
+            throw 'STATE_CHANGED: protected state or existing TA root changed immediately before SDK Execute.'
+        }
+        $immediateIdentities = Get-SdkRemainingTableRootsMetadataIdentities -Snapshot $immediateSnapshot
+        $initialIdentityJson = ConvertTo-Json -InputObject @($initialIdentities.TableIdentities | Sort-Object LogicalName) -Compress
+        $immediateIdentityJson = ConvertTo-Json -InputObject @($immediateIdentities.TableIdentities | Sort-Object LogicalName) -Compress
+        if ($initialIdentityJson -cne $immediateIdentityJson -or
+            $initialIdentities.SystemMetadataId -cne $immediateIdentities.SystemMetadataId) {
+            throw 'STATE_CHANGED: remaining-table metadata identities changed before SDK Execute.'
+        }
+        $request = New-SdkRemainingTableRootsRequest -AppId $script:Target.AppModuleId `
+            -TableIdentities $immediateIdentities.TableIdentities `
+            -SystemEntityMetadataId $immediateIdentities.SystemMetadataId
+        $finalRequestEvidence = Assert-SdkRemainingTableRootsRequest -Request $request.Request `
+            -TableIdentities $immediateIdentities.TableIdentities `
+            -SystemEntityMetadataId $immediateIdentities.SystemMetadataId
+        if ($finalRequestEvidence.Fingerprint -cne $requestEvidence.Fingerprint) {
+            throw 'SDK request fingerprint changed; Execute was not attempted.'
+        }
+        if (-not $clientState.Client.IsReady -or
+            [int]$clientState.Client.MaxRetryCount -ne 0 -or
+            ([Uri]$clientState.Client.ConnectedOrgUriActual).Authority -ine ([Uri]$OrganizationUrl).Authority -or
+            [guid]$clientState.Client.ConnectedOrgId -ne [guid]$ExpectedOrganizationId -or
+            $script:RequestCounts.POST -ne 0 -or $script:RequestCounts.PATCH -ne 0 -or
+            $script:WriteResults.Count -ne 0 -or $script:SdkExecuteCount -ne 0) {
+            throw 'SDK target, retry, or one-execute authorization guard failed immediately before Execute.'
+        }
+        $script:LastStage = 'Execute one SDK AddAppComponentsRequest for three table roots'
+        $executeResult = Invoke-SdkRemainingTableRootsExecuteOnce -Client $clientState.Client `
+            -Request $request.Request -TableIdentities $immediateIdentities.TableIdentities `
+            -SystemEntityMetadataId $immediateIdentities.SystemMetadataId `
+            -ExpectedFingerprint $requestEvidence.Fingerprint
+
+        $script:LastStage = 'GET-only reconciliation of four project table roots'
+        $postSnapshot = Get-TargetSnapshot
+        $protected = Get-TACanaryProtectedStateUnchanged -Before $InitialSnapshot -After $postSnapshot
+        $status = Get-SdkRemainingTableRootsOutcome -After $postSnapshot `
+            -ProtectedState $protected -ExecuteResult $executeResult
+        $rootSummaries = @($postSnapshot.EntityResolutionDiagnostics | ForEach-Object {
+            [pscustomobject]@{
+                LogicalName = $_.NormalizedLogicalName
+                ReturnedRowCount = $_.ReturnedRowCount
+                EntityIdMatchesObjectId = @($_.EntityIdMatchesQueriedObjectId |
+                    Where-Object { $_ -eq $true }).Count -eq 1
+                AppAssociationMatches = $_.AppAssociationMatches
+            }
+        })
+        $warningSummaries = @($postSnapshot.AppValidation.Issues | Where-Object {
+            $_.ErrorType -ceq 'Warning'
+        } | ForEach-Object {
+            [pscustomobject]@{
+                ErrorCode = $_.ErrorCode
+                Message = $_.Message
+                Classification = $_.Classification
+                RequiredComponents = $_.RequiredComponents
+            }
+        })
+        [pscustomobject]@{
+            Status = $status
+            StartingInventory = $InitialSnapshot.RawAppComponentTypeCounts
+            ExecuteResult = $executeResult
+            MetadataIdentities = @($immediateIdentities.TableIdentities | ForEach-Object {
+                [pscustomobject]@{
+                    LogicalName = $_.LogicalName
+                    MetadataIdVerifiedAgainstEntities = $_.MetadataId -ceq $_.EntityId
+                    ObjectTypeCodeValid = $_.ObjectTypeCode -gt 0
+                    DiffersFromSystemEntity = $_.MetadataId -cne $immediateIdentities.SystemMetadataId
+                }
+            })
+            Request = [pscustomobject]@{
+                RequestType = $finalRequestEvidence.RequestType
+                ComponentsType = $finalRequestEvidence.ComponentsType
+                ComponentCount = $finalRequestEvidence.ComponentCount
+                LogicalNames = $finalRequestEvidence.LogicalNames
+                ComponentIdAliases = $finalRequestEvidence.ComponentIdAliases
+                AppIdAlias = $finalRequestEvidence.AppIdAlias
+                Fingerprint = $finalRequestEvidence.Fingerprint
+            }
+            PostExecuteInventory = $postSnapshot.RawAppComponentTypeCounts
+            EntityRootResolution = $rootSummaries
+            ProtectedState = $protected
+            ValidateApp = [pscustomobject]@{
+                ValidationSuccess = $postSnapshot.AppValidation.ValidationSuccess
+                BlockingErrors = $postSnapshot.AppValidation.BlockingErrorCount
+                Warnings = $warningSummaries
+                WarningCount = $warningSummaries.Count
+            }
+            Roles = @($postSnapshot.AppModuleRoles | ForEach-Object { $_.Name })
+            AppState = [pscustomobject]@{
+                Active = [int]$postSnapshot.AppModule.StateCode -eq 0
+                Unpublished = [int]$postSnapshot.AppModule.ComponentState -eq 1
+            }
+            RequestCounts = [ordered]@{} + $script:RequestCounts
+            OperationCounts = [ordered]@{
+                GET = $script:RequestCounts.GET
+                RawAddAppComponentsPost = 0
+                SdkAddAppComponentsExecute = $script:SdkExecuteCount
+                RemoveAppComponentsPost = $script:RequestCounts.POST
+                SiteMapPatch = $script:RequestCounts.PATCH
+                OtherWrites = 0
+                PublishXml = 0
+                AppPublish = 0
+                RoleChanges = 0
+                Retries = 0
+            }
+            WritesMayHaveOccurred = ($script:WritesStarted -or $script:SdkExecuteCount -gt 0)
+        }
+    }
+    catch {
+        $status = if ($_.Exception.Message -like 'STATE_CHANGED:*') { 'STATE_CHANGED' }
+            elseif ($script:SdkExecuteCount -gt 0) { 'SDK_UNCERTAIN' }
+            elseif ($script:LastHttpStatus -eq 401) { 'SDK_FAILED_AUTH' }
+            elseif ($script:LastHttpStatus -eq 403) { 'SDK_FAILED_AUTHZ' }
+            elseif ($script:LastStage -match 'SDK|request|fingerprint') { 'SDK_FAILED_VALIDATION' }
+            else { 'STATE_CHANGED' }
+        $reconciliationFailure = $null
+        if ($script:SdkExecuteCount -gt 0 -and -not $postSnapshot) {
+            try { $postSnapshot = Get-TargetSnapshot }
+            catch { $reconciliationFailure = 'GET-only post-execute reconciliation failed.' }
+        }
+        [pscustomobject]@{
+            Status = $status
+            LastStage = $script:LastStage
+            ExecuteResult = $executeResult
+            Request = if ($requestEvidence) { [pscustomobject]@{
+                ComponentCount = $requestEvidence.ComponentCount
+                LogicalNames = $requestEvidence.LogicalNames
+                Fingerprint = $requestEvidence.Fingerprint
+            } } else { $null }
+            PostExecuteInventory = if ($postSnapshot) { $postSnapshot.RawAppComponentTypeCounts } else { $null }
+            ReconciliationError = $reconciliationFailure
+            RequestCounts = [ordered]@{} + $script:RequestCounts
+            SdkAddAppComponentsExecute = $script:SdkExecuteCount
+            WritesMayHaveOccurred = ($script:WritesStarted -or $script:SdkExecuteCount -gt 0)
+            SafeError = 'Guarded sequence stopped; raw exception details omitted.'
+        }
+    }
+    finally {
+        $script:WritesAllowed = $false
+        if ($clientState -and $clientState.Client -is [System.IDisposable]) {
+            $clientState.Client.Dispose()
+        }
+    }
+}
+
 function Assert-TACanaryPreflight {
     param([Parameter(Mandatory = $true)][object]$Snapshot)
     $counts = $Snapshot.RawAppComponentTypeCounts
@@ -3526,7 +4066,7 @@ function Get-TargetSnapshot {
         }
     }
     if ($EntityIdentityDiagnosticOnly -or $EntityRootRepairDiagnosticOnly -or $RemoveWrongSystemEntityRoots -or
-        $AddTaEntityCanary -or $SdkTaEntityCanary) {
+        $AddTaEntityCanary -or $SdkTaEntityCanary -or $SdkRemainingTableRoots) {
         $script:EntityResolutionDiagnostics = @(Get-EntityResolutionDiagnosticRows -Components $rawComponents -ReferenceComponents $referenceComponents)
         $script:EntityResolutionClassification = Get-EntityResolutionAggregateClassification -Diagnostics $script:EntityResolutionDiagnostics
         $payloadsForFingerprint = @($referenceComponents | ForEach-Object { $_.Payloads })
@@ -3538,7 +4078,7 @@ function Get-TargetSnapshot {
             if (-not $script:FirstFailingPredicate) { $script:FirstFailingPredicate = 'REFERENCE_PAYLOAD_FINGERPRINT_MATCHES_APPROVED' }
         }
         if ($EntityRootRepairDiagnosticOnly -or $RemoveWrongSystemEntityRoots -or $AddTaEntityCanary -or
-            $SdkTaEntityCanary) {
+            $SdkTaEntityCanary -or $SdkRemainingTableRoots) {
             $script:LastStage = 'Build guarded entity-root reconciliation evidence'
             $script:EntityRootRepairEvidence = Get-EntityRootRepairEvidence -Components $rawComponents `
                 -ReferenceComponents $referenceComponents `
@@ -4648,6 +5188,59 @@ function Invoke-Main {
     $plan = Get-AppCompositionPlan
     if ($PlanOnly) {
         Write-Output ($plan | ConvertTo-Json -Depth 20 -Compress)
+        return
+    }
+    if ($SdkRemainingTableRoots) {
+        try {
+            Assert-ApplyAuthorization -Phrase $Confirmation -Reference $AuthorizationReference
+        }
+        catch {
+            Write-Output ([ordered]@{
+                Status = 'SDK_FAILED_VALIDATION'
+                ExecuteAttempted = $false
+                WritesMayHaveOccurred = $false
+                RequestCounts = [ordered]@{} + $script:RequestCounts
+                SdkAddAppComponentsExecute = 0
+                RetryCount = 0
+                SafeError = 'Phase-specific remaining-table authorization guard failed; no environment request was sent.'
+            } | ConvertTo-Json -Depth 12 -Compress)
+            return
+        }
+        $snapshot = $null
+        try {
+            $script:LastStage = 'Fresh guarded Phase 2D.3M preflight'
+            $snapshot = Get-TargetSnapshot
+        }
+        catch {
+            $status = if ($script:LastHttpStatus -eq 401) { 'SDK_FAILED_AUTH' }
+                elseif ($script:LastHttpStatus -eq 403) { 'SDK_FAILED_AUTHZ' }
+                else { 'STATE_CHANGED' }
+            Write-Output ([ordered]@{
+                Status = $status
+                LastStage = $script:LastStage
+                ExecuteAttempted = $false
+                WritesMayHaveOccurred = $false
+                RequestCounts = [ordered]@{} + $script:RequestCounts
+                SdkAddAppComponentsExecute = 0
+                RetryCount = 0
+                SafeError = 'Fresh guarded remaining-table preflight failed; no write was sent.'
+            } | ConvertTo-Json -Depth 12 -Compress)
+            return
+        }
+        $result = Invoke-SdkRemainingTableRoots -InitialSnapshot $snapshot
+        $result | Add-Member -NotePropertyName AuthorizedLimits -NotePropertyValue ([pscustomobject]@{
+            RawAddAppComponentsPost = 0
+            SdkAddAppComponentsExecuteMaximum = 1
+            RemoveAppComponentsPost = 0
+            SiteMapPatch = 0
+            OtherWrites = 0
+            OtherSdkExecute = 0
+            PublishXml = 0
+            AppPublish = 0
+            RoleChanges = 0
+            Retries = 0
+        }) -Force
+        Write-Output ($result | ConvertTo-Json -Depth 30 -Compress)
         return
     }
     if ($SdkTaEntityCanary) {

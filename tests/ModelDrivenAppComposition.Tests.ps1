@@ -39,6 +39,9 @@ Assert-Test ($defaultPlan.Target.ReferenceTables -join ',' -ceq 'os_sr_ta,os_sr_
 Assert-Test ($defaultPlan.ProposedNavigation.SubAreas.Count -eq 4 -and $defaultPlan.ProposedNavigation.Area -ceq 'Settings') 'Plan Settings navigation for exactly four approved subareas'
 Assert-Test (-not $defaultPlan.AddAppComponentsPayload.ExactLiveIdsResolved -and $defaultPlan.LiveComponentResolutionRequired) 'PlanOnly does not fabricate live component IDs'
 Assert-Test ($script:ExternalCalls -eq 0) 'PlanOnly makes no auth, PAC, or network calls'
+Assert-Rejected {
+    & $scriptPath -SdkRemainingTableRoots -SdkTaEntityCanary
+} 'Reject combining Phase 2D.3M and the prior TA-canary execution modes' 'Choose exactly one supported execution mode'
 
 . $scriptPath -PlanOnly
 $syntheticTarget = [pscustomobject]@{
@@ -1435,7 +1438,81 @@ Assert-Test (-not $sdkExceptionResult.Succeeded -and $sdkExceptionResult.Attempt
     $retryClientFixture.ExecuteCalls -eq 1 -and $script:SdkExecuteCount -eq 1) `
     'SDK exception path records one attempt and never retries'
 $script:SdkExecuteCount = 0
+$remainingTableIdentities = @(
+    [pscustomobject]@{ LogicalName = 'os_sr_pos'; MetadataId = '33333333-aaaa-4bbb-8ccc-333333333333'; EntityId = '33333333-aaaa-4bbb-8ccc-333333333333'; ObjectTypeCode = 11006 }
+    [pscustomobject]@{ LogicalName = 'os_sr_csrc'; MetadataId = '44444444-aaaa-4bbb-8ccc-444444444444'; EntityId = '44444444-aaaa-4bbb-8ccc-444444444444'; ObjectTypeCode = 11007 }
+    [pscustomobject]@{ LogicalName = 'os_sr_loc'; MetadataId = '55555555-aaaa-4bbb-8ccc-555555555555'; EntityId = '55555555-aaaa-4bbb-8ccc-555555555555'; ObjectTypeCode = 11008 }
+)
+$remainingSdkFixture = New-SdkRemainingTableRootsRequest -AppId $script:Target.AppModuleId `
+    -TableIdentities $remainingTableIdentities -SystemEntityMetadataId $systemEntityCanaryId
+$remainingSdkEvidence = Assert-SdkRemainingTableRootsRequest -Request $remainingSdkFixture.Request `
+    -TableIdentities $remainingTableIdentities -SystemEntityMetadataId $systemEntityCanaryId
+Assert-Test ($remainingSdkFixture.RequestType -ceq 'Microsoft.Crm.Sdk.Messages.AddAppComponentsRequest' -and
+    $remainingSdkFixture.ComponentsType -ceq 'Microsoft.Xrm.Sdk.EntityReferenceCollection' -and
+    $remainingSdkFixture.ComponentCount -eq 3 -and $remainingSdkEvidence.ComponentCount -eq 3 -and
+    ($remainingSdkEvidence.LogicalNames -join ',') -ceq 'os_sr_pos,os_sr_csrc,os_sr_loc' -and
+    ($remainingSdkEvidence.ComponentIdAliases -join ',') -ceq 'os_sr_pos.MetadataId,os_sr_csrc.MetadataId,os_sr_loc.MetadataId' -and
+    $remainingSdkEvidence.AppIdAlias -ceq 'srapp' -and
+    $remainingSdkEvidence.Fingerprint -match '^[0-9a-f]{64}$') `
+    'Build and fingerprint exactly three ordered SDK roots using only corresponding MetadataId aliases'
+foreach ($identity in $remainingTableIdentities) {
+    $badLogicalRequest = New-SdkRemainingTableRootsRequest -AppId $script:Target.AppModuleId `
+        -TableIdentities $remainingTableIdentities -SystemEntityMetadataId $systemEntityCanaryId
+    $component = @($badLogicalRequest.Request.Components | Where-Object LogicalName -CEQ $identity.LogicalName)[0]
+    $component.LogicalName = 'entity'
+    Assert-Rejected {
+        Assert-SdkRemainingTableRootsRequest -Request $badLogicalRequest.Request `
+            -TableIdentities $remainingTableIdentities -SystemEntityMetadataId $systemEntityCanaryId
+    } "Reject historical EntityReference(entity, $($identity.LogicalName) MetadataId) bug" 'forbidden logical name'
+}
+foreach ($identity in $remainingTableIdentities) {
+    $crossPairedRequest = New-SdkRemainingTableRootsRequest -AppId $script:Target.AppModuleId `
+        -TableIdentities $remainingTableIdentities -SystemEntityMetadataId $systemEntityCanaryId
+    $component = @($crossPairedRequest.Request.Components | Where-Object LogicalName -CEQ $identity.LogicalName)[0]
+    $component.Id = [guid]$taCanaryId
+    Assert-Rejected {
+        Assert-SdkRemainingTableRootsRequest -Request $crossPairedRequest.Request `
+            -TableIdentities $remainingTableIdentities -SystemEntityMetadataId $systemEntityCanaryId
+    } "Reject cross-paired MetadataId for $($identity.LogicalName)" 'cross-paired MetadataId'
+}
+$wrongTaInRemainingRequest = New-SdkRemainingTableRootsRequest -AppId $script:Target.AppModuleId `
+    -TableIdentities $remainingTableIdentities -SystemEntityMetadataId $systemEntityCanaryId
+$wrongTaInRemainingRequest.Request.Components[0].LogicalName = 'os_sr_ta'
+Assert-Rejected {
+    Assert-SdkRemainingTableRootsRequest -Request $wrongTaInRemainingRequest.Request `
+        -TableIdentities $remainingTableIdentities -SystemEntityMetadataId $systemEntityCanaryId
+} 'Reject TA root from the remaining-three request' 'forbidden logical name'
+Assert-Rejected {
+    New-SdkRemainingTableRootsRequest -AppId $script:Target.AppModuleId `
+        -TableIdentities @($remainingTableIdentities | Select-Object -First 2) `
+        -SystemEntityMetadataId $systemEntityCanaryId
+} 'Reject a request with fewer than exactly three references' 'exactly three verified'
+$remainingSdkClientFixture = [pscustomobject]@{
+    MaxRetryCount = 5; IsReady = $true; ExecuteCalls = 0; LastError = ''; LastException = $null
+    SessionTrackingId = $null
+}
+$remainingSdkClientFixture | Add-Member -MemberType ScriptMethod -Name Execute -Value {
+    param($request)
+    $this.ExecuteCalls++
+    [pscustomobject]@{ Response = 'synthetic' }
+}
+$script:SdkExecuteCount = 0
+$remainingExecuteResult = Invoke-SdkRemainingTableRootsExecuteOnce -Client $remainingSdkClientFixture `
+    -Request $remainingSdkFixture.Request -TableIdentities $remainingTableIdentities `
+    -SystemEntityMetadataId $systemEntityCanaryId -ExpectedFingerprint $remainingSdkEvidence.Fingerprint
+Assert-Test ($remainingExecuteResult.Attempted -and $remainingExecuteResult.Succeeded -and
+    $remainingSdkClientFixture.ExecuteCalls -eq 1 -and $script:SdkExecuteCount -eq 1 -and
+    $remainingSdkClientFixture.MaxRetryCount -eq 0) `
+    'Execute exactly one three-root SDK request with ServiceClient retries disabled'
+Assert-Rejected {
+    Invoke-SdkRemainingTableRootsExecuteOnce -Client $remainingSdkClientFixture `
+        -Request $remainingSdkFixture.Request -TableIdentities $remainingTableIdentities `
+        -SystemEntityMetadataId $systemEntityCanaryId -ExpectedFingerprint $remainingSdkEvidence.Fingerprint
+} 'Reject a second remaining-root SDK Execute' 'no prior Execute'
+Assert-Test ($remainingSdkClientFixture.ExecuteCalls -eq 1) 'Second remaining-root Execute guard never invokes the client'
+$script:SdkExecuteCount = 0
 $sdkModeWas = $SdkTaEntityCanary
+$remainingRootsModeWas = $SdkRemainingTableRoots
 $organizationUrlWas = $OrganizationUrl
 $apiRootWas = $script:ApiRoot
 $writesAllowedWas = $script:WritesAllowed
@@ -1448,9 +1525,25 @@ try {
     Assert-Rejected {
         Invoke-DataverseRequest -Method POST -Path 'AddAppComponents' -Body ([ordered]@{})
     } 'Block raw AddAppComponents in the SDK TA canary mode' 'only one RemoveAppComponents POST'
+    $SdkTaEntityCanary = $false
+    $SdkRemainingTableRoots = $true
+    Assert-Rejected {
+        Invoke-DataverseRequest -Method POST -Path 'AddAppComponents' -Body ([ordered]@{})
+    } 'Block raw AddAppComponents in remaining-table SDK mode' 'GET-only through Web API'
+    Assert-Rejected {
+        Invoke-DataverseRequest -Method PATCH -Path "sitemaps($($script:Target.SiteMapId))" `
+            -Body ([ordered]@{ sitemapxml = '<SiteMap />' })
+    } 'Block Site Map PATCH in remaining-table SDK mode' 'GET-only through Web API'
+    Assert-Rejected {
+        Invoke-DataverseRequest -Method POST -Path 'RemoveAppComponents' -Body ([ordered]@{})
+    } 'Block RemoveAppComponents in remaining-table SDK mode' 'GET-only through Web API'
+    Assert-Rejected {
+        Invoke-DataverseRequest -Method POST -Path 'PublishXml' -Body ([ordered]@{})
+    } 'Block PublishXml in remaining-table SDK mode' 'GET-only through Web API'
 }
 finally {
     $SdkTaEntityCanary = $sdkModeWas
+    $SdkRemainingTableRoots = $remainingRootsModeWas
     $OrganizationUrl = $organizationUrlWas
     $script:ApiRoot = $apiRootWas
     $script:WritesAllowed = $writesAllowedWas
@@ -1620,6 +1713,228 @@ finally {
     Set-Item -Path Function:Get-EntityDefinitionByLogicalName -Value $originalGetEntityDefinitionByLogicalNameForSdk
     Set-Item -Path Function:Get-EntityRowsByLogicalName -Value $originalGetEntityRowsByLogicalNameForSdk
 }
+$remainingReferenceFixtures = @(
+    foreach ($reference in $canaryReferenceFixtures) {
+        $tableIdentity = @($remainingTableIdentities | Where-Object LogicalName -CEQ $reference.LogicalName)
+        [pscustomobject]@{
+            LogicalName = $reference.LogicalName
+            TableMetadataId = if ($reference.LogicalName -ceq 'os_sr_ta') { $taCanaryId } else { $tableIdentity[0].MetadataId }
+            EntitySetName = $reference.EntitySetName
+            MainForm = $reference.MainForm
+            ActiveView = $reference.ActiveView
+            Payloads = $reference.Payloads
+        }
+    }
+)
+$remainingApprovedTableEvidence = @(
+    foreach ($reference in $remainingReferenceFixtures) {
+        $tableIdentity = @($remainingTableIdentities | Where-Object LogicalName -CEQ $reference.LogicalName)
+        $tableId = if ($reference.LogicalName -ceq 'os_sr_ta') { $taCanaryId } else { $tableIdentity[0].MetadataId }
+        [pscustomobject]@{
+            LogicalName = $reference.LogicalName; MetadataSurfaceFound = $true
+            EntityTableSurfaceFound = $true; EntityTableRowCount = 1
+            EntityTableIdentityUnambiguous = $true; EntityId = $tableId; MetadataId = $tableId
+            LogicalNamesAgree = $true; MetadataIdEqualsEntityId = $true
+            PayloadEntityIdMatchesMetadataId = $true; PayloadEntityIdMatchesEntityId = $true
+            MetadataObjectTypeCode = if ($reference.LogicalName -ceq 'os_sr_ta') { 11005 } else { $tableIdentity[0].ObjectTypeCode }
+            EntityObjectTypeCodes = @($(if ($reference.LogicalName -ceq 'os_sr_ta') { 11005 } else { $tableIdentity[0].ObjectTypeCode }))
+            ObjectTypeCodesAgree = $true
+        }
+    }
+)
+$remainingPreflightFixture = $canaryPreflightFixture.PSObject.Copy()
+$remainingPreflightFixture.AppModule = [pscustomobject]@{
+    Id = $script:Target.AppModuleId; IdUnique = $script:Target.AppModuleIdUnique
+    Name = 'BSO-RS-Support'; UniqueName = 'srapp'; StateCode = 0; ComponentState = 1
+}
+$remainingPreflightFixture.SiteMap = [pscustomobject]@{
+    Id = $script:Target.SiteMapId; UniqueName = 'srapp'; IsAppAware = $true
+    ComponentState = 0; SitemapXml = '<SiteMap />'
+}
+$remainingPreflightFixture.RawAppComponentTypeCounts = [pscustomobject]@{
+    SiteMap = 1; Entity = 1; Form = 4; View = 4; Other = 0; Total = 10
+}
+$remainingPreflightFixture.ReferenceComponents = $remainingReferenceFixtures
+$remainingPreflightFixture | Add-Member -NotePropertyName EntityResolutionDiagnostics -Force -NotePropertyValue @([pscustomobject]@{
+    ReturnedRowCount = 1; NormalizedLogicalName = 'os_sr_ta'
+    EntityIdMatchesQueriedObjectId = @($true); AppAssociationMatches = $true
+})
+$remainingPreflightFixture.EntityRootRepairEvidence = [pscustomobject]@{
+    SystemEntity = [pscustomobject]@{ RowCount = 1; UniqueIdCount = 1; LogicalNames = @('entity') }
+    ApprovedTables = $remainingApprovedTableEvidence
+    Plan = [pscustomobject]@{
+        CurrentComponents = @([pscustomobject]@{
+            os_sr_ta = $true; os_sr_pos = $false; os_sr_csrc = $false; os_sr_loc = $false
+        })
+    }
+}
+$remainingIdentityMock = @{
+    os_sr_ta = @{ Id = $taCanaryId; Code = 11005 }
+    os_sr_pos = @{ Id = $remainingTableIdentities[0].MetadataId; Code = 11006 }
+    os_sr_csrc = @{ Id = $remainingTableIdentities[1].MetadataId; Code = 11007 }
+    os_sr_loc = @{ Id = $remainingTableIdentities[2].MetadataId; Code = 11008 }
+    entity = @{ Id = $systemEntityCanaryId; Code = 1 }
+}
+$originalGetEntityDefinitionByLogicalNameForRemaining = (Get-Command Get-EntityDefinitionByLogicalName -CommandType Function).ScriptBlock
+$originalGetEntityRowsByLogicalNameForRemaining = (Get-Command Get-EntityRowsByLogicalName -CommandType Function).ScriptBlock
+$script:RemainingMetadataLookupNames = [System.Collections.Generic.List[string]]::new()
+Set-Item -Path Function:Get-EntityDefinitionByLogicalName -Value {
+    param([string]$LogicalName)
+    $script:RemainingMetadataLookupNames.Add("metadata:$LogicalName")
+    [pscustomobject]@{
+        MetadataId = $remainingIdentityMock[$LogicalName].Id
+        LogicalName = $LogicalName
+        ObjectTypeCode = $remainingIdentityMock[$LogicalName].Code
+    }
+}
+Set-Item -Path Function:Get-EntityRowsByLogicalName -Value {
+    param([string]$LogicalName)
+    $script:RemainingMetadataLookupNames.Add("entities:$LogicalName")
+    @([pscustomobject]@{
+        entityid = $remainingIdentityMock[$LogicalName].Id
+        logicalname = $LogicalName
+        objecttypecode = $remainingIdentityMock[$LogicalName].Code
+    })
+}
+try {
+    $remainingPreflight = Assert-SdkRemainingTableRootsPreflight -Snapshot $remainingPreflightFixture
+    Assert-Test ($remainingPreflight.TaIdentity.LogicalName -ceq 'os_sr_ta' -and
+        $remainingPreflight.TaIdentity.MetadataId -ceq $taCanaryId) `
+        'Require the existing single entity root to remain the verified TA table'
+    $remainingMetadata = Get-SdkRemainingTableRootsMetadataIdentities -Snapshot $remainingPreflightFixture
+    Assert-Test ($remainingMetadata.TableIdentities.Count -eq 3 -and
+        ($remainingMetadata.TableIdentities.LogicalName -join ',') -ceq 'os_sr_pos,os_sr_csrc,os_sr_loc' -and
+        @($remainingMetadata.TableIdentities | Where-Object {
+            $_.MetadataId -cne $_.EntityId -or $_.ObjectTypeCode -le 0 -or
+            $_.MetadataId -ceq $remainingMetadata.SystemMetadataId
+        }).Count -eq 0) `
+        'Resolve and cross-check all three remaining tables against EntityDefinitions and entities'
+    Assert-Test ($script:RemainingMetadataLookupNames.Count -eq 8 -and
+        @($script:RemainingMetadataLookupNames | Where-Object { $_ -match '^metadata:os_sr_(pos|csrc|loc)$' }).Count -eq 3 -and
+        @($script:RemainingMetadataLookupNames | Where-Object { $_ -match '^entities:os_sr_(pos|csrc|loc)$' }).Count -eq 3 -and
+        @($script:RemainingMetadataLookupNames | Where-Object { $_ -ceq 'metadata:entity' }).Count -eq 1 -and
+        @($script:RemainingMetadataLookupNames | Where-Object { $_ -ceq 'entities:entity' }).Count -eq 1) `
+        'Independently resolve the system entity and every remaining project table on both metadata surfaces'
+    $originalGetEntityRowsByLogicalNameForRemaining = (Get-Command Get-EntityRowsByLogicalName -CommandType Function).ScriptBlock
+    Set-Item -Path Function:Get-EntityRowsByLogicalName -Value {
+        param([string]$LogicalName)
+        if ($LogicalName -ceq 'os_sr_pos') {
+            return @([pscustomobject]@{
+                entityid = $taCanaryId; logicalname = $LogicalName; objecttypecode = 11006
+            })
+        }
+        @([pscustomobject]@{
+            entityid = $remainingIdentityMock[$LogicalName].Id
+            logicalname = $LogicalName
+            objecttypecode = $remainingIdentityMock[$LogicalName].Code
+        })
+    }
+    Assert-Rejected {
+        Get-SdkRemainingTableRootsMetadataIdentities -Snapshot $remainingPreflightFixture
+    } 'Reject a remaining-table EntityDefinitions/entities MetadataId mismatch' 'identities are missing, ambiguous, or inconsistent'
+}
+finally {
+    Set-Item -Path Function:Get-EntityDefinitionByLogicalName -Value $originalGetEntityDefinitionByLogicalNameForRemaining
+    Set-Item -Path Function:Get-EntityRowsByLogicalName -Value $originalGetEntityRowsByLogicalNameForRemaining
+}
+$remainingProtectedState = [pscustomobject]@{
+    SiteMapUnchanged = $true; ComponentAssociationsIntact = $true; FormsAndViewsUnchanged = $true
+    RolesUnchanged = $true; AppActiveUnpublished = $true
+}
+$fourRootDiagnostics = @(
+    foreach ($logicalName in @('os_sr_ta', 'os_sr_pos', 'os_sr_csrc', 'os_sr_loc')) {
+        [pscustomobject]@{
+            ReturnedRowCount = 1; NormalizedLogicalName = $logicalName
+            EntityIdMatchesQueriedObjectId = @($true); AppAssociationMatches = $true
+        }
+    }
+)
+$fourRootsAfterFixture = $remainingPreflightFixture.PSObject.Copy()
+$fourRootsAfterFixture.RawAppComponentTypeCounts = [pscustomobject]@{
+    SiteMap = 1; Entity = 4; Form = 4; View = 4; Other = 0; Total = 13
+}
+$fourRootsAfterFixture | Add-Member -NotePropertyName EntityResolutionDiagnostics -Force -NotePropertyValue $fourRootDiagnostics
+$fourRootsAfterFixture.AppValidation = [pscustomobject]@{
+    ValidationSuccess = $true; BlockingErrorCount = 0
+    Issues = @([pscustomobject]@{
+        ErrorType = 'Warning'; ErrorCode = '-2147155691'
+        Message = 'Entity does not reference a form or view.'
+        Classification = 'NON_BLOCKING_FUNCTIONAL_WARNING'; RequiredComponents = @()
+    })
+}
+$fourRootsExecuteSuccess = [pscustomobject]@{ Succeeded = $true; HttpStatus = $null }
+Assert-Test ((Get-SdkRemainingTableRootsOutcome -After $fourRootsAfterFixture `
+    -ProtectedState $remainingProtectedState -ExecuteResult $fourRootsExecuteSuccess) -ceq
+    'ALL_FOUR_TABLE_ROOTS_VERIFIED') 'Verify all four exact table roots and permit a remaining functional warning'
+$remainingWrongSystem = $fourRootsAfterFixture.PSObject.Copy()
+$remainingWrongSystem | Add-Member -NotePropertyName EntityResolutionDiagnostics -Force -NotePropertyValue @($fourRootDiagnostics[0], $fourRootDiagnostics[1],
+    $fourRootDiagnostics[2], [pscustomobject]@{
+        ReturnedRowCount = 1; NormalizedLogicalName = 'entity'
+        EntityIdMatchesQueriedObjectId = @($true); AppAssociationMatches = $true
+    })
+Assert-Test ((Get-SdkRemainingTableRootsOutcome -After $remainingWrongSystem `
+    -ProtectedState $remainingProtectedState -ExecuteResult $fourRootsExecuteSuccess) -ceq
+    'WRONG_SYSTEM_ROOT_CREATED') 'Classify a newly created system entity root'
+$remainingWrongTable = $fourRootsAfterFixture.PSObject.Copy()
+$remainingWrongTable | Add-Member -NotePropertyName EntityResolutionDiagnostics -Force -NotePropertyValue @($fourRootDiagnostics[0], $fourRootDiagnostics[1],
+    $fourRootDiagnostics[2], [pscustomobject]@{
+        ReturnedRowCount = 1; NormalizedLogicalName = 'account'
+        EntityIdMatchesQueriedObjectId = @($true); AppAssociationMatches = $true
+    })
+Assert-Test ((Get-SdkRemainingTableRootsOutcome -After $remainingWrongTable `
+    -ProtectedState $remainingProtectedState -ExecuteResult $fourRootsExecuteSuccess) -ceq
+    'WRONG_TABLE_ROOT_CREATED') 'Classify an unexpected non-project table root'
+$remainingDuplicates = $fourRootsAfterFixture.PSObject.Copy()
+$remainingDuplicates | Add-Member -NotePropertyName EntityResolutionDiagnostics -Force -NotePropertyValue @($fourRootDiagnostics + $fourRootDiagnostics[1])
+Assert-Test ((Get-SdkRemainingTableRootsOutcome -After $remainingDuplicates `
+    -ProtectedState $remainingProtectedState -ExecuteResult $fourRootsExecuteSuccess) -ceq
+    'DUPLICATE_ROOTS_CREATED') 'Classify duplicate project-table roots'
+$remainingPartial = $fourRootsAfterFixture.PSObject.Copy()
+$remainingPartial.RawAppComponentTypeCounts = [pscustomobject]@{
+    SiteMap = 1; Entity = 3; Form = 4; View = 4; Other = 0; Total = 12
+}
+$remainingPartial | Add-Member -NotePropertyName EntityResolutionDiagnostics -Force -NotePropertyValue @($fourRootDiagnostics | Select-Object -First 3)
+Assert-Test ((Get-SdkRemainingTableRootsOutcome -After $remainingPartial `
+    -ProtectedState $remainingProtectedState -ExecuteResult $fourRootsExecuteSuccess) -ceq
+    'PARTIAL_ROOT_CREATION') 'Classify partially created remaining table roots'
+$remainingNoNewRoots = $remainingPreflightFixture.PSObject.Copy()
+Assert-Test ((Get-SdkRemainingTableRootsOutcome -After $remainingNoNewRoots `
+    -ProtectedState $remainingProtectedState -ExecuteResult $fourRootsExecuteSuccess) -ceq
+    'SDK_NO_ROOTS_CREATED') 'Classify a successful Execute with no new remaining roots'
+Assert-Test ((Get-SdkRemainingTableRootsOutcome -After $remainingNoNewRoots `
+    -ProtectedState $remainingProtectedState -ExecuteResult ([pscustomobject]@{ HttpStatus = 401 })) -ceq
+    'SDK_FAILED_AUTH') 'Classify remaining-table SDK authentication failures'
+Assert-Test ((Get-SdkRemainingTableRootsOutcome -After $remainingNoNewRoots `
+    -ProtectedState $remainingProtectedState -ExecuteResult ([pscustomobject]@{ HttpStatus = 403 })) -ceq
+    'SDK_FAILED_AUTHZ') 'Classify remaining-table SDK authorization failures'
+$forbiddenValidateWarning = $fourRootsAfterFixture.PSObject.Copy()
+$forbiddenValidateWarning.AppValidation = [pscustomobject]@{
+    ValidationSuccess = $true; BlockingErrorCount = 0
+    Issues = @([pscustomobject]@{
+        ErrorType = 'Warning'; Message = 'App does not reference at least one entity.'
+    })
+}
+Assert-Test ((Get-SdkRemainingTableRootsOutcome -After $forbiddenValidateWarning `
+    -ProtectedState $remainingProtectedState -ExecuteResult $fourRootsExecuteSuccess) -ceq
+    'SDK_FAILED_VALIDATION') 'Reject the ValidateApp missing-entity warning even when non-blocking'
+$forbiddenSiteMapWarning = $fourRootsAfterFixture.PSObject.Copy()
+$forbiddenSiteMapWarning.AppValidation = [pscustomobject]@{
+    ValidationSuccess = $true; BlockingErrorCount = 0
+    Issues = @([pscustomobject]@{
+        ErrorType = 'Warning'; Message = 'App does not contain Site Map.'
+    })
+}
+Assert-Test ((Get-SdkRemainingTableRootsOutcome -After $forbiddenSiteMapWarning `
+    -ProtectedState $remainingProtectedState -ExecuteResult $fourRootsExecuteSuccess) -ceq
+    'SDK_FAILED_VALIDATION') 'Reject a ValidateApp missing-Site-Map issue'
+$remainingValidationError = $fourRootsAfterFixture.PSObject.Copy()
+$remainingValidationError.AppValidation = [pscustomobject]@{
+    ValidationSuccess = $false; BlockingErrorCount = 1
+    Issues = @([pscustomobject]@{ ErrorType = 'Error'; Message = 'Synthetic blocker.' })
+}
+Assert-Test ((Get-SdkRemainingTableRootsOutcome -After $remainingValidationError `
+    -ProtectedState $remainingProtectedState -ExecuteResult $fourRootsExecuteSuccess) -ceq
+    'SDK_FAILED_VALIDATION') 'Reject blocking ValidateApp errors'
 $sdkWrongRootPreflightFixture = $canaryPreflightFixture.PSObject.Copy()
 $sdkWrongRootPreflightFixture.SiteMap = [pscustomobject]@{
     Id = $script:Target.SiteMapId; UniqueName = 'srapp'; IsAppAware = $true

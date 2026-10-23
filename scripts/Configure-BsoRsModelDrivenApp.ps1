@@ -818,7 +818,7 @@ function Invoke-DataverseRequest {
         throw 'Dataverse request path is outside the verified organization origin.'
     }
     $resource = [Uri]::UnescapeDataString($uri.AbsolutePath.Substring('/api/data/v9.2/'.Length))
-    if ($Method -eq 'GET' -and $resource -notmatch '^(WhoAmI$|appmodules(\(|$)|appmodulecomponents$|entities\(|sitemaps(\(|$)|sitemaps/Microsoft\.Dynamics\.CRM\.RetrieveUnpublishedMultiple\(|solutions$|publishers\(|solutioncomponents$|EntityDefinitions\(|systemforms(\(|$)|savedqueries(\(|$)|roles\(|RetrieveRequiredComponents\(|ValidateApp\()') {
+    if ($Method -eq 'GET' -and $resource -notmatch '^(WhoAmI$|appmodules(\(|$)|appmodulecomponents$|entities$|sitemaps(\(|$)|sitemaps/Microsoft\.Dynamics\.CRM\.RetrieveUnpublishedMultiple\(|solutions$|publishers\(|solutioncomponents$|EntityDefinitions\(|systemforms(\(|$)|savedqueries(\(|$)|roles\(|RetrieveRequiredComponents\(|ValidateApp\()') {
         throw 'GET blocked: endpoint is outside the app and component metadata allowlist.'
     }
     if ($Method -eq 'PATCH' -and ($resource -cne "sitemaps($($script:Target.SiteMapId))" -or
@@ -1206,7 +1206,14 @@ function Get-AppModuleEntityRecords {
     $records = [System.Collections.Generic.List[object]]::new()
     foreach ($component in @($Components | Where-Object { [int]$_.componenttype -eq 1 })) {
         $entityId = ConvertTo-NormalizedGuid -Value ([string]$component.objectid)
-        $record = Invoke-DataverseRequest -Method GET -Path "entities($entityId)?%24select=entityid,logicalname,name,objecttypecode"
+        $filter = 'entityid eq ' + $entityId
+        $path = New-CollectionPath -EntitySet $IdentityContract.EntitySet `
+            -Select 'entityid,logicalname,name,objecttypecode' -Filter $filter
+        $matches = @(Get-ODataRows -Path $path)
+        if ($matches.Count -ne 1) {
+            throw "An AppModule entity objectid resolved to $($matches.Count) entities rows; exactly one is required."
+        }
+        $record = $matches[0]
         if ((ConvertTo-NormalizedGuid -Value ([string]$record.entityid)) -cne $entityId -or
             [string]::IsNullOrWhiteSpace([string]$record.logicalname)) {
             throw 'An AppModule entity component did not resolve to its exact entities record.'

@@ -375,6 +375,54 @@ Assert-Rejected {
         -ReferenceComponents $script:ResolvedReferenceComponents -SiteMapId $script:Target.SiteMapId -AppModuleIdUnique $script:Target.AppModuleIdUnique
 } 'Reject duplicate normalized entity logical names' 'duplicate table logical name'
 
+$identityContract = [pscustomobject]@{ EntitySet = 'entities'; PrimaryKey = 'entityid' }
+$resolverComponent = [pscustomobject]@{ componenttype = 1; objectid = 'bbbbbbbb-0000-4000-8000-000000000001' }
+$resolverEntity = [pscustomobject]@{
+    entityid = $resolverComponent.objectid
+    logicalname = 'os_sr_ta'
+    name = 'TA Directory'
+    objecttypecode = 11005
+}
+$originalDataverseRequest = (Get-Command Invoke-DataverseRequest -CommandType Function).ScriptBlock
+$script:EntityResolverRequests = [System.Collections.Generic.List[object]]::new()
+$script:EntityResolverResponseRows = @($resolverEntity)
+$script:EntityResolverFailure = $false
+Set-Item -Path Function:Invoke-DataverseRequest -Value {
+    param([string]$Method, [string]$Path, [object]$Body, [string]$ETag)
+    $script:EntityResolverRequests.Add([pscustomobject]@{ Method = $Method; Path = $Path; Body = $Body })
+    if ($script:EntityResolverFailure) { throw 'Synthetic HTTP 400 from entities collection.' }
+    [pscustomobject]@{ value = @($script:EntityResolverResponseRows) }
+}
+try {
+    $resolvedEntity = @(Get-AppModuleEntityRecords -Components @($resolverComponent) -IdentityContract $identityContract)
+    Assert-Test ($resolvedEntity.Count -eq 1 -and $resolvedEntity[0].logicalname -ceq 'os_sr_ta') 'Resolve one entity record through entities RetrieveMultiple'
+    Assert-Test ($script:EntityResolverRequests.Count -eq 1 -and
+        $script:EntityResolverRequests[0].Method -ceq 'GET' -and
+        $script:EntityResolverRequests[0].Path -match '^entities\?') 'Use GET on the entities collection, not entity-by-ID'
+    $decodedEntityPath = [Uri]::UnescapeDataString([string]$script:EntityResolverRequests[0].Path)
+    Assert-Test ($decodedEntityPath -match '\$filter=entityid eq bbbbbbbb-0000-4000-8000-000000000001') 'Filter entities by the validated component objectid'
+    Assert-Test ($decodedEntityPath -match '\$select=entityid,logicalname,name,objecttypecode') 'Select entity identity and required display/type fields'
+    Assert-Test (@($script:EntityResolverRequests | Where-Object Method -ne 'GET').Count -eq 0) 'Entity resolution issues no writes'
+    Assert-Test ($resolvedEntity[0].logicalname -cne [string]$script:ResolvedReferenceComponents[0].TableMetadataId) 'Normalize through logicalname without MetadataId fallback'
+
+    $script:EntityResolverResponseRows = @()
+    Assert-Rejected {
+        Get-AppModuleEntityRecords -Components @($resolverComponent) -IdentityContract $identityContract
+    } 'Fail closed when entity RetrieveMultiple returns zero rows' 'exactly one is required'
+    $script:EntityResolverResponseRows = @($resolverEntity, $resolverEntity)
+    Assert-Rejected {
+        Get-AppModuleEntityRecords -Components @($resolverComponent) -IdentityContract $identityContract
+    } 'Fail closed when entity RetrieveMultiple returns multiple rows' 'exactly one is required'
+    $script:EntityResolverFailure = $true
+    Assert-Rejected {
+        Get-AppModuleEntityRecords -Components @($resolverComponent) -IdentityContract $identityContract
+    } 'Fail closed on entities collection HTTP 400' 'Synthetic HTTP 400'
+    Assert-Test (@($script:EntityResolverRequests | Where-Object Method -ne 'GET').Count -eq 0) 'Resolver failure paths remain GET-only'
+}
+finally {
+    Set-Item -Path Function:Invoke-DataverseRequest -Value $originalDataverseRequest
+}
+
 $approvedRoles = @(
     [pscustomobject]@{ Name = 'System Administrator'; RoleId = '11111111-1111-4111-8111-111111111111' }
     [pscustomobject]@{ Name = 'System Customizer'; RoleId = '22222222-2222-4222-8222-222222222222' }

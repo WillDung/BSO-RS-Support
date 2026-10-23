@@ -2106,13 +2106,14 @@ function Invoke-DataverseRequest {
         MaximumRedirection = 0
         SkipHeaderValidation = $true
         SkipHttpErrorCheck = $true
-        StatusCodeVariable = 'responseStatusCode'
-        ResponseHeadersVariable = 'responseHeaders'
         TimeoutSec = 90
         MaximumRetryCount = 0
         ErrorAction = 'Stop'
     }
-    if ($CaptureRawResponse) { $request.SkipHttpErrorCheck = $true }
+    if (-not $CaptureRawResponse) {
+        $request.StatusCodeVariable = 'responseStatusCode'
+        $request.ResponseHeadersVariable = 'responseHeaders'
+    }
     if ($null -ne $Body) {
         $request.ContentType = 'application/json; charset=utf-8'
         $request.Body = ConvertTo-Json -InputObject $Body -Depth 30 -Compress
@@ -2135,6 +2136,10 @@ function Invoke-DataverseRequest {
     if ($Method -ne 'GET') { $script:WritesStarted = $true }
     try {
         $response = if ($CaptureRawResponse) { Invoke-WebRequest @request } else { Invoke-RestMethod @request }
+        if ($CaptureRawResponse) {
+            $responseStatusCode = [int]$response.StatusCode
+            $responseHeaders = $response.Headers
+        }
         $script:LastRequestId = Get-SanitizedResponseGuidHeader -Headers $responseHeaders `
             -Names @('x-ms-service-request-id', 'req_id', 'x-ms-request-id')
         $script:LastCorrelationId = Get-SanitizedResponseGuidHeader -Headers $responseHeaders `
@@ -2171,6 +2176,9 @@ function Invoke-DataverseRequest {
         return $response
     }
     catch {
+        $bindingFailedBeforeDispatch = $CaptureRawResponse -and
+            $_.Exception -is [System.Management.Automation.ParameterBindingException]
+        if ($bindingFailedBeforeDispatch) { $script:RequestCounts[$Method]-- }
         $script:LastRequestId = Get-SanitizedResponseGuidHeader -Headers $responseHeaders `
             -Names @('x-ms-service-request-id', 'req_id', 'x-ms-request-id')
         $script:LastCorrelationId = Get-SanitizedResponseGuidHeader -Headers $responseHeaders `
@@ -2183,7 +2191,7 @@ function Invoke-DataverseRequest {
         }
         if ($CaptureRawResponse -and $null -eq $script:LastValidateAppRawResponse) {
             $script:LastValidateAppRawResponse = [pscustomobject]@{
-                TransportAttempted = $true
+                TransportAttempted = -not $bindingFailedBeforeDispatch
                 HttpStatus = $script:LastHttpStatus
                 ContentType = $null
                 ResponseBodyPresent = $false
@@ -5251,6 +5259,12 @@ function Get-TargetSnapshot {
                     EntityLogicalName = [string]$_.NormalizedLogicalName
                 }
             })
+        }
+        if ($ValidateAppDiagnosticOnly -or $FinalSiteMapNavigationOnly) {
+            if (-not $identityContract) { throw 'AppModule entity identity metadata contract could not be verified.' }
+            $entityRecords = @(Get-AppModuleEntityRecords -Components $rawComponents -IdentityContract $identityContract)
+            $components = @(ConvertTo-NormalizedAppModuleComponents -Components $rawComponents -EntityRecords $entityRecords `
+                -ReferenceComponents $referenceComponents -SiteMapId $script:Target.SiteMapId -AppModuleIdUnique $script:Target.AppModuleIdUnique)
         }
     }
     else {

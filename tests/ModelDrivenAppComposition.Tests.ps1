@@ -2621,12 +2621,74 @@ Assert-Rejected {
 Assert-Test ($script:RequestCounts.GET -eq 0 -and $script:RequestCounts.POST -eq 0 -and
     $script:RequestCounts.PATCH -eq 0 -and $script:ExternalCalls -eq 0) `
     'ValidateApp diagnostic write and raw-capture guards stop before authentication or network dispatch'
+$savedRawCaptureWebRequest = (Get-Command Invoke-WebRequest -CommandType Function).ScriptBlock
+$savedRawCaptureToken = $script:AccessToken
+$savedRawCaptureExpiry = $script:AccessTokenExpiresOn
+$script:AccessToken = 'synthetic'
+$script:AccessTokenExpiresOn = [DateTimeOffset]::UtcNow.AddHours(1)
+$script:RawCaptureDispatchCount = 0
+$script:RawCaptureStatus = 200
+Set-Item -Path Function:Invoke-WebRequest -Value {
+    [CmdletBinding()]
+    param(
+        [string]$Method, [string]$Uri, [hashtable]$Headers, [int]$MaximumRedirection,
+        [switch]$SkipHeaderValidation, [switch]$SkipHttpErrorCheck,
+        [int]$TimeoutSec, [int]$MaximumRetryCount
+    )
+    if ($MaximumRetryCount -ne 0) { throw 'Synthetic raw capture requires zero retries.' }
+    $script:RawCaptureDispatchCount++
+    [pscustomobject]@{
+        StatusCode = $script:RawCaptureStatus
+        Headers = @{ 'Content-Type' = 'application/json; charset=utf-8' }
+        Content = '{"AppValidationResponse":{"ValidationSuccess":true,"ValidationIssueList":[]}}'
+    }
+}
+try {
+    $rawCaptureResult = Invoke-ValidateAppDiagnosticRequest
+    Assert-Test ($rawCaptureResult.HttpStatus -eq 200 -and $rawCaptureResult.Category -ceq 'PASS' -and
+        $rawCaptureResult.ContentType -ceq 'application/json; charset=utf-8' -and
+        $rawCaptureResult.ResponseBodyPresent -and $rawCaptureResult.ResponseBodySha256.Length -eq 64 -and
+        $rawCaptureResult.IssueCount -eq 0) `
+        'Capture WebRequest status and headers from its response without unsupported RestMethod parameters'
+    Assert-Test ($script:RawCaptureDispatchCount -eq 1 -and $script:RequestCounts.GET -eq 1 -and
+        $null -eq $script:LastValidateAppRawResponse.RawBody) `
+        'Dispatch raw capture once, retain its hash, and clear the raw body'
+    $script:RawCaptureStatus = 401
+    $rawCaptureAuthFailure = Invoke-ValidateAppDiagnosticRequest
+    Assert-Test ($rawCaptureAuthFailure.Category -ceq 'AUTH' -and
+        $rawCaptureAuthFailure.HttpStatus -eq 401 -and $script:RawCaptureDispatchCount -eq 2) `
+        'Retain a raw WebRequest authentication response without retrying'
+    Set-Item -Path Function:Invoke-WebRequest -Value {
+        throw [System.Management.Automation.ParameterBindingException]::new('Synthetic local binding failure.')
+    }
+    $rawCaptureBindingFailure = Invoke-ValidateAppDiagnosticRequest
+    Assert-Test (-not $rawCaptureBindingFailure.TransportAttempted -and
+        $rawCaptureBindingFailure.ExceptionType -ceq 'System.Management.Automation.ParameterBindingException' -and
+        $script:RequestCounts.GET -eq 2) `
+        'Do not count a local raw-capture parameter-binding failure as a dispatched Dataverse GET'
+}
+finally {
+    Set-Item -Path Function:Invoke-WebRequest -Value $savedRawCaptureWebRequest
+    $script:AccessToken = $savedRawCaptureToken
+    $script:AccessTokenExpiresOn = $savedRawCaptureExpiry
+}
 $ValidateAppDiagnosticOnly = $savedValidateAppModeState.ValidateAppDiagnosticOnly
 $Apply = $savedValidateAppModeState.Apply
 $script:WritesAllowed = $savedValidateAppModeState.WritesAllowed
 $script:ApiRoot = $savedValidateAppModeState.ApiRoot
 $OrganizationUrl = $savedValidateAppModeState.OrganizationUrl
 $script:RequestCounts = $savedValidateAppModeState.RequestCounts
+
+$snapshotFunctionAst = (Get-Command Get-TargetSnapshot -CommandType Function).ScriptBlock.Ast
+$navigationNormalizationBranch = $snapshotFunctionAst.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.IfStatementAst] -and
+        $node.Clauses[0].Item1.Extent.Text -ceq '$ValidateAppDiagnosticOnly -or $FinalSiteMapNavigationOnly'
+}, $true)
+Assert-Test ($null -ne $navigationNormalizationBranch -and
+    $navigationNormalizationBranch.Extent.Text -match 'Get-AppModuleEntityRecords' -and
+    $navigationNormalizationBranch.Extent.Text -match 'ConvertTo-NormalizedAppModuleComponents') `
+    'Populate normalized component inventory in diagnostic and final-navigation snapshots'
 
 Assert-Test ($script:ExternalCalls -eq 0) 'All Phase 2D.3 regression coverage remains synthetic and offline'
 

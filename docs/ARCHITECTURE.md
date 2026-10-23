@@ -1,6 +1,6 @@
 # Architecture
 
-**Status:** Proposed target architecture, based on the draft blueprint. The four reference tables and unmanaged Solution are verified. The owner-adopted AppModule `srapp` (ID `3709bb7c-28cd-f111-a05c-70a8a581cbfa`) was separately composed and published as the complete 13-component reference-administration app; Phase 2D.4F accepted its UI with record-form tests deferred because no safe row existed. The app-only `srapp` name supersedes `os_srapp`; normal Dataverse table naming remains `os_sr_*`. Candidate-core schema and server operations remain proposals; Phase 3A is blocked on product/security decisions. See [Current State](CURRENT_STATE.md).
+**Status:** Proposed target architecture, based on the draft blueprint. The four reference tables and unmanaged Solution are verified. The owner-adopted AppModule `srapp` (ID `3709bb7c-28cd-f111-a05c-70a8a581cbfa`) was separately composed and published as the complete 13-component reference-administration app; Phase 2D.4F accepted its UI with record-form tests deferred because no safe row existed. The app-only `srapp` name supersedes `os_srapp`; normal Dataverse table naming remains `os_sr_*`. Candidate-core owner decisions are now approved and documented, but Candidate schema and business operations remain unprovisioned proposals; Phase 3A readiness is blocked by external audit and API privilege prerequisites. See [Current State](CURRENT_STATE.md) and the [Phase 3A.2 report](PHASE_3A2_CANDIDATE_CORE_DECISION_APPLICATION.md).
 
 ## Logical components
 
@@ -8,7 +8,7 @@
 |---|---|---|
 | Interactive operations | Power Apps Model-driven App | Existing AppModule `srapp` is published and verified with the four approved reference-table pages. No Candidate workflow is included. `os_srapp` was a superseded name proposal. Historical type-10091 identity remains unknown and is not treated as the Site Map. See [Model-driven App Manifest](MODEL_DRIVEN_APP_MANIFEST.md) and [Automation Runbook](MODEL_DRIVEN_APP_AUTOMATION_RUNBOOK.md). |
 | Complex interaction | Power Apps Custom Pages | Use only when justified; proposed |
-| Authoritative data | Microsoft Dataverse | Sole production source for candidate workflow/business state; four approved reference tables are verified. Candidate core schema remains unprovisioned and blocked on decisions. |
+| Authoritative data | Microsoft Dataverse | Sole production source for candidate workflow/business state; four approved reference tables are verified. Candidate core decisions are approved; its schema remains unprovisioned pending external audit/security gates. |
 | Critical business operations | Dataverse Custom APIs and synchronous plug-ins | Proposed enforcement for critical transitions |
 | Orchestration | Power Automate Cloud Flows | Integrations and asynchronous work; must call approved business operations |
 | Mail and calendar | Microsoft 365 Outlook/Teams | Identity and permission model requires verification |
@@ -20,7 +20,7 @@
 
 ## Proposed Dataverse schema boundary
 
-The proposed table inventory is grouped into reference, candidate/history, interview/communication, and integration areas in [Data Model](DATA_MODEL.md). Four approved reference tables are verified. Candidate, Call Log, and Candidate Status History are unprovisioned; their Phase 3A proposal is `BLOCKED_PRODUCT_DECISION`. Complete proposed columns, ownership, keys, relationships, cascade rules, audit, security, and migration mappings are in [Dataverse Schema Specification](DATAVERSE_SCHEMA_SPECIFICATION.md) and the [Phase 3A design report](PHASE_3A_CANDIDATE_CORE_DESIGN.md). Candidate/activity tables are proposed UserOwned, but ownership and security details remain subject to approval. No Candidate role, Custom API, plug-in, or flow is asserted implemented.
+The proposed table inventory is grouped into reference, candidate/history, interview/communication, and integration areas in [Data Model](DATA_MODEL.md). Four approved reference tables are verified. Candidate, Call Log, and Candidate Status History are unprovisioned; their product decisions are approved, but Phase 3A remains `BLOCKED_EXTERNAL_AUDIT_AND_API_PRIVILEGE_PREREQUISITES`. Complete proposed columns, ownership, keys, relationships, cascade rules, audit, security, and migration mappings are in [Dataverse Schema Specification](DATAVERSE_SCHEMA_SPECIFICATION.md) and the [Phase 3A design report](PHASE_3A_CANDIDATE_CORE_DESIGN.md). No Candidate role, Custom API, plug-in, or flow is asserted implemented.
 
 ## Interaction and data flow
 
@@ -36,4 +36,4 @@ Entra authentication, Dataverse role/row/field authorization, and Microsoft 365 
 
 ## Architecture decisions still open
 
-Schema review/approval, table ownership/security roles, field-level controls, keys, audit/retention, synchronous API contracts, user-scoped connector pattern, calendar reconciliation, LEGO sync transport, CV file strategy, and optional services remain open. The selected naming strategy uses Publisher Prefix `os` plus namespace segment `sr_`; final technical names begin `os_sr_`. See [Security Model](SECURITY_MODEL.md), [Integration Design](INTEGRATION_DESIGN.md), [ALM Deployment](ALM_DEPLOYMENT.md), and [Product Decisions](PRODUCT_DECISIONS.md).
+Candidate Core product decisions are owner-approved. Organization-level audit governance and the least-privilege Custom API execution privilege model remain external readiness gates; Choice allocation and AutoNumber support require fresh metadata preflight. Later schema, connector identity, calendar reconciliation, LEGO sync transport, CV file strategy, and optional services remain open for their respective phases. The selected naming strategy uses Publisher Prefix `os` plus namespace segment `sr_`; final technical names begin `os_sr_`. See [Security Model](SECURITY_MODEL.md), [Integration Design](INTEGRATION_DESIGN.md), [ALM Deployment](ALM_DEPLOYMENT.md), and [Product Decisions](PRODUCT_DECISIONS.md).

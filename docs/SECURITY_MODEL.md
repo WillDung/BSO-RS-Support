@@ -1,6 +1,6 @@
 # Security Model
 
-**Status:** Security design proposal and constraints. The published `srapp` reference app retains its accepted System Administrator and System Customizer associations; no project-specific BSO/Admin end-user role is established by that association. Phase 2D.4F made no access changes. Candidate-core effective privileges, operation execution identity, ownership, field security, and audit scope remain unapproved; see the [Phase 3A Candidate Core Design](PHASE_3A_CANDIDATE_CORE_DESIGN.md) and [Dataverse Schema Specification](DATAVERSE_SCHEMA_SPECIFICATION.md). No role or tenant setting was changed in Phase 3A.
+**Status:** Security design proposal and constraints. The published `srapp` reference app retains its accepted System Administrator and System Customizer associations; no project-specific BSO/Admin end-user role is established by that association. Phase 2D.4F made no access changes. Phase 3A owner decisions approve Dataverse Owner as responsible BSO, table auditing for Candidate/Call Log/Status History, and no column-level security for Candidate Name/Email/Phone in the initial slice. Effective privileges and Custom API Execute privilege remain unapproved; see the [Phase 3A Candidate Core Design](PHASE_3A_CANDIDATE_CORE_DESIGN.md), [Phase 3A.2 readiness report](PHASE_3A2_CANDIDATE_CORE_DECISION_APPLICATION.md), and [Dataverse Schema Specification](DATAVERSE_SCHEMA_SPECIFICATION.md). No role or tenant setting was changed.
 
 ## Identity and authentication
 
@@ -13,13 +13,13 @@ Microsoft Entra ID is the target authentication authority. Authentication does n
 - **TA:** directory/interviewer contact, not automatically an interactive app role. Additional TA access requires an explicit product decision.
 - Candidate/visitor access is not assumed.
 
-Define table privileges, row ownership/sharing, team model, and field-level security after stakeholder review. Restrict salary, contact details, CV links/documents, email snapshots, and integration diagnostics as appropriate. Validate access with positive and negative tests.
+Define table privileges, row ownership/sharing, team model, and Custom API execution privileges with security-owner review. The Phase 3A owner-approved initial slice uses Dataverse `ownerid` as the responsible BSO and has no duplicate Assigned BSO lookup. Name/Email/Phone column-level security is explicitly not applied in this initial slice; least-privilege table/row access and auditing remain required. Restrict salary, CV links/documents, email snapshots, and integration diagnostics as appropriate. Validate access with positive and negative tests.
 
 ### Proposed schema access boundaries
 
 | Data area | Proposed Dataverse boundary | Sensitive columns/data |
 |---|---|---|
-| Candidate and child activity records | UserOwned; BSO owner or approved team; child owner aligned by server-side operation; no implicit access from a lookup | Candidate name, email, phone, CV URL; call notes; interview feedback; visit details |
+| Candidate and child activity records | UserOwned; Candidate Dataverse Owner is responsible BSO; child owner aligned by server-side operation; no implicit access from a lookup | Candidate name/email/phone are not column-secured in initial slice; CV URL, call notes, interview feedback, and visit details remain sensitive |
 | Interview results | UserOwned under Candidate owner; only approved BSO/roles | Feedback and salary; field-level security proposed, subject to role design |
 | Email dispatch | UserOwned under Candidate owner; narrow table and column privileges; immutable content snapshot after queue | Sender, To/CC snapshots, subject/body, provider IDs; field-level security and explicit retention |
 | TA, Position, Candidate Source, Location, Email Template | OrgOwned reference data; BSO read only as needed; restricted admin/integration write | TA email and room resource addresses remain directory/contact information |
@@ -29,9 +29,9 @@ Define table privileges, row ownership/sharing, team model, and field-level secu
 
 The Candidate primary name is proposed as Candidate Number rather than personal name because Dataverse exposes a related row's primary name through lookups. Candidate Number is still an internal identifier and must be access-controlled. Alternate-key columns cannot have field-level security; protect their disclosure using row/table privileges. No policy or role assignment is configured by this proposal.
 
-Read-only assessment on 19 October 2026 found environment auditing off, configured retention of 30 days (not an approved policy), and user-access auditing off. Capacity, historic audit-log presence, existing table audit flags, and effects on other applications remain unknown. Do not change these settings until IT/Compliance approves retention, scope, audit readers, legal hold/DSR, capacity ownership, and change control. The proposed scope and impact are documented in [Dataverse Audit Policy Proposal](DATAVERSE_AUDIT_POLICY.md) and [Audit Impact Assessment](AUDIT_IMPACT_ASSESSMENT.md).
+Owner-approved Phase 3A requirement: enable Dataverse table auditing for Candidate, Call Log, and Candidate Status History. The read-only assessment on 19 October 2026 found organization auditing off, configured retention of 30 days (not an approved policy), and user-access auditing off. Capacity, historic audit-log presence, existing table audit flags, and effects on other applications remain unknown. IT/Compliance must resolve organization-level activation, retention, audit readers, legal hold/DSR, capacity ownership, and change control before auditing can be relied on; this design task changed no setting. The proposed scope and impact are documented in [Dataverse Audit Policy Proposal](DATAVERSE_AUDIT_POLICY.md) and [Audit Impact Assessment](AUDIT_IMPACT_ASSESSMENT.md).
 
-Dataverse auditing is distinct from `os_sr_csh`, the proposed application-owned append-only status history. `os_sr_csh` must capture accepted business transitions through an approved atomic server operation; Dataverse auditing supplements it. Do not audit sensitive email snapshots, candidate PII, salary, or CV links without an approved column-level decision and data-minimization review.
+Dataverse auditing is distinct from `os_sr_csh`, the proposed application-owned append-only status history. `os_sr_csh` must capture accepted business transitions through an approved atomic server operation; Dataverse auditing supplements it. The table-audit enablement requirement is approved for the three Candidate-core tables; any additional column-level audit selection for email snapshots, salary, CV links, or later domains must follow IT/Compliance data-minimization and retention review.
 
 ## Connector identity
 

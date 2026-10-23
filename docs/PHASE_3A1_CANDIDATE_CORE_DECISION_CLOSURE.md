@@ -4,6 +4,8 @@
 **Final classification:** `BLOCKED_PRODUCT_DECISION`  
 **Scope:** Owner-decision recording and local design review only. No tenant connection, metadata read/write, provisioning, business data, or Phase 2D change.
 
+**Superseding owner decision:** On 23 October 2026, after this historical closure attempt, the owner explicitly approved all eight decision areas. The "not recorded" entries below accurately describe the state at this report's creation, but are superseded as the current decision status by [Phase 3A.2 Decision Application and Readiness](PHASE_3A2_CANDIDATE_CORE_DECISION_APPLICATION.md). The manifest and design were subsequently revised; this report itself is retained as historical evidence.
+
 ## 1. Executive Summary
 
 Phase 3A.1 requested explicit owner decisions on eight schema-affecting topics. No owner-authored selections were received. The decision form's generic fallback text was not treated as a choice, approval, rejection, or deferral. In particular, no recommendation is marked accepted and no `DEFER / EXTERNAL DECISION` choice is attributed to the owner.

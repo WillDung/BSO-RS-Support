@@ -18,6 +18,8 @@ These invariants govern design and implementation. See [Project Decisions](docs/
 
 Canonical path: Need Call Candidate → Candidate Answered → Waiting Manual Scheduling → Round 1 Scheduled → Offer Extended (Pass) or Candidate Failed (Fail). Reschedule from Round 1 Scheduled returns to Need Call Candidate through an approved business action, with cancellation attempt and audit. No Draft Created, BSO Reviewing, Sent to TA, or TA Approval workflow may be reintroduced without a new explicit product decision.
 
+For the initial Candidate slice, the owner-approved call outcomes are Answered, No Answer, and Call Back Requested. Answered from Need Call Candidate atomically creates a Call Log, advances Candidate to Candidate Answered, and creates one Status History row; No Answer and Call Back Requested create a Call Log only and leave status unchanged. Candidate Name and Email are required; Phone is optional. Candidate Number is server-generated, immutable, unique, and nonpersonal. Dataverse Owner is the responsible BSO; do not add a duplicate Assigned BSO lookup. Every state-changing Candidate operation requires a caller-generated GUID CorrelationId and must be idempotent for that logical operation. Reschedule requires a reason and records actor, timestamp, CorrelationId, previous/new status, and reason; calendar/event cancellation evidence and execution are deferred to the later scheduling phase, and reschedule must remain unavailable until that boundary is implemented.
+
 ## Scheduling
 
 - BSO coordinates; TA and candidate are required attendees; for offline interviews the room is a resource attendee.
@@ -39,6 +41,7 @@ Canonical path: Need Call Candidate → Candidate Answered → Waiting Manual Sc
 
 - Preserve business history and sufficient correlation to investigate external actions. Avoid secrets and unnecessary PII in logs.
 - Never commit secrets, tokens, passwords, real tenant IDs, production connector URLs, real candidate data, real CVs, or connection credentials. Use synthetic examples.
+- Enable Dataverse table auditing for Candidate, Call Log, and Candidate Status History. In the initial Candidate slice, do not apply column-level security to Candidate Name, Email, or Phone; continue to enforce least-privilege table/row access.
 - Apply least privilege and organizational DLP/privacy policies. No permission grant is assumed.
 
 ## Naming and information disclosure

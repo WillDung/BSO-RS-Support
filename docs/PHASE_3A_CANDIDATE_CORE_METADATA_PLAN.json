@@ -1,6 +1,11 @@
 {
   "phase": "3A",
   "status": "PROPOSAL_NOT_AUTHORIZED",
+  "ownerDecisionBaseline": {
+    "date": "2026-10-23",
+    "source": "Explicit owner approval in the Phase 3A.1 follow-up conversation",
+    "status": "ALL_PHASE_3A_PRODUCT_DECISIONS_ACCEPTED"
+  },
   "solutionUniqueName": "os_sr_bso_rs_support",
   "publisherPrefix": "os",
   "projectNamespace": "sr_",
@@ -9,6 +14,7 @@
     "os_sr_call",
     "os_sr_csh",
     "os_sr_candstat",
+    "os_sr_callout",
     "os_sr_cact"
   ],
   "tables": [
@@ -19,11 +25,14 @@
       "primaryName": {
         "logicalName": "os_sr_cand_cnum",
         "displayName": "Candidate Number",
-        "type": "String",
-        "maxLength": 100,
+        "type": "AutoNumber",
+        "format": "CAND-{SEQNUM:8}",
         "required": "Required",
         "keyRole": "PrimaryNameAndAlternateKey",
-        "decision": "Candidate number source, generation, format, and character set remain open."
+        "generatedBy": "Dataverse",
+        "immutableAfterCreate": true,
+        "containsPersonalInformation": false,
+        "decision": "Validate the proposed AutoNumber format through the supported metadata path."
       },
       "columns": [
         {
@@ -33,7 +42,7 @@
           "maxLength": 200,
           "required": "Required",
           "classification": "PersonalInformation",
-          "decision": "Confirm create-time requiredness and approved column security."
+          "columnSecurity": "NotAppliedInInitialSlice"
         },
         {
           "logicalName": "os_sr_cand_eml",
@@ -41,9 +50,9 @@
           "type": "String",
           "format": "Email",
           "maxLength": 254,
-          "required": "OptionalAtCreate",
+          "required": "Required",
           "classification": "PersonalInformation",
-          "decision": "Confirm create-time requiredness; required before booking under current rules."
+          "columnSecurity": "NotAppliedInInitialSlice"
         },
         {
           "logicalName": "os_sr_cand_phn",
@@ -53,7 +62,16 @@
           "maxLength": 50,
           "required": "Optional",
           "classification": "PersonalInformation",
-          "decision": "Confirm phone/contact-channel scope and conditional requirement."
+          "columnSecurity": "NotAppliedInInitialSlice"
+        },
+        {
+          "logicalName": "os_sr_cand_corid",
+          "displayName": "Creation Correlation ID",
+          "type": "String",
+          "maxLength": 36,
+          "required": "RequiredForOperationCreate",
+          "format": "GUID",
+          "purpose": "Deduplicate Candidate creation by logical operation."
         },
         {
           "logicalName": "os_sr_cand_pos",
@@ -78,15 +96,6 @@
           "target": "os_sr_ta",
           "required": "ConditionalBeforeBooking",
           "relationship": "os_sr_ta_cand"
-        },
-        {
-          "logicalName": "os_sr_cand_lgcar",
-          "displayName": "LEGO Career",
-          "type": "Lookup",
-          "target": "os_sr_lgcar",
-          "required": "ConditionalBeforeBooking",
-          "relationship": "os_sr_lgcar_cand",
-          "decision": "Target table is proposed and not in the Phase 2D verified reference-table inventory."
         },
         {
           "logicalName": "os_sr_cand_cvurl",
@@ -124,9 +133,27 @@
           "columns": [
             "os_sr_cand_cnum"
           ],
-          "status": "Proposed; candidate number policy and key-safe character set are unresolved."
+          "status": "Proposed unique key for the Dataverse-generated nonpersonal Candidate Number."
+        },
+        {
+          "name": "os_sr_cand_ak_corid",
+          "columns": [
+            "os_sr_cand_corid"
+          ],
+          "status": "Proposed unique key for idempotent Candidate creation."
         }
-      ]
+      ],
+      "ownerAssignment": "AuthenticatedInitiatingUser",
+      "responsibleBso": "Dataverse ownerid; no duplicate Assigned BSO lookup",
+      "audit": {
+        "enabled": true,
+        "scope": "Dataverse table auditing",
+        "columnSecurity": {
+          "os_sr_cand_nm": false,
+          "os_sr_cand_eml": false,
+          "os_sr_cand_phn": false
+        }
+      }
     },
     {
       "logicalName": "os_sr_call",
@@ -151,10 +178,10 @@
         {
           "logicalName": "os_sr_call_out",
           "displayName": "Call Outcome",
-          "type": "String",
-          "maxLength": 100,
+          "type": "GlobalChoice",
+          "target": "os_sr_callout",
           "required": "Required",
-          "decision": "Outcome taxonomy is explicitly unresolved; do not use arbitrary free text as a transition instruction."
+          "decision": "Owner-approved controlled outcome taxonomy; no arbitrary free-text transition instruction."
         },
         {
           "logicalName": "os_sr_call_ctat",
@@ -184,17 +211,10 @@
           "logicalName": "os_sr_call_corid",
           "displayName": "Correlation ID",
           "type": "String",
-          "maxLength": 100,
-          "required": "Conditional",
-          "purpose": "Correlate the business action and its persisted effects."
-        },
-        {
-          "logicalName": "os_sr_call_actkey",
-          "displayName": "Action Idempotency Key",
-          "type": "String",
-          "maxLength": 100,
+          "maxLength": 36,
           "required": "RequiredForOperationWrites",
-          "policy": "Opaque URL-safe identifier; never a credential."
+          "format": "GUID",
+          "purpose": "Caller-generated operation ID and idempotency key."
         }
       ],
       "alternateKeys": [
@@ -202,11 +222,15 @@
           "name": "os_sr_call_ak_cand_action",
           "columns": [
             "os_sr_call_cand",
-            "os_sr_call_actkey"
+            "os_sr_call_corid"
           ],
-          "status": "Proposed idempotency constraint."
+          "status": "Proposed idempotency constraint; CorrelationId is a caller-generated GUID."
         }
-      ]
+      ],
+      "audit": {
+        "enabled": true,
+        "scope": "Dataverse table auditing"
+      }
     },
     {
       "logicalName": "os_sr_csh",
@@ -263,15 +287,16 @@
           "displayName": "Reason",
           "type": "Memo",
           "maxLength": 1000,
-          "required": "Conditional",
-          "decision": "Reason-required transitions and allowed reason content need owner policy."
+          "required": "RequiredForReschedule",
+          "decision": "Owner-approved mandatory reschedule reason."
         },
         {
           "logicalName": "os_sr_csh_corid",
           "displayName": "Correlation ID",
           "type": "String",
-          "maxLength": 100,
-          "required": "Conditional",
+          "maxLength": 36,
+          "required": "RequiredForOperationTransitions",
+          "format": "GUID",
           "purpose": "Link related operation evidence without embedding external payloads."
         },
         {
@@ -281,13 +306,6 @@
           "maxLength": 50,
           "required": "Required",
           "policy": "Server-allowlisted action name."
-        },
-        {
-          "logicalName": "os_sr_csh_actkey",
-          "displayName": "Transition Idempotency Key",
-          "type": "String",
-          "maxLength": 100,
-          "required": "Required"
         }
       ],
       "alternateKeys": [
@@ -295,11 +313,15 @@
           "name": "os_sr_csh_ak_cand_action",
           "columns": [
             "os_sr_csh_cand",
-            "os_sr_csh_actkey"
+            "os_sr_csh_corid"
           ],
-          "status": "Proposed exactly-once transition-history constraint."
+          "status": "Proposed exactly-once transition-history constraint; CorrelationId is a caller-generated GUID."
         }
-      ]
+      ],
+      "audit": {
+        "enabled": true,
+        "scope": "Dataverse table auditing"
+      }
     }
   ],
   "globalChoice": {
@@ -331,6 +353,26 @@
       {
         "value": 100010005,
         "label": "Candidate Failed"
+      }
+    ],
+    "valueStatus": "Proposed deterministic values; verify publisher option-value allocation before any future write."
+  },
+  "callOutcomeChoice": {
+    "logicalName": "os_sr_callout",
+    "displayName": "Call Outcome",
+    "valuePrefix": 10001,
+    "options": [
+      {
+        "value": 100010000,
+        "label": "Answered"
+      },
+      {
+        "value": 100010001,
+        "label": "No Answer"
+      },
+      {
+        "value": 100010002,
+        "label": "Call Back Requested"
       }
     ],
     "valueStatus": "Proposed deterministic values; verify publisher option-value allocation before any future write."
@@ -380,16 +422,32 @@
       "required": false,
       "delete": "Restrict",
       "assignShareReparent": "NoCascade"
+    }
+  ],
+  "callOutcomeRules": [
+    {
+      "outcome": "Answered",
+      "from": "Need Call Candidate",
+      "to": "Candidate Answered",
+      "createsCallLog": true,
+      "createsStatusHistory": true,
+      "atomic": true
     },
     {
-      "schemaName": "os_sr_lgcar_cand",
-      "parent": "os_sr_lgcar",
-      "child": "os_sr_cand",
-      "lookup": "os_sr_cand_lgcar",
-      "required": false,
-      "delete": "Restrict",
-      "assignShareReparent": "NoCascade",
-      "dependency": "LEGO Career target not provisioned in Phase 2D."
+      "outcome": "No Answer",
+      "from": "Need Call Candidate",
+      "to": "Need Call Candidate",
+      "createsCallLog": true,
+      "createsStatusHistory": false,
+      "atomic": true
+    },
+    {
+      "outcome": "Call Back Requested",
+      "from": "Need Call Candidate",
+      "to": "Need Call Candidate",
+      "createsCallLog": true,
+      "createsStatusHistory": false,
+      "atomic": true
     }
   ],
   "transitionMatrix": [
@@ -403,7 +461,7 @@
     {
       "from": "Candidate Answered",
       "action": "ProceedToScheduling",
-      "condition": "Required CV URL and valid linked career are present",
+      "condition": "Move to manual scheduling only; future booking boundary validates CV URL and linked LEGO Career.",
       "to": "Waiting Manual Scheduling",
       "allowed": true
     },
@@ -431,7 +489,8 @@
     {
       "from": "Round 1 Scheduled",
       "action": "RequestReschedule",
-      "condition": "Approved cancellation/reconciliation evidence is verified; no calendar call in Phase 3A",
+      "condition": "Mandatory reason is recorded; calendar/event cancellation attempt and its evidence are owned by the later scheduling phase.",
+      "executionStatus": "DeferredUntilSchedulingBoundary",
       "to": "Need Call Candidate",
       "allowed": true
     }
@@ -443,16 +502,19 @@
     "binding": "Unbound",
     "implementation": "Synchronous main-operation plug-in",
     "inputs": [
-      "CandidateId: Guid, required",
+      "CandidateId: Guid, required except for CreateCandidate",
       "ActionType: String allowlist, required",
       "ExpectedStatus: Integer, required for transitions",
-      "IdempotencyKey: URL-safe opaque string, required",
-      "Reason: String, conditional",
-      "CorrelationId: String, conditional",
-      "CallOutcome: String, required for RecordCall pending approved taxonomy",
+      "CorrelationId: Guid, caller-generated and required for every state-changing operation",
+      "CandidateName: String, required for CreateCandidate",
+      "CandidateEmail: String, required for CreateCandidate",
+      "CandidatePhone: String, optional for CreateCandidate",
+      "PositionId: Guid, optional for CreateCandidate",
+      "CandidateSourceId: Guid, optional for CreateCandidate",
+      "Reason: String, required for RequestReschedule",
+      "CallOutcome: os_sr_callout value, required for RecordCall",
       "ContactedAt: DateTime, required for RecordCall",
-      "Notes: String, optional",
-      "RescheduleEvidenceId: String, required for RequestReschedule"
+      "Notes: String, optional"
     ],
     "outputs": [
       "ResultCode: Applied or DuplicateReplay",
@@ -462,11 +524,17 @@
       "StatusHistoryId when created"
     ],
     "rules": [
-      "Action allowlist maps to fixed transitions; caller cannot submit arbitrary target status.",
+      "CreateCandidate, UpdateCandidate, and workflow actions are allowlisted; caller cannot submit arbitrary target status.",
       "Use authenticated initiating user as actor; never trust actor IDs supplied by clients.",
+      "CreateCandidate assigns Dataverse ownerid to the authenticated initiating BSO and omits any Assigned BSO duplicate lookup.",
+      "CorrelationId is a caller-generated GUID, required for every state-changing operation and reused only for retries of that logical operation.",
       "Compare ExpectedStatus and Dataverse RowVersion; reject stale/conflicting updates.",
-      "Idempotent replay returns original result; same key with different payload is rejected.",
+      "Unique Candidate/Call/History correlation keys prevent duplicate Candidate creates, Call Logs, and transition History rows; replay payloads are checked for conflict.",
+      "UpdateCandidate uses replacement values; an identical replay is a no-op and creates no Call Log, History row, or status transition; CorrelationId remains required.",
       "Commit Candidate update, Call Log, and exactly one Status History row atomically when applicable.",
+      "Answered calls atomically write Call Log, Candidate status, and one History row; non-answer outcomes write only Call Log and do not change status.",
+      "Candidate Number is generated by Dataverse, nonpersonal, immutable after create, and protected by a unique alternate key.",
+      "Reschedule requires a reason and writes actor, server timestamp, correlation ID, previous/new status, and reason; the action remains unavailable until the later cancellation-attempt boundary is implemented.",
       "No external provider call is made by this Phase 3A operation."
     ]
   },
@@ -474,26 +542,25 @@
     "authorized": false,
     "maximumTenantWrites": 0,
     "sequence": [
-      "Create or verify global Choice",
+      "Create or verify global Choices os_sr_candstat and os_sr_callout",
       "Create Candidate table",
-      "Add Candidate columns and lookups to existing approved reference tables",
-      "Resolve LEGO Career target dependency before creating that lookup",
+      "Add Candidate columns and lookups to the existing approved Position, Candidate Source, and TA Directory tables",
       "Create Call Log table and columns",
       "Create Candidate Status History table and columns",
       "Create alternate keys after table/column metadata propagation",
+      "Set table auditing enabled on Candidate, Call Log, and Candidate Status History; verify organization auditing is enabled under approved governance before relying on it",
       "Verify exact Solution membership",
       "Use only separately approved bounded publication/reconciliation"
     ],
     "businessOperationSeparateFromSchema": true
   },
-  "unresolvedDecisions": [
-    "Candidate Number source, generation, format, and allowed character set",
-    "Call outcome taxonomy and which non-answer outcomes create call rows without a status transition",
-    "Candidate create-time requiredness for email and phone",
-    "Candidate owner/BSO assignment and team/transfer semantics",
-    "Reason/correlation evidence requirements for reschedule and history rows",
-    "Field-security and audit-column policy for candidate contact and CV data",
-    "Available LEGO Career lookup target and its required metadata"
+  "unresolvedDecisions": [],
+  "externalPrerequisites": [
+    "Verify publisher option-value allocation for both global Choices immediately before any future metadata write.",
+    "The last documented environment assessment found organization auditing disabled; verify approved organization-level audit enablement, retention, access, and capacity before relying on table audit flags.",
+    "Complete least-privilege Custom API execution and effective-access design while preserving the authenticated initiating user; no role/access change is authorized here.",
+    "Verify the exact authorized environment, solution/publisher, and supported AutoNumber metadata path during a separately authorized provisioning preflight.",
+    "Defer LEGO Career relationship, career validation, scheduling, and cancellation evidence to the later booking/scheduling boundary."
   ],
   "testSafety": {
     "syntheticOnly": true,

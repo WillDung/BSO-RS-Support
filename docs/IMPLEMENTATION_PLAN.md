@@ -1,6 +1,6 @@
 # Implementation Plan
 
-Phase status is factual as of 23 October 2026. Phase 0 foundation and Phase 1B Publisher/Solution setup are complete. The approved reference tables `os_sr_ta`, `os_sr_pos`, `os_sr_csrc`, and `os_sr_loc` are verified. Phase 2D reference-app composition and publication are complete with the accepted deferred form-record-test caveat. Phase 3A has a deterministic proposal and offline assertions but is **`BLOCKED_PRODUCT_DECISION`**; Candidate, Call Log, Candidate Status History, Choice, Custom API, and plug-in are not provisioned or deployed. See [Current State](CURRENT_STATE.md).
+Phase status is factual as of 23 October 2026. Phase 0 foundation and Phase 1B Publisher/Solution setup are complete. The approved reference tables `os_sr_ta`, `os_sr_pos`, `os_sr_csrc`, and `os_sr_loc` are verified. Phase 2D reference-app composition and publication are complete with the accepted deferred form-record-test caveat. Phase 3A owner product decisions are approved and applied to the deterministic proposal; provisioning readiness is **`BLOCKED_EXTERNAL_AUDIT_AND_API_PRIVILEGE_PREREQUISITES`**. Candidate, Call Log, Candidate Status History, Choices, Custom API, and plug-in are not provisioned or deployed. See [Current State](CURRENT_STATE.md) and the [Phase 3A.2 report](PHASE_3A2_CANDIDATE_CORE_DECISION_APPLICATION.md).
 
 The first Position Apply attempt on 20 October 2026 returned HTTP 401. This is historical and was followed by separately authorized reference-table operations; it is not the current table inventory. Its root cause remains unknown. See [Current State](CURRENT_STATE.md) and [Scripts](../scripts/README.md).
 
@@ -23,8 +23,8 @@ The first Position Apply attempt on 20 October 2026 returned HTTP 401. This is h
 - **Deliverables:** [Dataverse Schema Specification](DATAVERSE_SCHEMA_SPECIFICATION.md); Publisher, unmanaged Solution, and four reference tables verified. Candidate core proposal is separately documented in [Phase 3A](PHASE_3A_CANDIDATE_CORE_DESIGN.md). No Candidate business records, Candidate API, or Candidate plug-in exists.
 - **Acceptance:** Resolve design decisions; approve schema and security; verify keys/relationships/audit; then test permitted/blocked transitions and no duplicate status/history before implementation acceptance.
 - **Validation:** Static logical-name/key/relationship review; read-only solution component check; executable Dataverse/API, authorization, concurrency, and audit tests only after a separately approved implementation.
-- **Risks:** Candidate/TA identity and ownership, key value formats, field-level security vs keys, retention, external side effects, and legacy data semantics remain unresolved.
-- **Status:** Publisher/Solution setup and the separately approved reference-table implementations are complete. Candidate/history schema and security are not approved or provisioned; Phase 3A remains blocked on product/security decisions. Audit policy and Candidate business operations remain unresolved. See [Current State](CURRENT_STATE.md), [Data Model](DATA_MODEL.md), and the [Reference Table Runbook](PHASE_1D_B_REFERENCE_TABLE_RUNBOOK.md).
+- **Risks:** TA identity, child ownership/effective-access model, key value formats, field-level security vs keys, audit retention, external side effects, and legacy data semantics remain unresolved.
+- **Status:** Publisher/Solution setup and the separately approved reference-table implementations are complete. Candidate-core product decisions are approved and the schema remains unprovisioned. Organization-level audit governance and least-privilege Candidate business-operation security remain unresolved readiness gates. See [Current State](CURRENT_STATE.md), [Data Model](DATA_MODEL.md), and the [Reference Table Runbook](PHASE_1D_B_REFERENCE_TABLE_RUNBOOK.md).
 
 ## Phase 2 — Core Recruitment App
 
@@ -47,11 +47,11 @@ The first Position Apply attempt on 20 October 2026 returned HTTP 401. This is h
 
 - **Objective:** Produce an owner-reviewable design for Candidate, Call Log, Candidate Status History, their state machine, and server-enforced transition contract.
 - **Scope:** Design/readiness only; exactly three proposed tables plus the shared Choice and business-operation contract. No tenant access, schema writes, business rows, API/plugin deployment, app changes, publication, or role changes.
-- **Dependencies:** Candidate Number policy; Call Outcome taxonomy; Candidate create-time requiredness; BSO ownership/transfer model; reschedule evidence/reason policy; approved field-security/audit policy; LEGO Career lookup target; Custom API execution/privilege review.
+- **Dependencies:** Owner decisions for Candidate Number, Call Outcome, contact requiredness, owner model, reschedule reason, auditing/field security, operation correlation/idempotency, and LEGO Career deferral are approved. Remaining gates are organization-level audit governance, least-privilege Custom API execution/effective-access design, option-value/AutoNumber verification, and a guarded environment/solution preflight.
 - **Deliverables:** [Phase 3A design report](PHASE_3A_CANDIDATE_CORE_DESIGN.md), [synthetic metadata proposal manifest](PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json), and [offline assertion harness](../tests/Phase3ACandidateCoreDesign.Tests.ps1).
 - **Acceptance:** Candidate and child schemas deterministic; all transitions and negative cases defined; operation atomically enforces status/history/call writes and idempotency; relationships/security/integrity consistent; no material product decision remains open.
 - **Validation:** Offline proposal assertions, existing regression/readiness suites, and `git diff --check`. Runtime Dataverse/API/authorization/concurrency tests require a future implementation in an approved test environment.
-- **Status:** **`BLOCKED_PRODUCT_DECISION`**. The report records open decisions and a bounded next task. Phase 3A made zero tenant requests and zero writes.
+- **Status:** **`BLOCKED_EXTERNAL_AUDIT_AND_API_PRIVILEGE_PREREQUISITES`**. Product decisions are recorded; organization-level audit governance and operation privilege design remain blockers. Phase 3A.2 made zero tenant requests and zero writes; provisioning still requires separate authorization.
 
 ## Phase 3 — Email and Scheduling
 

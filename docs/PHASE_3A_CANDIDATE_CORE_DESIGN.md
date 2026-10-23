@@ -1,33 +1,30 @@
 # Phase 3A — Candidate Core Domain Design & Provisioning Readiness Report
 
 **As of:** 23 October 2026  
-**Final classification:** `BLOCKED_PRODUCT_DECISION`  
+**Final classification:** `BLOCKED_EXTERNAL_AUDIT_AND_API_PRIVILEGE_PREREQUISITES`
 **Phase:** Design/readiness only. No schema write, API/plugin implementation, publication, app change, or business-record operation is authorized by this report.
 
-**Phase 3A.1 follow-up:** The requested owner-decision closure did not receive owner-authored selections. No proposal item is treated as approved; schema and manifest are unchanged. See the [Phase 3A.1 decision closure report](PHASE_3A1_CANDIDATE_CORE_DECISION_CLOSURE.md).
+**Phase 3A.1 follow-up:** The first closure attempt received no owner-authored choices; its historical result remains in the [Phase 3A.1 report](PHASE_3A1_CANDIDATE_CORE_DECISION_CLOSURE.md). On 23 October 2026, the owner explicitly approved all eight decision areas. This revision applies those decisions and records remaining external gates in the [Phase 3A.2 decision application and readiness report](PHASE_3A2_CANDIDATE_CORE_DECISION_APPLICATION.md).
 
 ## 1. Executive Summary
 
-The existing repository proposal and the Phase 3A review support a consistent, server-enforced domain shape for Candidate, Call Log, and Candidate Status History. The canonical six-state workflow and naming family are already specified. A deterministic proposal snapshot is in [the metadata plan](PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json).
+The owner-approved design now has a deterministic shape for Candidate, Call Log, Candidate Status History, the status and call-outcome Choices, and the server-enforced operation contract. Approved requirements include server-generated nonpersonal Candidate Numbers; Answered / No Answer / Call Back Requested outcomes; required Candidate Name and Email with optional Phone; Dataverse Owner as the responsible BSO; a mandatory reschedule reason; table auditing for all three tables; caller-generated GUID CorrelationId idempotency; and deferral of the LEGO Career lookup to the later scheduling/booking boundary. The synthetic proposal snapshot is in [the metadata plan](PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json).
 
-Provisioning readiness is **blocked** because decisions that change the initial schema or action contract remain open: Candidate Number source/format, call outcome taxonomy, create-time contact requiredness, Candidate owner/BSO semantics, reschedule evidence/reason requirements, sensitive-field/audit policy, and the unprovisioned LEGO Career lookup target. These are not silently decided here. No Candidate business rows or tenant metadata were queried or written.
+Provisioning readiness remains blocked by external gates, not unresolved owner product choices: the last documented environment review found organization-level auditing disabled and its retention/access/capacity governance still open; the least-privilege Custom API execution privilege model has not been approved or tested; and Choice value allocation plus the supported AutoNumber path require fresh preflight verification. These cannot be closed by this offline design task. No Candidate business rows or tenant metadata were queried or written.
 
-The proposal uses a global Choice, `os_sr_candstat`, and one synchronous server operation, `os_sr_cact`, with a main-operation plug-in. Direct status editing is blocked. Candidate state, any applicable Call Log, and exactly one Status History row must commit atomically. Booking, calendar cancellation, interview result capture, email, and integrations remain out of this phase.
+The proposal uses global Choices `os_sr_candstat` and `os_sr_callout`, and one synchronous server operation, `os_sr_cact`, with a main-operation plug-in. Direct status editing is blocked. Candidate state, an applicable Call Log, and exactly one Status History row must commit atomically. Non-answer calls create only a Call Log. Reschedule requires a reason and captures actor, server timestamp, CorrelationId, previous/new status, and reason; actual calendar/event cancellation evidence and execution remain deferred to the scheduling phase. Booking, interview-result capture, email, and integrations remain out of this slice.
 
 ## 2. Repository / Phase Baseline
 
 - Repository: `BSO-RS-Support`; branch `main`.
-- HEAD: `0b8f3aa8fe3bfdbc6dea40c13b97a517e31cabfd`.
-- `origin/main`: `0b8f3aa8fe3bfdbc6dea40c13b97a517e31cabfd`.
-- Initial worktree: clean; no pre-existing user changes were present.
+- Phase 3A.2 starting HEAD: `3ead7282c09911d4275f931cb905247533a9df64` on `main`; `origin/main` matched at start.
+- Phase 3A.2 starting worktree: clean; the owner-approved decision revision began from that baseline.
 - Phase 2D reference-app milestone: `PHASE_2D_COMPLETE`. Published `srapp` remains the reference-administration app only; this work does not alter it.
 - Current verified app pages remain TA Directory, Positions, Candidate Sources, and Locations. No Candidate, Call Log, or Candidate Status History table is represented as deployed.
-- The exact approved reference tables (`os_sr_ta`, `os_sr_pos`, `os_sr_csrc`, `os_sr_loc`) exist; `os_sr_lgcar` is a proposed, not Phase 2D-verified, lookup target.
+- The exact approved reference tables (`os_sr_ta`, `os_sr_pos`, `os_sr_csrc`, `os_sr_loc`) exist. No Candidate-to-LEGO-Career lookup is included in the Phase 3A core proposal.
 - Project table prefix contract is `os_sr_*`; solution name is `os_sr_bso_rs_support`.
 - No ATSugg source schema or live candidate data was inspected.
-- At closeout, HEAD and `origin/main` remain `0b8f3aa8fe3bfdbc6dea40c13b97a517e31cabfd`. The worktree contains nine modified tracked documentation/test files and three new in-scope files listed in Section 23; no commit or push was made.
-
-The pre-existing Phase 2D documentation edits were already committed before this phase. This work began from a clean repository state and does not restore, stash, switch, pull, rebase, commit, or push.
+The Phase 3A.2 revision is local and uncommitted. No commit, push, restore, stash, branch switch, pull, or rebase was performed.
 
 ## 3. Candidate Table Design
 
@@ -35,21 +32,21 @@ The pre-existing Phase 2D documentation edits were already committed before this
 
 | Proposed column | Type / limit | Classification | Requiredness / rule |
 |---|---|---|---|
-| `os_sr_cand_cnum` — Candidate Number | Text, 100; primary name | Required | Unique, stable internal identifier and proposed alternate key. Source, generation, format, confidentiality, and permitted characters remain unresolved. |
-| `os_sr_cand_nm` — Candidate Name | Text, 200 | Required | Personal information; confirm create-time requirement and field security. |
-| `os_sr_cand_eml` — Candidate Email | Email text, 254 | Recommended | Optional at creation in the existing proposal; required before booking under current rules. Not unique and not an alternate key. |
-| `os_sr_cand_phn` — Candidate Phone | Phone text, 50 | Optional / conditional | Require only if the approved first-slice contact operation uses phone; normalization and contact-channel policy are unresolved. |
-| `os_sr_cand_pos` — Position | Lookup to `os_sr_pos` | Recommended | Optional at creation in the current proposal; do not infer title uniqueness. |
+| `os_sr_cand_cnum` — Candidate Number | Dataverse AutoNumber, `CAND-{SEQNUM:8}`; primary name | Required | Server-generated, immutable after creation, unique, nonpersonal; protected by a unique alternate key. Validate the proposed format and supported AutoNumber creation path before provisioning. |
+| `os_sr_cand_nm` — Candidate Name | Text, 200 | Required | Personal information; required at Candidate creation. No column-level security in this initial slice; protect by table/row access and auditing. |
+| `os_sr_cand_eml` — Candidate Email | Email text, 254 | Required | Required at Candidate creation. No column-level security in this initial slice; not unique and not an alternate key. |
+| `os_sr_cand_phn` — Candidate Phone | Phone text, 50 | Optional | Optional at Candidate creation. No column-level security in this initial slice. |
+| `os_sr_cand_corid` — Creation Correlation ID | GUID text, 36 | Required for operation-created records | Caller-generated GUID; unique alternate key prevents duplicate Candidate creation for one logical operation. |
+| `os_sr_cand_pos` — Position | Lookup to `os_sr_pos` | Recommended | Included in Candidate core; optional at creation; do not infer title uniqueness. |
 | `os_sr_cand_csrc` — Candidate Source | Lookup to `os_sr_csrc` | Recommended | Optional at creation in the current proposal; retain historical source meaning. |
 | `os_sr_cand_ta` — Assigned TA | Lookup to `os_sr_ta` | Conditional | Required before booking; TA remains an interviewer/directory contact, not an approval role. |
-| `os_sr_cand_lgcar` — LEGO Career | Lookup to `os_sr_lgcar` | Conditional | Required before booking under current rules. The target table is a dependency outside the verified Phase 2D table inventory. |
-| `os_sr_cand_cvurl` — Candidate CV URL | URL text, 2,000 | Conditional, sensitive | Required before booking under current rules; access/host/retention and field-security policy need approval. |
+| `os_sr_cand_cvurl` — Candidate CV URL | URL text, 2,000 | Conditional, sensitive | Booking prerequisite under current rules; host/access/retention remain later booking-boundary decisions. |
 | `os_sr_cand_stat` — Candidate Workflow Status | Global Choice `os_sr_candstat` | Required | Default `Need Call Candidate`; no direct interactive editing. |
-| `ownerid` | Dataverse system lookup | System | Proposed BSO/approved-team boundary; who assigns, transfers, and shares ownership is unresolved. |
+| `ownerid` | Dataverse system lookup | System | The record Owner is the responsible BSO. Candidate creation assigns the authenticated initiating BSO as Owner; no duplicate Assigned BSO lookup is added. |
 | `createdon`, `createdby`, `modifiedon`, `modifiedby` | Dataverse system columns | System | Do not duplicate as custom columns. |
 | `versionnumber` | Dataverse row version | System | Use for optimistic concurrency if enabled and verified; do not add a custom workflow version without a demonstrated need. |
 
-Do not put candidate name, email, phone, CV URL, salary, interview result, or free-form notes in the primary name or technical identifiers. Email is informational/operational, not a globally unique identity key.
+Do not put candidate name, email, phone, CV URL, salary, interview result, or free-form notes in the primary name or technical identifiers. Email is not a globally unique identity key. The accepted Candidate Number format proposal contains no personal information; Dataverse generation and an active unique key enforce its intended uniqueness.
 
 ## 4. Candidate Status Design
 
@@ -68,6 +65,18 @@ These values follow the `10001` publisher option-value prefix noted by the exist
 
 Block direct UI, Web API, and Flow status changes. Only the approved Dataverse business operation may transition state. Initial creation at the default status is not a transition and does not create a fabricated history row.
 
+## 4A. Call Outcome Design
+
+**Owner-approved initial outcomes:** global Choice `os_sr_callout`.
+
+| Proposed integer | Outcome | Candidate effect from Need Call Candidate |
+|---:|---|---|
+| 100010000 | Answered | Atomically create Call Log, transition to Candidate Answered, and create one Status History row. |
+| 100010001 | No Answer | Create Call Log only; Candidate remains Need Call Candidate; no Status History row. |
+| 100010002 | Call Back Requested | Create Call Log only; Candidate remains Need Call Candidate; no Status History row. |
+
+The three labels are owner-approved. Numeric option values are deterministic proposals and must be checked against the Publisher allocation before any write, then frozen after creation. No other initial outcome is allowed. Invalid outcome/status combinations fail closed.
+
 ## 5. Call Log Design
 
 **Proposed table:** `os_sr_call` / Call Log; `UserOwned`; append-only through the approved action.
@@ -76,16 +85,15 @@ Block direct UI, Web API, and Flow status changes. Only the approved Dataverse b
 |---|---|---|
 | `os_sr_call_ref` — Call Reference | Autonumber Text, `CALL-{SEQNUM:8}` | System-generated nonpersonal primary name; sequence gaps are acceptable. |
 | `os_sr_call_cand` — Candidate | Lookup to `os_sr_cand` | Required; parent deletion restricted. |
-| `os_sr_call_out` — Call Outcome | Text, 100 in the existing proposal | Required, but the controlled outcome taxonomy is an open product decision. Do not parse arbitrary text as an instruction. |
+| `os_sr_call_out` — Call Outcome | Global Choice `os_sr_callout` | Required; only Answered, No Answer, and Call Back Requested are allowed in the initial slice. |
 | `os_sr_call_ctat` — Contacted At | Date/Time, User Local | Required business-event time; distinct from record creation time. |
 | `os_sr_call_ctby` — Contacted By | Lookup to `systemuser` | Required; resolve from authenticated initiating identity, not a client-supplied user or fixed Flow owner. |
 | `os_sr_call_nts` — Notes | Multiline Text, 4,000 | Optional; minimize and restrict any personal/sensitive detail. |
-| `os_sr_call_corid` — Correlation ID | Text, 100 | Conditional; nonsecret operation correlation only. |
-| `os_sr_call_actkey` — Action Idempotency Key | Text, 100 | Required for operation-created rows; opaque URL-safe token, not a credential. |
+| `os_sr_call_corid` — Correlation ID | GUID text, 36 | Required for operation-created rows; caller-generated per logical operation and used as the idempotency key. |
 
-Normal BSO application behavior: Read only; no direct Create/Update/Delete. A validated server action appends a row. Whether an administrator may correct/delete under a separately audited retention process is not decided here. Candidate hard-delete must be restricted while child records exist; deactivation must not delete call evidence. A unique alternate key on Candidate + Action Idempotency Key prevents duplicate operation submissions.
+Normal BSO application behavior: Read only; no direct Create/Update/Delete. A validated server action appends a row. Whether an administrator may correct/delete under a separately audited retention process is not decided here. Candidate hard-delete must be restricted while child records exist; deactivation must not delete call evidence. A unique alternate key on Candidate + CorrelationId prevents duplicate operation submissions.
 
-Only the workflow-supported answered outcome is known to cause the `Need Call Candidate` → `Candidate Answered` transition. Other outcome values and whether all unsuccessful attempts are loggable remain unresolved; do not invent values such as Busy, No Answer, or Voicemail.
+`Answered` from `Need Call Candidate` creates the Call Log, transitions Candidate to `Candidate Answered`, and creates exactly one Status History row atomically. `No Answer` and `Call Back Requested` create a Call Log only and leave Candidate status unchanged.
 
 ## 6. Candidate Status History Design
 
@@ -99,12 +107,11 @@ Only the workflow-supported answered outcome is known to cause the `Need Call Ca
 | `os_sr_csh_newstat` — New Status | Global Choice `os_sr_candstat` | Required; must be an allowed transition and differ from previous. |
 | `os_sr_csh_actr` — Actor | Lookup to `systemuser` | Required; derived from authenticated initiating identity. |
 | `os_sr_csh_chg` — Changed At | Date/Time, User Local | Required; server-generated UTC transition time. |
-| `os_sr_csh_rsn` — Reason | Multiline Text, 1,000 | Conditional; required only under an owner-approved action/reason policy. |
-| `os_sr_csh_corid` — Correlation ID | Text, 100 | Conditional; links external evidence without storing raw payloads. |
+| `os_sr_csh_rsn` — Reason | Multiline Text, 1,000 | Required for reschedule. |
+| `os_sr_csh_corid` — Correlation ID | GUID text, 36 | Required for every operation-created transition row; caller-generated per logical operation. |
 | `os_sr_csh_cact` — Candidate Action | Text, 50 | Required, operation-controlled allowlisted action name. |
-| `os_sr_csh_actkey` — Transition Idempotency Key | Text, 100 | Required for operation-created transitions. |
 
-Normal application access is Read only. Direct user Create/Update/Delete must be denied or blocked by a server-enforced write guard; only the trusted operation creates rows. `Delete=Restrict` and no cascade delete/assign/share/reparent. Ownership should be set by the server operation according to the approved Candidate owner policy; a lookup does not itself grant row access.
+Each accepted reschedule history row records the authenticated actor, server-generated UTC timestamp, CorrelationId, previous/new status, and mandatory reason in the same transaction. Normal application access is Read only. Direct user Create/Update/Delete must be denied or blocked by a server-enforced write guard; only the trusted operation creates rows. `Delete=Restrict` and no cascade delete/assign/share/reparent. Ownership is set by the server operation; a lookup does not itself grant row access.
 
 The purpose-built history is the business transition record, not a substitute for Dataverse auditing. Audit settings and retention remain subject to IT/Compliance approval.
 
@@ -117,20 +124,21 @@ The purpose-built history is the business transition record, not a substitute fo
 | Position → Candidate | `os_sr_pos_cand` / `os_sr_cand_pos` | Candidate lookup proposed optional | Restrict; deactivate reference, do not delete history. |
 | Candidate Source → Candidate | `os_sr_csrc_cand` / `os_sr_cand_csrc` | Candidate lookup proposed optional | Restrict; preserve historical source. |
 | TA Directory → Candidate | `os_sr_ta_cand` / `os_sr_cand_ta` | Conditional, required before booking | Restrict; TA is not an app approver. |
-| LEGO Career → Candidate | `os_sr_lgcar_cand` / `os_sr_cand_lgcar` | Conditional, required before booking | Restrict; target table is an unresolved provisioning dependency. |
 
-Candidate ownership is the security boundary; child records do not inherit access by lookup. The operation must set child ownership deliberately. No relationship cascade should delete call or status-history evidence when a Candidate or reference row is deactivated. Hard-delete policy, transfer/share behavior, and BSO-versus-team ownership require approval.
+Candidate ownership is the security boundary; child records do not inherit access by lookup. Candidate Owner is the responsible BSO; creation uses the authenticated initiating BSO. The operation must set child ownership deliberately. No relationship cascade should delete call or status-history evidence when a Candidate or reference row is deactivated. LEGO Career is excluded from Candidate core; the later booking boundary owns linked-career validation.
 
 ## 8. Transition Matrix
 
 | Current status | Action / qualifying result | Next status | Allowed? | Guard |
 |---|---|---|---|---|
-| Need Call Candidate | `RecordCall`, approved outcome says candidate answered | Candidate Answered | Yes | Same transaction appends Call Log and one History row. |
-| Candidate Answered | `ProceedToScheduling` | Waiting Manual Scheduling | Yes | Required CV URL and valid linked LEGO Career are present under current rules. |
+| Need Call Candidate | `RecordCall` with Answered | Candidate Answered | Yes | Same transaction appends Call Log and one History row. |
+| Need Call Candidate | `RecordCall` with No Answer | Need Call Candidate | Yes, no transition | Create Call Log only; do not create History or change status. |
+| Need Call Candidate | `RecordCall` with Call Back Requested | Need Call Candidate | Yes, no transition | Create Call Log only; do not create History or change status. |
+| Candidate Answered | `ProceedToScheduling` | Waiting Manual Scheduling | Yes | Candidate core does not require a LEGO Career lookup; the later booking boundary validates CV URL and linked career. |
 | Waiting Manual Scheduling | `MarkRound1Scheduled` | Round 1 Scheduled | Yes | Only after a future scheduler reports a verified successful booking. |
 | Round 1 Scheduled | `RecordPass` | Offer Extended | Yes | Requires future authorized Pass result evidence. |
 | Round 1 Scheduled | `RecordFail` | Candidate Failed | Yes | Requires future authorized Fail result evidence. |
-| Round 1 Scheduled | `RequestReschedule` | Need Call Candidate | Yes, conditionally | Requires verified cancellation/reconciliation evidence and applicable reason; no calendar call in Phase 3A. |
+| Round 1 Scheduled | `RequestReschedule` | Need Call Candidate | Deferred to scheduling phase | Requires mandatory reason; the later scheduling phase must implement and evidence the cancellation attempt before this operation is enabled. |
 | Any status | Same status / no-op “transition” | Same status | No | No transition or duplicate history row. |
 | Need Call Candidate | Skip directly to Waiting Manual Scheduling or Round 1 Scheduled | Any later status | No | Reject skipped states. |
 | Candidate Answered | Return directly to Need Call Candidate | Need Call Candidate | No | Reschedule path is only from Round 1 Scheduled. |
@@ -140,48 +148,51 @@ Candidate ownership is the security boundary; child records do not inherit acces
 | Any status | Legacy Draft Created / BSO Reviewing / Sent to TA / TA Approval | Any | No | Deprecated stages are prohibited. |
 | Any status | Unknown action, stale status, missing evidence, unauthorized caller | Any | No | Fail closed with no partial writes. |
 
-The six statuses and canonical path are confirmed. Detailed outcome values, evidence payloads, and reason policy remain proposed/open as stated above.
+The six statuses, three initial outcomes, and mandatory reschedule reason are owner-approved. Calendar/event cancellation evidence and execution are deliberately deferred; this design does not claim the reschedule action is currently executable.
 
 ## 9. Call Action Contract
 
-Proposed single entry point: `os_sr_cact` (“Apply Candidate Action”). For `RecordCall`, it validates the authenticated BSO, Candidate ID, current expected status, idempotency token, contacted timestamp, and an approved outcome.
+Proposed single entry point: `os_sr_cact` (“Apply Candidate Action”). Every state-changing operation requires a caller-generated GUID `CorrelationId`, reused only when retrying the same logical operation. For `RecordCall`, it validates the authenticated BSO, Candidate ID, current expected status, CorrelationId, contacted timestamp, and one of the three approved outcomes.
 
-- If the Candidate is `Need Call Candidate` and the approved outcome is “candidate answered,” atomically append one Call Log, transition to `Candidate Answered`, and append exactly one Status History row.
-- An allowed outcome that does not change status may append one Call Log only; its values and meaning are not approved yet.
+- `Answered` from `Need Call Candidate` atomically appends one Call Log, transitions to `Candidate Answered`, and appends exactly one Status History row.
+- `No Answer` and `Call Back Requested` append one Call Log only and leave status unchanged.
 - Reject a call action whose status/outcome combination is invalid; do not create a log and then fail the transition in a separate request.
 - Do not let a caller supply or impersonate `Contacted By`/History Actor. Capture the initiating user server-side.
-- A repeated identical request returns the original result. Reusing its key with a different action/payload returns a conflict, not a success-shaped response.
-- Exact non-answer outcomes, whether call time can be backdated, phone/email channel requirements, and whether calls are allowed after the first state remain product decisions.
+- A repeated identical request returns the original result. Reusing its CorrelationId with a different action/payload returns a conflict, not a success-shaped response.
+- Call time can be backdated only under the validated input rule; do not invent additional outcomes. No Answer and Call Back Requested are valid only from `Need Call Candidate` in this initial slice.
 
 ## 10. Server-Enforced Transition Contract
 
-**Proposed Dataverse Custom API:** unique name `os_sr_cact`, display name **Apply Candidate Action**, unbound Action with required `CandidateId` input. Its synchronous main-operation plug-in owns the transition validation and transaction boundary.
+**Proposed Dataverse Custom API:** unique name `os_sr_cact`, display name **Apply Candidate Action**, unbound Action implemented by a synchronous main-operation plug-in. `CandidateId` is required except for `CreateCandidate`; every state-changing operation requires `CorrelationId` as a GUID.
 
 Inputs:
 
 | Input | Type | Rule |
 |---|---|---|
-| `CandidateId` | Guid | Required; target Candidate. |
-| `ActionType` | String | Required allowlisted action; never accept arbitrary target state. |
+| `CandidateId` | Guid | Required except for `CreateCandidate`; target Candidate. |
+| `ActionType` | String | Required allowlisted action, including Candidate create/update and workflow actions; never accept arbitrary target state. |
 | `ExpectedStatus` | Integer | Required for transitions; must match current status. |
-| `IdempotencyKey` | String | Required opaque URL-safe value. |
-| `Reason` | String | Conditional; owner-approved rules determine when required. |
-| `CorrelationId` | String | Conditional, nonsecret. |
-| `CallOutcome` | String | Required for `RecordCall`; exact approved taxonomy unresolved. |
+| `CorrelationId` | Guid | Required, caller-generated, one per logical state-changing operation; reuse only for its retry. |
+| `CandidateName` | String | Required for `CreateCandidate`. |
+| `CandidateEmail` | String | Required for `CreateCandidate`. |
+| `CandidatePhone` | String | Optional for `CreateCandidate`. |
+| `PositionId` / `CandidateSourceId` | Guid | Optional Candidate lookups; Position is included in core. |
+| `Reason` | String | Required for `RequestReschedule`. |
+| `CallOutcome` | Choice integer | Required for `RecordCall`; only Answered, No Answer, or Call Back Requested. |
 | `ContactedAt` | DateTime | Required for `RecordCall`; represents business event, not server creation time. |
 | `Notes` | String | Optional and minimized. |
-| `RescheduleEvidenceId` | String | Required for reschedule; must resolve to approved persisted cancellation/reconciliation evidence from a future feature. |
 
 Outputs are deterministic: `ResultCode` (`Applied` or `DuplicateReplay`), previous/current status, and created Call Log/History IDs when applicable. Failures return explicit stable validation/conflict/authorization codes; no success-shaped fallback.
 
-The plug-in must retrieve authoritative state, validate action/status/evidence, derive actor/time, enforce optimistic concurrency, and write Candidate + applicable children in one Dataverse transaction. Verify the Custom API transaction setting and synchronous plug-in execution behavior before implementation. If atomicity cannot be guaranteed, stop; do not split state and history writes across calls or Flow steps. External calendar/email calls are excluded.
+Candidate creation assigns `ownerid` from the authenticated initiating BSO and lets Dataverse generate Candidate Number; clients cannot provide or later update the number. The plug-in must retrieve authoritative state, validate action/status, derive actor/time, enforce optimistic concurrency, and write Candidate + applicable children in one Dataverse transaction. Verify the Custom API transaction setting and synchronous plug-in execution behavior before implementation. If atomicity cannot be guaranteed, stop; do not split state and history writes across calls or Flow steps. External calendar/email calls are excluded. `RequestReschedule` remains disabled until the later scheduling phase supplies the required cancellation-attempt boundary.
 
 ## 11. Concurrency / Idempotency Design
 
 - Use Candidate `versionnumber`/row version and conditional update (`IfRowVersionMatches` semantics); verify Candidate optimistic concurrency is enabled. Status equality alone does not prevent concurrent lost updates.
-- Use unique alternate keys `(Candidate, Action Idempotency Key)` on Call Log and Status History; no email alternate key.
-- Generate a new opaque key for each logical action; retrying the same request reuses it. Never generate a new key merely to get past an uncertain result.
-- For an existing key, compare action/payload to distinguish exact replay from key reuse with changed intent. Exact replay returns the persisted outcome; a changed payload is rejected.
+- Use unique alternate keys on Candidate creation CorrelationId, `(Candidate, CorrelationId)` on Call Log, and `(Candidate, CorrelationId)` on Status History; no email alternate key.
+- The caller generates a GUID CorrelationId for each logical state-changing operation; retrying the same operation reuses it. Never generate a new ID merely to get past an uncertain result.
+- For a persisted correlation key, compare action/payload to distinguish exact replay from key reuse with changed intent. Exact replay returns the persisted outcome; a changed payload is rejected.
+- `UpdateCandidate` uses replacement values: an identical replay is a no-op and cannot append a Call Log, History row, or status transition. Its CorrelationId is still mandatory.
 - The call's log, Candidate status update, and History row share one synchronous Dataverse transaction. A duplicate-key or stale-row conflict must roll the transaction back with no partial records.
 - Candidate status update uses `ExpectedStatus` and row-version check. Distinguish stale/concurrent conflict from invalid workflow transition.
 - Do not add a custom version field unless actual platform concurrency cannot meet the need. No automatic retry after an uncertain metadata or business operation.
@@ -192,19 +203,19 @@ No roles or access were changed or assigned in Phase 3A. Proposed future effecti
 
 | Table | BSO (subject to approved role) | Admin |
 |---|---|---|
-| Candidate | Create/Read/Write for non-status fields; no Delete. Status field changes only via Custom API. Assign/Share only if an approved ownership model requires it. | No Admin role assumed; define separately and grant minimum needed. |
+| Candidate | Create/Read/Write only through the approved Custom API, including Name, Email, Phone, and status; no Delete. Owner is the responsible BSO. | No Admin role assumed; define separately and grant minimum needed. |
 | Call Log | Read; no direct Create/Update/Delete. API-controlled append only. | Read only unless an approved correction/retention procedure says otherwise. |
 | Status History | Read; no direct Create/Update/Delete. Trusted operation only. | Read only; no routine edit/delete. |
 
-The Custom API must enforce an explicit Execute privilege and authorize the initiating BSO. Any operation identity/privilege arrangement must be least-privileged, auditable, and preserve the initiating actor; no System Administrator shortcut, fixed Flow-owner identity, or silent impersonation is assumed. Exact service execution/security design and field profiles require security-owner review. TA receives no Candidate access by default.
+The Custom API must enforce an explicit Execute privilege and authorize the initiating BSO. Any operation identity/privilege arrangement must be least-privileged, auditable, and preserve the initiating actor; no System Administrator shortcut, fixed Flow-owner identity, or silent impersonation is assumed. The exact privilege/effective-access model remains an external security approval and test prerequisite. TA receives no Candidate access by default.
 
 ## 13. Privacy / Audit Model
 
 - Candidate Name, Email, Phone, CV URL, Candidate Number, and Call Notes can reveal personal information. Candidate Number and key columns cannot be field-secured; protect them with table/row access.
-- Review column security for name, email, phone, and CV URL; a CV URL is sensitive even if no document is stored in Dataverse.
+- Do not apply column-level security to Candidate Name, Email, or Phone in this initial slice, as explicitly approved. Protect them through least-privilege table/row access and auditing. A CV URL remains sensitive and requires its later booking-boundary access/retention design.
 - Minimize free-text notes. Never put full Candidate rows, CV URLs, tokens, secrets, or provider payloads in logs, error text, tests, prompts, or provisioning evidence.
-- Proposed table audit scope: Candidate status/owner/selected lookup changes; Call Log and History business changes. Do not audit CV/contact contents until IT/Compliance approves the exact column matrix and retention impact.
-- Dataverse auditing supplements `os_sr_csh`; it does not replace it. Existing documentation reports environment auditing disabled and configured retention of 30 days as technical state, not approved policy. No settings were read or changed in Phase 3A.
+- Owner-approved requirement: enable Dataverse table auditing for Candidate, Call Log, and Candidate Status History. Do not apply column-level security to Candidate Name, Email, or Phone in this initial slice. Dataverse auditing supplements `os_sr_csh`; it does not replace it.
+- The last documented environment assessment reports organization-level auditing disabled and configured retention of 30 days, which is not an approved policy. IT/Compliance must resolve organization-level activation, retention, audit access, legal-hold/DSR, and capacity governance before audit can be relied on. No settings were read or changed in this design task.
 - Use synthetic fixtures only. No candidate data/CV or tenant-specific connector URL in tests.
 
 ## 14. Naming Contract
@@ -221,46 +232,47 @@ Names are proposals and use full final names once; Power Apps inputs that prepen
 | Candidate action Custom API | `os_sr_cact` |
 | Candidate → Call Log / History relationships | `os_sr_cand_call` / `os_sr_cand_csh` |
 | Candidate Number alternate key | `os_sr_cand_ak_cnum` |
-| Call / History idempotency keys | `os_sr_call_ak_cand_action` / `os_sr_csh_ak_cand_action` |
+| Creation / Call / History correlation keys | `os_sr_cand_ak_corid` / `os_sr_call_ak_cand_action` / `os_sr_csh_ak_cand_action` |
+| Call outcome Choice | `os_sr_callout` |
 | Candidate action plug-in step | `os_sr_cact_stp` |
 
 Field names appear in the proposal manifest. Existing abbreviations (`cand`, `call`, `csh`, `cnum`, `stat`, `actkey`, `corid`, `ctat`, `ctby`, `actr`, `prevstat`, `newstat`, `rsn`, `ref`, `stp`) follow [Data Model](DATA_MODEL.md). Add `cact` = Candidate Action to the private abbreviation dictionary as a proposal before approving component names. Do not double-prefix and do not use names as a security boundary.
 
 ## 15. Keys / Integrity
 
-- Candidate key: `os_sr_cand_ak_cnum` on `os_sr_cand_cnum`, conditional on the still-open Candidate Number format/source and key-safe character policy.
-- Call idempotency key: `os_sr_call_ak_cand_action` on `os_sr_call_cand` + `os_sr_call_actkey`.
-- Status-history idempotency key: `os_sr_csh_ak_cand_action` on `os_sr_csh_cand` + `os_sr_csh_actkey`.
+- Candidate key: `os_sr_cand_ak_cnum` on Dataverse-generated `os_sr_cand_cnum`; `os_sr_cand_ak_corid` on creation CorrelationId.
+- Call idempotency key: `os_sr_call_ak_cand_action` on `os_sr_call_cand` + `os_sr_call_corid`.
+- Status-history idempotency key: `os_sr_csh_ak_cand_action` on `os_sr_csh_cand` + `os_sr_csh_corid`.
 - Candidate email is not globally unique and is not an alternate key.
-- Require nonblank key values, stable opaque tokens, maximum allowed field/index sizes, and valid Dataverse alternate-key characters. Verify index activation before relying on a key.
+- Require nonblank canonical GUID correlation values, maximum allowed field/index sizes, and valid Dataverse alternate-key characters. Verify index activation before relying on a key.
 - Require exactly one History row for every accepted transition, and no History row for a rejected or unchanged-state request. Initial Candidate creation at the default is not a transition.
 - Relationship integrity: required child-to-Candidate references; restrict hard deletes and preserve inactive parents/children; validate same Candidate for any future multi-lookup operation.
-- Correlation IDs are for tracing, not uniqueness. The action idempotency key plus Candidate alternate key is the uniqueness mechanism; add a separate correlation key only if a confirmed business requirement later needs it.
+- CorrelationId is both the trace identifier and per-operation idempotency token. Distinct alternate keys scope it to Candidate creation, Call Log, and Status History effects; check payload equivalence before returning a replay.
 
 ## 16. Provisioning Sequence
 
 No sequence below is authorized in this phase. After all blocking decisions and approvals are resolved, the proposed bounded sequence is:
 
 1. Confirm the exact target environment and active identity under the required guarded workflow; do not log in or switch environments.
-2. Verify solution `os_sr_bso_rs_support`, Publisher `os_bso_rs_support`, prefix `os`, option-value range, and exact existing reference lookup targets.
-3. Resolve/verify the `os_sr_lgcar` target dependency before creating `os_sr_cand_cand_lgcar`; do not fabricate an external reference table.
-4. Create/verify global Choice `os_sr_candstat` with the approved stable values.
-5. Create Candidate table and primary name; add non-lookup columns.
-6. Create Call Log table and non-lookup columns.
-7. Create Candidate Status History table and non-lookup columns.
-8. Create lookups/relationships only after target table metadata is confirmed; delete behavior must be Restrict/no cascade.
+2. Verify solution `os_sr_bso_rs_support`, Publisher `os_bso_rs_support`, prefix `os`, both Choice value allocations, and exact existing Position, Candidate Source, and TA lookup targets.
+3. Resolve organization-level auditing, retention, audit access, and capacity prerequisites under approved IT/Compliance governance; stop if table audit cannot be made effective.
+4. Confirm supported AutoNumber creation for `os_sr_cand_cnum` and the approved generation/immutability enforcement.
+5. Create/verify global Choices `os_sr_candstat` and `os_sr_callout` with their approved labels and verified/frozen values.
+6. Create Candidate table with AutoNumber primary name and non-lookup columns, including Creation CorrelationId; create its table audit flag.
+7. Create Call Log and Candidate Status History with their GUID CorrelationId fields and table audit flags.
+8. Create lookups only to confirmed existing Candidate, Position, Candidate Source, TA Directory, Call Log, and History targets; LEGO Career is excluded from this slice.
 9. Wait for metadata propagation; create alternate keys only after columns exist, then verify key activation.
-10. Verify exact Solution membership and complete metadata by fresh GET-only reads after each authorized write.
-11. Implement Custom API/plug-in in a separate bounded phase after security and atomicity review; do not combine schema creation with business-operation code deployment.
+10. Verify exact Solution membership and complete metadata by fresh GET-only reads after each separately authorized write.
+11. Implement Custom API/plug-in in a separate bounded phase after least-privilege execution review and atomicity verification; do not combine schema creation with business-operation code deployment.
 12. Publish/reconcile only if required by the actual change and separately authorized. Never use Publish All without explicit authorization.
 
 Separate Candidate/Call/History schema writes from API/plugin implementation for rollback and reconciliation boundaries.
 
 ## 17. Metadata Payload Plan
 
-The reviewable, synthetic-only canonical proposal is [PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json](PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json). It defines the three tables, status Choice values, lookups/relationships, proposed keys, transition matrix, Custom API contract, and unresolved decisions. It is **not** a Dataverse Web API payload, solution export, generated PAC artifact, or authorization to provision.
+The reviewable, synthetic-only canonical proposal is [PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json](PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json). It defines the three tables, status and call-outcome Choices, lookups/relationships, proposed keys, transition matrix, Custom API contract, owner-decision record, and external prerequisites. It is **not** a Dataverse Web API payload, solution export, generated PAC artifact, or authorization to provision.
 
-Local manifest SHA-256: **37da1392b2cfbd4a2886aa07886b00831775cc73c5f7bd65333ad70ceb334c0d**. This fingerprint identifies the exact JSON proposal file bytes only; it is not a request-body fingerprint. Any future implementation must generate and approve deterministic, operation-specific metadata payloads after the open decisions are closed, then re-check exact hashes immediately before dispatch.
+Local manifest SHA-256: **8e035cc64451817efb8342fec245df2aa5e943eb3bd81fe3d5393ee9185d2e08**. This fingerprint identifies the exact JSON proposal file bytes only; it is not a request-body fingerprint. Re-check exact payload hashes immediately before any separately authorized dispatch.
 
 ## 18. Provisioning Safety Gates
 
@@ -271,49 +283,49 @@ Local manifest SHA-256: **37da1392b2cfbd4a2886aa07886b00831775cc73c5f7bd65333ad7
 - Bounded requests, zero automatic retries for uncertain writes, and GET-only reconciliation after each write before any next write.
 - No blind retry; reconcile existing metadata first after any uncertain result.
 - No Publish All; never alter the published `srapp` composition/navigation in this scope.
-- Synthetic data only; no business rows; no roles/access/audit/DLP changes.
+- Synthetic data only; no business rows; no roles/access/environment audit/DLP changes in this design task.
 
 ## 19. Offline Test Plan
 
 The new local assertion harness checks the proposal only; it does not claim runtime business-operation tests passed. Future implementation tests must include:
 
-1. Exact three-table scope, `os_sr_` names, primary names, types, requiredness, and system-owned columns.
-2. Choice labels, stable distinct integer values, default value, and absence of deprecated TA approval stages.
-3. Relationship target, requiredness, restrict-delete/no-cascade policy, and missing LEGO Career dependency detection.
-4. Candidate Number, Call Log, and Status History alternate-key definitions and key-safe synthetic values.
+1. Exact three-table scope, `os_sr_` names, generated Candidate Number, required Name/Email, optional Phone, owner assignment, and system-owned columns.
+2. Status and Call Outcome Choice labels, stable distinct integer values, default value, and absence of deprecated TA approval stages.
+3. Position, Candidate Source, and TA relationship targets; restrict-delete/no-cascade policy; no Candidate-to-LEGO-Career relationship.
+4. Candidate Number and CorrelationId alternate-key definitions and key-safe synthetic values.
 5. Every allowed state transition, each negative/skipped/terminal transition, unknown action, and no-op.
 6. Expected-status and stale row-version rejection.
-7. Concurrent duplicate submissions, same key/same payload replay, and same key/different payload rejection.
+7. Concurrent duplicate submissions, same CorrelationId/same payload replay, and same CorrelationId/different payload rejection.
 8. Exactly one history row per valid transition; zero on rejection; atomic rollback when a child create fails.
-9. Call Log + Candidate Answered + History atomic behavior and non-transition call behavior after approved outcomes exist.
-10. Reschedule rejection without approved cancellation/reconciliation evidence; no calendar call in this slice.
-11. Effective BSO/Admin/TA positive and negative privileges; no direct status write or manual History create/update/delete.
+9. Answered Call Log + Candidate Answered + History atomic behavior; No Answer/Call Back Requested create Call Log only.
+10. Mandatory reschedule reason and complete History evidence; action remains unavailable until later cancellation-attempt support; no calendar call in this slice.
+11. Effective BSO/Admin/TA positive and negative privileges; no direct status write or manual Call/History create/update/delete.
 12. Actor derived from initiating identity, no fixed Flow owner impersonation, server UTC transition time, and no PII in logs/fixtures.
 13. Exact metadata plan fingerprint and zero network/auth/PAC calls in all offline design tests.
 
 No runtime Custom API, plugin, Dataverse concurrency, or authorization test can pass until an implementation exists in an approved test environment. None is claimed here.
 
-Validation completed: the Phase 3A design harness passed **28** synthetic assertions; the existing reference provisioning/recovery, readiness, and app-composition suites passed **550**, **11**, and **329** synthetic assertions respectively; `git diff --check` passed. These are local checks only.
+Validation is rerun after the owner-approved design revision; counts and exact outcomes are recorded in the Phase 3A.2 report. These are local checks only.
 
 ## 20. Scope Exclusions
 
 Out of Phase 3A: Outlook scheduling; room availability; Teams; interview event create/cancel; Email Center/Dispatch; Visitor Registration; LEGO synchronization; dashboards/KPI; AI Builder; migration; Candidate production data; full end-user role rollout; all changes to the published Phase 2D app/navigation.
 
-The Candidate schema may reference LEGO Career and CV URL because current booking rules require them; this does not implement the sync, validate live postings, or authorize scheduling.
+Candidate core does not include a LEGO Career lookup, career synchronization, CV validation, or booking. The later scheduling/booking boundary must enforce the approved linked-career and CV prerequisites before booking.
 
-## 21. Open Product Decisions
+## 21. Owner Decisions and Remaining External Gates
 
-1. Candidate Number source, generator/manual entry, format, allowed characters, confidentiality, and primary-name suitability.
-2. Exact Call Outcome values; which outcomes are retained; which values advance status; call channel/phone requirements; and whether calls can be logged in later statuses.
-3. Candidate create-time requiredness for Position, Candidate Source, Email, Phone, and TA.
-4. Candidate owner/BSO assignment: creator vs assigned BSO, approved team ownership, transfer/share behavior, and child ownership after transfer.
-5. Reschedule evidence source and durable reference; when cancellation/reconciliation counts as sufficient; reason requirement/content policy.
-6. Contact/CV field-security profiles, table/column audit matrix, retention and authorized readers. Existing technical audit settings are not policy approval.
-7. `os_sr_lgcar` is not among the Phase 2D verified four reference tables. Confirm its separate design/provisioning and ensure it exists before creating the Candidate lookup.
-8. Confirm the Custom API execution/privilege arrangement preserves the initiating actor while allowing only least-privilege server writes.
-9. Confirm the publisher option-value allocation still permits the proposed Choice integers.
+The owner decisions for Candidate Number, call outcome taxonomy, Candidate Name/Email/Phone requiredness, Dataverse Owner as responsible BSO, mandatory reschedule reason/history, table audit and contact field-security policy, GUID CorrelationId idempotency, and LEGO Career deferral are recorded as approved in the Phase 3A.2 report. No owner product decision from Phase 3A.1 remains open.
 
-Items 1–3 and 7 materially affect provisioning. Items 4–6 and 8 materially affect security/schema or operation implementation and require owner/security/IT review. No answer is inferred.
+External prerequisites remain:
+
+1. Enablement and governance for organization-level Dataverse auditing. The last documented environment review found auditing disabled; retention, authorized audit readers, legal-hold/DSR, and capacity ownership remain to be settled by IT/Compliance.
+2. Least-privilege Custom API Execute privilege/effective-access design and validation; preserve the authenticated initiating BSO without System Administrator or fixed Flow-owner impersonation.
+3. Verify global Choice option-value allocations and supported Candidate AutoNumber metadata creation in a fresh, separately authorized provisioning preflight.
+4. Verify the exact target environment, publisher, solution, and existing reference-table targets during the future guarded preflight.
+5. Implement cancellation-attempt evidence before enabling the reschedule action in the later scheduling phase. This is an explicitly deferred implementation dependency, not an unresolved Candidate Core product choice.
+
+These items do not change the accepted Candidate Core product requirements, but the audit and API privilege gates block readiness for Candidate Core provisioning.
 
 ## 22. Request / Write Counts
 
@@ -335,24 +347,19 @@ Local PowerShell regression/design tests are not tenant requests.
 
 ## 23. Files Changed
 
-Phase 3A changes:
+Phase 3A.2 owner-decision revision updates the design and manifest, records decisions in the new [Phase 3A.2 report](PHASE_3A2_CANDIDATE_CORE_DECISION_APPLICATION.md), and synchronizes [Current State](CURRENT_STATE.md), [Product Decisions](PRODUCT_DECISIONS.md), [Data Model](DATA_MODEL.md), [Schema Specification](DATAVERSE_SCHEMA_SPECIFICATION.md), [Business Workflows](BUSINESS_WORKFLOWS.md), [Security Model](SECURITY_MODEL.md), [Architecture](ARCHITECTURE.md), [Project Context](PROJECT_CONTEXT.md), [Implementation Plan](IMPLEMENTATION_PLAN.md), [Phase 3A.1 historical closure](PHASE_3A1_CANDIDATE_CORE_DECISION_CLOSURE.md), and the offline assertion harness plus [test instructions](../tests/README.md).
 
-- New [Phase 3A design report](PHASE_3A_CANDIDATE_CORE_DESIGN.md).
-- New [synthetic metadata proposal manifest](PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json).
-- New [offline design assertion test](../tests/Phase3ACandidateCoreDesign.Tests.ps1).
-- Updated [test instructions](../tests/README.md), [project context](PROJECT_CONTEXT.md), [current state](CURRENT_STATE.md), [implementation plan](IMPLEMENTATION_PLAN.md), [product decisions](PRODUCT_DECISIONS.md), [data model](DATA_MODEL.md), [schema specification](DATAVERSE_SCHEMA_SPECIFICATION.md), [architecture](ARCHITECTURE.md), and [security model](SECURITY_MODEL.md).
-
-Final worktree: nine modified tracked files and three new in-scope files. No solution source, environment configuration, business data, or published app component is in scope.
+No solution source, environment configuration, business data, or published app component is in scope.
 
 ## 24. Final Classification
 
-**`BLOCKED_PRODUCT_DECISION`**
+**`BLOCKED_EXTERNAL_AUDIT_AND_API_PRIVILEGE_PREREQUISITES`**
 
-The workflow labels and broad relationship/state-machine shape are deterministic enough for review, but unresolved product/security decisions materially affect Candidate identity, call operation validation, owner access, and the Candidate-to-LEGO Career relationship. The criteria for `READY_FOR_CANDIDATE_CORE_PROVISIONING` are therefore not met. No tenant write occurred.
+All owner product decisions are recorded and the manifest is deterministic as a proposal. The last documented environment evidence says organization auditing is disabled, and the least-privilege Custom API execution privilege model remains unapproved/untested. Candidate Core cannot be classified `READY_FOR_CANDIDATE_CORE_PROVISIONING` until these exact audit and security gates are resolved. Choice allocation and AutoNumber support remain mandatory fresh preflight checks before any write. No tenant write occurred.
 
 ## 25. Exact Recommended Next Task
 
-Obtain written owner/security/IT decisions for items 1–9 in Section 21, with specific resolution of Candidate Number, Call Outcome values, create-time requiredness, BSO ownership, and LEGO Career dependency. Then update the proposal and regenerate its fingerprints/tests. Do **not** provision until the updated report classifies `READY_FOR_CANDIDATE_CORE_PROVISIONING` and a separate bounded write authorization is supplied.
+Resolve the organization-level audit governance and least-privilege Custom API execution privilege model with IT/Compliance and Security owners. Then run a separately authorized guarded preflight for the environment, publisher option allocation, and AutoNumber support. Do **not** provision until those gates pass and separate bounded write authorization is supplied.
 
 ## 26. AI HANDOVER
 
@@ -360,8 +367,8 @@ Obtain written owner/security/IT decisions for items 1–9 in Section 21, with s
 - Candidate, Call Log, and Candidate Status History remain design proposals; none was provisioned.
 - Use [the metadata plan](PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json) as a proposal snapshot only, not as a request or generated solution artifact.
 - The workflow uses the six canonical statuses, defaulting to Need Call Candidate. No legacy TA approval state is allowed.
-- Proposed `os_sr_cact` must validate state server-side, compare expected status/version, enforce idempotency, and atomically persist Candidate status, applicable Call Log, and exactly one Status History row.
-- Reschedule remains gated on verified cancellation/reconciliation evidence. No calendar cancellation or booking is implemented.
-- Candidate Number, Call Outcomes, contact requiredness, owner semantics, audit/security, and LEGO Career target remain open.
-- Final classification: `BLOCKED_PRODUCT_DECISION`; all tenant request/write counts are zero.
-- Next action: resolve Section 21 decisions, revise and retest the proposal, then seek separate provisioning authorization.
+- Proposed `os_sr_cact` must require a caller-generated GUID CorrelationId for every state-changing operation, compare expected status/version, and atomically persist Candidate status, applicable Call Log, and exactly one Status History row.
+- Answered logs and transitions atomically; No Answer and Call Back Requested log only. Reschedule requires a reason and full history evidence but stays disabled until the later cancellation-attempt boundary is implemented.
+- Candidate Number, call outcomes, contact requiredness, Owner-as-BSO, auditing, contact field-security, and LEGO Career deferral are owner-approved decisions.
+- Final classification: `BLOCKED_EXTERNAL_AUDIT_AND_API_PRIVILEGE_PREREQUISITES`; all tenant request/write counts are zero.
+- Next action: close audit governance and operation privilege design, then obtain separate bounded provisioning authorization and run guarded live preflight.

@@ -7,6 +7,7 @@ param(
     [switch]$SiteMapAssociationOnly,
     [switch]$ReferenceUiCompositionOnly,
     [switch]$EntityIdentityDiagnosticOnly,
+    [switch]$EntityRootRepairDiagnosticOnly,
     [string]$Confirmation,
     [string]$AuthorizationReference,
     [string]$EnvironmentName = $env:BSO_RS_ENVIRONMENT_NAME,
@@ -68,6 +69,7 @@ $script:ExpectedUserGuardNeedsPin = $false
 $script:EntityResolutionDiagnostics = @()
 $script:EntityResolutionClassification = 'NOT_RUN'
 $script:RetrieveAppComponentsEvidence = $null
+$script:EntityRootRepairEvidence = $null
 $script:FirstFailingPredicate = $null
 $script:IdentityContractFailurePredicate = $null
 $script:PayloadFingerprintDiagnostic = $null
@@ -75,11 +77,14 @@ $script:PayloadFingerprintDiagnostic = $null
 if (($PlanOnly -and ($DryRun -or $Apply -or $SiteMapAssociationOnly)) -or
     ($DryRun -and $Apply) -or
     ($SiteMapAssociationOnly -and $ReferenceUiCompositionOnly) -or
-    ($EntityIdentityDiagnosticOnly -and ($PlanOnly -or $Apply -or $SiteMapAssociationOnly -or $ReferenceUiCompositionOnly)) -or
+    (($EntityIdentityDiagnosticOnly -or $EntityRootRepairDiagnosticOnly) -and
+        ($PlanOnly -or $DryRun -or $Apply -or $SiteMapAssociationOnly -or $ReferenceUiCompositionOnly -or
+            ($EntityIdentityDiagnosticOnly -and $EntityRootRepairDiagnosticOnly))) -or
     ($SiteMapAssociationOnly -and -not ($DryRun -or $Apply))) {
     throw 'Choose exactly one supported execution mode.'
 }
-if (-not $PlanOnly -and -not $DryRun -and -not $Apply -and -not $EntityIdentityDiagnosticOnly) { $PlanOnly = $true }
+if (-not $PlanOnly -and -not $DryRun -and -not $Apply -and
+    -not $EntityIdentityDiagnosticOnly -and -not $EntityRootRepairDiagnosticOnly) { $PlanOnly = $true }
 
 function Get-PropertyValue {
     param([object]$Object, [Parameter(Mandatory = $true)][string]$Name)
@@ -120,14 +125,19 @@ function Assert-ReferenceUiPayloadFingerprint {
         [Parameter(Mandatory = $true)][object[]]$Payload,
         [string]$ExpectedFingerprint = $script:ApprovedReferenceUiPayloadFingerprint
     )
-    $json = ConvertTo-Json -InputObject @($Payload) -Depth 10 -Compress
-    $actualFingerprint = [Convert]::ToHexString(
-        [System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes($json))
-    ).ToLowerInvariant()
+    $actualFingerprint = Get-PayloadFingerprint -Payload $Payload
     if ($actualFingerprint -cne $ExpectedFingerprint) {
         throw 'Reference UI component payload fingerprint differs from the explicitly approved set.'
     }
     $actualFingerprint
+}
+
+function Get-PayloadFingerprint {
+    param([Parameter(Mandatory = $true)][object[]]$Payload)
+    $json = ConvertTo-Json -InputObject @($Payload) -Depth 10 -Compress
+    [Convert]::ToHexString(
+        [System.Security.Cryptography.SHA256]::HashData([System.Text.Encoding]::UTF8.GetBytes($json))
+    ).ToLowerInvariant()
 }
 
 function Assert-ApplyAuthorization {
@@ -662,7 +672,8 @@ function Get-PacIdentity {
 }
 
 function Test-AllowsProcessExpectedUserPin {
-    [bool]($SiteMapAssociationOnly -or $ReferenceUiCompositionOnly -or $EntityIdentityDiagnosticOnly)
+    [bool]($SiteMapAssociationOnly -or $ReferenceUiCompositionOnly -or $EntityIdentityDiagnosticOnly -or
+        $EntityRootRepairDiagnosticOnly)
 }
 
 function Assert-TargetInputs {
@@ -1423,6 +1434,439 @@ function Get-EntityResolutionAggregateClassification {
     'UNKNOWN'
 }
 
+function Get-EntityRowsByLogicalName {
+    param([Parameter(Mandatory = $true)][string]$LogicalName)
+    $escapedName = $LogicalName.Replace("'", "''")
+    $path = New-CollectionPath -EntitySet 'entities' `
+        -Select 'entityid,logicalname,name,objecttypecode,componentstate' `
+        -Filter "logicalname eq '$escapedName'"
+    @(Get-ODataRows -Path $path)
+}
+
+function Get-EntityDefinitionByLogicalName {
+    param([Parameter(Mandatory = $true)][string]$LogicalName)
+    $escapedName = $LogicalName.Replace("'", "''")
+    Invoke-DataverseRequest -Method GET `
+        -Path "EntityDefinitions(LogicalName='$escapedName')?%24select=MetadataId,LogicalName,ObjectTypeCode"
+}
+
+function Get-RemoveAppComponentsContract {
+    param([Parameter(Mandatory = $true)][xml]$Metadata)
+    $action = $Metadata.SelectSingleNode("//*[local-name()='Action' and @Name='RemoveAppComponents']")
+    if (-not $action) { return [pscustomobject]@{ Found = $false; Valid = $false; AppIdType = $null; ComponentsType = $null } }
+    $parameters = @{}
+    foreach ($parameter in $action.SelectNodes("./*[local-name()='Parameter']")) {
+        $parameters[$parameter.GetAttribute('Name')] = $parameter.GetAttribute('Type')
+    }
+    [pscustomobject]@{
+        Found = $true
+        AppIdType = $parameters['AppId']
+        ComponentsType = $parameters['Components']
+        Valid = $parameters['AppId'] -ceq 'Edm.Guid' -and
+            $parameters['Components'] -ceq 'Collection(mscrm.crmbaseentity)'
+    }
+}
+
+function Get-NormalizedGuidCandidates {
+    param([object[]]$Rows, [string]$PropertyName)
+    $values = [System.Collections.Generic.List[string]]::new()
+    foreach ($row in $Rows) {
+        $value = [string](Get-PropertyValue -Object $row -Name $PropertyName)
+        $parsed = [guid]::Empty
+        if ([guid]::TryParse($value.Trim('{}'), [ref]$parsed)) {
+            $values.Add($parsed.ToString('D').ToLowerInvariant())
+        }
+    }
+    @($values | Select-Object -Unique)
+}
+
+function Test-GuidValueMatchesAny {
+    param([string]$Value, [string[]]$Candidates)
+    $parsed = [guid]::Empty
+    if ([string]::IsNullOrWhiteSpace($Value) -or -not [guid]::TryParse($Value.Trim('{}'), [ref]$parsed)) {
+        return $false
+    }
+    $normalized = $parsed.ToString('D').ToLowerInvariant()
+    foreach ($candidate in $Candidates) {
+        $parsedCandidate = [guid]::Empty
+        if ([guid]::TryParse(([string]$candidate).Trim('{}'), [ref]$parsedCandidate) -and
+            $parsedCandidate.ToString('D').ToLowerInvariant() -ceq $normalized) {
+            return $true
+        }
+    }
+    $false
+}
+
+function Get-DirectReferenceUiAssociationEvidence {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Components,
+        [Parameter(Mandatory = $true)][object[]]$ReferenceComponents,
+        [Parameter(Mandatory = $true)][string]$SiteMapId,
+        [Parameter(Mandatory = $true)][string]$AppModuleIdUnique
+    )
+    $associationMatches = @($Components | Where-Object {
+        Test-GuidValueMatchesAny -Value ([string](Get-PropertyValue -Object $_ -Name '_appmoduleidunique_value')) `
+            -Candidates @($AppModuleIdUnique)
+    })
+    $siteMaps = @($Components | Where-Object { [int]$_.componenttype -eq 62 })
+    $siteMapMatches = @($siteMaps | Where-Object {
+        [int]$_.componenttype -eq 62 -and
+        (Test-GuidValueMatchesAny -Value ([string]$_.objectid) -Candidates @($SiteMapId))
+    })
+    $assets = [System.Collections.Generic.List[object]]::new()
+    foreach ($reference in $ReferenceComponents) {
+        $formMatches = @($Components | Where-Object {
+            [int]$_.componenttype -eq 60 -and
+            (Test-GuidValueMatchesAny -Value ([string]$_.objectid) -Candidates @([string]$reference.MainForm.Id))
+        })
+        $viewMatches = @($Components | Where-Object {
+            [int]$_.componenttype -eq 26 -and
+            (Test-GuidValueMatchesAny -Value ([string]$_.objectid) -Candidates @([string]$reference.ActiveView.Id))
+        })
+        $assets.Add([pscustomobject]@{
+            LogicalName = $reference.LogicalName
+            MainFormPresentDirectly = $formMatches.Count -eq 1
+            MainFormDirectMatchCount = $formMatches.Count
+            ActiveViewPresentDirectly = $viewMatches.Count -eq 1
+            ActiveViewDirectMatchCount = $viewMatches.Count
+        })
+    }
+    [pscustomobject]@{
+        SiteMapCount = $siteMaps.Count
+        IntendedSiteMapDirectMatchCount = $siteMapMatches.Count
+        IntendedSiteMapPresentDirectly = $siteMapMatches.Count -eq 1
+        AppAssociationMatchesForEveryComponent = $associationMatches.Count -eq $Components.Count
+        Assets = $assets.ToArray()
+    }
+}
+
+function Get-EntityRootRepairPlan {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Components,
+        [Parameter(Mandatory = $true)][string[]]$SystemEntityIds,
+        [Parameter(Mandatory = $true)][object[]]$ReferenceIdentityEvidence,
+        [Parameter(Mandatory = $true)][bool]$OriginalPayloadFingerprintMatches,
+        [Parameter(Mandatory = $true)][bool]$RemoveActionContractValid,
+        [Parameter(Mandatory = $true)][string]$AppId
+    )
+    $entityComponents = @($Components | Where-Object { [int]$_.componenttype -eq 1 })
+    $componentRecordIds = @(Get-NormalizedGuidCandidates -Rows $entityComponents -PropertyName 'appmodulecomponentid')
+    $objectIds = @(Get-NormalizedGuidCandidates -Rows $entityComponents -PropertyName 'objectid')
+    $componentRecordsDistinct = $entityComponents.Count -eq 4 -and $componentRecordIds.Count -eq 4
+    $objectIdsDistinct = $entityComponents.Count -eq 4 -and $objectIds.Count -eq 4
+    $objectIdsDuplicated = $objectIds.Count -lt $entityComponents.Count
+    $allObjectIdsEqual = $entityComponents.Count -gt 0 -and $objectIds.Count -eq 1
+    $referenceByName = @{}
+    foreach ($reference in $ReferenceIdentityEvidence) {
+        $referenceByName[[string]$reference.LogicalName] = $reference
+    }
+    $systemIds = @($SystemEntityIds | Where-Object { $_ } | Select-Object -Unique)
+    $mappingRows = [System.Collections.Generic.List[object]]::new()
+    $currentRootMatchesSystem = 0
+    $currentRootMatchesProjectId = 0
+    $currentRootMatchesProject = 0
+    $currentRootMatchesAnyProjectId = 0
+    for ($index = 0; $index -lt $entityComponents.Count; $index++) {
+        $component = $entityComponents[$index]
+        $objectId = [string](Get-PropertyValue -Object $component -Name 'objectid')
+        $row = [ordered]@{
+            Alias = 'CurrentEntityComponent{0}' -f ([char](65 + $index))
+            ComponentRecordIdPresent = -not [string]::IsNullOrWhiteSpace([string](Get-PropertyValue -Object $component -Name 'appmodulecomponentid'))
+            ObjectIdPresent = -not [string]::IsNullOrWhiteSpace($objectId)
+            IsDefault = Get-PropertyValue -Object $component -Name 'isdefault'
+            IsMetadata = Get-PropertyValue -Object $component -Name 'ismetadata'
+            RootAppModuleComponentIdPresent = -not [string]::IsNullOrWhiteSpace([string](Get-PropertyValue -Object $component -Name 'rootappmodulecomponentid'))
+            RootComponentBehavior = Get-PropertyValue -Object $component -Name 'rootcomponentbehavior'
+            ObjectIdEqualsSystemEntityId = Test-GuidValueMatchesAny -Value $objectId -Candidates $systemIds
+        }
+        if ($row.ObjectIdEqualsSystemEntityId) { $currentRootMatchesSystem++ }
+        $payloadIdMatchCount = 0
+        foreach ($logicalName in @('os_sr_ta', 'os_sr_pos', 'os_sr_csrc', 'os_sr_loc')) {
+            $evidence = $referenceByName[$logicalName]
+            $metadataMatch = $false
+            $entitiesMatch = $false
+            $payloadMetadataMatch = $false
+            $payloadEntitiesMatch = $false
+            if ($evidence) {
+                $metadataMatch = Test-GuidValueMatchesAny -Value $objectId -Candidates @([string]$evidence.MetadataId)
+                $entitiesMatch = Test-GuidValueMatchesAny -Value $objectId -Candidates @([string]$evidence.EntityId)
+                $payloadMetadataMatch = Test-GuidValueMatchesAny -Value ([string]$evidence.PayloadEntityId) -Candidates @([string]$evidence.MetadataId)
+                $payloadEntitiesMatch = Test-GuidValueMatchesAny -Value ([string]$evidence.PayloadEntityId) -Candidates @([string]$evidence.EntityId)
+            }
+            if ($metadataMatch -or $entitiesMatch) {
+                $currentRootMatchesProject++
+                $currentRootMatchesAnyProjectId++
+            }
+            if ($metadataMatch -or $entitiesMatch) { $row[$logicalName] = $true } else { $row[$logicalName] = $false }
+            $row["PayloadMatches${logicalName}MetadataId"] = $payloadMetadataMatch
+            $row["PayloadMatches${logicalName}EntityId"] = $payloadEntitiesMatch
+            if ($payloadMetadataMatch -or $payloadEntitiesMatch) { $payloadIdMatchCount++ }
+        }
+        $row.PayloadMatchesAnyApprovedTableId = $payloadIdMatchCount -gt 0
+        $row.PayloadIdEqualsCurrentObjectId = $false
+        foreach ($evidence in $ReferenceIdentityEvidence) {
+            if (Test-GuidValueMatchesAny -Value ([string]$evidence.PayloadEntityId) -Candidates @($objectId)) {
+                $row.PayloadIdEqualsCurrentObjectId = $true
+                break
+            }
+        }
+        $mappingRows.Add([pscustomobject]$row)
+    }
+
+    $referenceIdentityComplete = $ReferenceIdentityEvidence.Count -eq 4 -and @(
+        $ReferenceIdentityEvidence | Where-Object {
+            -not $_.MetadataFound -or -not $_.EntityTableIdentityUnambiguous -or
+            -not $_.LogicalNamesAgree -or -not $_.MetadataIdEqualsEntityId -or
+            ($null -ne $_.ObjectTypeCodesAgree -and -not $_.ObjectTypeCodesAgree)
+        }
+    ).Count -eq 0
+    $tableRootCounts = @{}
+    foreach ($logicalName in @('os_sr_ta', 'os_sr_pos', 'os_sr_csrc', 'os_sr_loc')) {
+        $tableRootCounts[$logicalName] = @(
+            $mappingRows | Where-Object { $_.$logicalName }
+        ).Count
+    }
+    $eachProjectRootExactlyOnce = $referenceIdentityComplete -and
+        @($tableRootCounts.Values | Where-Object { $_ -ne 1 }).Count -eq 0
+    $systemMatchesAll = $entityComponents.Count -eq 4 -and $currentRootMatchesSystem -eq 4
+    if ($systemMatchesAll -and $currentRootMatchesProjectId -eq 0) {
+        $rootClassification = 'WRONG_SYSTEM_ENTITY_ROOTS_CONFIRMED'
+    }
+    elseif ($eachProjectRootExactlyOnce -and $currentRootMatchesSystem -eq 0) {
+        $rootClassification = 'CORRECT_PROJECT_TABLE_ROOTS'
+    }
+    elseif (($currentRootMatchesSystem + $currentRootMatchesProjectId) -gt 0 -and
+        -not ($systemMatchesAll -or $eachProjectRootExactlyOnce)) {
+        $rootClassification = 'MIXED_ROOT_STATE'
+    }
+    else {
+        $rootClassification = 'UNKNOWN'
+    }
+
+    $payloadSource = 'ENTITYDEFINITIONS_METADATA_ID'
+    $payloadSourceMatchesCurrentRoots = $mappingRows.Count -eq 4 -and
+        @($mappingRows | Where-Object {
+            -not $_.ObjectIdEqualsSystemEntityId -or -not $_.PayloadIdEqualsCurrentObjectId
+        }).Count -eq 0
+    $originalPayloadRootCause = if (-not $OriginalPayloadFingerprintMatches) {
+        'ORIGINAL_PAYLOAD_FINGERPRINT_NOT_REPRODUCED'
+    }
+    elseif ($payloadSourceMatchesCurrentRoots) {
+        'ENTITYDEFINITIONS_METADATA_ID_MATCHES_CURRENT_SYSTEM_ROOTS'
+    }
+    else {
+        'NOT_ESTABLISHED_BY_AVAILABLE_PAYLOAD_AND_ROOT_EVIDENCE'
+    }
+
+    $removePayload = @()
+    $addPayload = @()
+    $removeFingerprint = $null
+    $addFingerprint = $null
+    $removeRequestBodyFingerprint = $null
+    $addRequestBodyFingerprint = $null
+    $removeSemanticsKnownForObservedMultiplicity = -not $objectIdsDuplicated
+    $repairPlanStatus = 'NOT_APPLICABLE'
+    if ($rootClassification -eq 'WRONG_SYSTEM_ENTITY_ROOTS_CONFIRMED') {
+        $uniqueWrongIds = @($entityComponents | ForEach-Object {
+            ConvertTo-NormalizedGuid -Value ([string]$_.objectid)
+        } | Select-Object -Unique)
+        $removePayload = @($uniqueWrongIds | ForEach-Object {
+            [ordered]@{ entityid = $_; '@odata.type' = 'Microsoft.Dynamics.CRM.entity' }
+        })
+        if ($referenceIdentityComplete) {
+            $addPayload = @($ReferenceIdentityEvidence | Sort-Object {
+                [array]::IndexOf(@('os_sr_ta', 'os_sr_pos', 'os_sr_csrc', 'os_sr_loc'), $_.LogicalName)
+            } | ForEach-Object {
+                [ordered]@{ entityid = [string]$_.EntityId; '@odata.type' = 'Microsoft.Dynamics.CRM.entity' }
+            })
+        }
+        if ($removePayload.Count -gt 0) {
+            $removeFingerprint = Get-PayloadFingerprint -Payload $removePayload
+        }
+        if ($addPayload.Count -eq 4) {
+            $addFingerprint = Get-PayloadFingerprint -Payload $addPayload
+        }
+        if ($removePayload.Count -gt 0) {
+            $removeRequestBodyFingerprint = Get-PayloadFingerprint -Payload @(
+                [ordered]@{ AppId = $AppId; Components = @($removePayload) }
+            )
+        }
+        if ($addPayload.Count -eq 4) {
+            $addRequestBodyFingerprint = Get-PayloadFingerprint -Payload @(
+                [ordered]@{ AppId = $AppId; Components = @($addPayload) }
+            )
+        }
+        $repairPlanStatus = if ($referenceIdentityComplete -and $objectIdsDistinct -and
+            $removePayload.Count -eq 4 -and $addPayload.Count -eq 4 -and
+            $RemoveActionContractValid -and
+            $OriginalPayloadFingerprintMatches -and
+            $originalPayloadRootCause -eq 'ENTITYDEFINITIONS_METADATA_ID_MATCHES_CURRENT_SYSTEM_ROOTS') {
+            'READY'
+        }
+        else {
+            'AMBIGUOUS'
+        }
+    }
+    [pscustomobject]@{
+        CurrentEntityComponentCount = $entityComponents.Count
+        AllComponentRecordIdsDistinct = $componentRecordsDistinct
+        AllObjectIdsDistinct = $objectIdsDistinct
+        SomeObjectIdsDuplicate = $objectIdsDuplicated
+        AllObjectIdsEqual = $allObjectIdsEqual
+        CurrentComponents = $mappingRows.ToArray()
+        SystemEntityUniqueIdCount = $systemIds.Count
+        ReferenceIdentityComplete = $referenceIdentityComplete
+        ProjectTableRootCounts = $tableRootCounts
+        RootClassification = $rootClassification
+        OriginalPayloadIdSource = $payloadSource
+        OriginalPayloadFingerprintMatchesApproved = $OriginalPayloadFingerprintMatches
+        OriginalPayloadRootCause = $originalPayloadRootCause
+        RemovePayload = @($removePayload | ForEach-Object {
+            [pscustomobject]@{
+                ODataType = Get-PropertyValue -Object $_ -Name '@odata.type'
+                EntityIdPresent = -not [string]::IsNullOrWhiteSpace([string](Get-PropertyValue -Object $_ -Name 'entityid'))
+            }
+        })
+        RemovePayloadCount = $removePayload.Count
+        RemovePayloadFingerprint = $removeFingerprint
+        RemoveRequestBodyFingerprint = $removeRequestBodyFingerprint
+        RemoveSemanticsKnownForObservedMultiplicity = $removeSemanticsKnownForObservedMultiplicity
+        AddPayload = @($ReferenceIdentityEvidence | Sort-Object {
+            [array]::IndexOf(@('os_sr_ta', 'os_sr_pos', 'os_sr_csrc', 'os_sr_loc'), $_.LogicalName)
+        } | ForEach-Object {
+            [pscustomobject]@{
+                LogicalName = $_.LogicalName
+                ODataType = 'Microsoft.Dynamics.CRM.entity'
+                EntityIdPresent = -not [string]::IsNullOrWhiteSpace([string]$_.EntityId)
+            }
+        })
+        AddPayloadCount = $addPayload.Count
+        AddPayloadFingerprint = $addFingerprint
+        AddRequestBodyFingerprint = $addRequestBodyFingerprint
+        RemoveActionContractValid = $RemoveActionContractValid
+        AddPayloadContainsOnlyEntityComponents = @($addPayload | Where-Object {
+            $_.'@odata.type' -cne 'Microsoft.Dynamics.CRM.entity' -or @($_.Keys | Where-Object { $_ -ne '@odata.type' }) -join ',' -cne 'entityid'
+        }).Count -eq 0
+        RepairPlanStatus = $repairPlanStatus
+        ExpectedDirectComponentCountsAfterRepair = [pscustomobject]@{
+            SiteMap = 1; Entity = 4; Form = 4; View = 4; Total = 13
+        }
+        NavigationChangePlanned = $false
+        PublishPlanned = $false
+    }
+}
+
+function Get-EntityRootRepairEvidence {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Components,
+        [Parameter(Mandatory = $true)][object[]]$ReferenceComponents,
+        [Parameter(Mandatory = $true)][bool]$OriginalPayloadFingerprintMatches,
+        [Parameter(Mandatory = $true)][xml]$Metadata
+    )
+    $logicalNames = @('entity') + @('os_sr_ta', 'os_sr_pos', 'os_sr_csrc', 'os_sr_loc')
+    $entityRowsByName = @{}
+    foreach ($logicalName in $logicalNames) {
+        $script:LastStage = "Resolve entities table row for $logicalName"
+        $entityRowsByName[$logicalName] = @(Get-EntityRowsByLogicalName -LogicalName $logicalName)
+    }
+    $referenceEvidence = [System.Collections.Generic.List[object]]::new()
+    foreach ($reference in $ReferenceComponents) {
+        $logicalName = [string]$reference.LogicalName
+        $script:LastStage = "Resolve EntityDefinitions metadata for $logicalName"
+        $entityDefinitionMetadata = Get-EntityDefinitionByLogicalName -LogicalName $logicalName
+        $entityRows = @($entityRowsByName[$logicalName])
+        $entityIds = @(Get-NormalizedGuidCandidates -Rows $entityRows -PropertyName 'entityid')
+        $metadataId = [string](Get-PropertyValue -Object $entityDefinitionMetadata -Name 'MetadataId')
+        $payload = @($reference.Payloads | Where-Object {
+            $_.'@odata.type' -ceq 'Microsoft.Dynamics.CRM.entity'
+        })
+        $payloadEntityId = if ($payload.Count -eq 1) { [string]$payload[0].entityid } else { $null }
+        $metadataLogicalName = [string](Get-PropertyValue -Object $entityDefinitionMetadata -Name 'LogicalName')
+        $entityLogicalNames = @($entityRows | ForEach-Object { [string](Get-PropertyValue -Object $_ -Name 'logicalname') } | Select-Object -Unique)
+        $metadataObjectTypeCode = Get-PropertyValue -Object $entityDefinitionMetadata -Name 'ObjectTypeCode'
+        $entityObjectTypeCodes = @($entityRows | ForEach-Object { Get-PropertyValue -Object $_ -Name 'objecttypecode' } | Where-Object { $null -ne $_ } | Select-Object -Unique)
+        $metadataEvidence = [pscustomobject]@{
+            LogicalName = $logicalName
+            MetadataFound = $metadataLogicalName -ceq $logicalName -and
+                -not [string]::IsNullOrWhiteSpace($metadataId)
+            MetadataLogicalNameMatches = $metadataLogicalName -ceq $logicalName
+            MetadataObjectTypeCode = $metadataObjectTypeCode
+            EntityTableRowCount = $entityRows.Count
+            EntityTableLogicalNames = $entityLogicalNames
+            EntityTableLogicalNamesAgree = $entityLogicalNames.Count -eq 1 -and $entityLogicalNames[0] -ceq $logicalName
+            EntityTableUniqueIdCount = $entityIds.Count
+            EntityTableObjectTypeCodes = $entityObjectTypeCodes
+            EntityTableComponentStates = @($entityRows | ForEach-Object { Get-PropertyValue -Object $_ -Name 'componentstate' } | Select-Object -Unique)
+            EntityId = if ($entityIds.Count -eq 1) { $entityIds[0] } else { $null }
+            EntityTableIdentityUnambiguous = $entityIds.Count -eq 1 -and
+                $entityLogicalNames.Count -eq 1 -and $entityLogicalNames[0] -ceq $logicalName
+            LogicalNamesAgree = $metadataLogicalName -ceq $logicalName -and
+                $entityLogicalNames.Count -eq 1 -and $entityLogicalNames[0] -ceq $logicalName
+            ObjectTypeCodesAgree = if ($null -eq $metadataObjectTypeCode -or $entityObjectTypeCodes.Count -eq 0) {
+                $null
+            }
+            else {
+                $entityObjectTypeCodes.Count -eq 1 -and [string]$entityObjectTypeCodes[0] -ceq [string]$metadataObjectTypeCode
+            }
+            MetadataIdEqualsEntityId = Test-GuidValueMatchesAny -Value $metadataId -Candidates $entityIds
+            MetadataId = $metadataId
+            PayloadEntityId = $payloadEntityId
+            PayloadMatchesMetadataId = Test-GuidValueMatchesAny -Value $payloadEntityId -Candidates @($metadataId)
+            PayloadMatchesEntityId = Test-GuidValueMatchesAny -Value $payloadEntityId -Candidates $entityIds
+        }
+        $referenceEvidence.Add($metadataEvidence)
+    }
+    $systemEntityIds = @(Get-NormalizedGuidCandidates -Rows @($entityRowsByName['entity']) -PropertyName 'entityid')
+    $removeContract = Get-RemoveAppComponentsContract -Metadata $Metadata
+    $plan = Get-EntityRootRepairPlan -Components $Components -SystemEntityIds $systemEntityIds `
+        -ReferenceIdentityEvidence $referenceEvidence.ToArray() `
+        -OriginalPayloadFingerprintMatches $OriginalPayloadFingerprintMatches `
+        -RemoveActionContractValid ([bool]$removeContract.Valid) `
+        -AppId $script:Target.AppModuleId
+    $appEntityObjectIds = @(Get-NormalizedGuidCandidates -Rows @($Components | Where-Object {
+        [int]$_.componenttype -eq 1
+    }) -PropertyName 'objectid')
+    $referencePayloads = @($ReferenceComponents | ForEach-Object { $_.Payloads })
+    [pscustomobject]@{
+        SystemEntity = [pscustomobject]@{
+            RowCount = @($entityRowsByName['entity']).Count
+            LogicalNames = @($entityRowsByName['entity'] | ForEach-Object { [string]$_.logicalname } | Select-Object -Unique)
+            UniqueIdCount = $systemEntityIds.Count
+            ObjectTypeCodes = @($entityRowsByName['entity'] | ForEach-Object { $_.objecttypecode } | Where-Object { $null -ne $_ } | Select-Object -Unique)
+            ComponentStates = @($entityRowsByName['entity'] | ForEach-Object { $_.componentstate } | Select-Object -Unique)
+        }
+        ApprovedTables = @($referenceEvidence | ForEach-Object {
+            [pscustomobject]@{
+                LogicalName = $_.LogicalName
+                MetadataSurfaceFound = $_.MetadataFound
+                EntityTableSurfaceFound = ($_.EntityTableRowCount -gt 0)
+                EntityTableRowCount = $_.EntityTableRowCount
+                EntityTableIdentityUnambiguous = $_.EntityTableIdentityUnambiguous
+                LogicalNamesAgree = $_.LogicalNamesAgree
+                MetadataObjectTypeCode = $_.MetadataObjectTypeCode
+                EntityObjectTypeCodes = $_.EntityTableObjectTypeCodes
+                ObjectTypeCodesAgree = $_.ObjectTypeCodesAgree
+                EntityComponentStates = $_.EntityTableComponentStates
+                MetadataIdEqualsEntityId = $_.MetadataIdEqualsEntityId
+                PayloadEntityIdMatchesMetadataId = $_.PayloadMatchesMetadataId
+                PayloadEntityIdMatchesEntityId = $_.PayloadMatchesEntityId
+                PayloadEntityIdMatchesCurrentAppObjectId = Test-GuidValueMatchesAny `
+                    -Value ([string]$_.PayloadEntityId) -Candidates $appEntityObjectIds
+                PayloadEntityIdMatchesSystemEntityId = Test-GuidValueMatchesAny `
+                    -Value ([string]$_.PayloadEntityId) -Candidates $systemEntityIds
+            }
+        })
+        RemoveAppComponentsContract = $removeContract
+        OriginalPayloadComponentCounts = [pscustomobject]@{
+            Entity = @($referencePayloads | Where-Object { $_.'@odata.type' -ceq 'Microsoft.Dynamics.CRM.entity' }).Count
+            Form = @($referencePayloads | Where-Object { $_.'@odata.type' -ceq 'Microsoft.Dynamics.CRM.systemform' }).Count
+            View = @($referencePayloads | Where-Object { $_.'@odata.type' -ceq 'Microsoft.Dynamics.CRM.savedquery' }).Count
+            Total = $referencePayloads.Count
+        }
+        Plan = $plan
+    }
+}
+
 function Get-RetrieveAppComponentsSafeSummary {
     param([object]$Response)
     $summaries = [System.Collections.Generic.List[object]]::new()
@@ -1487,7 +1931,7 @@ function New-SafeStoppedExecutionSummary {
         ExceptionType = $ErrorRecord.Exception.GetType().Name
         FailedCommand = if ($ErrorRecord.Exception -is [System.Management.Automation.CommandNotFoundException]) { $ErrorRecord.Exception.CommandName } else { $null }
         Stage = $script:LastStage
-        LastApiPath = $script:LastPath
+        LastApiPath = if ($EntityRootRepairDiagnosticOnly) { '[SUPPRESSED]' } else { $script:LastPath }
         HttpStatus = $script:LastHttpStatus
         DataverseErrorCode = $script:LastErrorCode
         SafeError = $script:LastSafeError
@@ -1497,6 +1941,7 @@ function New-SafeStoppedExecutionSummary {
         EntityResolutionDiagnostics = @($script:EntityResolutionDiagnostics)
         EntityResolutionClassification = $script:EntityResolutionClassification
         RetrieveAppComponentsEvidence = $script:RetrieveAppComponentsEvidence
+        EntityRootRepairEvidence = $script:EntityRootRepairEvidence
         ReferencePayloadFingerprint = $script:PayloadFingerprintDiagnostic
         SafeExpectedValue = if ($script:FirstFailingPredicate) { 'Exactly one entity row per valid objectid; approved logical names exactly once' } else { $null }
         SafeObservedCategory = if ($script:EntityResolutionDiagnostics.Count) { @($script:EntityResolutionDiagnostics | ForEach-Object { $_.FailureCategory } | Where-Object { $_ }) -join ',' } else { $null }
@@ -1642,6 +2087,9 @@ function Get-TargetSnapshot {
 
     $script:LastStage = 'Read AppModule components'
     $rawComponents = @(Get-ODataRows -Path (New-CollectionPath -EntitySet 'appmodulecomponents' -Select 'appmodulecomponentid,_appmoduleidunique_value,componenttype,objectid,isdefault,ismetadata,rootappmodulecomponentid,rootcomponentbehavior' -Filter "_appmoduleidunique_value eq $($script:Target.AppModuleIdUnique)"))
+    $directReferenceUiAssociationEvidence = Get-DirectReferenceUiAssociationEvidence `
+        -Components $rawComponents -ReferenceComponents $referenceComponents `
+        -SiteMapId $script:Target.SiteMapId -AppModuleIdUnique $script:Target.AppModuleIdUnique
     $script:LastStage = 'Verify AppModule entity identity contract'
     $metadata = Get-DataverseMetadataDocument
     $identityContract = $null
@@ -1661,7 +2109,7 @@ function Get-TargetSnapshot {
             }
         }
     }
-    if ($EntityIdentityDiagnosticOnly) {
+    if ($EntityIdentityDiagnosticOnly -or $EntityRootRepairDiagnosticOnly) {
         $script:EntityResolutionDiagnostics = @(Get-EntityResolutionDiagnosticRows -Components $rawComponents -ReferenceComponents $referenceComponents)
         $script:EntityResolutionClassification = Get-EntityResolutionAggregateClassification -Diagnostics $script:EntityResolutionDiagnostics
         $payloadsForFingerprint = @($referenceComponents | ForEach-Object { $_.Payloads })
@@ -1672,6 +2120,12 @@ function Get-TargetSnapshot {
             $script:PayloadFingerprintDiagnostic = 'MISMATCH'
             if (-not $script:FirstFailingPredicate) { $script:FirstFailingPredicate = 'REFERENCE_PAYLOAD_FINGERPRINT_MATCHES_APPROVED' }
         }
+        if ($EntityRootRepairDiagnosticOnly) {
+            $script:EntityRootRepairEvidence = Get-EntityRootRepairEvidence -Components $rawComponents `
+                -ReferenceComponents $referenceComponents `
+                -OriginalPayloadFingerprintMatches ($script:PayloadFingerprintDiagnostic -ceq $script:ApprovedReferenceUiPayloadFingerprint) `
+                -Metadata $metadata
+        }
         $retrieveAppComponents = $null
         $retrieveAppComponentsStatus = $null
         try {
@@ -1680,11 +2134,19 @@ function Get-TargetSnapshot {
         }
         catch {
             $retrieveAppComponentsStatus = $script:LastHttpStatus
-            if (-not $script:FirstFailingPredicate) { $script:FirstFailingPredicate = 'RETRIEVE_APP_COMPONENTS_READ' }
         }
         $script:RetrieveAppComponentsEvidence = [pscustomobject]@{
             HttpStatus = $retrieveAppComponentsStatus
             RequestSucceeded = ($null -ne $retrieveAppComponents -and $retrieveAppComponentsStatus -ge 200 -and $retrieveAppComponentsStatus -lt 300)
+            Availability = if ($retrieveAppComponentsStatus -eq 404) {
+                'RETRIEVE_APP_COMPONENTS_UNAVAILABLE_FOR_CURRENT_UNPUBLISHED_APP'
+            }
+            elseif ($null -eq $retrieveAppComponentsStatus) {
+                'UNKNOWN'
+            }
+            else {
+                'RESPONDED'
+            }
             Components = if ($retrieveAppComponents) { @(Get-RetrieveAppComponentsSafeSummary -Response $retrieveAppComponents) } else { @() }
         }
         $components = @()
@@ -1717,7 +2179,9 @@ function Get-TargetSnapshot {
             throw "Solution export does not contain the exact Main form and public view for $($reference.LogicalName)."
         }
     }
-    if ($ReferenceUiCompositionOnly) { Assert-ApprovedAppRoles -Roles $roleSnapshot }
+    if ($ReferenceUiCompositionOnly -or $EntityRootRepairDiagnosticOnly) {
+        Assert-ApprovedAppRoles -Roles $roleSnapshot
+    }
     $script:LastStage = 'Read current app dependency validation'
     $validation = Invoke-DataverseRequest -Method GET -Path "ValidateApp(AppModuleId=$($script:Target.AppModuleId))"
     $validationResponse = Get-PropertyValue -Object $validation -Name 'AppValidationResponse'
@@ -1767,6 +2231,7 @@ function Get-TargetSnapshot {
         SolutionComponents = @($solutionComponents | ForEach-Object { [pscustomobject]@{ ComponentType = $_.componenttype; ObjectId = $_.objectid; RootComponentId = $_.rootsolutioncomponentid; RootComponentBehavior = $_.rootcomponentbehavior } })
         SolutionAppModuleRootCount = 1
         AppComponents = $components
+        DirectReferenceUiAssociationEvidence = $directReferenceUiAssociationEvidence
         RawAppComponentTypeCounts = [ordered]@{
             SiteMap = @($rawComponents | Where-Object { [int]$_.componenttype -eq 62 }).Count
             Entity = @($rawComponents | Where-Object { [int]$_.componenttype -eq 1 }).Count
@@ -1780,6 +2245,7 @@ function Get-TargetSnapshot {
         EntityResolutionDiagnostics = @($script:EntityResolutionDiagnostics)
         EntityResolutionClassification = $script:EntityResolutionClassification
         RetrieveAppComponentsEvidence = $script:RetrieveAppComponentsEvidence
+        EntityRootRepairEvidence = $script:EntityRootRepairEvidence
         ReferencePayloadFingerprint = $script:PayloadFingerprintDiagnostic
         AppModuleRoles = $roleSnapshot
         AppValidation = [pscustomobject]@{
@@ -2166,6 +2632,133 @@ function Invoke-Main {
     }
     if ($Apply) { Assert-ApplyAuthorization -Phrase $Confirmation -Reference $AuthorizationReference }
     $snapshot = Get-TargetSnapshot
+    if ($EntityRootRepairDiagnosticOnly) {
+        $rootRepairPlan = $snapshot.EntityRootRepairEvidence.Plan
+        $referenceAssets = @($snapshot.ReferenceComponents | ForEach-Object {
+            $referenceAsset = $_
+            $directAsset = @($snapshot.DirectReferenceUiAssociationEvidence.Assets |
+                Where-Object { $_.LogicalName -ceq $referenceAsset.LogicalName } | Select-Object -First 1)
+            [pscustomobject]@{
+                LogicalName = $referenceAsset.LogicalName
+                MainFormName = $referenceAsset.MainForm.Name
+                MainFormType = $referenceAsset.MainForm.Type
+                MainFormState = $referenceAsset.MainForm.ActivationState
+                MainFormComponentState = $referenceAsset.MainForm.ComponentState
+                PublicViewName = $referenceAsset.ActiveView.Name
+                PublicView = -not [bool]$referenceAsset.ActiveView.IsPrivate
+                ViewState = $referenceAsset.ActiveView.StateCode
+                ViewComponentState = $referenceAsset.ActiveView.ComponentState
+                DirectFormPresent = if ($directAsset.Count -eq 1) { $directAsset[0].MainFormPresentDirectly } else { $false }
+                DirectViewPresent = if ($directAsset.Count -eq 1) { $directAsset[0].ActiveViewPresentDirectly } else { $false }
+            }
+        })
+        $assetInventoryValid = $referenceAssets.Count -eq 4 -and @(
+            $referenceAssets | Where-Object {
+                -not $_.DirectFormPresent -or -not $_.DirectViewPresent -or
+                $_.MainFormName -cne 'Information' -or [int]$_.MainFormType -ne 2 -or
+                [int]$_.MainFormState -ne 1 -or [int]$_.MainFormComponentState -ne 0 -or
+                -not $_.PublicView -or [int]$_.ViewState -ne 0 -or [int]$_.ViewComponentState -ne 0
+            }
+        ).Count -eq 0
+        $directInventoryValid = $snapshot.RawAppComponentTypeCounts.Total -eq 13 -and
+            $snapshot.RawAppComponentTypeCounts.SiteMap -eq 1 -and
+            $snapshot.RawAppComponentTypeCounts.Entity -eq 4 -and
+            $snapshot.RawAppComponentTypeCounts.Form -eq 4 -and
+            $snapshot.RawAppComponentTypeCounts.View -eq 4 -and
+            $snapshot.RawAppComponentTypeCounts.Other -eq 0 -and
+            $snapshot.DirectReferenceUiAssociationEvidence.AppAssociationMatchesForEveryComponent
+        $siteMapAssociationValid = $snapshot.DirectReferenceUiAssociationEvidence.IntendedSiteMapPresentDirectly -and
+            $snapshot.SiteMap.UniqueName -ceq $script:Target.SiteMapUniqueName -and
+            [bool]$snapshot.SiteMap.IsAppAware
+        $appStateValid = $snapshot.AppModule.UniqueName -ceq $script:Target.AppUniqueName -and
+            $snapshot.AppModule.Name -ceq $script:Target.AppName -and
+            [int]$snapshot.AppModule.StateCode -eq 0 -and [int]$snapshot.AppModule.ComponentState -eq 1
+        $validationHasNoBlockers = $snapshot.AppValidation.ValidationSuccess -eq $true -and
+            $snapshot.AppValidation.BlockingErrorCount -eq 0
+        $allRepairPreconditions = $directInventoryValid -and $assetInventoryValid -and
+            $siteMapAssociationValid -and $appStateValid -and $validationHasNoBlockers
+        $finalClassification = if ($rootRepairPlan.RootClassification -eq 'WRONG_SYSTEM_ENTITY_ROOTS_CONFIRMED') {
+            if ($rootRepairPlan.RepairPlanStatus -eq 'READY' -and $allRepairPreconditions) {
+                'REPAIR_PLAN_READY'
+            }
+            else {
+                'WRONG_ROOTS_CONFIRMED_REPAIR_AMBIGUOUS'
+            }
+        }
+        elseif ($rootRepairPlan.RootClassification -eq 'CORRECT_PROJECT_TABLE_ROOTS') {
+            'CURRENT_ROOTS_ACTUALLY_CORRECT'
+        }
+        elseif ($rootRepairPlan.RootClassification -eq 'MIXED_ROOT_STATE') {
+            'MIXED_ROOT_STATE'
+        }
+        else {
+            'BLOCKED_IDENTITY_EVIDENCE'
+        }
+        Write-Output ([ordered]@{
+            Status = 'ENTITY_ROOT_REPAIR_DIAGNOSTIC_COMPLETE_NO_WRITE'
+            EnvironmentGuards = [pscustomobject]@{
+                TargetMatched = $true
+                EnvironmentNameMatched = $true
+                OrganizationMatched = $true
+            }
+            IdentityChecks = $snapshot.IdentityChecks
+            Solution = [pscustomobject]@{
+                UniqueName = $snapshot.Solution.UniqueName
+                Unmanaged = -not [bool]$snapshot.Solution.IsManaged
+                Publisher = $snapshot.SolutionPublisher.UniqueName
+                Prefix = $snapshot.SolutionPublisher.CustomizationPrefix
+            }
+            AppModule = [pscustomobject]@{
+                Name = $snapshot.AppModule.Name
+                UniqueName = $snapshot.AppModule.UniqueName
+                Active = [int]$snapshot.AppModule.StateCode -eq 0
+                Unpublished = [int]$snapshot.AppModule.ComponentState -eq 1
+            }
+            DirectComponentCounts = $snapshot.RawAppComponentTypeCounts
+            DirectAssociation = $snapshot.DirectReferenceUiAssociationEvidence
+            PreflightGates = [pscustomobject]@{
+                DirectInventoryValid = $directInventoryValid
+                ReferenceAssetsValid = $assetInventoryValid
+                SiteMapAssociationValid = $siteMapAssociationValid
+                AppStateValid = $appStateValid
+                ValidateAppNoBlockingErrors = $validationHasNoBlockers
+                AllRepairPreconditions = $allRepairPreconditions
+            }
+            Roles = @($snapshot.AppModuleRoles | ForEach-Object { $_.Name })
+            SiteMap = [pscustomobject]@{
+                UniqueName = $snapshot.SiteMap.UniqueName
+                AppAware = [bool]$snapshot.SiteMap.IsAppAware
+                ComponentState = $snapshot.SiteMap.ComponentState
+                ETagPresent = -not [string]::IsNullOrWhiteSpace([string]$snapshot.SiteMap.ETag)
+                NavigationBefore = @($snapshot.SiteMapNavigationBefore | ForEach-Object {
+                    [pscustomobject]@{ Area = $_.AreaTitle; Group = $_.GroupTitle; Title = $_.Title; Entity = $_.Entity }
+                })
+                ProposedNavigationAfter = @($snapshot.SiteMapNavigationAfter | ForEach-Object {
+                    [pscustomobject]@{ Area = $_.AreaTitle; Group = $_.GroupTitle; Title = $_.Title; Entity = $_.Entity }
+                })
+                ProposedUpdateNeeded = [bool]$snapshot.SiteMapNeedsUpdate
+            }
+            EntityResolution = @($snapshot.EntityResolutionDiagnostics)
+            EntityResolutionClassification = $snapshot.EntityResolutionClassification
+            FirstFailingPredicate = $script:FirstFailingPredicate
+            OriginalPayloadFingerprint = $snapshot.ReferencePayloadFingerprint
+            RootRepairEvidence = $snapshot.EntityRootRepairEvidence
+            FinalClassification = $finalClassification
+            ValidateApp = [pscustomobject]@{
+                Calls = 1
+                ValidationSuccess = $snapshot.AppValidation.ValidationSuccess
+                BlockingErrors = $snapshot.AppValidation.BlockingErrorCount
+                Warnings = @($snapshot.AppValidation.Issues)
+            }
+            RetrieveAppComponents = $snapshot.RetrieveAppComponentsEvidence
+            ReferenceAssets = $referenceAssets
+            RequestCounts = [ordered]@{} + $script:RequestCounts
+            RetryCount = 0
+            WriteResults = @()
+            WritesMayHaveOccurred = $script:WritesStarted
+        } | ConvertTo-Json -Depth 40 -Compress)
+        return
+    }
     if ($EntityIdentityDiagnosticOnly) {
         Write-Output ([ordered]@{
             Status = 'DIAGNOSTIC_COMPLETE_NO_WRITE'

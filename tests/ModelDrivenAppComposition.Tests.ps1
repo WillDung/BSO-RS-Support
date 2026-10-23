@@ -236,6 +236,9 @@ $ReferenceUiCompositionOnly = $false
 $EntityIdentityDiagnosticOnly = $true
 Assert-Test (Test-AllowsProcessExpectedUserPin) 'Allow process-only expected-user pin for guarded read-only identity diagnostics'
 $EntityIdentityDiagnosticOnly = $false
+$EntityRootRepairDiagnosticOnly = $true
+Assert-Test (Test-AllowsProcessExpectedUserPin) 'Allow process-only expected-user pin for guarded Phase 2D.3G read-only diagnostics'
+$EntityRootRepairDiagnosticOnly = $false
 Assert-Test ($phasePlan.MaximumWriteRequests -eq 2 -and $phasePlan.AutomaticRetries -eq 0) 'Phase 2D.3 plan caps writes at two and retries at zero'
 Assert-Test ($phasePlan.OrderedWriteOperations[0].Method -ceq 'POST' -and
     $phasePlan.OrderedWriteOperations[0].ComponentCount -eq 12 -and
@@ -536,6 +539,264 @@ try {
 }
 finally {
     Set-Item -Path Function:Invoke-DataverseRequest -Value $originalDataverseRequest
+}
+
+$originalGetODataRows = (Get-Command Get-ODataRows -CommandType Function).ScriptBlock
+$script:EntityRowsRequestPaths = [System.Collections.Generic.List[string]]::new()
+Set-Item -Path Function:Get-ODataRows -Value {
+    param([string]$Path)
+    $script:EntityRowsRequestPaths.Add($Path)
+    @([pscustomobject]@{
+        entityid = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+        logicalname = 'entity'
+        name = 'Entity'
+        objecttypecode = 1
+        componentstate = 0
+    })
+}
+$originalDataverseRequestForRootTests = (Get-Command Invoke-DataverseRequest -CommandType Function).ScriptBlock
+$script:EntityDefinitionRequests = [System.Collections.Generic.List[object]]::new()
+Set-Item -Path Function:Invoke-DataverseRequest -Value {
+    param([string]$Method, [string]$Path, [object]$Body, [string]$ETag)
+    $script:EntityDefinitionRequests.Add([pscustomobject]@{ Method = $Method; Path = $Path })
+    [pscustomobject]@{ MetadataId = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb'; LogicalName = 'os_sr_ta'; ObjectTypeCode = 11005 }
+}
+try {
+    $entityTableRows = @(Get-EntityRowsByLogicalName -LogicalName 'entity')
+    Assert-Test ($entityTableRows.Count -eq 1 -and $entityTableRows[0].componentstate -eq 0) 'Read entity table identity including component state'
+    $entityRowsPath = [Uri]::UnescapeDataString($script:EntityRowsRequestPaths[0])
+    Assert-Test ($entityRowsPath -match '\$filter=logicalname eq ''entity''' -and
+        $entityRowsPath -match '\$select=entityid,logicalname,name,objecttypecode,componentstate') 'Filter entities by logical name and retain componentstate'
+    $metadataRow = Get-EntityDefinitionByLogicalName -LogicalName 'os_sr_ta'
+    Assert-Test ($metadataRow.LogicalName -ceq 'os_sr_ta' -and
+        $script:EntityDefinitionRequests[0].Method -ceq 'GET' -and
+        [Uri]::UnescapeDataString($script:EntityDefinitionRequests[0].Path) -match "EntityDefinitions\(LogicalName='os_sr_ta'\).*MetadataId,LogicalName,ObjectTypeCode") 'Read EntityDefinitions metadata identity with an explicit GET'
+    Assert-Test (@(Get-NormalizedGuidCandidates -Rows @($metadataRow) -PropertyName 'MetadataId').Count -eq 1 -and
+        -not (Test-GuidValueMatchesAny -Value $metadataRow.MetadataId -Candidates @('cccccccc-cccc-4ccc-8ccc-cccccccccccc'))) 'Validate and compare MetadataId without exposing its value'
+}
+finally {
+    Set-Item -Path Function:Get-ODataRows -Value $originalGetODataRows
+    Set-Item -Path Function:Invoke-DataverseRequest -Value $originalDataverseRequestForRootTests
+}
+
+$rootRepairReferences = @(
+    foreach ($reference in $script:ResolvedReferenceComponents) {
+        [pscustomobject]@{
+            LogicalName = $reference.LogicalName
+            MetadataFound = $true
+            EntityTableIdentityUnambiguous = $true
+            LogicalNamesAgree = $true
+            MetadataIdEqualsEntityId = $true
+            ObjectTypeCodesAgree = $true
+            MetadataId = $reference.TableMetadataId
+            EntityId = $reference.TableMetadataId
+            PayloadEntityId = $reference.TableMetadataId
+        }
+    }
+)
+$repairSystemEntityId = 'ffffffff-ffff-4fff-8fff-ffffffffffff'
+$wrongSystemRoots = @(
+    for ($index = 0; $index -lt 4; $index++) {
+        [pscustomobject]@{
+            appmodulecomponentid = '{0:x8}-3000-4000-8000-{1:x12}' -f ($index + 1), ($index + 1)
+            componenttype = 1
+            objectid = $repairSystemEntityId
+            ismetadata = $false
+            isdefault = $false
+            rootappmodulecomponentid = $null
+            rootcomponentbehavior = $null
+        }
+    }
+)
+$wrongSystemPlan = Get-EntityRootRepairPlan -Components $wrongSystemRoots `
+    -SystemEntityIds @($repairSystemEntityId) -ReferenceIdentityEvidence $rootRepairReferences `
+    -OriginalPayloadFingerprintMatches $true -RemoveActionContractValid $true -AppId $script:Target.AppModuleId
+Assert-Test ($wrongSystemPlan.RootClassification -ceq 'WRONG_SYSTEM_ENTITY_ROOTS_CONFIRMED' -and
+    $wrongSystemPlan.AllComponentRecordIdsDistinct -and -not $wrongSystemPlan.AllObjectIdsDistinct -and
+    $wrongSystemPlan.SomeObjectIdsDuplicate -and $wrongSystemPlan.AllObjectIdsEqual) 'Confirm four wrong system roots and detect duplicate object references'
+Assert-Test ($wrongSystemPlan.RemovePayloadCount -eq 1 -and
+    -not $wrongSystemPlan.RemoveSemanticsKnownForObservedMultiplicity -and
+    $wrongSystemPlan.RepairPlanStatus -ceq 'AMBIGUOUS') 'Do not guess RemoveAppComponents behavior for duplicate wrong roots'
+Assert-Test ($wrongSystemPlan.AddPayloadCount -eq 4 -and
+    $wrongSystemPlan.AddPayloadContainsOnlyEntityComponents -and
+    @($wrongSystemPlan.AddPayload | Where-Object { $_.ODataType -ne 'Microsoft.Dynamics.CRM.entity' }).Count -eq 0) 'Build only four typed entity references for the proposed Add repair'
+Assert-Test ($wrongSystemPlan.AddPayloadFingerprint -ceq (Get-PayloadFingerprint -Payload @(
+    $rootRepairReferences | Sort-Object { [array]::IndexOf(@('os_sr_ta', 'os_sr_pos', 'os_sr_csrc', 'os_sr_loc'), $_.LogicalName) } |
+        ForEach-Object { [ordered]@{ entityid = $_.EntityId; '@odata.type' = 'Microsoft.Dynamics.CRM.entity' } }
+))) 'Fingerprint the deterministic four-table AddAppComponents repair payload'
+Assert-Test ($wrongSystemPlan.RemovePayloadFingerprint -ceq (Get-PayloadFingerprint -Payload @(
+    [ordered]@{ entityid = $repairSystemEntityId; '@odata.type' = 'Microsoft.Dynamics.CRM.entity' }
+))) 'Fingerprint one unique typed removal reference for a duplicate wrong root'
+Assert-Test ($wrongSystemPlan.RemovePayloadFingerprint -match '^[0-9a-f]{64}$' -and
+    $wrongSystemPlan.AddPayloadFingerprint -match '^[0-9a-f]{64}$' -and
+    $wrongSystemPlan.RemoveRequestBodyFingerprint -match '^[0-9a-f]{64}$' -and
+    $wrongSystemPlan.AddRequestBodyFingerprint -match '^[0-9a-f]{64}$' -and
+    $wrongSystemPlan.OriginalPayloadIdSource -ceq 'ENTITYDEFINITIONS_METADATA_ID' -and
+    $wrongSystemPlan.OriginalPayloadRootCause -ceq 'NOT_ESTABLISHED_BY_AVAILABLE_PAYLOAD_AND_ROOT_EVIDENCE') 'Fingerprint repair payloads while preserving unresolved original root cause'
+$safeRootDiagnostic = $wrongSystemPlan | ConvertTo-Json -Depth 10 -Compress
+Assert-Test ($safeRootDiagnostic -notmatch '[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}' -and
+    $safeRootDiagnostic -match 'WRONG_SYSTEM_ENTITY_ROOTS_CONFIRMED') 'Retain sanitized root classification without raw GUIDs'
+$wrongRootsWithProtectedComponents = @($wrongSystemRoots) + @(
+    [pscustomobject]@{ componenttype = 62; objectid = $script:Target.SiteMapId }
+    [pscustomobject]@{ componenttype = 60; objectid = $script:ResolvedReferenceComponents[0].MainForm.Id }
+    [pscustomobject]@{ componenttype = 26; objectid = $script:ResolvedReferenceComponents[0].ActiveView.Id }
+)
+$protectedComponentPlan = Get-EntityRootRepairPlan -Components $wrongRootsWithProtectedComponents `
+    -SystemEntityIds @($repairSystemEntityId) -ReferenceIdentityEvidence $rootRepairReferences `
+    -OriginalPayloadFingerprintMatches $true -RemoveActionContractValid $true -AppId $script:Target.AppModuleId
+Assert-Test ($protectedComponentPlan.RemovePayloadCount -eq 1 -and
+    $protectedComponentPlan.AddPayloadCount -eq 4 -and
+    @($protectedComponentPlan.RemovePayload | Where-Object ODataType -ne 'Microsoft.Dynamics.CRM.entity').Count -eq 0) 'Exclude Site Map, form, and view records from repair payloads'
+
+$correctProjectRoots = @(
+    for ($index = 0; $index -lt 4; $index++) {
+        [pscustomobject]@{
+            appmodulecomponentid = '{0:x8}-4000-4000-8000-{1:x12}' -f ($index + 1), ($index + 1)
+            componenttype = 1
+            objectid = $rootRepairReferences[$index].EntityId
+        }
+    }
+)
+$correctRootPlan = Get-EntityRootRepairPlan -Components $correctProjectRoots `
+    -SystemEntityIds @($repairSystemEntityId) -ReferenceIdentityEvidence $rootRepairReferences `
+    -OriginalPayloadFingerprintMatches $true -RemoveActionContractValid $true -AppId $script:Target.AppModuleId
+Assert-Test ($correctRootPlan.RootClassification -ceq 'CORRECT_PROJECT_TABLE_ROOTS' -and
+    $correctRootPlan.AllObjectIdsDistinct) 'Resolve four exact project table roots using matching EntityDefinitions and entities IDs'
+$mixedRoots = @($correctProjectRoots[0], $correctProjectRoots[1]) + @(
+    $wrongSystemRoots[2], $wrongSystemRoots[3]
+)
+$mixedRootPlan = Get-EntityRootRepairPlan -Components $mixedRoots `
+    -SystemEntityIds @($repairSystemEntityId) -ReferenceIdentityEvidence $rootRepairReferences `
+    -OriginalPayloadFingerprintMatches $true -RemoveActionContractValid $true -AppId $script:Target.AppModuleId
+Assert-Test ($mixedRootPlan.RootClassification -ceq 'MIXED_ROOT_STATE') 'Classify mixed system and project entity roots'
+$differentMetadataEvidence = @($rootRepairReferences)
+$differentMetadataEvidence[0] = [pscustomobject]@{
+    LogicalName = $rootRepairReferences[0].LogicalName
+    MetadataFound = $true
+    EntityTableIdentityUnambiguous = $true
+    LogicalNamesAgree = $true
+    MetadataIdEqualsEntityId = $false
+    ObjectTypeCodesAgree = $true
+    MetadataId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
+    EntityId = $rootRepairReferences[0].EntityId
+    PayloadEntityId = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
+}
+$unverifiedIdPlan = Get-EntityRootRepairPlan -Components $wrongSystemRoots `
+    -SystemEntityIds @($repairSystemEntityId) -ReferenceIdentityEvidence $differentMetadataEvidence `
+    -OriginalPayloadFingerprintMatches $true -RemoveActionContractValid $true -AppId $script:Target.AppModuleId
+Assert-Test (-not $unverifiedIdPlan.ReferenceIdentityComplete -and
+    $unverifiedIdPlan.RepairPlanStatus -ceq 'AMBIGUOUS') 'Block repair when MetadataId and entities entityid differ'
+$removeContractMetadata = [xml]@'
+<edmx:Edmx xmlns:edmx="http://docs.oasis-open.org/odata/ns/edmx" Version="4.0">
+  <edmx:DataServices>
+    <Schema xmlns="http://docs.oasis-open.org/odata/ns/edm" Namespace="Microsoft.Dynamics.CRM">
+      <Action Name="RemoveAppComponents">
+        <Parameter Name="AppId" Type="Edm.Guid" Nullable="false" />
+        <Parameter Name="Components" Type="Collection(mscrm.crmbaseentity)" Nullable="false" />
+      </Action>
+    </Schema>
+  </edmx:DataServices>
+</edmx:Edmx>
+'@
+$removeActionContract = Get-RemoveAppComponentsContract -Metadata $removeContractMetadata
+Assert-Test ($removeActionContract.Valid -and $removeActionContract.ComponentsType -ceq 'Collection(mscrm.crmbaseentity)') 'Verify RemoveAppComponents accepts typed component collections'
+
+$rootRepairAssetComponents = @(
+    [pscustomobject]@{
+        appmodulecomponentid = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
+        _appmoduleidunique_value = $script:Target.AppModuleIdUnique
+        componenttype = 62
+        objectid = $script:Target.SiteMapId
+    }
+    foreach ($reference in $script:ResolvedReferenceComponents) {
+        [pscustomobject]@{
+            appmodulecomponentid = $reference.MainForm.Id
+            _appmoduleidunique_value = $script:Target.AppModuleIdUnique
+            componenttype = 60
+            objectid = $reference.MainForm.Id
+        }
+        [pscustomobject]@{
+            appmodulecomponentid = $reference.ActiveView.Id
+            _appmoduleidunique_value = $script:Target.AppModuleIdUnique
+            componenttype = 26
+            objectid = $reference.ActiveView.Id
+        }
+    }
+)
+$assetEvidence = Get-DirectReferenceUiAssociationEvidence -Components $rootRepairAssetComponents `
+    -ReferenceComponents $script:ResolvedReferenceComponents -SiteMapId $script:Target.SiteMapId `
+    -AppModuleIdUnique $script:Target.AppModuleIdUnique
+Assert-Test ($assetEvidence.IntendedSiteMapPresentDirectly -and
+    $assetEvidence.AppAssociationMatchesForEveryComponent -and
+    @($assetEvidence.Assets | Where-Object { -not $_.MainFormPresentDirectly -or -not $_.ActiveViewPresentDirectly }).Count -eq 0) 'Verify all approved forms, views, Site Map, and app associations directly'
+
+$originalGetODataRowsForRootEvidence = (Get-Command Get-ODataRows -CommandType Function).ScriptBlock
+$originalDataverseRequestForEntityMetadata = (Get-Command Invoke-DataverseRequest -CommandType Function).ScriptBlock
+$script:RootEvidenceGetPaths = [System.Collections.Generic.List[string]]::new()
+$script:RootEvidenceMetadataPaths = [System.Collections.Generic.List[string]]::new()
+Set-Item -Path Function:Get-ODataRows -Value {
+    param([string]$Path)
+    $script:RootEvidenceGetPaths.Add($Path)
+    $decodedPath = [Uri]::UnescapeDataString($Path)
+    $logicalMatch = [regex]::Match($decodedPath, '\$filter=logicalname eq ''([^'']+)''')
+    if (-not $logicalMatch.Success) { throw 'Synthetic entity query must filter by logicalname.' }
+    $logicalName = $logicalMatch.Groups[1].Value
+    if ($logicalName -ceq 'entity') {
+        return @(
+            [pscustomobject]@{
+                entityid = $repairSystemEntityId; logicalname = 'entity'; name = 'Entity'
+                objecttypecode = 1; componentstate = 0
+            }
+            [pscustomobject]@{
+                entityid = $repairSystemEntityId; logicalname = 'entity'; name = 'Entity'
+                objecttypecode = 1; componentstate = 1
+            }
+        )
+    }
+    $tableEvidence = @($rootRepairReferences | Where-Object LogicalName -CEQ $logicalName)
+    if ($tableEvidence.Count -ne 1) { throw 'Synthetic logical name was not approved.' }
+    $reference = @($script:ResolvedReferenceComponents | Where-Object LogicalName -CEQ $logicalName)[0]
+    @([pscustomobject]@{
+        entityid = $tableEvidence[0].EntityId
+        logicalname = $logicalName
+        name = $logicalName
+        objecttypecode = 11005 + [array]::IndexOf(@('os_sr_ta', 'os_sr_pos', 'os_sr_csrc', 'os_sr_loc'), $logicalName)
+        componentstate = 0
+    })
+}
+Set-Item -Path Function:Invoke-DataverseRequest -Value {
+    param([string]$Method, [string]$Path, [object]$Body, [string]$ETag)
+    $script:RootEvidenceMetadataPaths.Add($Path)
+    if ($Method -cne 'GET') { throw 'Synthetic root evidence is GET-only.' }
+    $logicalMatch = [regex]::Match($Path, "EntityDefinitions\(LogicalName='([^']+)'\)")
+    if (-not $logicalMatch.Success) { throw 'Unexpected synthetic metadata route.' }
+    $logicalName = $logicalMatch.Groups[1].Value
+    $reference = @($rootRepairReferences | Where-Object LogicalName -CEQ $logicalName)[0]
+    [pscustomobject]@{
+        MetadataId = $reference.MetadataId
+        LogicalName = $logicalName
+        ObjectTypeCode = 11005 + [array]::IndexOf(@('os_sr_ta', 'os_sr_pos', 'os_sr_csrc', 'os_sr_loc'), $logicalName)
+    }
+}
+try {
+    $rootEvidence = Get-EntityRootRepairEvidence -Components $wrongSystemRoots `
+        -ReferenceComponents $script:ResolvedReferenceComponents `
+        -OriginalPayloadFingerprintMatches $true -Metadata $removeContractMetadata
+    Assert-Test (@($rootEvidence.ApprovedTables | Where-Object {
+        -not $_.MetadataSurfaceFound -or -not $_.EntityTableSurfaceFound -or
+        -not $_.LogicalNamesAgree -or -not $_.MetadataIdEqualsEntityId -or
+        ($null -ne $_.ObjectTypeCodesAgree -and -not $_.ObjectTypeCodesAgree)
+    }).Count -eq 0) 'Prove matching EntityDefinitions and entities table IDs for every intended logical name'
+    Assert-Test ($rootEvidence.SystemEntity.RowCount -eq 2 -and
+        $rootEvidence.SystemEntity.ComponentStates.Count -eq 2 -and
+        $rootEvidence.SystemEntity.UniqueIdCount -eq 1) 'Preserve duplicate system entity layers and their componentstate values'
+    Assert-Test ($rootEvidence.Plan.RootClassification -ceq 'WRONG_SYSTEM_ENTITY_ROOTS_CONFIRMED' -and
+        $rootEvidence.RemoveAppComponentsContract.Valid) 'Safely retain confirmed wrong-root classification and supported removal contract'
+    Assert-Test ($script:RootEvidenceGetPaths.Count -eq 5 -and $script:RootEvidenceMetadataPaths.Count -eq 4) 'Resolve system entity and four tables over both read-only identity surfaces'
+}
+finally {
+    Set-Item -Path Function:Get-ODataRows -Value $originalGetODataRowsForRootEvidence
+    Set-Item -Path Function:Invoke-DataverseRequest -Value $originalDataverseRequestForEntityMetadata
 }
 
 $approvedRoles = @(

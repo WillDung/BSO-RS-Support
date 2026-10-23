@@ -9,6 +9,7 @@ param(
     [switch]$EntityIdentityDiagnosticOnly,
     [switch]$EntityRootRepairDiagnosticOnly,
     [switch]$RemoveWrongSystemEntityRoots,
+    [switch]$AddTaEntityCanary,
     [string]$Confirmation,
     [string]$AuthorizationReference,
     [string]$EnvironmentName = $env:BSO_RS_ENVIRONMENT_NAME,
@@ -79,6 +80,9 @@ $script:PayloadFingerprintDiagnostic = $null
 $script:SystemEntityIdForRemoval = $null
 $script:CurrentRawAppComponents = @()
 $script:RemovalDispatchResult = $null
+$script:TACanaryDispatchResult = $null
+$script:TACanaryWireRequest = $null
+$script:TACanaryFinalRequest = $null
 
 if (($PlanOnly -and ($DryRun -or $Apply -or $SiteMapAssociationOnly)) -or
     ($DryRun -and $Apply) -or
@@ -87,12 +91,15 @@ if (($PlanOnly -and ($DryRun -or $Apply -or $SiteMapAssociationOnly)) -or
         ($PlanOnly -or $DryRun -or $Apply -or $SiteMapAssociationOnly -or $ReferenceUiCompositionOnly -or
             ($EntityIdentityDiagnosticOnly -and $EntityRootRepairDiagnosticOnly) -or
             ($RemoveWrongSystemEntityRoots -and ($EntityIdentityDiagnosticOnly -or $EntityRootRepairDiagnosticOnly)))) -or
+    ($AddTaEntityCanary -and ($PlanOnly -or $DryRun -or $Apply -or $SiteMapAssociationOnly -or
+        $ReferenceUiCompositionOnly -or $EntityIdentityDiagnosticOnly -or $EntityRootRepairDiagnosticOnly -or
+        $RemoveWrongSystemEntityRoots)) -or
     ($SiteMapAssociationOnly -and -not ($DryRun -or $Apply))) {
     throw 'Choose exactly one supported execution mode.'
 }
 if (-not $PlanOnly -and -not $DryRun -and -not $Apply -and
     -not $EntityIdentityDiagnosticOnly -and -not $EntityRootRepairDiagnosticOnly -and
-    -not $RemoveWrongSystemEntityRoots) { $PlanOnly = $true }
+    -not $RemoveWrongSystemEntityRoots -and -not $AddTaEntityCanary) { $PlanOnly = $true }
 
 function Get-PropertyValue {
     param([object]$Object, [Parameter(Mandatory = $true)][string]$Name)
@@ -148,10 +155,188 @@ function Get-PayloadFingerprint {
     ).ToLowerInvariant()
 }
 
+function New-TACanaryPayload {
+    param(
+        [Parameter(Mandatory = $true)][string]$AppId,
+        [Parameter(Mandatory = $true)][string]$TaEntityId,
+        [Parameter(Mandatory = $true)][string]$SystemEntityId
+    )
+    $normalizedTaId = ConvertTo-NormalizedGuid -Value $TaEntityId
+    if ($normalizedTaId -ceq (ConvertTo-NormalizedGuid -Value $SystemEntityId)) {
+        throw 'TA canary entity identity must not match the system entity identity.'
+    }
+    [ordered]@{
+        AppId = ConvertTo-NormalizedGuid -Value $AppId
+        Components = @(
+            [ordered]@{
+                entityid = $normalizedTaId
+                '@odata.type' = 'Microsoft.Dynamics.CRM.entity'
+            }
+        )
+    }
+}
+
+function Get-TACanaryWireBodyEvidence {
+    param(
+        [Parameter(Mandatory = $true)][byte[]]$Bytes,
+        [Parameter(Mandatory = $true)][string]$AppId,
+        [Parameter(Mandatory = $true)][string]$TaEntityId,
+        [Parameter(Mandatory = $true)][string]$SystemEntityId
+    )
+    try {
+        $document = [System.Text.Json.JsonDocument]::Parse([ReadOnlyMemory[byte]]::new($Bytes))
+    }
+    catch {
+        throw 'Serialized TA canary body is not valid strict JSON.'
+    }
+    try {
+        $root = $document.RootElement
+        if ($root.ValueKind -ne [System.Text.Json.JsonValueKind]::Object) {
+            throw 'Serialized TA canary body must be a JSON object.'
+        }
+        $rootProperties = @($root.EnumerateObject() | ForEach-Object { $_.Name })
+        $uniqueRootProperties = @($rootProperties | Select-Object -Unique)
+        $unexpectedRootProperties = @($rootProperties | Where-Object { $_ -cnotin @('AppId', 'Components') })
+        if ($rootProperties.Count -ne 2 -or $uniqueRootProperties.Count -ne 2 -or
+            $unexpectedRootProperties.Count -ne 0) {
+            throw 'Serialized TA canary body must contain only one AppId and one Components property.'
+        }
+        $appIdElement = $root.GetProperty('AppId')
+        $componentsElement = $root.GetProperty('Components')
+        if ($appIdElement.ValueKind -ne [System.Text.Json.JsonValueKind]::String -or
+            (ConvertTo-NormalizedGuid -Value $appIdElement.GetString()) -cne (ConvertTo-NormalizedGuid -Value $AppId) -or
+            $componentsElement.ValueKind -ne [System.Text.Json.JsonValueKind]::Array -or
+            $componentsElement.GetArrayLength() -ne 1) {
+            throw 'Serialized TA canary body has an invalid AppId or component count.'
+        }
+        $component = $componentsElement[0]
+        if ($component.ValueKind -ne [System.Text.Json.JsonValueKind]::Object) {
+            throw 'Serialized TA canary component must be a JSON object.'
+        }
+        $componentProperties = @($component.EnumerateObject() | ForEach-Object { $_.Name })
+        $uniqueComponentProperties = @($componentProperties | Select-Object -Unique)
+        $unexpectedComponentProperties = @($componentProperties | Where-Object {
+            $_ -cnotin @('entityid', '@odata.type')
+        })
+        if ($componentProperties.Count -ne 2 -or
+            $uniqueComponentProperties.Count -ne 2 -or
+            $unexpectedComponentProperties.Count -ne 0) {
+            throw 'Serialized TA canary component contains missing, duplicate, or unexpected identity properties.'
+        }
+        $entityIdElement = $component.GetProperty('entityid')
+        $typeElement = $component.GetProperty('@odata.type')
+        if ($entityIdElement.ValueKind -ne [System.Text.Json.JsonValueKind]::String -or
+            $typeElement.ValueKind -ne [System.Text.Json.JsonValueKind]::String -or
+            [string]::IsNullOrWhiteSpace($entityIdElement.GetString()) -or
+            $typeElement.GetString() -cne 'Microsoft.Dynamics.CRM.entity') {
+            throw 'Serialized TA canary component has an empty entityid or invalid OData type.'
+        }
+        $normalizedEntityId = ConvertTo-NormalizedGuid -Value $entityIdElement.GetString()
+        if ($normalizedEntityId -cne (ConvertTo-NormalizedGuid -Value $TaEntityId) -or
+            $normalizedEntityId -ceq (ConvertTo-NormalizedGuid -Value $SystemEntityId)) {
+            throw 'Serialized TA canary component identity differs from the verified TA table.'
+        }
+        $semanticComponent = [ordered]@{
+            entityid = $normalizedEntityId
+            '@odata.type' = $typeElement.GetString()
+        }
+        $semanticBody = [ordered]@{
+            AppId = (ConvertTo-NormalizedGuid -Value $appIdElement.GetString())
+            Components = @($semanticComponent)
+        }
+        [pscustomobject]@{
+            SemanticFingerprint = Get-PayloadFingerprint -Payload @($semanticBody)
+            SerializedBodySha256 = [Convert]::ToHexString(
+                [System.Security.Cryptography.SHA256]::HashData($Bytes)
+            ).ToLowerInvariant()
+            AppId = (ConvertTo-NormalizedGuid -Value $appIdElement.GetString())
+            ComponentCount = $componentsElement.GetArrayLength()
+            EntityId = $normalizedEntityId
+            ODataType = $typeElement.GetString()
+        }
+    }
+    finally {
+        $document.Dispose()
+    }
+}
+
+function New-TACanaryWireRequest {
+    param(
+        [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Body,
+        [Parameter(Mandatory = $true)][string]$TaEntityId,
+        [Parameter(Mandatory = $true)][string]$SystemEntityId
+    )
+    Assert-TACanaryPayloadObject -Body $Body -AppId $script:Target.AppModuleId `
+        -TaEntityId $TaEntityId -SystemEntityId $SystemEntityId
+    $semanticFingerprint = Get-PayloadFingerprint -Payload @($Body)
+    $json = ConvertTo-Json -InputObject $Body -Depth 10 -Compress
+    $encoding = [System.Text.UTF8Encoding]::new($false, $true)
+    $bytes = $encoding.GetBytes($json)
+    $evidence = Get-TACanaryWireBodyEvidence -Bytes $bytes -AppId $script:Target.AppModuleId `
+        -TaEntityId $TaEntityId -SystemEntityId $SystemEntityId
+    if ($evidence.SemanticFingerprint -cne $semanticFingerprint) {
+        throw 'Serialized TA canary semantics differ from the approved source payload.'
+    }
+    [pscustomobject]@{
+        BodyBytes = $bytes
+        SemanticFingerprint = $semanticFingerprint
+        SerializedBodySha256 = $evidence.SerializedBodySha256
+        ComponentCount = $evidence.ComponentCount
+        ODataType = $evidence.ODataType
+        TaEntityId = ConvertTo-NormalizedGuid -Value $TaEntityId
+        SystemEntityId = ConvertTo-NormalizedGuid -Value $SystemEntityId
+    }
+}
+
+function Assert-TACanaryPayloadObject {
+    param(
+        [Parameter(Mandatory = $true)][System.Collections.IDictionary]$Body,
+        [Parameter(Mandatory = $true)][string]$AppId,
+        [Parameter(Mandatory = $true)][string]$TaEntityId,
+        [Parameter(Mandatory = $true)][string]$SystemEntityId
+    )
+    if (@($Body.Keys).Count -ne 2 -or
+        ([string]$Body.AppId -cne (ConvertTo-NormalizedGuid -Value $AppId)) -or
+        @($Body.Components).Count -ne 1) {
+        throw 'TA canary must contain exactly one AppId and one component.'
+    }
+    $component = @($Body.Components)[0]
+    $keys = @($component.Keys | ForEach-Object { [string]$_ } | Sort-Object)
+    if (($keys -join ',') -cne '@odata.type,entityid' -or
+        [string]$component['@odata.type'] -cne 'Microsoft.Dynamics.CRM.entity' -or
+        [string]::IsNullOrWhiteSpace([string]$component.entityid) -or
+        (ConvertTo-NormalizedGuid -Value ([string]$component.entityid)) -cne
+            (ConvertTo-NormalizedGuid -Value $TaEntityId) -or
+        (ConvertTo-NormalizedGuid -Value ([string]$component.entityid)) -ceq
+            (ConvertTo-NormalizedGuid -Value $SystemEntityId)) {
+        throw 'TA canary must contain only the freshly verified os_sr_ta entity identity.'
+    }
+}
+
+function Assert-TACanaryWireRequest {
+    param(
+        [Parameter(Mandatory = $true)][byte[]]$Bytes,
+        [Parameter(Mandatory = $true)][string]$ExpectedSemanticFingerprint,
+        [Parameter(Mandatory = $true)][string]$ExpectedSerializedBodySha256,
+        [Parameter(Mandatory = $true)][string]$TaEntityId,
+        [Parameter(Mandatory = $true)][string]$SystemEntityId
+    )
+    $evidence = Get-TACanaryWireBodyEvidence -Bytes $Bytes -AppId $script:Target.AppModuleId `
+        -TaEntityId $TaEntityId -SystemEntityId $SystemEntityId
+    if ($evidence.SemanticFingerprint -cne $ExpectedSemanticFingerprint -or
+        $evidence.SerializedBodySha256 -cne $ExpectedSerializedBodySha256) {
+        throw 'Final serialized TA canary body fingerprints changed; no request sent.'
+    }
+    $evidence
+}
+
 function Assert-ApplyAuthorization {
     param([string]$Phrase, [string]$Reference)
     $expectedPhrase = if ($SiteMapAssociationOnly) {
         'APPLY PHASE 2D.2 IN VN LMV IT'
+    }
+    elseif ($AddTaEntityCanary) {
+        'APPLY PHASE 2D.3I TA ENTITY CANARY IN VN LMV IT'
     }
     elseif ($ReferenceUiCompositionOnly) {
         'APPLY PHASE 2D.3 IN VN LMV IT'
@@ -681,7 +866,7 @@ function Get-PacIdentity {
 
 function Test-AllowsProcessExpectedUserPin {
     [bool]($SiteMapAssociationOnly -or $ReferenceUiCompositionOnly -or $EntityIdentityDiagnosticOnly -or
-        $EntityRootRepairDiagnosticOnly -or $RemoveWrongSystemEntityRoots)
+        $EntityRootRepairDiagnosticOnly -or $RemoveWrongSystemEntityRoots -or $AddTaEntityCanary)
 }
 
 function Assert-TargetInputs {
@@ -852,10 +1037,13 @@ function Invoke-DataverseRequest {
         [Parameter(Mandatory = $true)][ValidateSet('GET', 'PATCH', 'POST')][string]$Method,
         [Parameter(Mandatory = $true)][string]$Path,
         [object]$Body,
-        [string]$ETag
+        [string]$ETag,
+        [byte[]]$SerializedBodyBytes,
+        [string]$ExpectedSemanticFingerprint,
+        [string]$ExpectedSerializedBodySha256
     )
     if ($Method -ne 'GET' -and
-        (-not ($Apply -or $RemoveWrongSystemEntityRoots) -or -not $script:WritesAllowed)) {
+        (-not ($Apply -or $RemoveWrongSystemEntityRoots -or $AddTaEntityCanary) -or -not $script:WritesAllowed)) {
         throw 'Write blocked; explicit Apply authorization gate is required.'
     }
     $uri = [Uri]::new([Uri]$script:ApiRoot, $Path)
@@ -864,6 +1052,10 @@ function Invoke-DataverseRequest {
         throw 'Dataverse request path is outside the verified organization origin.'
     }
     $resource = [Uri]::UnescapeDataString($uri.AbsolutePath.Substring('/api/data/v9.2/'.Length))
+    if ($AddTaEntityCanary -and $Method -ne 'GET' -and
+        ($Method -cne 'POST' -or $resource -cne 'AddAppComponents')) {
+        throw 'TA canary mode permits only one AddAppComponents POST; all other writes are blocked.'
+    }
     if ($Method -eq 'GET' -and $resource -notmatch '^(WhoAmI$|appmodules(\(|$)|appmodulecomponents$|entities$|sitemaps(\(|$)|sitemaps/Microsoft\.Dynamics\.CRM\.RetrieveUnpublishedMultiple\(|solutions$|publishers\(|solutioncomponents$|EntityDefinitions\(|systemforms(\(|$)|savedqueries(\(|$)|roles\(|RetrieveRequiredComponents\(|RetrieveAppComponents\(|ValidateApp\()') {
         throw 'GET blocked: endpoint is outside the app and component metadata allowlist.'
     }
@@ -871,10 +1063,29 @@ function Invoke-DataverseRequest {
         @($Body.Keys) -ne @('sitemapxml'))) {
         throw 'PATCH blocked: only the sitemapxml field on the existing target Site Map is allowed.'
     }
-    if ($ReferenceUiCompositionOnly -and $Method -in @('POST', 'PATCH')) {
+    if ($ReferenceUiCompositionOnly -and -not $AddTaEntityCanary -and $Method -in @('POST', 'PATCH')) {
         Assert-ReferenceUiWriteSequence -Method $Method
     }
-    if ($Method -eq 'POST' -and $RemoveWrongSystemEntityRoots) {
+    $dispatchBodyBytes = $null
+    if ($Method -eq 'POST' -and $AddTaEntityCanary) {
+        if ($resource -cne 'AddAppComponents' -or $script:RequestCounts.POST -ne 0 -or
+            $script:RequestCounts.PATCH -ne 0 -or $script:WriteResults.Count -ne 0 -or
+            $null -eq $SerializedBodyBytes -or $null -ne $Body) {
+            throw 'Only one serialized TA AddAppComponents POST is permitted in canary mode.'
+        }
+        Assert-TACanaryWriteSequence
+        $dispatchBodyBytes = [byte[]]$SerializedBodyBytes.Clone()
+        $wireEvidence = Assert-TACanaryWireRequest -Bytes $dispatchBodyBytes `
+            -ExpectedSemanticFingerprint $ExpectedSemanticFingerprint `
+            -ExpectedSerializedBodySha256 $ExpectedSerializedBodySha256 `
+            -TaEntityId $script:TACanaryFinalRequest.TaEntityId `
+            -SystemEntityId $script:TACanaryFinalRequest.SystemEntityId
+        $script:TACanaryDispatchResult = [pscustomobject]@{
+            BodySha256 = $wireEvidence.SerializedBodySha256
+            SemanticFingerprint = $wireEvidence.SemanticFingerprint
+        }
+    }
+    elseif ($Method -eq 'POST' -and $RemoveWrongSystemEntityRoots) {
         if ($resource -cne 'RemoveAppComponents' -or $script:RequestCounts.POST -ne 0 -or
             $script:RequestCounts.PATCH -ne 0 -or $script:WriteResults.Count -ne 0) {
             throw 'Only one RemoveAppComponents POST is permitted in this mode; all other writes are blocked.'
@@ -885,7 +1096,7 @@ function Invoke-DataverseRequest {
     elseif ($Method -eq 'POST' -and $resource -cne 'AddAppComponents') {
         throw 'POST blocked: only AddAppComponents is allowed; no create, publish, or role endpoint is allowed.'
     }
-    if ($Method -eq 'POST' -and -not $RemoveWrongSystemEntityRoots) {
+    if ($Method -eq 'POST' -and -not ($RemoveWrongSystemEntityRoots -or $AddTaEntityCanary)) {
         if ($SiteMapAssociationOnly) { Assert-SiteMapAssociationPayload -Body $Body }
         elseif ($ReferenceUiCompositionOnly) { Assert-ReferenceUiCompositionPayload -Body $Body }
         else { Assert-AppComponentsPayload -Body $Body }
@@ -918,6 +1129,10 @@ function Invoke-DataverseRequest {
     if ($null -ne $Body) {
         $request.ContentType = 'application/json; charset=utf-8'
         $request.Body = ConvertTo-Json -InputObject $Body -Depth 30 -Compress
+    }
+    elseif ($null -ne $dispatchBodyBytes) {
+        $request.ContentType = 'application/json; charset=utf-8'
+        $request.Body = $dispatchBodyBytes
     }
     $responseStatusCode = 0
     $responseHeaders = $null
@@ -1895,6 +2110,7 @@ function Get-EntityRootRepairEvidence {
                 EntityTableSurfaceFound = ($_.EntityTableRowCount -gt 0)
                 EntityTableRowCount = $_.EntityTableRowCount
                 EntityTableIdentityUnambiguous = $_.EntityTableIdentityUnambiguous
+                EntityId = $_.EntityId
                 LogicalNamesAgree = $_.LogicalNamesAgree
                 MetadataObjectTypeCode = $_.MetadataObjectTypeCode
                 EntityObjectTypeCodes = $_.EntityTableObjectTypeCodes
@@ -2074,6 +2290,395 @@ function Assert-RemoveWrongSystemEntityWriteSequence {
     if ($script:RequestCounts.POST -ne 0 -or $script:RequestCounts.PATCH -ne 0 -or
         $script:WriteResults.Count -ne 0 -or $script:WritesStarted) {
         throw 'Removal mode permits exactly one RemoveAppComponents POST and no prior write.'
+    }
+}
+
+function Assert-TACanaryWriteSequence {
+    if ($script:RequestCounts.POST -ne 0 -or $script:RequestCounts.PATCH -ne 0 -or
+        $script:WriteResults.Count -ne 0 -or $script:WritesStarted) {
+        throw 'TA canary permits exactly one AddAppComponents POST and no prior write.'
+    }
+}
+
+function Get-TACanaryTableIdentity {
+    param([Parameter(Mandatory = $true)][object]$Snapshot)
+    $references = @($Snapshot.ReferenceComponents | Where-Object { $_.LogicalName -ceq 'os_sr_ta' })
+    $evidence = @($Snapshot.EntityRootRepairEvidence.ApprovedTables | Where-Object { $_.LogicalName -ceq 'os_sr_ta' })
+    if ($references.Count -ne 1 -or $evidence.Count -ne 1 -or
+        -not $evidence[0].MetadataSurfaceFound -or
+        -not $evidence[0].EntityTableSurfaceFound -or
+        [int]$evidence[0].EntityTableRowCount -ne 1 -or
+        -not $evidence[0].EntityTableIdentityUnambiguous -or
+        -not $evidence[0].LogicalNamesAgree -or
+        -not $evidence[0].MetadataIdEqualsEntityId -or
+        $null -eq $evidence[0].MetadataObjectTypeCode -or
+        @($evidence[0].EntityObjectTypeCodes).Count -ne 1 -or
+        $evidence[0].ObjectTypeCodesAgree -ne $true -or
+        -not $evidence[0].PayloadEntityIdMatchesMetadataId -or
+        -not $evidence[0].PayloadEntityIdMatchesEntityId) {
+        throw 'Fresh TA table metadata and entities identity evidence is missing, ambiguous, or inconsistent.'
+    }
+    $taId = ConvertTo-NormalizedGuid -Value ([string]$evidence[0].EntityId)
+    $metadataId = ConvertTo-NormalizedGuid -Value ([string]$references[0].TableMetadataId)
+    if ($taId -cne $metadataId) {
+        throw 'Fresh TA EntityDefinitions MetadataId and entities.entityid do not agree.'
+    }
+    [pscustomobject]@{
+        LogicalName = 'os_sr_ta'
+        EntityId = $taId
+        MetadataId = $metadataId
+        EntitySetName = [string]$references[0].EntitySetName
+    }
+}
+
+function Assert-TACanaryPreflight {
+    param([Parameter(Mandatory = $true)][object]$Snapshot)
+    $counts = $Snapshot.RawAppComponentTypeCounts
+    if (-not $Snapshot.IdentityChecks.PacIdentityAvailable -or
+        -not $Snapshot.IdentityChecks.AzIdentityAvailable -or
+        -not $Snapshot.IdentityChecks.DataverseIdentityAvailable -or
+        -not $Snapshot.IdentityChecks.PacAzWhoAmIMatch -or
+        -not $Snapshot.IdentityChecks.ExpectedUserConfigured -or
+        -not $Snapshot.IdentityChecks.ExpectedUserMatch) {
+        throw 'Fresh PAC, Az, Dataverse WhoAmI, or expected-user identity guard failed.'
+    }
+    if ($Snapshot.Solution.UniqueName -cne $script:Target.SolutionUniqueName -or
+        [bool]$Snapshot.Solution.IsManaged -or
+        $Snapshot.SolutionPublisher.UniqueName -cne $script:Target.SolutionPublisherUniqueName -or
+        $Snapshot.SolutionPublisher.CustomizationPrefix -cne 'os' -or
+        $Snapshot.AddAppComponentsContract.Action -cne 'Microsoft.Dynamics.CRM.AddAppComponents' -or
+        $Snapshot.AddAppComponentsContract.AppIdType -cne 'Edm.Guid' -or
+        $Snapshot.AddAppComponentsContract.ComponentsType -notmatch '^Collection\([^)]*crmbaseentity\)$' -or
+        @($Snapshot.AddAppComponentsContract.ComponentEntityTypes | Where-Object {
+            $_.EntityType -ceq 'Microsoft.Dynamics.CRM.entity' -and $_.PrimaryKey -ceq 'entityid'
+        }).Count -ne 1) {
+        throw 'Fresh Solution, Publisher, or AddAppComponents contract differs from the approved target.'
+    }
+    if ($Snapshot.AppModule.Id -cne $script:Target.AppModuleId -or
+        $Snapshot.AppModule.IdUnique -cne $script:Target.AppModuleIdUnique -or
+        $Snapshot.AppModule.Name -cne $script:Target.AppName -or
+        $Snapshot.AppModule.UniqueName -cne $script:Target.AppUniqueName -or
+        [int]$Snapshot.AppModule.StateCode -ne 0 -or
+        [int]$Snapshot.AppModule.ComponentState -ne 1) {
+        throw 'Fresh srapp identity/state is not the approved Active/Unpublished target.'
+    }
+    if ($Snapshot.SiteMap.Id -cne $script:Target.SiteMapId -or
+        $Snapshot.SiteMap.UniqueName -cne $script:Target.SiteMapUniqueName -or
+        -not $Snapshot.SiteMap.IsAppAware -or
+        -not $Snapshot.DirectReferenceUiAssociationEvidence.IntendedSiteMapPresentDirectly -or
+        $Snapshot.DirectReferenceUiAssociationEvidence.SiteMapCount -ne 1 -or
+        -not $Snapshot.DirectReferenceUiAssociationEvidence.AppAssociationMatchesForEveryComponent) {
+        throw 'Fresh Site Map identity or direct app association changed.'
+    }
+    $navigation = @($Snapshot.SiteMapNavigationBefore)
+    if ($navigation.Count -ne 1 -or $navigation[0].AreaTitle -cne 'Area1' -or
+        $navigation[0].GroupTitle -cne 'Group1' -or $navigation[0].Title -cne 'Subarea1' -or
+        -not [string]::IsNullOrWhiteSpace([string]$navigation[0].Entity)) {
+        throw 'Fresh Site Map no longer contains only the approved placeholder navigation.'
+    }
+    if ($counts.SiteMap -ne 1 -or $counts.Entity -ne 0 -or $counts.Form -ne 4 -or
+        $counts.View -ne 4 -or $counts.Other -ne 0 -or $counts.Total -ne 9) {
+        throw 'STATE_CHANGED: fresh direct component inventory is not the exact nine-component canary baseline.'
+    }
+    $expectedNames = @('os_sr_ta', 'os_sr_pos', 'os_sr_csrc', 'os_sr_loc')
+    $referenceNames = @($Snapshot.ReferenceComponents | ForEach-Object { [string]$_.LogicalName } | Sort-Object)
+    if ($referenceNames.Count -ne 4 -or
+        ($referenceNames -join ',') -cne (($expectedNames | Sort-Object) -join ',')) {
+        throw 'Fresh approved reference form/view inventory is incomplete or ambiguous.'
+    }
+    $assetEvidence = @($Snapshot.DirectReferenceUiAssociationEvidence.Assets)
+    if ($assetEvidence.Count -ne 4 -or @(
+        $assetEvidence | Where-Object {
+            $_.LogicalName -notin $expectedNames -or
+            -not $_.MainFormPresentDirectly -or $_.MainFormDirectMatchCount -ne 1 -or
+            -not $_.ActiveViewPresentDirectly -or $_.ActiveViewDirectMatchCount -ne 1
+        }
+    ).Count -gt 0) {
+        throw 'Fresh direct app inventory does not preserve each approved Main form and public view exactly once.'
+    }
+    Assert-ApprovedAppRoles -Roles $Snapshot.AppModuleRoles
+    if ($Snapshot.AppValidation.ValidationSuccess -ne $true -or
+        $Snapshot.AppValidation.BlockingErrorCount -ne 0) {
+        throw 'Fresh ValidateApp has a blocking error or did not succeed.'
+    }
+    if ($Snapshot.EntityRootRepairEvidence.SystemEntity.RowCount -ne 1 -or
+        $Snapshot.EntityRootRepairEvidence.SystemEntity.UniqueIdCount -ne 1 -or
+        @($Snapshot.EntityRootRepairEvidence.SystemEntity.LogicalNames).Count -ne 1 -or
+        $Snapshot.EntityRootRepairEvidence.SystemEntity.LogicalNames[0] -cne 'entity' -or
+        [string]::IsNullOrWhiteSpace($script:SystemEntityIdForRemoval)) {
+        throw 'Fresh system entity identity could not be resolved uniquely.'
+    }
+    $taIdentity = Get-TACanaryTableIdentity -Snapshot $Snapshot
+    if ($taIdentity.EntityId -ceq (ConvertTo-NormalizedGuid -Value $script:SystemEntityIdForRemoval)) {
+        throw 'Fresh os_sr_ta entityid equals the system entity identity.'
+    }
+    [pscustomobject]@{
+        TaEntityId = $taIdentity.EntityId
+        SystemEntityId = ConvertTo-NormalizedGuid -Value $script:SystemEntityIdForRemoval
+    }
+}
+
+function Get-TACanaryFailureStatus {
+    param([string]$FailureCategory = 'PREFLIGHT')
+    if ($script:LastHttpStatus -eq 401) { return 'FAILED_AUTH' }
+    if ($script:LastHttpStatus -eq 403) { return 'FAILED_AUTHZ' }
+    if ($FailureCategory -ceq 'SERIALIZATION') { return 'FAILED_SERIALIZATION_VALIDATION' }
+    if ($script:LastHttpStatus -ge 400 -and $script:LastHttpStatus -lt 500) { return 'FAILED_VALIDATION' }
+    if ($FailureCategory -ceq 'POST_DISPATCH' -or $script:WritesStarted) { return 'UNCERTAIN' }
+    'FAILED_VALIDATION'
+}
+
+function Get-TACanaryProtectedStateUnchanged {
+    param(
+        [Parameter(Mandatory = $true)][object]$Before,
+        [Parameter(Mandatory = $true)][object]$After
+    )
+    $beforeRoles = ConvertTo-Json -InputObject @($Before.AppModuleRoles) -Compress
+    $afterRoles = ConvertTo-Json -InputObject @($After.AppModuleRoles) -Compress
+    $sameReferenceAssets = $Before.ReferenceComponents.Count -eq 4 -and $After.ReferenceComponents.Count -eq 4
+    foreach ($name in @('os_sr_ta', 'os_sr_pos', 'os_sr_csrc', 'os_sr_loc')) {
+        $beforeReference = @($Before.ReferenceComponents | Where-Object { $_.LogicalName -ceq $name })
+        $afterReference = @($After.ReferenceComponents | Where-Object { $_.LogicalName -ceq $name })
+        if ($beforeReference.Count -ne 1 -or $afterReference.Count -ne 1 -or
+            $beforeReference[0].MainForm.Id -cne $afterReference[0].MainForm.Id -or
+            $beforeReference[0].ActiveView.Id -cne $afterReference[0].ActiveView.Id) {
+            $sameReferenceAssets = $false
+        }
+    }
+    [pscustomobject]@{
+        SiteMapUnchanged = $Before.SiteMap.Id -ceq $After.SiteMap.Id -and
+            $Before.SiteMap.UniqueName -ceq $After.SiteMap.UniqueName -and
+            $Before.SiteMap.SitemapXml -ceq $After.SiteMap.SitemapXml -and
+            (ConvertTo-Json -InputObject @($Before.SiteMapNavigationBefore) -Compress) -ceq
+                (ConvertTo-Json -InputObject @($After.SiteMapNavigationBefore) -Compress) -and
+            $After.DirectReferenceUiAssociationEvidence.IntendedSiteMapPresentDirectly
+        ComponentAssociationsIntact = $After.DirectReferenceUiAssociationEvidence.AppAssociationMatchesForEveryComponent
+        FormsAndViewsUnchanged = $sameReferenceAssets -and
+            @($After.DirectReferenceUiAssociationEvidence.Assets | Where-Object {
+                -not $_.MainFormPresentDirectly -or $_.MainFormDirectMatchCount -ne 1 -or
+                -not $_.ActiveViewPresentDirectly -or $_.ActiveViewDirectMatchCount -ne 1
+            }).Count -eq 0
+        RolesUnchanged = $beforeRoles -ceq $afterRoles
+        AppActiveUnpublished = $After.AppModule.Id -ceq $Before.AppModule.Id -and
+            $After.AppModule.IdUnique -ceq $Before.AppModule.IdUnique -and
+            $After.AppModule.UniqueName -ceq $script:Target.AppUniqueName -and
+            [int]$After.AppModule.StateCode -eq 0 -and [int]$After.AppModule.ComponentState -eq 1
+    }
+}
+
+function Get-TACanaryOutcome {
+    param(
+        [Parameter(Mandatory = $true)][object]$Before,
+        [Parameter(Mandatory = $true)][object]$After,
+        [Parameter(Mandatory = $true)][object]$ProtectedState,
+        [Nullable[int]]$WriteStatus
+    )
+    if ($WriteStatus -eq 401) { return 'FAILED_AUTH' }
+    if ($WriteStatus -eq 403) { return 'FAILED_AUTHZ' }
+    if (-not $ProtectedState.SiteMapUnchanged -or -not $ProtectedState.ComponentAssociationsIntact -or
+        -not $ProtectedState.FormsAndViewsUnchanged -or
+        -not $ProtectedState.RolesUnchanged -or -not $ProtectedState.AppActiveUnpublished) {
+        return 'PROTECTED_COMPONENT_CHANGED'
+    }
+    $counts = $After.RawAppComponentTypeCounts
+    $roots = @($After.EntityResolutionDiagnostics)
+    if ($counts.Entity -gt 1) { return 'DUPLICATE_OR_MULTIPLE_ROOTS_CREATED' }
+    if ($counts.Entity -eq 1 -and $roots.Count -eq 1) {
+        $root = $roots[0]
+        if ($root.ReturnedRowCount -eq 1 -and $root.NormalizedLogicalName -ceq 'entity') {
+            return 'WRONG_SYSTEM_ENTITY_ROOT_RECREATED'
+        }
+        if ($root.ReturnedRowCount -ne 1 -or
+            @($root.EntityIdMatchesQueriedObjectId | Where-Object { $_ -eq $true }).Count -ne 1) {
+            return 'UNCERTAIN'
+        }
+        if (-not $root.AppAssociationMatches) { return 'PROTECTED_COMPONENT_CHANGED' }
+        if ($root.NormalizedLogicalName -ceq 'entity') { return 'WRONG_SYSTEM_ENTITY_ROOT_RECREATED' }
+        if ($root.NormalizedLogicalName -cne 'os_sr_ta') { return 'WRONG_ENTITY_ROOT_CREATED' }
+        if ($root.ObjectIdEqualsPayloadEntityId -ne $true -or
+            $root.PayloadEntityIdEqualsEntityId -ne $true) {
+            return 'UNCERTAIN'
+        }
+        try { Get-TACanaryTableIdentity -Snapshot $After | Out-Null }
+        catch { return 'UNCERTAIN' }
+        if ($counts.SiteMap -ne 1 -or $counts.Form -ne 4 -or $counts.View -ne 4 -or
+            $counts.Other -ne 0 -or $counts.Total -ne 10 -or
+            $After.AppValidation.ValidationSuccess -ne $true -or
+            $After.AppValidation.BlockingErrorCount -ne 0) {
+            return 'FAILED_VALIDATION'
+        }
+        return 'CANARY_ROOT_VERIFIED'
+    }
+    if ($counts.Entity -eq 0 -and $WriteStatus -ge 200 -and $WriteStatus -lt 300) {
+        return 'NO_ENTITY_ROOT_CREATED'
+    }
+    if ($WriteStatus -ge 400 -and $WriteStatus -lt 500) { return 'FAILED_VALIDATION' }
+    'UNCERTAIN'
+}
+
+function Invoke-TACanaryAdd {
+    param([Parameter(Mandatory = $true)][object]$Preflight)
+    $wireRequest = $null
+    $initialIdentity = $null
+    $initialFailureCategory = 'PREFLIGHT'
+    try {
+        $initialIdentity = Assert-TACanaryPreflight -Snapshot $Preflight
+        Assert-TACanaryWriteSequence
+        $body = New-TACanaryPayload -AppId $script:Target.AppModuleId `
+            -TaEntityId $initialIdentity.TaEntityId -SystemEntityId $initialIdentity.SystemEntityId
+        $initialFailureCategory = 'SERIALIZATION'
+        $wireRequest = New-TACanaryWireRequest -Body $body -TaEntityId $initialIdentity.TaEntityId `
+            -SystemEntityId $initialIdentity.SystemEntityId
+        $script:TACanaryFinalRequest = $wireRequest
+    }
+    catch {
+        return [pscustomobject]@{
+            Status = Get-TACanaryFailureStatus -FailureCategory $initialFailureCategory
+            WriteDispatched = $false
+            WriteMayHaveOccurred = $false
+            RequestCounts = [ordered]@{} + $script:RequestCounts
+            RetryCount = 0
+            SafeError = 'Initial canary preflight or serialized payload validation failed; no write was sent.'
+        }
+    }
+
+    $finalPreflight = $null
+    $finalFailureCategory = 'PREFLIGHT'
+    try {
+        $script:LastStage = 'Fresh immediate pre-dispatch guarded preflight'
+        $finalPreflight = Get-TargetSnapshot
+        $finalIdentity = Assert-TACanaryPreflight -Snapshot $finalPreflight
+        if ($finalIdentity.TaEntityId -cne $wireRequest.TaEntityId -or
+            $finalIdentity.SystemEntityId -cne $wireRequest.SystemEntityId) {
+            throw 'Fresh TA or system entity identity changed after payload fingerprinting.'
+        }
+        $finalFailureCategory = 'SERIALIZATION'
+        Assert-TACanaryWireRequest -Bytes $wireRequest.BodyBytes `
+            -ExpectedSemanticFingerprint $wireRequest.SemanticFingerprint `
+            -ExpectedSerializedBodySha256 $wireRequest.SerializedBodySha256 `
+            -TaEntityId $finalIdentity.TaEntityId -SystemEntityId $finalIdentity.SystemEntityId | Out-Null
+        Assert-TACanaryWriteSequence
+    }
+    catch {
+        return [pscustomobject]@{
+            Status = Get-TACanaryFailureStatus -FailureCategory $finalFailureCategory
+            WriteDispatched = $false
+            WriteMayHaveOccurred = $false
+            SemanticPayloadFingerprint = if ($wireRequest) { $wireRequest.SemanticFingerprint } else { $null }
+            SerializedWireBodySha256 = if ($wireRequest) { $wireRequest.SerializedBodySha256 } else { $null }
+            RequestCounts = [ordered]@{} + $script:RequestCounts
+            RetryCount = 0
+            SafeError = 'Immediate pre-dispatch guard failed; no write was sent.'
+        }
+    }
+
+    $script:TACanaryDispatchResult = [pscustomobject]@{
+        Dispatched = $false
+        HttpStatus = $null
+        ErrorCode = $null
+        RequestId = $null
+        CorrelationId = $null
+        BodySha256 = $wireRequest.SerializedBodySha256
+        SemanticFingerprint = $wireRequest.SemanticFingerprint
+        SafeError = $null
+    }
+    $script:WritesAllowed = $true
+    try {
+        $script:LastStage = 'Dispatch exactly one serialized TA AddAppComponents request'
+        Invoke-DataverseRequest -Method POST -Path 'AddAppComponents' `
+            -SerializedBodyBytes $wireRequest.BodyBytes `
+            -ExpectedSemanticFingerprint $wireRequest.SemanticFingerprint `
+            -ExpectedSerializedBodySha256 $wireRequest.SerializedBodySha256 | Out-Null
+        $script:TACanaryDispatchResult.Dispatched = $true
+        $script:TACanaryDispatchResult.HttpStatus = $script:LastHttpStatus
+    }
+    catch {
+        $script:TACanaryDispatchResult.Dispatched = $script:RequestCounts.POST -eq 1
+        $script:TACanaryDispatchResult.HttpStatus = $script:LastHttpStatus
+        $script:TACanaryDispatchResult.ErrorCode = $script:LastErrorCode
+        $script:TACanaryDispatchResult.RequestId = $script:LastRequestId
+        $script:TACanaryDispatchResult.CorrelationId = $script:LastCorrelationId
+        $script:TACanaryDispatchResult.SafeError = $script:LastSafeError
+    }
+    finally {
+        $script:WritesAllowed = $false
+    }
+    $script:TACanaryDispatchResult.RequestId = if ($script:TACanaryDispatchResult.RequestId) {
+        $script:TACanaryDispatchResult.RequestId
+    } else { $script:LastRequestId }
+    $script:TACanaryDispatchResult.CorrelationId = if ($script:TACanaryDispatchResult.CorrelationId) {
+        $script:TACanaryDispatchResult.CorrelationId
+    } else { $script:LastCorrelationId }
+
+    $after = $null
+    try {
+        $script:LastStage = 'GET-only TA canary reconciliation'
+        $after = Get-TargetSnapshot
+    }
+    catch {
+        return [pscustomobject]@{
+            Status = if ($script:TACanaryDispatchResult.HttpStatus -eq 401) { 'FAILED_AUTH' }
+                elseif ($script:TACanaryDispatchResult.HttpStatus -eq 403) { 'FAILED_AUTHZ' }
+                else { 'UNCERTAIN' }
+            WriteDispatched = $script:TACanaryDispatchResult.Dispatched
+            WriteMayHaveOccurred = $script:WritesStarted
+            SemanticPayloadFingerprint = $wireRequest.SemanticFingerprint
+            SerializedWireBodySha256 = $wireRequest.SerializedBodySha256
+            DispatchedBodySha256 = $script:TACanaryDispatchResult.BodySha256
+            WriteResult = $script:TACanaryDispatchResult
+            PostWriteInventory = $null
+            RequestCounts = [ordered]@{} + $script:RequestCounts
+            RetryCount = 0
+            SafeError = 'Post-write GET-only reconciliation failed; raw details omitted.'
+        }
+    }
+    $protected = Get-TACanaryProtectedStateUnchanged -Before $Preflight -After $after
+    $outcome = Get-TACanaryOutcome -Before $Preflight -After $after -ProtectedState $protected `
+        -WriteStatus $script:TACanaryDispatchResult.HttpStatus
+    [pscustomobject]@{
+        Status = $outcome
+        WriteDispatched = $script:TACanaryDispatchResult.Dispatched
+        WriteMayHaveOccurred = $script:WritesStarted
+        SemanticPayloadFingerprint = $wireRequest.SemanticFingerprint
+        SerializedWireBodySha256 = $wireRequest.SerializedBodySha256
+        DispatchedBodySha256 = $script:TACanaryDispatchResult.BodySha256
+        ComponentCount = $wireRequest.ComponentCount
+        ComponentType = $wireRequest.ODataType
+        PostWriteInventory = $after.RawAppComponentTypeCounts
+        EntityRootResolution = @($after.EntityResolutionDiagnostics | ForEach-Object {
+            [pscustomobject]@{
+                ReturnedRowCount = $_.ReturnedRowCount
+                LogicalName = $_.NormalizedLogicalName
+                EntityIdMatchesObjectId = @($_.EntityIdMatchesQueriedObjectId | Where-Object { $_ -eq $true }).Count -eq 1
+            }
+        })
+        ProtectedState = $protected
+        ValidateApp = [pscustomobject]@{
+            ValidationSuccess = $after.AppValidation.ValidationSuccess
+            BlockingErrors = $after.AppValidation.BlockingErrorCount
+            Warnings = @($after.AppValidation.Issues | Where-Object { $_.ErrorType -ceq 'Warning' })
+            RequiredComponents = @($after.AppValidation.Issues | ForEach-Object { $_.RequiredComponents })
+        }
+        WriteResult = $script:TACanaryDispatchResult
+        RequestCounts = [ordered]@{} + $script:RequestCounts
+        OperationCounts = [ordered]@{
+            GET = $script:RequestCounts.GET
+            AddAppComponentsPost = $script:RequestCounts.POST
+            RemoveAppComponentsPost = 0
+            SiteMapPatch = $script:RequestCounts.PATCH
+            OtherPost = 0
+            Retries = 0
+            PublishXml = 0
+            AppPublish = 0
+            RoleChanges = 0
+        }
+        RetryCount = 0
+        RemoveAppComponentsPost = 0
+        SiteMapPatch = 0
+        OtherPost = 0
+        PublishXml = 0
+        AppPublish = 0
+        RoleChanges = 0
     }
 }
 
@@ -2321,7 +2926,7 @@ function Get-TargetSnapshot {
             }
         }
     }
-    if ($EntityIdentityDiagnosticOnly -or $EntityRootRepairDiagnosticOnly -or $RemoveWrongSystemEntityRoots) {
+    if ($EntityIdentityDiagnosticOnly -or $EntityRootRepairDiagnosticOnly -or $RemoveWrongSystemEntityRoots -or $AddTaEntityCanary) {
         $script:EntityResolutionDiagnostics = @(Get-EntityResolutionDiagnosticRows -Components $rawComponents -ReferenceComponents $referenceComponents)
         $script:EntityResolutionClassification = Get-EntityResolutionAggregateClassification -Diagnostics $script:EntityResolutionDiagnostics
         $payloadsForFingerprint = @($referenceComponents | ForEach-Object { $_.Payloads })
@@ -2332,7 +2937,7 @@ function Get-TargetSnapshot {
             $script:PayloadFingerprintDiagnostic = 'MISMATCH'
             if (-not $script:FirstFailingPredicate) { $script:FirstFailingPredicate = 'REFERENCE_PAYLOAD_FINGERPRINT_MATCHES_APPROVED' }
         }
-        if ($EntityRootRepairDiagnosticOnly -or $RemoveWrongSystemEntityRoots) {
+        if ($EntityRootRepairDiagnosticOnly -or $RemoveWrongSystemEntityRoots -or $AddTaEntityCanary) {
             $script:LastStage = 'Build guarded entity-root reconciliation evidence'
             $script:EntityRootRepairEvidence = Get-EntityRootRepairEvidence -Components $rawComponents `
                 -ReferenceComponents $referenceComponents `
@@ -2364,6 +2969,17 @@ function Get-TargetSnapshot {
         }
         $components = @()
         $entityRecords = @()
+        if ($AddTaEntityCanary) {
+            $components = @($script:EntityResolutionDiagnostics | Where-Object {
+                $_.ReturnedRowCount -eq 1 -and
+                @($_.EntityIdMatchesQueriedObjectId | Where-Object { $_ -eq $true }).Count -eq 1
+            } | ForEach-Object {
+                [pscustomobject]@{
+                    ComponentType = 1
+                    EntityLogicalName = [string]$_.NormalizedLogicalName
+                }
+            })
+        }
     }
     else {
         if (-not $identityContract) { throw 'AppModule entity identity metadata contract could not be verified.' }
@@ -2392,7 +3008,7 @@ function Get-TargetSnapshot {
             throw "Solution export does not contain the exact Main form and public view for $($reference.LogicalName)."
         }
     }
-    if ($ReferenceUiCompositionOnly -or $EntityRootRepairDiagnosticOnly -or $RemoveWrongSystemEntityRoots) {
+    if ($ReferenceUiCompositionOnly -or $EntityRootRepairDiagnosticOnly -or $RemoveWrongSystemEntityRoots -or $AddTaEntityCanary) {
         Assert-ApprovedAppRoles -Roles $roleSnapshot
     }
     $script:LastStage = 'Read current app dependency validation'
@@ -2983,6 +3599,50 @@ function Invoke-Main {
     $plan = Get-AppCompositionPlan
     if ($PlanOnly) {
         Write-Output ($plan | ConvertTo-Json -Depth 20 -Compress)
+        return
+    }
+    if ($AddTaEntityCanary) {
+        try {
+            Assert-ApplyAuthorization -Phrase $Confirmation -Reference $AuthorizationReference
+        }
+        catch {
+            Write-Output ([ordered]@{
+                Status = 'FAILED_VALIDATION'
+                WriteDispatched = $false
+                WriteMayHaveOccurred = $false
+                RequestCounts = [ordered]@{} + $script:RequestCounts
+                RetryCount = 0
+                SafeError = 'Phase-specific canary authorization guard failed; no environment request was sent.'
+            } | ConvertTo-Json -Depth 10 -Compress)
+            return
+        }
+        $snapshot = $null
+        try {
+            $script:LastStage = 'Fresh guarded TA canary preflight'
+            $snapshot = Get-TargetSnapshot
+        }
+        catch {
+            $status = Get-TACanaryFailureStatus
+            Write-Output ([ordered]@{
+                Status = $status
+                WriteDispatched = $false
+                WriteMayHaveOccurred = $false
+                RequestCounts = [ordered]@{} + $script:RequestCounts
+                RetryCount = 0
+                SafeError = 'Fresh guarded canary preflight failed; no write was sent.'
+            } | ConvertTo-Json -Depth 10 -Compress)
+            return
+        }
+        $result = Invoke-TACanaryAdd -Preflight $snapshot
+        $result | Add-Member -NotePropertyName AuthorizedLimits -NotePropertyValue ([pscustomobject]@{
+            AddAppComponentsPostMaximum = 1
+            ComponentsInAddPost = 1
+            RemoveAppComponentsPost = 0
+            SiteMapPatch = 0
+            OtherWrites = 0
+            Retries = 0
+        }) -Force
+        Write-Output ($result | ConvertTo-Json -Depth 30 -Compress)
         return
     }
     if ($Apply) { Assert-ApplyAuthorization -Phrase $Confirmation -Reference $AuthorizationReference }

@@ -239,6 +239,9 @@ $EntityIdentityDiagnosticOnly = $false
 $EntityRootRepairDiagnosticOnly = $true
 Assert-Test (Test-AllowsProcessExpectedUserPin) 'Allow process-only expected-user pin for guarded Phase 2D.3G read-only diagnostics'
 $EntityRootRepairDiagnosticOnly = $false
+$AddTaEntityCanary = $true
+Assert-Test (Test-AllowsProcessExpectedUserPin) 'Allow identity-pinned process guard for the authorized TA-only canary'
+$AddTaEntityCanary = $false
 Assert-Test ($phasePlan.MaximumWriteRequests -eq 2 -and $phasePlan.AutomaticRetries -eq 0) 'Phase 2D.3 plan caps writes at two and retries at zero'
 Assert-Test ($phasePlan.OrderedWriteOperations[0].Method -ceq 'POST' -and
     $phasePlan.OrderedWriteOperations[0].ComponentCount -eq 12 -and
@@ -1034,6 +1037,408 @@ $removedNavigation = @([pscustomobject]@{
 Assert-Rejected { Assert-SiteMapSemanticNodePreservation -Before $beforeNavigation -After $removedNavigation } 'Reject semantic delta deleting an existing node ID' 'removes or fails to preserve'
 $duplicateIdsXml = $fixtureXml.Replace('</Group>', '<SubArea Id="subarea_9787e9c1"><Titles><Title LCID="1033" Title="Duplicate"/></Titles></SubArea></Group>')
 Assert-Rejected { Assert-SiteMapHasNoDuplicateNavigationIds -SiteMapXml $duplicateIdsXml } 'Reject duplicate Site Map navigation IDs' 'duplicate SubArea IDs'
+
+$taCanaryId = '11111111-aaaa-4bbb-8ccc-111111111111'
+$systemEntityCanaryId = '99999999-aaaa-4bbb-8ccc-999999999999'
+$otherTableCanaryId = '22222222-aaaa-4bbb-8ccc-222222222222'
+$taCanaryBody = New-TACanaryPayload -AppId $script:Target.AppModuleId `
+    -TaEntityId $taCanaryId -SystemEntityId $systemEntityCanaryId
+Assert-Test ($taCanaryBody.Keys.Count -eq 2 -and @($taCanaryBody.Components).Count -eq 1 -and
+    $taCanaryBody.Components[0].entityid -ceq $taCanaryId -and
+    $taCanaryBody.Components[0]['@odata.type'] -ceq 'Microsoft.Dynamics.CRM.entity') `
+    'Build exactly one typed TA entity canary payload'
+Assert-Rejected {
+    New-TACanaryPayload -AppId $script:Target.AppModuleId `
+        -TaEntityId $systemEntityCanaryId -SystemEntityId $systemEntityCanaryId
+} 'Reject system entity as the TA canary identity' 'must not match the system entity'
+Assert-Rejected {
+    Assert-TACanaryPayloadObject -Body $taCanaryBody -AppId $script:Target.AppModuleId `
+        -TaEntityId $otherTableCanaryId -SystemEntityId $systemEntityCanaryId
+} 'Reject a wrong approved table identity in the TA canary' 'freshly verified os_sr_ta'
+$nullEntityCanaryBody = [ordered]@{
+    AppId = $script:Target.AppModuleId
+    Components = @([ordered]@{ entityid = $null; '@odata.type' = 'Microsoft.Dynamics.CRM.entity' })
+}
+Assert-Rejected {
+    Assert-TACanaryPayloadObject -Body $nullEntityCanaryBody -AppId $script:Target.AppModuleId `
+        -TaEntityId $taCanaryId -SystemEntityId $systemEntityCanaryId
+} 'Reject a null TA entityid' 'freshly verified os_sr_ta'
+$missingEntityCanaryBody = [ordered]@{
+    AppId = $script:Target.AppModuleId
+    Components = @([ordered]@{ '@odata.type' = 'Microsoft.Dynamics.CRM.entity' })
+}
+Assert-Rejected {
+    Assert-TACanaryPayloadObject -Body $missingEntityCanaryBody -AppId $script:Target.AppModuleId `
+        -TaEntityId $taCanaryId -SystemEntityId $systemEntityCanaryId
+} 'Reject a missing TA entityid' 'freshly verified os_sr_ta'
+$multipleEntityCanaryBody = [ordered]@{
+    AppId = $script:Target.AppModuleId
+    Components = @($taCanaryBody.Components[0], $taCanaryBody.Components[0])
+}
+Assert-Rejected {
+    Assert-TACanaryPayloadObject -Body $multipleEntityCanaryBody -AppId $script:Target.AppModuleId `
+        -TaEntityId $taCanaryId -SystemEntityId $systemEntityCanaryId
+} 'Reject multiple component entries in the TA canary' 'exactly one AppId and one component'
+$extraEntityCanaryBody = [ordered]@{
+    AppId = $script:Target.AppModuleId
+    Components = @([ordered]@{
+        entityid = $taCanaryId
+        systementityid = $systemEntityCanaryId
+        '@odata.type' = 'Microsoft.Dynamics.CRM.entity'
+    })
+}
+Assert-Rejected {
+    Assert-TACanaryPayloadObject -Body $extraEntityCanaryBody -AppId $script:Target.AppModuleId `
+        -TaEntityId $taCanaryId -SystemEntityId $systemEntityCanaryId
+} 'Reject an additional entity identity property' 'only the freshly verified'
+$taCanaryWireRequest = New-TACanaryWireRequest -Body $taCanaryBody `
+    -TaEntityId $taCanaryId -SystemEntityId $systemEntityCanaryId
+$taCanaryWireEvidence = Get-TACanaryWireBodyEvidence -Bytes $taCanaryWireRequest.BodyBytes `
+    -AppId $script:Target.AppModuleId -TaEntityId $taCanaryId -SystemEntityId $systemEntityCanaryId
+Assert-Test ($taCanaryWireEvidence.EntityId -ceq $taCanaryId -and
+    $taCanaryWireEvidence.ODataType -ceq 'Microsoft.Dynamics.CRM.entity' -and
+    $taCanaryWireEvidence.ComponentCount -eq 1) 'Strictly parse final serialized TA JSON and confirm the intended entityid'
+Assert-Test ($taCanaryWireRequest.SemanticFingerprint -match '^[0-9a-f]{64}$' -and
+    $taCanaryWireEvidence.SemanticFingerprint -ceq $taCanaryWireRequest.SemanticFingerprint) `
+    'Check the semantic payload fingerprint against final parsed JSON'
+Assert-Test ($taCanaryWireRequest.SerializedBodySha256 -match '^[0-9a-f]{64}$' -and
+    $taCanaryWireEvidence.SerializedBodySha256 -ceq $taCanaryWireRequest.SerializedBodySha256) `
+    'Fingerprint the exact serialized UTF-8 request body'
+Assert-Rejected {
+    Assert-TACanaryWireRequest -Bytes $taCanaryWireRequest.BodyBytes `
+        -ExpectedSemanticFingerprint ('0' * 64) `
+        -ExpectedSerializedBodySha256 $taCanaryWireRequest.SerializedBodySha256 `
+        -TaEntityId $taCanaryId -SystemEntityId $systemEntityCanaryId
+} 'Reject a changed semantic payload fingerprint' 'fingerprints changed'
+Assert-Rejected {
+    Assert-TACanaryWireRequest -Bytes $taCanaryWireRequest.BodyBytes `
+        -ExpectedSemanticFingerprint $taCanaryWireRequest.SemanticFingerprint `
+        -ExpectedSerializedBodySha256 ('0' * 64) `
+        -TaEntityId $taCanaryId -SystemEntityId $systemEntityCanaryId
+} 'Reject a changed serialized-body fingerprint' 'fingerprints changed'
+Assert-Rejected {
+    Get-TACanaryWireBodyEvidence -Bytes ([System.Text.Encoding]::UTF8.GetBytes(
+        '{"AppId":"' + $script:Target.AppModuleId + '","AppId":"' + $script:Target.AppModuleId +
+        '","Components":[{"entityid":"' + $taCanaryId + '","@odata.type":"Microsoft.Dynamics.CRM.entity"}]}'
+    )) -AppId $script:Target.AppModuleId -TaEntityId $taCanaryId -SystemEntityId $systemEntityCanaryId
+} 'Reject duplicate top-level JSON keys in final wire body' 'only one AppId'
+Assert-Rejected {
+    $systemWire = [System.Text.Encoding]::UTF8.GetBytes(
+        '{"AppId":"' + $script:Target.AppModuleId + '","Components":[{"entityid":"' +
+        $systemEntityCanaryId + '","@odata.type":"Microsoft.Dynamics.CRM.entity"}]}'
+    )
+    Get-TACanaryWireBodyEvidence -Bytes $systemWire -AppId $script:Target.AppModuleId `
+        -TaEntityId $taCanaryId -SystemEntityId $systemEntityCanaryId
+} 'Reject system entity identity in final JSON bytes' 'differs from the verified TA'
+
+$canaryRoleFixtures = @(
+    [pscustomobject]@{ Name = 'System Administrator'; RoleId = 'role-admin' }
+    [pscustomobject]@{ Name = 'System Customizer'; RoleId = 'role-customizer' }
+)
+$canaryAssetFixtures = @(
+    foreach ($name in @('os_sr_ta', 'os_sr_pos', 'os_sr_csrc', 'os_sr_loc')) {
+        [pscustomobject]@{
+            LogicalName = $name
+            MainFormPresentDirectly = $true; MainFormDirectMatchCount = 1
+            ActiveViewPresentDirectly = $true; ActiveViewDirectMatchCount = 1
+        }
+    }
+)
+$canaryReferenceFixtures = @(
+    foreach ($index in 1..4) {
+        [pscustomobject]@{
+            LogicalName = @('os_sr_ta', 'os_sr_pos', 'os_sr_csrc', 'os_sr_loc')[$index - 1]
+            TableMetadataId = @(
+                $taCanaryId
+                '33333333-aaaa-4bbb-8ccc-333333333333'
+                '44444444-aaaa-4bbb-8ccc-444444444444'
+                '55555555-aaaa-4bbb-8ccc-555555555555'
+            )[$index - 1]
+            EntitySetName = "synthetic_$index"
+            MainForm = [pscustomobject]@{ Id = "form-$index" }
+            ActiveView = [pscustomobject]@{ Id = "view-$index" }
+        }
+    }
+)
+$canaryBeforeFixture = [pscustomobject]@{
+    AppModule = [pscustomobject]@{
+        Id = 'app-id'; IdUnique = 'app-unique'; UniqueName = 'srapp'; StateCode = 0; ComponentState = 1
+    }
+    SiteMap = [pscustomobject]@{ Id = 'sitemap-id'; UniqueName = 'srapp'; SitemapXml = '<SiteMap />' }
+    SiteMapNavigationBefore = @([pscustomobject]@{ AreaId = 'area'; GroupId = 'group'; SubAreaId = 'placeholder' })
+    AppModuleRoles = $canaryRoleFixtures
+    ReferenceComponents = $canaryReferenceFixtures
+}
+$canaryAfterFixture = [pscustomobject]@{
+    AppModule = [pscustomobject]@{
+        Id = 'app-id'; IdUnique = 'app-unique'; UniqueName = 'srapp'; StateCode = 0; ComponentState = 1
+    }
+    SiteMap = [pscustomobject]@{ Id = 'sitemap-id'; UniqueName = 'srapp'; SitemapXml = '<SiteMap />' }
+    SiteMapNavigationBefore = @([pscustomobject]@{ AreaId = 'area'; GroupId = 'group'; SubAreaId = 'placeholder' })
+    AppModuleRoles = $canaryRoleFixtures
+    ReferenceComponents = $canaryReferenceFixtures
+    DirectReferenceUiAssociationEvidence = [pscustomobject]@{
+        IntendedSiteMapPresentDirectly = $true
+        AppAssociationMatchesForEveryComponent = $true
+        Assets = $canaryAssetFixtures
+    }
+    RawAppComponentTypeCounts = [pscustomobject]@{
+        SiteMap = 1; Entity = 1; Form = 4; View = 4; Other = 0; Total = 10
+    }
+    EntityResolutionDiagnostics = @([pscustomobject]@{
+        ReturnedRowCount = 1; NormalizedLogicalName = 'os_sr_ta'; AppAssociationMatches = $true
+        EntityIdMatchesQueriedObjectId = @($true)
+        ObjectIdEqualsPayloadEntityId = $true; PayloadEntityIdEqualsEntityId = $true
+    })
+    EntityRootRepairEvidence = [pscustomobject]@{
+        ApprovedTables = @([pscustomobject]@{
+            LogicalName = 'os_sr_ta'; MetadataSurfaceFound = $true
+            EntityTableSurfaceFound = $true; EntityTableRowCount = 1
+            EntityTableIdentityUnambiguous = $true; EntityId = $taCanaryId
+            LogicalNamesAgree = $true; MetadataIdEqualsEntityId = $true
+            PayloadEntityIdMatchesMetadataId = $true; PayloadEntityIdMatchesEntityId = $true
+            MetadataObjectTypeCode = 11005; EntityObjectTypeCodes = @(11005); ObjectTypeCodesAgree = $true
+        })
+        Plan = [pscustomobject]@{ ProjectTableRootCounts = @{ os_sr_ta = 1; os_sr_pos = 0; os_sr_csrc = 0; os_sr_loc = 0 } }
+    }
+    AppValidation = [pscustomobject]@{
+        ValidationSuccess = $true; BlockingErrorCount = 0; Issues = @()
+    }
+}
+$script:SystemEntityIdForRemoval = $systemEntityCanaryId
+$canaryPreflightFixture = [pscustomobject]@{
+    IdentityChecks = [pscustomobject]@{
+        PacIdentityAvailable = $true; AzIdentityAvailable = $true; DataverseIdentityAvailable = $true
+        PacAzWhoAmIMatch = $true; ExpectedUserConfigured = $true; ExpectedUserMatch = $true
+    }
+    Solution = [pscustomobject]@{ UniqueName = 'os_sr_bso_rs_support'; IsManaged = $false }
+    SolutionPublisher = [pscustomobject]@{ UniqueName = 'os_bso_rs_support'; CustomizationPrefix = 'os' }
+    AddAppComponentsContract = [pscustomobject]@{
+        Action = 'Microsoft.Dynamics.CRM.AddAppComponents'; AppIdType = 'Edm.Guid'
+        ComponentsType = 'Collection(mscrm.crmbaseentity)'
+        ComponentEntityTypes = @([pscustomobject]@{
+            EntityType = 'Microsoft.Dynamics.CRM.entity'; PrimaryKey = 'entityid'
+        })
+    }
+    AppModule = [pscustomobject]@{
+        Id = $script:Target.AppModuleId; IdUnique = $script:Target.AppModuleIdUnique
+        Name = 'BSO-RS-Support'; UniqueName = 'srapp'; StateCode = 0; ComponentState = 1
+    }
+    SiteMap = [pscustomobject]@{
+        Id = $script:Target.SiteMapId; UniqueName = 'srapp'; IsAppAware = $true
+    }
+    SiteMapNavigationBefore = @([pscustomobject]@{
+        AreaTitle = 'Area1'; GroupTitle = 'Group1'; Title = 'Subarea1'; Entity = $null
+    })
+    RawAppComponentTypeCounts = [pscustomobject]@{
+        SiteMap = 1; Entity = 0; Form = 4; View = 4; Other = 0; Total = 9
+    }
+    ReferenceComponents = $canaryReferenceFixtures
+    DirectReferenceUiAssociationEvidence = [pscustomobject]@{
+        IntendedSiteMapPresentDirectly = $true; SiteMapCount = 1
+        AppAssociationMatchesForEveryComponent = $true; Assets = $canaryAssetFixtures
+    }
+    AppModuleRoles = $canaryRoleFixtures
+    AppValidation = [pscustomobject]@{ ValidationSuccess = $true; BlockingErrorCount = 0 }
+    EntityRootRepairEvidence = [pscustomobject]@{
+        SystemEntity = [pscustomobject]@{
+            RowCount = 1; UniqueIdCount = 1; LogicalNames = @('entity')
+        }
+        ApprovedTables = @([pscustomobject]@{
+            LogicalName = 'os_sr_ta'; MetadataSurfaceFound = $true
+            EntityTableSurfaceFound = $true; EntityTableRowCount = 1
+            EntityTableIdentityUnambiguous = $true; EntityId = $taCanaryId
+            LogicalNamesAgree = $true; MetadataIdEqualsEntityId = $true
+            PayloadEntityIdMatchesMetadataId = $true; PayloadEntityIdMatchesEntityId = $true
+            MetadataObjectTypeCode = 11005; EntityObjectTypeCodes = @(11005); ObjectTypeCodesAgree = $true
+        })
+    }
+}
+$canaryPreflightIdentity = Assert-TACanaryPreflight -Snapshot $canaryPreflightFixture
+Assert-Test ($canaryPreflightIdentity.TaEntityId -ceq $taCanaryId -and
+    $canaryPreflightIdentity.SystemEntityId -ceq $systemEntityCanaryId) `
+    'Pass exact nine-component, identity, role, app, Site Map and TA metadata preflight'
+$changedCanaryBaseline = $canaryPreflightFixture.PSObject.Copy()
+$changedCanaryBaseline.RawAppComponentTypeCounts = [pscustomobject]@{
+    SiteMap = 1; Entity = 1; Form = 4; View = 4; Other = 0; Total = 10
+}
+Assert-Rejected {
+    Assert-TACanaryPreflight -Snapshot $changedCanaryBaseline
+} 'Stop canary when an entity root already exists' 'STATE_CHANGED'
+$canaryProtected = Get-TACanaryProtectedStateUnchanged -Before $canaryBeforeFixture -After $canaryAfterFixture
+$canaryVerifiedIdentity = Get-TACanaryTableIdentity -Snapshot $canaryAfterFixture
+$canaryVerifiedOutcome = Get-TACanaryOutcome -Before $canaryBeforeFixture -After $canaryAfterFixture `
+    -ProtectedState $canaryProtected -WriteStatus 204
+Assert-Test ($canaryVerifiedOutcome -ceq 'CANARY_ROOT_VERIFIED') `
+    "Verify the one TA root and unchanged protected state ($canaryVerifiedOutcome)"
+$wrongSystemCanary = $canaryAfterFixture.PSObject.Copy()
+$wrongSystemCanary.EntityResolutionDiagnostics = @([pscustomobject]@{
+    ReturnedRowCount = 1; NormalizedLogicalName = 'entity'; AppAssociationMatches = $true
+    EntityIdMatchesQueriedObjectId = @($true)
+})
+Assert-Test ((Get-TACanaryOutcome -Before $canaryBeforeFixture -After $wrongSystemCanary `
+    -ProtectedState $canaryProtected -WriteStatus 204) -ceq 'WRONG_SYSTEM_ENTITY_ROOT_RECREATED') `
+    'Classify a re-created system entity root'
+$wrongTableCanary = $canaryAfterFixture.PSObject.Copy()
+$wrongTableCanary.EntityResolutionDiagnostics = @([pscustomobject]@{
+    ReturnedRowCount = 1; NormalizedLogicalName = 'os_sr_pos'; AppAssociationMatches = $true
+    EntityIdMatchesQueriedObjectId = @($true)
+})
+Assert-Test ((Get-TACanaryOutcome -Before $canaryBeforeFixture -After $wrongTableCanary `
+    -ProtectedState $canaryProtected -WriteStatus 204) -ceq 'WRONG_ENTITY_ROOT_CREATED') `
+    'Classify a different project table root'
+$multipleCanary = $canaryAfterFixture.PSObject.Copy()
+$multipleCanary.RawAppComponentTypeCounts = [pscustomobject]@{
+    SiteMap = 1; Entity = 2; Form = 4; View = 4; Other = 0; Total = 11
+}
+Assert-Test ((Get-TACanaryOutcome -Before $canaryBeforeFixture -After $multipleCanary `
+    -ProtectedState $canaryProtected -WriteStatus 204) -ceq 'DUPLICATE_OR_MULTIPLE_ROOTS_CREATED') `
+    'Classify multiple entity roots without repair'
+$noRootCanary = $canaryAfterFixture.PSObject.Copy()
+$noRootCanary.RawAppComponentTypeCounts = [pscustomobject]@{
+    SiteMap = 1; Entity = 0; Form = 4; View = 4; Other = 0; Total = 9
+}
+$noRootCanary.EntityResolutionDiagnostics = @()
+Assert-Test ((Get-TACanaryOutcome -Before $canaryBeforeFixture -After $noRootCanary `
+    -ProtectedState $canaryProtected -WriteStatus 204) -ceq 'NO_ENTITY_ROOT_CREATED') `
+    'Classify a completed canary POST with no root'
+Assert-Test ((Get-TACanaryOutcome -Before $canaryBeforeFixture -After $canaryAfterFixture `
+    -ProtectedState $canaryProtected -WriteStatus 401) -ceq 'FAILED_AUTH') 'Classify unauthorized canary write'
+Assert-Test ((Get-TACanaryOutcome -Before $canaryBeforeFixture -After $canaryAfterFixture `
+    -ProtectedState $canaryProtected -WriteStatus 403) -ceq 'FAILED_AUTHZ') 'Classify forbidden canary write'
+$changedCanaryProtected = $canaryProtected.PSObject.Copy()
+$changedCanaryProtected.SiteMapUnchanged = $false
+Assert-Test ((Get-TACanaryOutcome -Before $canaryBeforeFixture -After $canaryAfterFixture `
+    -ProtectedState $changedCanaryProtected -WriteStatus 204) -ceq 'PROTECTED_COMPONENT_CHANGED') `
+    'Stop if protected Site Map state changes'
+$changedFormAfterCanary = $canaryAfterFixture.PSObject.Copy()
+$changedFormAssets = @($canaryAssetFixtures | ForEach-Object { $_.PSObject.Copy() })
+$changedFormAssets[0].MainFormPresentDirectly = $false
+$changedFormAfterCanary.DirectReferenceUiAssociationEvidence = [pscustomobject]@{
+    IntendedSiteMapPresentDirectly = $true; AppAssociationMatchesForEveryComponent = $true
+    Assets = $changedFormAssets
+}
+$changedFormProtected = Get-TACanaryProtectedStateUnchanged -Before $canaryBeforeFixture `
+    -After $changedFormAfterCanary
+Assert-Test ((Get-TACanaryOutcome -Before $canaryBeforeFixture -After $changedFormAfterCanary `
+    -ProtectedState $changedFormProtected -WriteStatus 204) -ceq 'PROTECTED_COMPONENT_CHANGED') `
+    'Stop if a protected form disappears'
+$changedViewAfterCanary = $canaryAfterFixture.PSObject.Copy()
+$changedViewAssets = @($canaryAssetFixtures | ForEach-Object { $_.PSObject.Copy() })
+$changedViewAssets[0].ActiveViewPresentDirectly = $false
+$changedViewAfterCanary.DirectReferenceUiAssociationEvidence = [pscustomobject]@{
+    IntendedSiteMapPresentDirectly = $true; AppAssociationMatchesForEveryComponent = $true
+    Assets = $changedViewAssets
+}
+$changedViewProtected = Get-TACanaryProtectedStateUnchanged -Before $canaryBeforeFixture `
+    -After $changedViewAfterCanary
+Assert-Test ((Get-TACanaryOutcome -Before $canaryBeforeFixture -After $changedViewAfterCanary `
+    -ProtectedState $changedViewProtected -WriteStatus 204) -ceq 'PROTECTED_COMPONENT_CHANGED') `
+    'Stop if a protected public view disappears'
+$changedRoleAfterCanary = $canaryAfterFixture.PSObject.Copy()
+$changedRoleAfterCanary.AppModuleRoles = @([pscustomobject]@{ Name = 'System Administrator'; RoleId = 'changed' })
+$changedRoleProtected = Get-TACanaryProtectedStateUnchanged -Before $canaryBeforeFixture `
+    -After $changedRoleAfterCanary
+Assert-Test ((Get-TACanaryOutcome -Before $canaryBeforeFixture -After $changedRoleAfterCanary `
+    -ProtectedState $changedRoleProtected -WriteStatus 204) -ceq 'PROTECTED_COMPONENT_CHANGED') `
+    'Stop if the app role association changes'
+$script:RequestCounts = @{ GET = 0; PATCH = 0; POST = 0 }
+$script:WriteResults = [System.Collections.Generic.List[object]]::new()
+$script:WritesStarted = $false
+Assert-TACanaryWriteSequence
+$script:RequestCounts.POST = 1
+Assert-Rejected { Assert-TACanaryWriteSequence } 'Block every second canary POST' 'exactly one AddAppComponents POST'
+$script:RequestCounts = @{ GET = 0; PATCH = 0; POST = 0 }
+$script:WritesStarted = $false
+
+$originalDataverseRequestForCanaryDispatch = (Get-Command Invoke-DataverseRequest -CommandType Function).ScriptBlock
+$originalInvokeRestMethodForCanaryDispatch = (Get-Command Invoke-RestMethod -CommandType Function).ScriptBlock
+$savedCanaryDispatchState = @{
+    AddTaEntityCanary = $AddTaEntityCanary
+    ReferenceUiCompositionOnly = $ReferenceUiCompositionOnly
+    ApiRoot = $script:ApiRoot
+    OrganizationUrl = $OrganizationUrl
+    AccessToken = $script:AccessToken
+    AccessTokenExpiresOn = $script:AccessTokenExpiresOn
+    WritesAllowed = $script:WritesAllowed
+    WritesStarted = $script:WritesStarted
+    RequestCounts = $script:RequestCounts
+    WriteResults = $script:WriteResults
+    CanaryFinalRequest = $script:TACanaryFinalRequest
+}
+$AddTaEntityCanary = $true
+$ReferenceUiCompositionOnly = $false
+$script:ApiRoot = 'https://synthetic.crm.dynamics.com/api/data/v9.2/'
+$OrganizationUrl = 'https://synthetic.crm.dynamics.com/'
+$script:AccessToken = 'synthetic'
+$script:AccessTokenExpiresOn = [DateTimeOffset]::UtcNow.AddHours(1)
+$script:WritesAllowed = $true
+$script:WritesStarted = $false
+$script:RequestCounts = @{ GET = 0; PATCH = 0; POST = 0 }
+$script:WriteResults = [System.Collections.Generic.List[object]]::new()
+$script:TACanaryFinalRequest = $taCanaryWireRequest
+$taCanaryBody.Components[0].entityid = $otherTableCanaryId
+Set-Item -Path Function:Invoke-RestMethod -Value {
+    param(
+        [string]$Method, [string]$Uri, [hashtable]$Headers, [int]$MaximumRedirection,
+        [switch]$SkipHeaderValidation, [switch]$SkipHttpErrorCheck, [string]$StatusCodeVariable,
+        [string]$ResponseHeadersVariable, [int]$TimeoutSec, [int]$MaximumRetryCount,
+        [string]$ErrorAction, [string]$ContentType, [byte[]]$Body
+    )
+    $script:CapturedCanaryDispatchBody = [byte[]]$Body.Clone()
+    Set-Variable -Name $StatusCodeVariable -Value 204 -Scope 1
+    Set-Variable -Name $ResponseHeadersVariable -Value @{} -Scope 1
+    $null
+}
+try {
+    $dispatchResult = Invoke-DataverseRequest -Method POST -Path 'AddAppComponents' `
+        -SerializedBodyBytes $taCanaryWireRequest.BodyBytes `
+        -ExpectedSemanticFingerprint $taCanaryWireRequest.SemanticFingerprint `
+        -ExpectedSerializedBodySha256 $taCanaryWireRequest.SerializedBodySha256
+    Assert-Test ($script:RequestCounts.POST -eq 1 -and $script:WriteResults.Count -eq 1 -and
+        $script:LastHttpStatus -eq 204) 'Dispatch exactly one canary write through the validated body path'
+    Assert-Test ($script:CapturedCanaryDispatchBody.Length -eq $taCanaryWireRequest.BodyBytes.Length -and
+        [Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($script:CapturedCanaryDispatchBody)).ToLowerInvariant() -ceq
+            $taCanaryWireRequest.SerializedBodySha256) 'HTTP dispatcher receives byte-for-byte the fingerprinted UTF-8 body'
+    Assert-Test ($taCanaryBody.Components[0].entityid -ceq $otherTableCanaryId -and
+        $script:CapturedCanaryDispatchBody.Length -gt 0 -and
+        (Get-TACanaryWireBodyEvidence -Bytes $script:CapturedCanaryDispatchBody `
+            -AppId $script:Target.AppModuleId -TaEntityId $taCanaryId `
+            -SystemEntityId $systemEntityCanaryId).EntityId -ceq $taCanaryId) `
+        'Do not regenerate the dispatched body from a mutated source object after fingerprinting'
+    Assert-Rejected { Assert-TACanaryWriteSequence } 'Reject any repeated canary write after dispatch' 'exactly one AddAppComponents POST'
+    Assert-Rejected {
+        Invoke-DataverseRequest -Method PATCH -Path "sitemaps($($script:Target.SiteMapId))" `
+            -Body ([ordered]@{ sitemapxml = '<SiteMap />' })
+    } 'Block Site Map PATCH in TA canary mode' 'only one AddAppComponents POST'
+    Assert-Rejected {
+        Invoke-DataverseRequest -Method POST -Path 'RemoveAppComponents' `
+            -SerializedBodyBytes $taCanaryWireRequest.BodyBytes `
+            -ExpectedSemanticFingerprint $taCanaryWireRequest.SemanticFingerprint `
+            -ExpectedSerializedBodySha256 $taCanaryWireRequest.SerializedBodySha256
+    } 'Block RemoveAppComponents in TA canary mode' 'only one AddAppComponents POST'
+    Assert-Rejected {
+        Invoke-DataverseRequest -Method POST -Path 'PublishXml' `
+            -SerializedBodyBytes $taCanaryWireRequest.BodyBytes `
+            -ExpectedSemanticFingerprint $taCanaryWireRequest.SemanticFingerprint `
+            -ExpectedSerializedBodySha256 $taCanaryWireRequest.SerializedBodySha256
+    } 'Block PublishXml and every other POST in TA canary mode' 'only one AddAppComponents POST'
+}
+finally {
+    Set-Item -Path Function:Invoke-DataverseRequest -Value $originalDataverseRequestForCanaryDispatch
+    Set-Item -Path Function:Invoke-RestMethod -Value $originalInvokeRestMethodForCanaryDispatch
+    $AddTaEntityCanary = $savedCanaryDispatchState.AddTaEntityCanary
+    $ReferenceUiCompositionOnly = $savedCanaryDispatchState.ReferenceUiCompositionOnly
+    $script:ApiRoot = $savedCanaryDispatchState.ApiRoot
+    $OrganizationUrl = $savedCanaryDispatchState.OrganizationUrl
+    $script:AccessToken = $savedCanaryDispatchState.AccessToken
+    $script:AccessTokenExpiresOn = $savedCanaryDispatchState.AccessTokenExpiresOn
+    $script:WritesAllowed = $savedCanaryDispatchState.WritesAllowed
+    $script:WritesStarted = $savedCanaryDispatchState.WritesStarted
+    $script:RequestCounts = $savedCanaryDispatchState.RequestCounts
+    $script:WriteResults = $savedCanaryDispatchState.WriteResults
+    $script:TACanaryFinalRequest = $savedCanaryDispatchState.CanaryFinalRequest
+}
 
 Assert-Test ($script:ExternalCalls -eq 0) 'All Phase 2D.3 regression coverage remains synthetic and offline'
 

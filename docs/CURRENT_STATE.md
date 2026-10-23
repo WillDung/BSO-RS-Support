@@ -1,5 +1,16 @@
 # Current State
 
+## Phase 2D.3I Update — TA Entity Canary Recreated the Wrong Root
+
+The owner-authorized canary dispatched exactly one `AddAppComponents` POST after its guarded preflight. The runner stopped with exit code 1 and did not preserve a reliable HTTP status, response/correlation IDs, or canary fingerprints. No write was retried. Two subsequent GET-only diagnostics each completed with 38 GETs and no writes.
+
+- The live direct inventory is ten components: one existing Site Map, one type-1 entity root, four approved Information Main forms, and four approved public views. The one entity root resolves by `appmodulecomponent.objectid` → `entities.entityid` to system logical name `entity`, not `os_sr_ta`. The approved table metadata identities resolve consistently, but no approved project-table root is present.
+- `srapp` remains Active/Unpublished. The existing placeholder Site Map remains directly associated and unchanged; all four forms/views remain directly associated; roles remain System Administrator and System Customizer.
+- GET-only `ValidateApp` succeeds with zero blocking errors and nine warnings: eight unresolved table dependencies and the existing non-blocking entity/form-or-view warning.
+- **Outcome: `WRONG_SYSTEM_ENTITY_ROOT_RECREATED`.** Combined Web API counts: **150 GET**, **1 AddAppComponents POST**, **0 RemoveAppComponents POST**, **0 Site Map PATCH**, **0 other POST**, **0 PublishXml**, **0 app publish**, **0 role changes**, **0 retries**. The AddAppComponents HTTP result and dispatched payload hashes were not captured; do not retry or infer them.
+- Recommended next task: a separately authorized, GET-only investigation of the AddAppComponents identity contract and available request evidence. Do not remove/add components, patch navigation, or publish until a separate repair authorization and fresh guarded preflight.
+- Offline regression validation before the live attempt passed **194** app-composition assertions, **550** provisioning/recovery assertions, and **11** readiness assertions; PowerShell 7 parser validation and `git diff --check` passed.
+
 ## Phase 2D.3H Update — Wrong System Entity Roots Removed
 
 The owner authorized exactly one `RemoveAppComponents` operation against the system logical table `entity`, followed by GET-only reconciliation. The fresh preflight passed the approved VN LMV IT, PAC/Az/WhoAmI, expected-user process pin, Solution/Publisher, `srapp`, Site Map, role, component, and protected form/view gates. The exact request contained one typed `Microsoft.Dynamics.CRM.entity` reference, omitted all protected/project component IDs, and had SHA-256 `73b431f524303ff55c73fbeab864f6c71fc46debba5aa46bba5d4ed70ff54aae`.
@@ -10,7 +21,7 @@ The owner authorized exactly one `RemoveAppComponents` operation against the sys
 - **Final outcome: `WRONG_ROOTS_FULLY_REMOVED`.** The observed one logical removal removed all four duplicate wrong system-entity rows. This does not establish the underlying cause of the original wrong roots. Do not add project table roots or patch the Site Map without a separately authorized task and a fresh guarded preflight.
 - Counts for Phase 2D.3H, including the failed local read-only reconciliation attempts: **166 GET**, **1 RemoveAppComponents POST** (HTTP 204), **0 AddAppComponents POST**, **0 Site Map PATCH**, **0 other POST**, **0 DELETE**, **0 PublishXml**, **0 app publish**, **0 role changes**, **0 retries**. HEAD stayed at `821f0e6766926121cb7079a401dac278f7fd7ea2`; no commit or push occurred.
 - Final regression checks passed: **158** app-composition assertions, **550** provisioning/recovery assertions, **11** readiness assertions, PowerShell parser validation, and `git diff --check`.
-- Recommended next task: a separately authorized Phase 2D.3I fresh guarded preflight followed by at most one AddAppComponents call for the four approved table roots only; stop before any Site Map change or publication.
+- This Phase 2D.3H recommendation is superseded by the Phase 2D.3I result above. Do not add the four project-table roots or patch navigation until the wrong system root is understood and a separate repair is authorized.
 
 ## Phase 2D.3G Update — Confirmed Wrong Entity Roots; Repair Ambiguous
 

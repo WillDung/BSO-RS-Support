@@ -1,0 +1,59 @@
+{
+  "status": "OwnerAuthorizedMinimalOperationEvidence",
+  "solution": "os_sr_bso_rs_support",
+  "publisher": "os_bso_rs_support",
+  "prefix": "os",
+  "table": "os_sr_oprc",
+  "displayName": "Operation Receipt",
+  "ownership": "UserOwned",
+  "auditEnabled": true,
+  "primaryName": "os_sr_oprc_nm",
+  "key": {
+    "name": "os_sr_oprc_ak_corid",
+    "columns": ["os_sr_oprc_corid"]
+  },
+  "columns": [
+    { "name": "os_sr_oprc_nm", "label": "Operation Reference", "type": "String", "length": 36, "required": true },
+    { "name": "os_sr_oprc_corid", "label": "Correlation ID", "type": "String", "length": 36, "required": true },
+    { "name": "os_sr_oprc_cact", "label": "Candidate Action", "type": "String", "length": 40, "required": true },
+    { "name": "os_sr_oprc_hash", "label": "Request Fingerprint", "type": "String", "length": 64, "required": true },
+    { "name": "os_sr_oprc_ver", "label": "Fingerprint Version", "type": "String", "length": 10, "required": true },
+    { "name": "os_sr_oprc_prevstat", "label": "Previous Status", "type": "Integer", "required": false },
+    { "name": "os_sr_oprc_newstat", "label": "Current Status", "type": "Integer", "required": true },
+    { "name": "os_sr_oprc_callref", "label": "Call Log Reference", "type": "String", "length": 36, "required": false },
+    { "name": "os_sr_oprc_histref", "label": "Status History Reference", "type": "String", "length": 36, "required": false }
+  ],
+  "candidateRelationship": {
+    "name": "os_sr_cand_oprc",
+    "lookup": "os_sr_oprc_cand",
+    "label": "Candidate",
+    "required": true,
+    "parent": "os_sr_cand",
+    "parentKey": "ResolveFromLiveMetadata",
+    "delete": "Restrict",
+    "assign": "NoCascade",
+    "share": "NoCascade",
+    "reparent": "NoCascade"
+  },
+  "semantics": {
+    "identity": "API-wide lowercase D-format nonempty CorrelationId, unique across actors/actions/Candidates",
+    "actor": "createdby and ownerid must equal authenticated initiating caller; no configured execution-user elevation",
+    "fingerprint": "SHA-256 of versioned length-delimited canonical validated inputs including initiating caller and CorrelationId; no raw request retained",
+    "privacy": "Fingerprints are sensitive evidence, not anonymization. Random correlation identity is included; receipt row access remains least-privileged. No additional secret or key-management dependency is introduced.",
+    "result": "Successful transaction retains derived original previous/current status and optional effect IDs; Applied is implicit. Replay returns DuplicateReplay plus those persisted values.",
+    "retention": "No deletion or expiration authorized; no shorter replay lifetime introduced.",
+    "mutability": "Append only through validated synchronous operation; direct CRUD blocked by server guards.",
+    "navigation": "Not added to srapp or end-user navigation.",
+    "access": "No role/user/team grants. Effective execution remains dependent on a separately approved caller role with receipt Read/Create/Append and Candidate AppendTo as needed.",
+    "candidateCreateReplay": "Candidate reference is filled after Candidate creation in the same transaction, with creation payload fingerprint preserved despite later profile edits."
+  },
+  "maximumSchemaWrites": {
+    "tableWithScalarAttributes": 1,
+    "primaryNamePropertyCorrection": 1,
+    "candidateLookupAuditActivation": 1,
+    "candidateLookupRelationship": 1,
+    "alternateKey": 1,
+    "other": 0,
+    "automaticRetries": 0
+  }
+}

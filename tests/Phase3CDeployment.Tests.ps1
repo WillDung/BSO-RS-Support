@@ -1,0 +1,38 @@
+#requires -Version 7.4
+$ErrorActionPreference = 'Stop'
+$root = Split-Path $PSScriptRoot
+$sourcePath = Join-Path $root 'scripts\Deploy-BsoRsCandidateOperations.ps1'
+$source = Get-Content -Raw $sourcePath
+$contract = Get-Content -Raw (Join-Path $root 'docs\PHASE_3C_API_CONTRACT.json') | ConvertFrom-Json
+$script:Passed = 0
+function Assert-Test([bool]$Condition, [string]$Name) {
+    if (-not $Condition) { throw "FAIL: $Name" }
+    $script:Passed++
+}
+$t = $null; $e = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($sourcePath, [ref]$t, [ref]$e)
+Assert-Test ($e.Count -eq 0) 'Deployment runner parses'
+Assert-Test ($contract.uniqueName -ceq 'os_sr_cact' -and -not $contract.isFunction -and $contract.bindingType -eq 0) 'Approved unbound Action'
+Assert-Test ($contract.isPrivate -and $contract.allowedCustomProcessingStepType -eq 0) 'Private discovery with no extension steps'
+Assert-Test ($contract.executePrivilegeName -ceq 'prvWriteos_sr_cand') 'Existing generated Write privilege'
+Assert-Test ($contract.inputs.Count -eq 13 -and $contract.outputs.Count -eq 5) 'Exact approved parameter/output counts'
+Assert-Test (@($contract.inputs | Where-Object { -not $_.optional }).name -join ',' -ceq 'ActionType,CorrelationId') 'Only common mandatory parameters are metadata-required'
+Assert-Test (@($contract.inputs | Where-Object name -CEQ 'CorrelationId')[0].type -eq 12) 'External CorrelationId remains GUID'
+Assert-Test ($contract.protectedTables.Count -eq 4) 'Only Candidate Core and receipt tables protected'
+Assert-Test ($source -match 'MaximumRetryCount = 0' -and $source -match 'MaximumRedirection = 0') 'No transport retry or redirect'
+Assert-Test ($source -match 'FileMode\]::CreateNew' -and $source -match 'DISPATCH_RESERVED' -and $source -match 'Flush\(\$true\)') 'Durable per-dispatch consumption journal'
+Assert-Test ($source -match 'Get-RegistrationNavigation' -and $source -match 'ReferencingEntityNavigationPropertyName') 'Resolve actual case-sensitive metadata navigation'
+Assert-Test ($source -match 'AssemblySha256' -and $source -match 'ContractSha256' -and $source -match 'ReceiptPlanSha256' -and $source -match 'CoreManifestSha256') 'Predeployment immutable scope fingerprints'
+Assert-Test ($source -notmatch 'Invoke-DeploymentRequest -Method (DELETE|PATCH|PUT)' -and $source -match 'Non-registration write path rejected') 'Create-only registration path allowlist'
+Assert-Test ($source -match 'Assert-RegistrationReadback -Write \$write' -and $source -match 'Assert-RegistrationMembership' -and $source -match 'Assert-RegistrationInventoryExact') 'Immediate readback and full final membership/inventory'
+Assert-Test ($source -match 'apiComponentTypes' -and $source -match '\$metadata.ObjectTypeCode') 'Custom API membership codes resolved from actual metadata, not stale static enum assumptions'
+Assert-Test ($source -match 'one failed/uncertain registration GET reconciliation' -and $source -match 'throw \$original') 'Failed/uncertain write reconciles and stops'
+Assert-Test ($source -match 'PrimaryIdAttribute -cne' -and $source -match "Required direct-write guard hook unavailable") 'Fail closed on missing baseline guard assumptions'
+Assert-Test ($source -match "foreach \(\`$messageName in @\('Associate', 'Disassociate'\)\)") 'Protect lookup reassociation outside normal update paths'
+$plugin = Get-Content -Raw (Join-Path $root 'solutions\CandidateCore\DataversePlugin.cs')
+Assert-Test ($plugin -match 'context.UserId != context.InitiatingUserId' -and $plugin -match 'CreateOrganizationService\(context.InitiatingUserId\)') 'No implicit execution-user elevation'
+Assert-Test ($plugin -match 'IfRowVersionMatches' -and $plugin -match 'AUDIT_ACTIVATION_PENDING') 'Conditional writes and runtime audit gate'
+Assert-Test ($plugin -match 'parent.SharedVariables' -and $plugin -match 'DIRECT_CANDIDATE_CORE_WRITE_BLOCKED') 'Server guard checks validated parent intent'
+Assert-Test ($plugin -notmatch 'trace.Trace\([^;]*(Fingerprint|CandidateName|CandidateEmail|InputParameters)') 'No raw input/PII fingerprint tracing'
+Assert-Test ($source -notmatch "PublishAllXml|PublishXml -|roles\?.*POST") 'No publication or role-write path'
+"PASS: $script:Passed synthetic Phase 3C deployment/contract assertions; source/contract checks, no authentication/network."

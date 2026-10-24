@@ -1,0 +1,33 @@
+# Candidate Core server operations
+
+Source for the signed `os_sr_cact` Dataverse assembly, version `1.0.0.0`. This is authored .NET plug-in source, **not an exported/unpacked Solution**. The supported target is .NET Framework 4.6.2 with `Microsoft.CrmSdk.CoreAssemblies` pinned to 9.0.2.60; the SDK assembly is supplied by the Dataverse sandbox. No runtime dependency is merged/uploaded with this assembly.
+
+## Build and offline validation
+
+From repository root, using a protected local strong-name key:
+
+```powershell
+dotnet build .\solutions\CandidateCore\CandidateCore.csproj -c Release "-p:CandidateSigningKey=C:\protected-local-path\candidate-signing.snk"
+dotnet run --project .\tests\CandidateCore\CandidateCore.Tests.csproj -c Release
+dotnet build .\tests\CandidateCoreSdk\CandidateCoreSdk.Tests.csproj -c Release "-p:CandidateSigningKey=C:\protected-local-path\candidate-signing.snk"
+& .\tests\CandidateCoreSdk\bin\Release\net48\CandidateCoreSdk.Tests.exe
+& .\tests\Phase3COperationReceipt.Tests.ps1
+& .\tests\Phase3CDeployment.Tests.ps1
+```
+
+Do not commit private signing material. `bin`/`obj` are ignored. Preserve the same signing identity for compatible updates; assembly hash also depends on the signing key. No signing key, tenant identifiers, secrets, or real Candidate values are compiled into source.
+
+## Runtime boundaries
+
+- `ApplyCandidateAction` is the synchronous main-operation handler for the unbound private Action `os_sr_cact`. Private affects discovery, not authorization.
+- Use existing Candidate Write execution privilege plus calling-user table/row permissions. The factory explicitly selects the initiating caller; contexts with a different execution user or nested invocation are rejected. No SYSTEM/service-account elevation.
+- Organization auditing must be active for business execution. Metadata deployment is separately allowed while it is inactive.
+- Candidate creation/profile updates, approved calls, and scheduling-queue transition use the server contract. Future scheduled/result/reschedule actions reject until their evidence boundaries exist; a semantic transition test does not enable them in the API.
+- Present profile fields replace, omitted fields preserve, and explicit null clears optional phone/lookups only. Name/email cannot be blank/null. UTC contact timestamps cannot be in the future.
+- Versioned canonical request fingerprints include caller, correlation identity, action, target, expected status, and all supplied validated fields. Omission/null/type boundaries are distinct. Digests remain sensitive evidence, not anonymization.
+- Receipt insert and applicable Candidate/Call/History effects share the caller's synchronous Dataverse transaction. Unique canonical-string correlation key prevents racing duplicate effects; transaction faults propagate without internal retry. An exact later replay returns persisted original effect IDs/status even after subsequent Candidate edits.
+- `ProtectCandidateCore` rejects direct mutation entrypoints. Create/Update requires the exact validated parent API mutation fingerprint. Other registered mutation messages are rejected; association guards no-op for unrelated tables/relationships.
+- A supported caller needs an approved role with operation-specific Candidate and child/receipt privileges, including Append/AppendTo where applicable. This phase does **not** create/grant such a role or prove a non-admin user's effective rights.
+- No API is invoked during metadata deployment verification. Actual online authorization, race/rollback, AutoNumber generation, and end-to-end workflow tests require separate business-data authorization and audit readiness.
+
+See the [API contract](../../docs/PHASE_3C_API_CONTRACT.json), [receipt contract](../../docs/PHASE_3C_OPERATION_RECEIPT_PLAN.json), [deployment runner](../../scripts/Deploy-BsoRsCandidateOperations.ps1), and [Phase 3C report](../../docs/PHASE_3C_CANDIDATE_CORE_API_PLUGIN_REPORT.md).

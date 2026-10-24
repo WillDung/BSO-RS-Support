@@ -1,5 +1,13 @@
 # Scripts
 
+## Phase 3C receipt and API metadata
+
+[Provision-BsoRsOperationReceipt.ps1](Provision-BsoRsOperationReceipt.ps1) defaults to `PlanOnly` with zero authentication/network calls. `Preflight` / `Reconcile` are GET-only guarded modes. Its receipt-only create/correction modes are bounded to the owner-approved table, Candidate relationship, canonical String alternate key, and two exact metadata property corrections observed during provisioning. Consumed create/correction dispatches must never be repeated. Existing receipt metadata requires `Reconcile`, not `Apply`. Historical completion modes are pinned to their retained dispatch evidence and exact known intermediate metadata.
+
+[Deploy-BsoRsCandidateOperations.ps1](Deploy-BsoRsCandidateOperations.ps1) supports explicit `Preflight`, `Apply`, and `Reconcile`. It first runs full guarded Candidate Core/receipt reconciliation. Preflight discovers exact SDK registration navigation/message filters and saves a new local write plan with assembly/contract/storage/body fingerprints. Apply requires its exact hash and a new durable dispatch journal; it reserves each dispatch before sending, GET-reconciles immediately, and stops on failure/uncertainty with zero automatic retries. It never invokes `os_sr_cact`, creates business rows, grants roles, changes the app, or publishes.
+
+Do not blindly rerun Apply after any partial registration. Use the retained journal and read-only reconciliation before obtaining any required bounded continuation. See [plug-in build instructions](../solutions/CandidateCore/README.md), [receipt plan](../docs/PHASE_3C_OPERATION_RECEIPT_PLAN.json), [API contract](../docs/PHASE_3C_API_CONTRACT.json), and [current Phase 3C report](../docs/PHASE_3C_CANDIDATE_CORE_API_PLUGIN_REPORT.md).
+
 Scripts here support reviewed build, validation, migration, and ALM tasks. They must be safe by default, avoid embedded credentials and personal data, clearly identify environment effects, and include verification instructions.
 
 ## VS Code Readiness

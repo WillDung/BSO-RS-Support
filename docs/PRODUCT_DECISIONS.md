@@ -4,6 +4,8 @@ This log separates explicit product rules from choices requiring confirmation. S
 
 ## Established product rules
 
+**24 October Phase 3C authorization:** the owner explicitly approved the minimal durable Operation Receipt extension for the existing replay/conflict contract, superseding the earlier zero-schema-write boundary only for this evidence storage. It is infrastructure, not end-user navigation; no role grants, app changes, Candidate workflow rows, or business API invocations are authorized. The [receipt plan](PHASE_3C_OPERATION_RECEIPT_PLAN.json) uses a canonical 36-character GUID String alternate key, not an unsupported GUID key column. It retains no raw contact/request payload. Existing Candidate/Call/History schema and Choice values remain unchanged except the new Candidate-to-receipt relationship. See [Phase 3C report](PHASE_3C_CANDIDATE_CORE_API_PLUGIN_REPORT.md) for observed state; authorization is not itself a deployment claim.
+
 | Topic | Current rule | Basis/status |
 |---|---|---|
 | Product and legacy | BSO-RS-Support will eventually replace ATSugg; keep ATSugg intact through migration and acceptance. | Confirmed objective |

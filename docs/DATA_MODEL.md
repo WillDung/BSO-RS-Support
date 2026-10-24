@@ -36,6 +36,16 @@ The table and two additional attributes were created in the separately authorize
 
 ## Naming standard and private abbreviation dictionary
 
+### Verified Phase 3C Operation Receipt
+
+Owner-approved 24 October 2026 as minimal replay infrastructure, not an end-user navigation table. Table `os_sr_oprc` is UserOwned and audit-enabled. String primary name `os_sr_oprc_nm` is required, max 36; server supplies canonical nonpersonal correlation identity. Required String(36) `os_sr_oprc_corid` has Active unique key `os_sr_oprc_ak_corid`. No GUID-typed alternate-key field is used.
+
+Other required fields: `os_sr_oprc_cact` String(40), `os_sr_oprc_hash` String(64), `os_sr_oprc_ver` String(10), `os_sr_oprc_newstat` Integer, and audited Candidate lookup `os_sr_oprc_cand`. Optional fields: `os_sr_oprc_prevstat` Integer, `os_sr_oprc_callref` / `os_sr_oprc_histref` String(36) result references. Relationship `os_sr_cand_oprc` has Delete Restrict and no assign/share/unshare/reparent/merge cascades. Normal createdby/createdon and owner evidence identifies the initiating caller; no raw contact/request payload is stored.
+
+The approved receipt schema/API contracts and implementation semantics are in [receipt plan](PHASE_3C_OPERATION_RECEIPT_PLAN.json), [API contract](PHASE_3C_API_CONTRACT.json), and [Phase 3C report](PHASE_3C_CANDIDATE_CORE_API_PLUGIN_REPORT.md). Server guards enforce API-only append and immutable evidence; no user/team role grants, receipt navigation, or retention purge were introduced. Organization-level auditing remains externally pending. Existing Candidate/Call/History attributes and Choices were not changed.
+
+Receipt dictionary additions: `oprc` = Operation Receipt; `hash` = normalized request fingerprint; `callref` = original Call Log result GUID reference; `histref` = original Status History result GUID reference. Existing `cact`, `corid`, `ver`, `nm`, `cand`, `prevstat`/`newstat`, and `ak` tokens are reused. Assembly name/namespace is `os_sr_cact`; .NET type names use descriptive suffixes `ApplyCandidateAction` and `ProtectCandidateCore` within that namespace rather than inventing new table prefixes.
+
 The following internal dictionary maps business meanings to technical abbreviations. Keep this mapping in this repository; do not publish it externally. The selected naming strategy is Publisher Prefix `os` plus the project namespace segment `sr_`. Together they form the final technical-name prefix `os_sr_`; examples below show final names, not values to paste blindly into auto-prefixing name fields. Names other than the four verified reference-table slices remain proposals.
 
 | Business meaning | Abbreviation | Example proposed table name |
@@ -43,6 +53,7 @@ The following internal dictionary maps business meanings to technical abbreviati
 | Candidate | `cand` | `os_sr_cand` |
 | Call Log | `call` | `os_sr_call` |
 | Candidate Status History | `csh` | `os_sr_csh` |
+| Operation Receipt | `oprc` | `os_sr_oprc` |
 | Interview Round | `irnd` | `os_sr_irnd` |
 | Interview Result | `ires` | `os_sr_ires` |
 | TA Directory | `ta` | `os_sr_ta` |

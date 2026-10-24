@@ -3,8 +3,8 @@
 **As of:** 24 October 2026
 **Current Candidate-only schema status:** `CANDIDATE_TABLE_KEYS_LOOKUPS_AND_SOLUTION_MEMBERSHIP_RECONCILED`
 **Current Phase 3B.2 status:** `CANDIDATE_CORE_STORAGE_PROVISIONED_AUDIT_ACTIVATION_PENDING`
-**Current Phase 3C status:** `BLOCKED_PHASE3C_OPERATION_RECEIPT_DESIGN_REVIEW`
-**Phase:** Owner-approved Candidate Core storage is reconciled, including both repaired History fields bound to `os_sr_candstat`. Phase 3C API/plugin implementation and metadata deployment are conditionally authorized, but the required update-operation replay contract has a proven storage dependency requiring owner review. No Phase 3C write has occurred. Organization auditing remains an external business-data prerequisite, not an API/plugin metadata deployment blocker.
+**Current Phase 3C status:** `CANDIDATE_CORE_API_DEPLOYED_AUDIT_ACTIVATION_PENDING`
+**Phase:** Candidate Core storage remains exact, including the repaired History fields. The owner approved the minimal durable Operation Receipt extension at 17:29 on 24 October; it and the signed API/plugin metadata are now provisioned and GET-reconciled. No business API invocation, workflow row, role grant, app change, or publication occurred. See [Section 28](#28-phase-3c-implemented-metadata-closeout) and the [current Phase 3C report](PHASE_3C_CANDIDATE_CORE_API_PLUGIN_REPORT.md). Organization audit activation and separately authorized real transaction/effective-user tests remain business-acceptance gates.
 
 > Current implementation evidence and the Phase 3C dependency/proposal are in [Section 27](#27-phase-3c-preflight-and-operation-evidence-dependency). Earlier sections describing the wrong live History bindings or recommending another binding repair are historical and superseded by [the successful Phase 3B.2 replacement](PHASE_3B2_CANDIDATE_CHILD_TABLES_REPORT.md#34-owner-authorized-two-column-replacement). The existing JSON manifest's approved schema contract is unchanged.
 
@@ -382,6 +382,8 @@ First obtain new bounded authorization to plan a non-destructive correction for 
 
 ## 27. Phase 3C Preflight and Operation Evidence Dependency
 
+> Historical pre-17:29 assessment. The owner subsequently approved the minimal receipt extension; [Section 28](#28-phase-3c-implemented-metadata-closeout) supersedes the blocked/unapproved/deployment-absent statements below. Preserve this section as the rationale, not the current deployment classification.
+
 **Date:** 24 October 2026. **Implementation status:** blocked for owner review, not deployed.
 
 ### Verified preflight
@@ -453,3 +455,15 @@ Offline checks passed: 50 Phase 3B.2 synthetic assertions, 46 Candidate Core ass
 Next owner decision: review/authorize the additive operation-evidence and API-contract design, or retain the current schema and leave Phase 3C blocked. After approval, freeze the contract; implement transaction/caller/direct-write guards; run synthetic concurrency/replay/authorization tests; precompute exact assembly/type/step/API/parameter payloads and counts; repeat fresh storage and identity checks; then perform bounded zero-retry deployment and GET-only reconciliation. Live business-operation tests require a separate data/audit authorization.
 
 Reference: [Microsoft Custom API guidance - secure your custom API by requiring a privilege](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/custom-api#secure-your-custom-api-by-requiring-a-privilege).
+
+## 28. Phase 3C Implemented Metadata Closeout
+
+The owner explicitly approved durable operation-receipt infrastructure without changing Candidate/Call/History attributes or Choice values. The exact [receipt contract](PHASE_3C_OPERATION_RECEIPT_PLAN.json) is now implemented as `os_sr_oprc`, user-owned and audited, with a required Candidate lookup and Active canonical GUID String(36) alternate key. It retains a versioned normalized request fingerprint, action, original result statuses and optional Call/History references; normal createdby/owner evidence identifies the initiating actor. No raw request/contact/free-text payload or expiry policy was introduced.
+
+One signed `os_sr_cact` .NET Framework 4.6.2 assembly contains the handler and direct-write guard. Fifty synchronous guard steps, private unbound Action `os_sr_cact`, 13 request parameters, five responses, handler, existing Candidate Write execution privilege, and Solution membership reconcile exactly. Actual API metadata/component types were discovered rather than relying on a stale static component enum.
+
+Caller-context service operations require UserId = InitiatingUserId and a synchronous transaction; no elevation or grant was introduced. The receipt and applicable effects commit together. Identical replay returns original persisted effects after later edits; conflicting correlation reuse fails. Direct/bulk mutations and project lookup reassociation are rejected outside the exact validated API intent; unrelated associations are no-op. Profile fields use present=replace, omitted=preserve, explicit null=clear optional fields. The original API output list is unchanged.
+
+Organization auditing remains inactive, so runtime rejects business execution. Future scheduled/result/reschedule actions remain unavailable pending their approved trusted evidence boundaries. No UI or integration was implemented. No live business invocation occurred; four-table count-only closeout returned 0 rows.
+
+The final result is **`CANDIDATE_CORE_API_DEPLOYED_AUDIT_ACTIVATION_PENDING`**. Build passed with zero warnings/errors; nine offline suites passed 1,145 assertions, including real SDK adapter/guard types with mocked services and host rollback simulation. These are not live transaction/non-admin security acceptance. The [Phase 3C report](PHASE_3C_CANDIDATE_CORE_API_PLUGIN_REPORT.md) records exact request/write counts, assembly/payload hashes, observed metadata defaults/corrections, key propagation, supported private export snapshot, and next acceptance gate. No commit or push.

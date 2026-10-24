@@ -1,5 +1,14 @@
 # Tests
 
+## Phase 3C Candidate operations and receipt evidence
+
+- [Receipt assertions](Phase3COperationReceipt.Tests.ps1): `& .\tests\Phase3COperationReceipt.Tests.ps1`; 27 local plan/payload/source assertions, no authentication/network.
+- [Deployment assertions](Phase3CDeployment.Tests.ps1): `& .\tests\Phase3CDeployment.Tests.ps1`; 23 local contract/source assertions, no authentication/network.
+- [Operation harness](CandidateCore/CandidateCore.Tests.csproj): `dotnet run --project .\tests\CandidateCore\CandidateCore.Tests.csproj -c Release`; 56 assertions over the actual shared operation engine. In-memory host rollback simulation tests atomic failure boundaries; it does not prove live Dataverse transaction behavior.
+- [SDK adapter/guard harness](CandidateCoreSdk/CandidateCoreSdk.Tests.csproj): build/run instructions are in the [plug-in README](../solutions/CandidateCore/README.md); 53 assertions using real SDK types with synthetic contexts/service proxies, including actor mapping, conditional updates, audit gate, replay, direct CRUD/bulk rejection, tampered intents, and association isolation. No live calls.
+
+The SDK harness targets .NET Framework 4.8 (Windows runtime); the deployed assembly targets 4.6.2. The pure engine harness targets .NET 8 and links the same engine source without SDK dependencies. These are dependency-free executable assertion harnesses, not VS Code-discovered unit tests. Signing is local; private keys must not be committed. No business API invocation or Candidate test row is authorized by running these tests. See [Phase 3C report](../docs/PHASE_3C_CANDIDATE_CORE_API_PLUGIN_REPORT.md).
+
 Approved automated test source and synthetic fixtures. Separate unit, integration, authorization, concurrency, failure-recovery, UAT, and production smoke evidence. Never include real candidate data, CVs, credentials, or production exports. No business-application acceptance tests are claimed. See [Test Strategy](../docs/TEST_STRATEGY.md) and [Acceptance Criteria](../docs/ACCEPTANCE_CRITERIA.md).
 
 ## Reference Provisioning

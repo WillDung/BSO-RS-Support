@@ -1,6 +1,6 @@
 # Test Strategy
 
-**Status:** Test approach plus partial implementation evidence. Candidate Core metadata and the server operation API/plugin are deployed; offline synthetic suites exist and have passed. No live business-operation acceptance is claimed. The owner-authorized Phase 3D run stopped before fixture creation because organization auditing is disabled, the approved API intentionally defers scheduler/result/reschedule transitions, and a safe exact-ID cleanup mechanism was not established. See the [Phase 3D report](PHASE_3D_CANDIDATE_CORE_RUNTIME_ACCEPTANCE_REPORT.md).
+**Status:** Test approach plus partial implementation evidence. Candidate Core metadata and the server operation API/plugin are deployed; offline synthetic suites exist. The owner-authorized assembly update removed the organization-audit runtime rejection and was GET-reconciled, though its HTTP status was not captured. Phase 3D is `UNCERTAIN_WRITE_OUTCOME`: the runtime one-shot lock was already consumed, no matching dispatch journal was found among retained session artifacts inspected, and Apply was not rerun. Fresh count-only reads returned zero rows in all four Candidate Core business/evidence tables; live operation behavior remains unverified. Scheduler/result/reschedule actions must continue failing closed until trusted evidence exists. See the [Phase 3D report](PHASE_3D_CANDIDATE_CORE_RUNTIME_ACCEPTANCE_REPORT.md).
 
 ## Test layers
 

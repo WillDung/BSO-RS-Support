@@ -53,9 +53,11 @@ internal static class Program
             Check(host.CallerFactorySelections.All(id => id == Actor), "SDK no service elevation");
             Check(host.CandidateRequests.All(request => request.ConcurrencyBehavior == ConcurrencyBehavior.IfRowVersionMatches), "SDK conditional updates");
         }
-        var audit = new Host(100010000) { Audit = false };
-        Reject(() => new ApplyCandidateAction().Execute(audit), "AUDIT_ACTIVATION_PENDING");
-        Check(audit.Calls == 0 && audit.Updates == 0 && audit.Receipt == null, "SDK audit gate before mutation");
+        var auditPending = new Host(100010000) { OrganizationAuditEnabled = false };
+        new ApplyCandidateAction().Execute(auditPending);
+        Check(auditPending.Calls == 1 && auditPending.Updates == 1 && auditPending.Receipt != null,
+            "SDK organization audit state does not block operation evidence");
+        Check(auditPending.OrganizationReads == 0, "SDK does not query organization audit state");
         foreach (string property in new[] { "IsInTransaction", "Depth", "UserId" })
         {
             var host = new Host(100010000);
@@ -102,8 +104,8 @@ internal static class Program
         public Dictionary<string, object?> MainValues;
         public IPluginExecutionContext MainContext;
         public Entity? Receipt;
-        public int Calls, Histories, Updates, Status = 100010000;
-        public bool Audit = true, TamperTarget;
+        public int Calls, Histories, Updates, OrganizationReads, Status = 100010000;
+        public bool OrganizationAuditEnabled = true, TamperTarget;
         public List<Guid?> CallerFactorySelections = new List<Guid?>();
         public List<UpdateRequest> CandidateRequests = new List<UpdateRequest>();
         public Host(int outcome)
@@ -137,7 +139,11 @@ internal static class Program
             if (call.MethodName == "Retrieve")
             {
                 var table = (string)call.Args[0];
-                if (table == "organization") return new Entity(table, Organization) { ["isauditenabled"] = Audit };
+                if (table == "organization")
+                {
+                    OrganizationReads++;
+                    return new Entity(table, Organization) { ["isauditenabled"] = OrganizationAuditEnabled };
+                }
                 if (table == "os_sr_cand") return new Entity(table, Candidate) { RowVersion = "1", ["os_sr_cand_stat"] = new OptionSetValue(Status) };
                 throw new Exception("Unexpected Retrieve");
             }

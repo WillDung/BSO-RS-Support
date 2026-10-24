@@ -1,6 +1,41 @@
 # Phase 3D - Candidate Core Synthetic Runtime Acceptance
 
-Date: 24 October 2026. This is a pre-execution stop report, not a runtime acceptance claim. Source: owner-authorized Phase 3D attachment, current frozen Phase 3C contract and implementation, fresh guarded read-only reconciliation, four count-only queries, and offline regression suites.
+Date: 24 October 2026. This report retains the original pre-execution assessment and adds the current follow-up disposition below. Source: owner authorization, current Phase 3C contract and implementation, prior guarded reconciliation, current read-only CLI identity/count checks, local one-shot-lock inspection, and offline regression suites.
+
+## Current Follow-up Disposition
+
+**`UNCERTAIN_WRITE_OUTCOME` — no further runtime dispatch is authorized under the consumed one-shot guard.**
+
+The approved assembly update removing the organization-audit runtime rejection was previously dispatched once. Its durable journal did not capture the HTTP status; immediate and subsequent GET reconciliation verified the approved replacement binary and exact registrations. No second assembly update was sent. Organization-level auditing remains disabled and unchanged; it is an external governance/release prerequisite, not a Candidate Core runtime rejection.
+
+Before this follow-up, a fresh runtime preflight had passed with all four business/evidence tables empty and no API invocation. On resumption, the local one-shot runtime lock already existed and stated that the authorization had been consumed. Its creation time was 2026-10-24T13:29:36Z. No corresponding runtime dispatch journal was present among the retained session artifacts inspected. The lock was not removed or bypassed, and Apply was not rerun.
+
+A fresh read-only CLI profile check and count queries targeted VN LMV IT; the authenticated identity is omitted. Four sequential count-only FetchXML queries then returned **0 Candidate, 0 Call Log, 0 Candidate Status History, and 0 Operation Receipt rows**. These counts establish that no business rows are currently present; without the runtime dispatch journal they do not establish whether a Custom API request was attempted and rejected before creating data.
+
+| Evidence | Current result |
+|---|---|
+| Assembly update | 1 PATCH; HTTP status was not captured; replacement binary and registrations were GET-reconciled |
+| Assembly reconciliation | 508 instrumented GETs; 0 retries |
+| Earlier runtime preflight | 9 GETs; 0 Custom API invocations; all four row counts 0 |
+| Runtime one-shot lock | Already present; authorization marked consumed |
+| Runtime dispatch journal | Not found among retained session artifacts inspected |
+| Apply/API dispatches by this follow-up | 0 |
+| API dispatch count attributable to the pre-existing lock | Unknown; do not infer zero |
+| Fresh follow-up data reads | 4 count-only FetchXML queries; all four row counts 0 |
+| Fresh business/evidence row counts | Candidate 0; Call Log 0; History 0; Receipt 0 |
+| Business/metadata/app/role/audit-setting/publication writes | 0 in this follow-up |
+| Automatic retries | 0 |
+| Organization audit setting, roles, app, schema, Choices, publication | Not changed |
+
+The runner remains bounded at 21 Custom API dispatches, uses zero retries, and is covered by the offline Phase 3D runner-contract assertions. The authorized call/update/replay/conflict/stale-state checks were not confirmed live. `MarkRound1Scheduled`, `RecordPass`, `RecordFail`, and `RequestReschedule` remain expected to fail closed until trusted evidence exists; their runtime acceptance was not performed. Non-admin user/role acceptance remains deferred to the Candidate UI + Security phase.
+
+Do not remove the lock, recreate its evidence file to bypass the guard, or rerun Apply. Any further live acceptance requires a new owner-approved recovery authorization after the prior dispatch outcome has been reconciled. No business-data cleanup or speculative request was attempted.
+
+### Local Validation in This Follow-up
+
+All eight PowerShell assertion suites passed (**1,054 assertions**), including the 13 Phase 3D runner-contract assertions. The Candidate operation engine passed **67 assertions** and the SDK adapter/guard harness passed **56 assertions**. Total: **1,177 offline assertions**. The signed Candidate Core Release build succeeded with 0 warnings and 0 errors. These local checks do not resolve the unknown live API dispatch count or establish live operation acceptance.
+
+The sections below preserve the earlier pre-execution assessment and its evidence. Their then-current `TRANSITION_CONTRACT_FAILURE` classification is historical and superseded by this follow-up's `UNCERTAIN_WRITE_OUTCOME`.
 
 ## 1. Executive Summary
 

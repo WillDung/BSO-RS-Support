@@ -89,9 +89,10 @@ static class Program
             Reject(() => store.Atomic(Request(Input())), "SYNTHETIC_MUTATION_FAILURE");
             Check(store.Calls == 0 && store.Histories == 0 && store.Status == ActionRequest.NeedCall && store.Receipts.Count == 0, "Host transaction rollback at each effect");
         }
-        var auditStore = new MemoryStore { Audit = false };
-        Reject(() => auditStore.Atomic(Request(Input())), "AUDIT_ACTIVATION_PENDING");
-        Check(auditStore.Calls == 0, "Audit fail closed");
+        var auditPendingStore = new MemoryStore { Audit = false };
+        var auditPendingResult = auditPendingStore.Atomic(Request(Input()));
+        Check(!auditPendingResult.Replay && auditPendingStore.Calls == 1 && auditPendingStore.Receipts.Count == 1,
+            "Organization audit state is not a business runtime gate");
         var raceStore = new MemoryStore { StaleVersion = true };
         Reject(() => raceStore.Atomic(Request(Input())), "ROW_VERSION_CONFLICT");
         Check(raceStore.Calls == 0 && raceStore.Histories == 0, "Race no partial writes");
@@ -150,7 +151,7 @@ static class Program
     sealed class MemoryStore : IOperationStore
     {
         public int Status = ActionRequest.NeedCall, Calls, Histories, Updates, Creates, Version = 1, FailMutation, Mutation;
-        public bool Audit = true, StaleVersion, CandidateExists = true, HideReceiptOnce;
+        public bool Audit, StaleVersion, CandidateExists = true, HideReceiptOnce;
         public Dictionary<Guid, Receipt> Receipts = new();
         void Mutate() { if (++Mutation == FailMutation) throw new OperationError("SYNTHETIC_MUTATION_FAILURE"); }
         public ActionResult Atomic(ActionRequest request)
@@ -163,7 +164,7 @@ static class Program
                 throw;
             }
         }
-        public void RequireTransactionAndAudit() { if (!Audit) throw new OperationError("AUDIT_ACTIVATION_PENDING"); }
+        public void RequireTransaction() { }
         public Receipt? FindReceipt(Guid correlation)
         {
             // Model a losing transaction that read before the winning receipt committed.

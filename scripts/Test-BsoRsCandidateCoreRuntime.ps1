@@ -1,0 +1,575 @@
+#requires -Version 7.4
+[CmdletBinding()]
+param(
+    [ValidateSet('Preflight', 'Apply')][string]$RuntimeMode = 'Preflight',
+    [Parameter(Mandatory)][string]$EnvironmentName,
+    [Parameter(Mandatory)][string]$OrganizationUrl,
+    [Parameter(Mandatory)][string]$ExpectedEnvironmentId,
+    [Parameter(Mandatory)][string]$ExpectedOrganizationId,
+    [string]$RuntimeEvidencePath
+)
+
+$ErrorActionPreference = 'Stop'
+$root = Split-Path $PSScriptRoot
+$manifestPath = Join-Path $root 'docs\PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json'
+$contractPath = Join-Path $root 'docs\PHASE_3C_API_CONTRACT.json'
+$expectedManifestHash = '63f56173f61265f539d23d6ceffb5631e23f438e4e254755c1e24c7d17eb1915'
+$expectedActionCalls = 21
+$script:runtimeRequestCounts = @{ GET = 0; POST = 0 }
+$script:apiCalls = 0
+$script:journal = $null
+$script:apiRoot = $OrganizationUrl.TrimEnd('/') + '/api/data/v9.2/'
+$script:accessToken = $null
+$script:actorId = $null
+$script:candidateId = $null
+$script:sets = @{}
+$script:expectedReceiptEvidence = @{}
+$script:expectedCounts = @{ Candidates = 0; Calls = 0; History = 0; Receipts = 0 }
+
+$null = . (Join-Path $PSScriptRoot 'Provision-BsoRsOperationReceipt.ps1') -Mode PlanOnly `
+    -EnvironmentName $EnvironmentName -OrganizationUrl $OrganizationUrl `
+    -ExpectedEnvironmentId $ExpectedEnvironmentId -ExpectedOrganizationId $ExpectedOrganizationId
+
+function Save-RuntimeJournal {
+    $json = ConvertTo-Json -InputObject $script:journal -Depth 20
+    $bytes = [Text.Encoding]::UTF8.GetBytes($json)
+    $stream = [IO.File]::Open($RuntimeEvidencePath, [IO.FileMode]::Open, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    try { $stream.SetLength(0); $stream.Write($bytes, 0, $bytes.Length); $stream.Flush($true) }
+    finally { $stream.Dispose() }
+}
+
+function Get-RuntimeErrorCode {
+    param([string]$Message)
+    $allowed = @(
+        'INVALID_EMAIL', 'REQUIRED_TEXT', 'CORRELATION_CONFLICT', 'STALE_EXPECTED_STATUS',
+        'SCHEDULER_DEPENDENCY_UNAVAILABLE', 'RESULT_OR_CANCELLATION_DEPENDENCY_UNAVAILABLE',
+        'INVALID_TRANSITION', 'DATAVERSE_OPERATION_REJECTED', 'UNSUPPORTED_EXECUTION_CONTEXT'
+    )
+    foreach ($code in $allowed) {
+        if ($Message -match "(?<![A-Z0-9_])$([regex]::Escape($code))(?![A-Z0-9_])") { return $code }
+    }
+    return $null
+}
+
+function Invoke-RuntimeRequest {
+    param(
+        [Parameter(Mandatory)][ValidateSet('GET', 'POST')][string]$Method,
+        [Parameter(Mandatory)][string]$Path,
+        [object]$Body
+    )
+    $uri = [Uri]($script:apiRoot + $Path)
+    if ($uri.Scheme -cne 'https' -or $uri.Authority -ine ([Uri]$OrganizationUrl).Authority -or
+        $uri.AbsolutePath -notmatch '^/api/data/v9\.2/' -or $uri.UserInfo -or $uri.Fragment) {
+        throw 'Runtime request target is outside the owner-confirmed Dataverse API.'
+    }
+    if ($Method -ceq 'POST' -and ($Path -cne 'os_sr_cact' -or $script:apiCalls -ge $expectedActionCalls)) {
+        throw 'Runtime write is outside the single approved Custom API and 21-dispatch ceiling.'
+    }
+    $headers = @{
+        Authorization = "Bearer $script:accessToken"
+        Accept = 'application/json'
+        'OData-Version' = '4.0'
+        'OData-MaxVersion' = '4.0'
+        Consistency = 'Strong'
+    }
+    $arguments = @{
+        Uri = $uri
+        Method = $Method
+        Headers = $headers
+        MaximumRetryCount = 0
+        MaximumRedirection = 0
+        TimeoutSec = 120
+        SkipHttpErrorCheck = $true
+    }
+    if ($Method -ceq 'POST') {
+        $json = ConvertTo-Json -InputObject $Body -Depth 20 -Compress
+        $hash = Get-Sha256 -Bytes ([Text.Encoding]::UTF8.GetBytes($json))
+        $entry = [ordered]@{
+            Index = $script:apiCalls + 1
+            Action = [string]$Body.ActionType
+            PayloadSha256 = $hash
+            State = 'PLANNED'
+            HttpStatus = $null
+            ResultCode = $null
+        }
+        $script:journal.Dispatches += $entry
+        Save-RuntimeJournal
+        $entry.State = 'DISPATCH_RESERVED'
+        Save-RuntimeJournal
+        $null = $script:apiCalls++
+        $arguments.Body = $json
+        $arguments.ContentType = 'application/json; charset=utf-8'
+    }
+    $null = $script:runtimeRequestCounts[$Method]++
+    try { $response = Invoke-WebRequest @arguments }
+    catch {
+        if ($Method -ceq 'POST') {
+            $entry.State = 'UNCERTAIN_WRITE_OUTCOME'
+            Save-RuntimeJournal
+        }
+        throw 'Dataverse transport outcome is uncertain; no retry or resend is permitted.'
+    }
+    if ($Method -ceq 'POST') {
+        $entry.HttpStatus = [int]$response.StatusCode
+        if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 300) {
+            $entry.State = 'ACKNOWLEDGED'
+        } else {
+            $entry.State = 'REJECTED'
+        }
+        Save-RuntimeJournal
+    }
+    if ($response.StatusCode -lt 200 -or $response.StatusCode -ge 300) {
+        $parsed = $null
+        try { $parsed = $response.Content | ConvertFrom-Json } catch { $parsed = $null }
+        $safe = Get-SanitizedDataverseError -StatusCode $response.StatusCode -Response $parsed
+        $code = Get-RuntimeErrorCode -Message $safe
+        if ($Method -ceq 'POST') { $entry.ResultCode = $code; Save-RuntimeJournal }
+        return [pscustomobject]@{ Success = $false; StatusCode = [int]$response.StatusCode; ErrorCode = $code; SafeError = $safe }
+    }
+    if ([string]::IsNullOrWhiteSpace($response.Content)) { return $null }
+    if ($uri.AbsolutePath.EndsWith('/$count', [StringComparison]::Ordinal)) { return [string]$response.Content }
+    try { $parsed = $response.Content | ConvertFrom-Json -ErrorAction Stop }
+    catch { throw 'Dataverse returned an unreadable response; response content suppressed.' }
+    if ($Method -ceq 'POST') {
+        $entry.ResultCode = [string]$parsed.ResultCode
+        $entry.State = 'GET_RECONCILE_PENDING'
+        Save-RuntimeJournal
+    }
+    $parsed
+}
+
+function Get-Rows {
+    param([string]$Path)
+    $page = Invoke-RuntimeRequest -Method GET -Path $Path
+    if ($null -eq $page -or $null -eq $page.value) { throw 'Expected row collection was not returned.' }
+    if ($page.'@odata.nextLink') { throw 'Unexpected result paging; stop rather than broaden the read.' }
+    @($page.value)
+}
+
+function Get-Count {
+    param([string]$EntitySet, [string]$Filter)
+    $path = "$EntitySet/`$count"
+    if ($Filter) { $path += '?%24filter=' + [Uri]::EscapeDataString($Filter) }
+    $value = Invoke-RuntimeRequest -Method GET -Path $path
+    if ($null -ne $value -and $value.PSObject.Properties.Name -contains 'Success' -and -not $value.Success) {
+        throw (Get-SanitizedFailureMessage -Message $value.SafeError)
+    }
+    $count = 0
+    $countText = ([string]$value).Trim().TrimStart([char]0xFEFF).Trim()
+    if (-not [int]::TryParse($countText, [ref]$count) -or $count -lt 0) {
+        $kind = if ($null -eq $value) { 'null' } else { $value.GetType().Name }
+        $sample = if ($null -eq $value) { '' } else {
+            Get-SanitizedFailureMessage -Message ([string]$value)
+        }
+        throw "Count-only query returned an invalid $kind result: $sample"
+    }
+    $count
+}
+
+function Get-ScopedCounts {
+    @{
+        Candidates = Get-Count -EntitySet $script:sets.Candidate -Filter $null
+        Calls = Get-Count -EntitySet $script:sets.Call -Filter $null
+        History = Get-Count -EntitySet $script:sets.History -Filter $null
+        Receipts = Get-Count -EntitySet $script:sets.Receipt -Filter $null
+    }
+}
+
+function Assert-Counts {
+    param([string]$Checkpoint)
+    $actual = Get-ScopedCounts
+    foreach ($name in @('Candidates', 'Calls', 'History', 'Receipts')) {
+        if ($actual[$name] -ne $script:expectedCounts[$name]) {
+            throw "Runtime evidence count mismatch at $Checkpoint; stopped without retry."
+        }
+    }
+    if ($script:journal.Dispatches.Count -gt 0 -and
+        $script:journal.Dispatches[-1].State -in @('GET_RECONCILE_PENDING', 'REJECTED')) {
+        $script:journal.Dispatches[-1].State = 'GET_RECONCILED'
+        Save-RuntimeJournal
+    }
+}
+
+function New-Correlation {
+    [Guid]::NewGuid().ToString('D').ToLowerInvariant()
+}
+
+function Invoke-Action {
+    param([System.Collections.IDictionary]$Body, [string]$ExpectedFailure)
+    $result = Invoke-RuntimeRequest -Method POST -Path 'os_sr_cact' -Body $Body
+    if ($null -ne $result -and $result.PSObject.Properties.Name -contains 'Success') {
+        if (-not $ExpectedFailure -or $result.ErrorCode -cne $ExpectedFailure) {
+            throw (Get-SanitizedFailureMessage -Message $result.SafeError)
+        }
+        return $result
+    }
+    if ($ExpectedFailure) { throw "Expected rejection did not occur: $ExpectedFailure" }
+    if ([string]$result.ResultCode -notin @('Applied', 'DuplicateReplay')) {
+        throw 'Custom API returned an unexpected result code; response details suppressed.'
+    }
+    $result
+}
+
+function Assert-Status {
+    param([int]$Expected)
+    if (-not $script:candidateId) { throw 'Synthetic Candidate identity is unavailable.' }
+    $path = "$($script:sets.Candidate)?%24select=os_sr_cand_stat&%24filter=$([Uri]::EscapeDataString("os_sr_candid eq $($script:candidateId)"))&%24top=2"
+    $rows = Get-Rows -Path $path
+    if ($rows.Count -ne 1 -or [int]$rows[0].os_sr_cand_stat -ne $Expected) {
+        throw 'Synthetic Candidate status did not reconcile.'
+    }
+}
+
+function Assert-OperationResult {
+    param([object]$Result, [string]$ResultCode, [int]$CurrentStatus)
+    if ([string]$Result.ResultCode -cne $ResultCode -or [int]$Result.CurrentStatus -ne $CurrentStatus) {
+        throw 'Custom API result did not match the expected status/replay contract.'
+    }
+}
+
+function Assert-NoEffect {
+    param([string]$Checkpoint)
+    Assert-Counts -Checkpoint $Checkpoint
+    Assert-Status -Expected $script:expectedStatus
+}
+
+function Assert-LiveEvidence {
+    if ((Get-Count -EntitySet $script:sets.Candidate -Filter $null) -ne 1) { throw 'Expected exactly one synthetic Candidate.' }
+    $candidateRows = Get-Rows -Path "$($script:sets.Candidate)?%24select=os_sr_cand_stat,_createdby_value,_ownerid_value&%24filter=$([Uri]::EscapeDataString("os_sr_candid eq $($script:candidateId)"))&%24top=2"
+    if ($candidateRows.Count -ne 1 -or [int]$candidateRows[0].os_sr_cand_stat -ne 100010002 -or
+        [string]$candidateRows[0]._createdby_value -cne $script:actorId -or
+        [string]$candidateRows[0]._ownerid_value -cne $script:actorId) {
+        throw 'Final Candidate status, creator, or owner evidence mismatch.'
+    }
+    $callRows = Get-Rows -Path "$($script:sets.Call)?%24select=os_sr_call_out,os_sr_call_corid,_os_sr_call_ctby_value,_os_sr_call_cand_value,_ownerid_value&%24filter=$([Uri]::EscapeDataString("_os_sr_call_cand_value eq $($script:candidateId)"))&%24top=10"
+    $historyRows = Get-Rows -Path "$($script:sets.History)?%24select=os_sr_csh_prevstat,os_sr_csh_newstat,os_sr_csh_corid,os_sr_csh_cact,_os_sr_csh_actr_value,_os_sr_csh_cand_value,_ownerid_value&%24filter=$([Uri]::EscapeDataString("_os_sr_csh_cand_value eq $($script:candidateId)"))&%24top=10"
+    $receiptRows = Get-Rows -Path "$($script:sets.Receipt)?%24select=os_sr_oprc_cact,os_sr_oprc_corid,os_sr_oprc_hash,os_sr_oprc_prevstat,os_sr_oprc_newstat,os_sr_oprc_callref,os_sr_oprc_histref,_os_sr_oprc_cand_value,_createdby_value,_ownerid_value&%24filter=$([Uri]::EscapeDataString("_os_sr_oprc_cand_value eq $($script:candidateId)"))&%24top=10"
+    if ($callRows.Count -ne 2 -or $historyRows.Count -ne 2 -or $receiptRows.Count -ne 5) {
+        throw 'Final business evidence cardinality mismatch.'
+    }
+    $outcomes = @($callRows | ForEach-Object { [int]$_.os_sr_call_out } | Sort-Object)
+    if (($outcomes -join ',') -cne '100010000,100010001' -or
+        @($callRows | Where-Object {
+            [string]$_._os_sr_call_ctby_value -cne $script:actorId -or [string]$_._ownerid_value -cne $script:actorId
+        }).Count -ne 0) {
+        throw 'Call outcome or caller evidence mismatch.'
+    }
+    $transitions = @($historyRows | ForEach-Object { "$($_.os_sr_csh_prevstat)>$($_.os_sr_csh_newstat)" } | Sort-Object)
+    if (($transitions -join ',') -cne '100010000>100010001,100010001>100010002' -or
+        @($historyRows | Where-Object {
+            [string]$_._os_sr_csh_actr_value -cne $script:actorId -or [string]$_._ownerid_value -cne $script:actorId
+        }).Count -ne 0) {
+        throw 'Candidate Status History transitions or caller evidence mismatch.'
+    }
+    if (@($receiptRows | Where-Object {
+        [string]$_._os_sr_oprc_cand_value -cne $script:candidateId -or
+        [string]$_._createdby_value -cne $script:actorId -or [string]$_._ownerid_value -cne $script:actorId -or
+        [string]$_.os_sr_oprc_hash -notmatch '^[0-9a-f]{64}$'
+    }).Count -ne 0) { throw 'Operation Receipt integrity evidence mismatch.' }
+    $actions = @($receiptRows | ForEach-Object { [string]$_.os_sr_oprc_cact } | Sort-Object)
+    if (($actions -join ',') -cne 'CreateCandidate,ProceedToScheduling,RecordCall,RecordCall,UpdateCandidate') {
+        throw 'Operation Receipt action inventory mismatch.'
+    }
+    if (@($receiptRows | ForEach-Object { [string]$_.os_sr_oprc_corid } | Sort-Object -Unique).Count -ne 5) {
+        throw 'Operation Receipt correlation identities are not unique.'
+    }
+    foreach ($correlation in $script:expectedReceiptEvidence.Keys) {
+        $expected = $script:expectedReceiptEvidence[$correlation]
+        $receipt = @($receiptRows | Where-Object { [string]$_.os_sr_oprc_corid -ieq $correlation })
+        if ($receipt.Count -ne 1 -or [string]$receipt[0].os_sr_oprc_cact -cne $expected.Action -or
+            ([string]$receipt[0].os_sr_oprc_callref).ToLowerInvariant() -cne [string]$expected.CallId -or
+            ([string]$receipt[0].os_sr_oprc_histref).ToLowerInvariant() -cne [string]$expected.HistoryId) {
+            throw 'Operation Receipt replay/result references did not reconcile to original effects.'
+        }
+    }
+    $historyActions = @($historyRows | ForEach-Object { [string]$_.os_sr_csh_cact } | Sort-Object)
+    if (($historyActions -join ',') -cne 'ProceedToScheduling,RecordCall') {
+        throw 'Status History action inventory mismatch.'
+    }
+}
+
+try {
+    if ((Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expectedManifestHash) {
+        throw 'Current Candidate Core manifest fingerprint differs from the authorized baseline.'
+    }
+    if ((Get-Content -Raw $contractPath | ConvertFrom-Json).uniqueName -cne 'os_sr_cact') {
+        throw 'Approved Custom API contract identity mismatch.'
+    }
+    if ($RuntimeMode -ceq 'Apply' -and
+        (-not $RuntimeEvidencePath -or -not (Test-Path -LiteralPath $RuntimeEvidencePath) -or (Get-Item -LiteralPath $RuntimeEvidencePath).Length -ne 0)) {
+        throw 'A new empty one-shot runtime evidence file is required.'
+    }
+    Assert-TargetInput
+    Assert-PacIdentity
+    Get-ValidatedToken
+    $script:apiRoot = $OrganizationUrl.TrimEnd('/') + '/api/data/v9.2/'
+    $who = Invoke-RuntimeRequest -Method GET -Path 'WhoAmI'
+    if ([string]$who.UserId -ine $script:ExpectedUserId -or [string]$who.OrganizationId -ine $ExpectedOrganizationId) {
+        throw 'Runtime WhoAmI/expected-user guard failed.'
+    }
+    $script:actorId = [string]$who.UserId
+    foreach ($logicalName in @('os_sr_cand', 'os_sr_call', 'os_sr_csh', 'os_sr_oprc')) {
+        $metadata = Invoke-RuntimeRequest -Method GET -Path "EntityDefinitions(LogicalName='$logicalName')?%24select=EntitySetName,PrimaryIdAttribute"
+        if (-not $metadata.EntitySetName -or $metadata.PrimaryIdAttribute -cne "$logicalName`id") {
+            throw "Runtime table identity mismatch: $logicalName"
+        }
+        $key = switch ($logicalName) {
+            'os_sr_cand' { 'Candidate' }
+            'os_sr_call' { 'Call' }
+            'os_sr_csh' { 'History' }
+            'os_sr_oprc' { 'Receipt' }
+        }
+        $script:sets[$key] = [string]$metadata.EntitySetName
+    }
+    $script:expectedCounts = Get-ScopedCounts
+    if (@($script:expectedCounts.Values | Where-Object { $_ -ne 0 }).Count -ne 0) {
+        throw 'Zero-row safety gate failed; no business API invocation was sent.'
+    }
+    if ($RuntimeMode -ceq 'Preflight') {
+        [ordered]@{
+            Result = 'PHASE_3D_RUNTIME_PREFLIGHT_READY'
+            FreshZeroRowCounts = $script:expectedCounts
+            RequestGET = $script:runtimeRequestCounts.GET
+            CustomAPIInvocations = 0
+            BusinessDataWrites = 0
+            OrganizationAuditSettingWrites = 0
+            AutomaticRetries = 0
+        } | ConvertTo-Json -Depth 10
+        return
+    }
+    $lockRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'BSO-RS-Support'
+    $null = New-Item -ItemType Directory -Path $lockRoot -Force
+    $targetFingerprint = Get-Sha256 -Bytes ([Text.Encoding]::UTF8.GetBytes(
+        "$ExpectedOrganizationId|$expectedManifestHash|phase3d-candidate-core-runtime"))
+    $lockPath = Join-Path $lockRoot "phase3d-runtime-$targetFingerprint.lock"
+    $lockStream = [IO.File]::Open($lockPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    try {
+        $marker = [Text.Encoding]::UTF8.GetBytes("one-shot runtime authorization consumed; manifest=$expectedManifestHash; retries=0")
+        $lockStream.Write($marker, 0, $marker.Length); $lockStream.Flush($true)
+    } finally { $lockStream.Dispose() }
+    $script:journal = [ordered]@{
+        Test = 'Candidate Core synthetic runtime acceptance'
+        CandidateLabel = '[SYNTHETIC-E2E]'
+        ManifestSha256 = $expectedManifestHash
+        ApiUniqueName = 'os_sr_cact'
+        MaximumApiDispatches = $expectedActionCalls
+        AutomaticRetries = 0
+        Dispatches = @()
+    }
+    $stream = [IO.File]::Open($RuntimeEvidencePath, [IO.FileMode]::Open, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    $stream.Dispose()
+    Save-RuntimeJournal
+
+    $creationCorrelation = New-Correlation
+    $name = '[SYNTHETIC-E2E] Candidate Core Runtime'
+    $email = 'bso-rs-candidatecore-' + [Guid]::NewGuid().ToString('N') + '@example.invalid'
+    $create = [ordered]@{
+        ActionType = 'CreateCandidate'
+        CorrelationId = $creationCorrelation
+        CandidateName = $name
+        CandidateEmail = $email
+    }
+    $result = Invoke-Action -Body $create
+    Assert-OperationResult $result 'Applied' 100010000
+    $script:expectedReceiptEvidence[$creationCorrelation] = @{ Action = 'CreateCandidate'; CallId = ''; HistoryId = '' }
+    $script:expectedCounts.Candidates = 1
+    $script:expectedCounts.Receipts = 1
+    $candidateRows = Get-Rows -Path "$($script:sets.Candidate)?%24select=os_sr_candid,os_sr_cand_stat,os_sr_cand_cnum&%24filter=$([Uri]::EscapeDataString("os_sr_cand_corid eq '$creationCorrelation'"))&%24top=2"
+    if ($candidateRows.Count -ne 1 -or [string]$candidateRows[0].os_sr_cand_cnum -notmatch '^CAND-[0-9]{8}$') {
+        throw 'Created synthetic Candidate did not resolve uniquely or its AutoNumber did not reconcile.'
+    }
+    $script:candidateId = ([string]$candidateRows[0].os_sr_candid).ToLowerInvariant()
+    Assert-Counts 'CreateCandidate'
+    Assert-Status 100010000
+
+    $createReplay = Invoke-Action -Body $create
+    Assert-OperationResult $createReplay 'DuplicateReplay' 100010000
+    Assert-Counts 'CreateCandidate replay'
+    $createConflict = $create.Clone()
+    $createConflict.CandidateName = '[SYNTHETIC-E2E] Candidate Core Conflict'
+    $conflict = Invoke-Action -Body $createConflict -ExpectedFailure 'CORRELATION_CONFLICT'
+    Assert-Counts 'CreateCandidate conflict'
+
+    $invalidCreate = [ordered]@{
+        ActionType = 'CreateCandidate'; CorrelationId = (New-Correlation)
+        CandidateName = '[SYNTHETIC-E2E] Invalid Input'; CandidateEmail = 'invalid-email'
+    }
+    $null = Invoke-Action -Body $invalidCreate -ExpectedFailure 'INVALID_EMAIL'
+    Assert-Counts 'Invalid input'
+
+    $updateCorrelation = New-Correlation
+    $update = [ordered]@{
+        ActionType = 'UpdateCandidate'; CorrelationId = $updateCorrelation
+        CandidateId = $script:candidateId; CandidateName = '[SYNTHETIC-E2E] Candidate Core Runtime Updated'
+        CandidateEmail = 'bso-rs-candidatecore-updated-' + [Guid]::NewGuid().ToString('N') + '@example.invalid'
+    }
+    $result = Invoke-Action -Body $update
+    Assert-OperationResult $result 'Applied' 100010000
+    $script:expectedReceiptEvidence[$updateCorrelation] = @{ Action = 'UpdateCandidate'; CallId = ''; HistoryId = '' }
+    $script:expectedCounts.Receipts = 2
+    Assert-Counts 'UpdateCandidate'
+    Assert-Status 100010000
+    $result = Invoke-Action -Body $update
+    Assert-OperationResult $result 'DuplicateReplay' 100010000
+    Assert-Counts 'UpdateCandidate replay'
+    $updateConflict = $update.Clone()
+    $updateConflict.CandidatePhone = '000-000-0000'
+    $null = Invoke-Action -Body $updateConflict -ExpectedFailure 'CORRELATION_CONFLICT'
+    Assert-Counts 'UpdateCandidate conflict'
+
+    $stale = [ordered]@{
+        ActionType = 'RecordCall'; CorrelationId = (New-Correlation); CandidateId = $script:candidateId
+        ExpectedStatus = 100010001; CallOutcome = 100010001; ContactedAt = [DateTime]::UtcNow.ToString('o')
+    }
+    $null = Invoke-Action -Body $stale -ExpectedFailure 'STALE_EXPECTED_STATUS'
+    Assert-Counts 'Stale-state rejection'
+    Assert-Status 100010000
+
+    $noAnswer = [ordered]@{
+        ActionType = 'RecordCall'; CorrelationId = (New-Correlation); CandidateId = $script:candidateId
+        ExpectedStatus = 100010000; CallOutcome = 100010001; ContactedAt = [DateTime]::UtcNow.ToString('o')
+    }
+    $result = Invoke-Action -Body $noAnswer
+    Assert-OperationResult $result 'Applied' 100010000
+    $noAnswerCorrelation = [string]$noAnswer.CorrelationId
+    $script:expectedCounts.Calls = 1
+    $script:expectedCounts.Receipts = 3
+    $firstNoAnswerCall = [string]$result.CallLogId
+    $script:expectedReceiptEvidence[$noAnswerCorrelation] = @{
+        Action = 'RecordCall'; CallId = $firstNoAnswerCall.ToLowerInvariant(); HistoryId = ''
+    }
+    Assert-Counts 'RecordCall no answer'
+    Assert-Status 100010000
+    $result = Invoke-Action -Body $noAnswer
+    Assert-OperationResult $result 'DuplicateReplay' 100010000
+    if ([string]$result.CallLogId -cne $firstNoAnswerCall) { throw 'No-answer replay did not return original Call Log evidence.' }
+    Assert-Counts 'RecordCall no-answer replay'
+    $noAnswerConflict = $noAnswer.Clone()
+    $noAnswerConflict.CallOutcome = 100010002
+    $null = Invoke-Action -Body $noAnswerConflict -ExpectedFailure 'CORRELATION_CONFLICT'
+    Assert-Counts 'RecordCall no-answer conflict'
+
+    $answered = [ordered]@{
+        ActionType = 'RecordCall'; CorrelationId = (New-Correlation); CandidateId = $script:candidateId
+        ExpectedStatus = 100010000; CallOutcome = 100010000; ContactedAt = [DateTime]::UtcNow.ToString('o')
+    }
+    $result = Invoke-Action -Body $answered
+    Assert-OperationResult $result 'Applied' 100010001
+    $answeredCorrelation = [string]$answered.CorrelationId
+    $script:expectedCounts.Calls = 2
+    $script:expectedCounts.History = 1
+    $script:expectedCounts.Receipts = 4
+    $firstAnsweredCall = [string]$result.CallLogId
+    $firstAnsweredHistory = [string]$result.StatusHistoryId
+    $script:expectedReceiptEvidence[$answeredCorrelation] = @{
+        Action = 'RecordCall'; CallId = $firstAnsweredCall.ToLowerInvariant(); HistoryId = $firstAnsweredHistory.ToLowerInvariant()
+    }
+    Assert-Counts 'RecordCall answered'
+    Assert-Status 100010001
+    $result = Invoke-Action -Body $answered
+    Assert-OperationResult $result 'DuplicateReplay' 100010001
+    if ([string]$result.CallLogId -cne $firstAnsweredCall -or [string]$result.StatusHistoryId -cne $firstAnsweredHistory) {
+        throw 'Answered replay did not return original effect evidence.'
+    }
+    Assert-Counts 'RecordCall answered replay'
+    $answeredConflict = $answered.Clone()
+    $answeredConflict.CallOutcome = 100010002
+    $null = Invoke-Action -Body $answeredConflict -ExpectedFailure 'CORRELATION_CONFLICT'
+    Assert-Counts 'RecordCall answered conflict'
+
+    $proceed = [ordered]@{
+        ActionType = 'ProceedToScheduling'; CorrelationId = (New-Correlation); CandidateId = $script:candidateId
+        ExpectedStatus = 100010001
+    }
+    $result = Invoke-Action -Body $proceed
+    Assert-OperationResult $result 'Applied' 100010002
+    $proceedCorrelation = [string]$proceed.CorrelationId
+    $script:expectedCounts.History = 2
+    $script:expectedCounts.Receipts = 5
+    $firstProceedHistory = [string]$result.StatusHistoryId
+    $script:expectedReceiptEvidence[$proceedCorrelation] = @{
+        Action = 'ProceedToScheduling'; CallId = ''; HistoryId = $firstProceedHistory.ToLowerInvariant()
+    }
+    Assert-Counts 'ProceedToScheduling'
+    Assert-Status 100010002
+    $result = Invoke-Action -Body $proceed
+    Assert-OperationResult $result 'DuplicateReplay' 100010002
+    if ([string]$result.StatusHistoryId -cne $firstProceedHistory) { throw 'Queue-transition replay did not return original History evidence.' }
+    Assert-Counts 'ProceedToScheduling replay'
+    $proceedConflict = $proceed.Clone()
+    $proceedConflict.ExpectedStatus = 100010000
+    $null = Invoke-Action -Body $proceedConflict -ExpectedFailure 'CORRELATION_CONFLICT'
+    Assert-Counts 'ProceedToScheduling conflict'
+
+    foreach ($deferred in @(
+        @{ Action = 'MarkRound1Scheduled'; Expected = 'SCHEDULER_DEPENDENCY_UNAVAILABLE' },
+        @{ Action = 'RecordPass'; Expected = 'INVALID_TRANSITION' },
+        @{ Action = 'RecordFail'; Expected = 'INVALID_TRANSITION' },
+        @{ Action = 'RequestReschedule'; Expected = 'INVALID_TRANSITION' }
+    )) {
+        $body = [ordered]@{
+            ActionType = $deferred.Action; CorrelationId = (New-Correlation)
+            CandidateId = $script:candidateId; ExpectedStatus = 100010002
+        }
+        if ($deferred.Action -ceq 'RequestReschedule') { $body.Reason = 'Synthetic acceptance deferred without trusted cancellation evidence.' }
+        $null = Invoke-Action -Body $body -ExpectedFailure $deferred.Expected
+        Assert-Counts $deferred.Action
+        Assert-Status 100010002
+    }
+
+    Assert-LiveEvidence
+    Assert-Counts 'Final reconciliation'
+    $script:journal.Result = 'PHASE_3D_SYNTHETIC_RUNTIME_ACCEPTED'
+    $script:journal.Dispatches = @($script:journal.Dispatches | ForEach-Object {
+        [ordered]@{
+            Index = $_.Index; Action = $_.Action; PayloadSha256 = $_.PayloadSha256
+            State = $_.State; HttpStatus = $_.HttpStatus; ResultCode = $_.ResultCode
+        }
+    })
+    $script:journal.CandidateIdSha256 = Get-Sha256 -Bytes ([Text.Encoding]::UTF8.GetBytes($script:candidateId))
+    $script:journal.ActorIdSha256 = Get-Sha256 -Bytes ([Text.Encoding]::UTF8.GetBytes($script:actorId))
+    $script:journal.FinalCounts = Get-ScopedCounts
+    Save-RuntimeJournal
+    [ordered]@{
+        Result = 'PHASE_3D_SYNTHETIC_RUNTIME_ACCEPTED'
+        CandidateFixtureCount = 1
+        SyntheticName = '[SYNTHETIC-E2E] Candidate Core Runtime'
+        EmailDomain = '.invalid'
+        RetainedCandidate = $true
+        RetentionReason = 'Direct-delete guard and restrictive relationship policy remain intact.'
+        RequestGET = $script:runtimeRequestCounts.GET
+        CustomAPIInvocations = $script:apiCalls
+        CandidateWrites = 4; CallLogWrites = 2; StatusHistoryWrites = 2; ReceiptWrites = 5
+        TotalBusinessRecordWrites = 13
+        Replays = 5; Conflicts = 5; ExpectedRejections = 6
+        FinalCounts = $script:journal.FinalCounts
+        CandidateIdReferenceSha256 = $script:journal.CandidateIdSha256
+        ActorIdReferenceSha256 = $script:journal.ActorIdSha256
+        AutomaticRetries = 0; AppWrites = 0; RoleWrites = 0; AuditSettingWrites = 0; PublishXml = 0
+        DispatchEvidencePath = $RuntimeEvidencePath
+    } | ConvertTo-Json -Depth 20
+} catch {
+    $safe = Get-SanitizedFailureMessage -Message $_.Exception.Message
+    if ($script:journal) {
+        $script:journal.Result = 'PHASE_3D_RUNTIME_STOPPED'
+        $script:journal.Error = $safe
+        $script:journal.CandidateIdSha256 = if ($script:candidateId) { Get-Sha256 -Bytes ([Text.Encoding]::UTF8.GetBytes($script:candidateId)) } else { $null }
+        Save-RuntimeJournal
+    }
+    [ordered]@{
+        Result = if ($script:apiCalls -gt 0 -and $script:journal -and
+            @($script:journal.Dispatches | Where-Object State -CEQ 'UNCERTAIN_WRITE_OUTCOME').Count) {
+            'UNCERTAIN_WRITE_OUTCOME'
+        } else { 'PHASE_3D_RUNTIME_STOPPED' }
+        Error = $safe
+        RequestGET = $script:runtimeRequestCounts.GET
+        CustomAPIInvocations = $script:apiCalls
+        AutomaticRetries = 0
+        RecordIdsPersisted = $false
+        AppWrites = 0; RoleWrites = 0; AuditSettingWrites = 0; PublishXml = 0
+    } | ConvertTo-Json -Depth 10
+    throw 'Candidate Core runtime acceptance stopped; no automatic retry or API resend.'
+} finally {
+    $script:accessToken = $null
+    [Environment]::SetEnvironmentVariable('BSO_RS_EXPECTED_USER_ID', $null, 'Process')
+}

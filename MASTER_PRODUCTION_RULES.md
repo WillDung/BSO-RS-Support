@@ -5,7 +5,7 @@ These invariants govern design and implementation. See [Project Decisions](docs/
 ## Data authority and business operations
 
 - Dataverse is the only production source of truth for candidate workflow and business state. SharePoint stores approved documents, not primary candidate records.
-- Power Automate must not bypass business transition rules. Critical state changes pass through an approved Dataverse business operation. For Candidate Core, `os_sr_cact` is implemented and metadata-deployed; live runtime acceptance is still pending, organization auditing remains disabled, and the operation fails closed while that gate is unmet. See the [Phase 3C deployment report](docs/PHASE_3C_CANDIDATE_CORE_API_PLUGIN_REPORT.md) and the [Phase 3D runtime acceptance disposition](docs/PHASE_3D_CANDIDATE_CORE_RUNTIME_ACCEPTANCE_REPORT.md).
+- Power Automate must not bypass business transition rules. Critical state changes pass through an approved Dataverse business operation. For Candidate Core, `os_sr_cact` is implemented and metadata-deployed. Organization-level auditing remains an external governance/release prerequisite, not a runtime rejection; required table-audit metadata and append-only History/Receipt evidence remain mandatory. See the [Phase 3C deployment report](docs/PHASE_3C_CANDIDATE_CORE_API_PLUGIN_REPORT.md) and the [Phase 3D runtime acceptance report](docs/PHASE_3D_CANDIDATE_CORE_RUNTIME_ACCEPTANCE_REPORT.md).
 - Record each valid transition's previous status, new status, actor, timestamp, applicable reason, and correlation identifier where applicable.
 
 ## Identity and roles

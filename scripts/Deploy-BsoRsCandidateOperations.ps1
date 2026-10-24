@@ -1,14 +1,18 @@
 #requires -Version 7.4
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Preflight', 'Apply', 'Reconcile')][string]$DeploymentMode,
+    [Parameter(Mandatory)][ValidateSet('Preflight', 'Apply', 'Reconcile', 'PreflightAssemblyUpdate', 'ApplyAssemblyUpdate', 'ReconcileAssemblyUpdate')][string]$DeploymentMode,
     [Parameter(Mandatory)][string]$EnvironmentName,
     [Parameter(Mandatory)][string]$OrganizationUrl,
     [Parameter(Mandatory)][string]$ExpectedEnvironmentId,
     [Parameter(Mandatory)][string]$ExpectedOrganizationId,
     [Parameter(Mandatory)][string]$DeploymentPlanPath,
     [string]$DispatchEvidencePath,
-    [string]$ExpectedDeploymentPlanSha256
+    [string]$ExpectedDeploymentPlanSha256,
+    [string]$AssemblyUpdatePlanPath,
+    [string]$ExpectedAssemblyUpdatePlanSha256,
+    [string]$ExpectedCurrentAssemblySha256,
+    [string]$ExpectedNewAssemblySha256
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,18 +21,19 @@ $deploymentScriptDirectory = $PSScriptRoot
 $deploymentContractPath = Join-Path $deploymentRoot 'docs\PHASE_3C_API_CONTRACT.json'
 $deploymentAssemblyPath = Join-Path $deploymentRoot 'solutions\CandidateCore\bin\Release\net462\os_sr_cact.dll'
 $deploymentContract = Get-Content -Raw $deploymentContractPath | ConvertFrom-Json
-$deploymentCounts = @{ GET = 0; POST = 0 }
+$deploymentCounts = @{ GET = 0; POST = 0; PATCH = 0 }
 $deploymentIndex = 0
 $deploymentJournal = $null
 $deploymentStorageGets = 0
 $deploymentPlan = $null
+$assemblyUpdatePlan = $null
 # Import existing guarded read helpers without executing an older provisioning main.
 $null = . (Join-Path $deploymentScriptDirectory 'Provision-BsoRsOperationReceipt.ps1') -Mode PlanOnly `
     -EnvironmentName $EnvironmentName -OrganizationUrl $OrganizationUrl `
     -ExpectedEnvironmentId $ExpectedEnvironmentId -ExpectedOrganizationId $ExpectedOrganizationId
 
 function Invoke-DeploymentRequest {
-    param([ValidateSet('GET', 'POST')][string]$Method, [string]$Path, [object]$Body)
+    param([ValidateSet('GET', 'POST', 'PATCH')][string]$Method, [string]$Path, [object]$Body)
     $uri = [Uri]($script:ApiRoot + $Path)
     if ($uri.Scheme -cne 'https' -or $uri.Authority -ine ([Uri]$OrganizationUrl).Authority -or
         $uri.AbsolutePath -notmatch '^/api/data/v9\.2/' -or $uri.UserInfo -or $uri.Fragment) { throw 'Foreign deployment API URL.' }
@@ -55,10 +60,31 @@ function Invoke-DeploymentRequest {
         $arguments.Body = $json
         $arguments.ContentType = 'application/json; charset=utf-8'
     }
+    if ($Method -ceq 'PATCH') {
+        if ($DeploymentMode -cne 'ApplyAssemblyUpdate' -or $null -eq $script:assemblyUpdatePlan -or
+            $null -eq $script:deploymentJournal -or $script:deploymentIndex -ne 0 -or
+            $Path -cne "pluginassemblies($($script:assemblyUpdatePlan.AssemblyId))" -or
+            $script:deploymentJournal.Writes.Count -ne 1 -or $script:deploymentJournal.Writes[0].State -cne 'PLANNED') {
+            throw 'Assembly update is not permitted by the exact one-write consumption plan.'
+        }
+        $json = ConvertTo-Json -InputObject $Body -Depth 20 -Compress
+        if ($Body.Count -ne 1 -or $Body.content -cne $script:assemblyUpdatePlan.Content -or
+            (Get-Sha256 -Bytes ([Text.Encoding]::UTF8.GetBytes($json))) -cne $script:assemblyUpdatePlan.PayloadSha256) {
+            throw 'Assembly update payload differs from its pinned plan.'
+        }
+        $entry = $script:deploymentJournal.Writes[0]
+        $script:deploymentJournal.Writes[0].State = 'DISPATCH_RESERVED'
+        Save-DeploymentJournal
+        $script:deploymentIndex++
+        $headers['MSCRM.SolutionUniqueName'] = 'os_sr_bso_rs_support'
+        $arguments.Body = $json
+        $arguments.ContentType = 'application/json; charset=utf-8'
+    }
     $script:deploymentCounts[$Method]++
     try { $response = Invoke-WebRequest @arguments }
     catch { throw 'UNCERTAIN_WRITE_OR_READ_TRANSPORT; reconcile and stop; no retry.' }
-    if ($Method -ceq 'POST') {
+    if ($Method -in @('POST', 'PATCH')) {
+        if ($Method -ceq 'PATCH') { $entry = $script:deploymentJournal.Writes[0] }
         $entry.HttpStatus = [int]$response.StatusCode
         $entry.State = if ($response.StatusCode -ge 200 -and $response.StatusCode -lt 300) { 'ACKNOWLEDGED' } else { 'REJECTED' }
         Save-DeploymentJournal
@@ -328,6 +354,167 @@ try {
             $bytes = [Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject $script:deploymentPlan -Depth 80))
             $stream.Write($bytes, 0, $bytes.Length); $stream.Flush($true)
         } finally { $stream.Dispose() }
+    } elseif ($DeploymentMode -in @('PreflightAssemblyUpdate', 'ApplyAssemblyUpdate', 'ReconcileAssemblyUpdate')) {
+        $actualPlanHash = (Get-FileHash -LiteralPath $DeploymentPlanPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($ExpectedDeploymentPlanSha256 -cne $actualPlanHash) { throw 'Existing deployment plan hash guard failed.' }
+        $script:deploymentPlan = Get-Content -Raw $DeploymentPlanPath | ConvertFrom-Json
+        if ($deploymentPlan.AssemblySha256 -cne $ExpectedCurrentAssemblySha256 -or
+            $deploymentPlan.ContractSha256 -cne $contractHash -or
+            $deploymentPlan.CoreManifestSha256 -cne $storage.CoreManifestSha256 -or
+            $deploymentPlan.ReceiptPlanSha256 -cne $storage.PlanSha256 -or
+            $assemblyHash -cne $ExpectedNewAssemblySha256) {
+            throw 'Current assembly, new assembly, contract, or storage fingerprint differs from the update authorization.'
+        }
+        $baselineReadbacks = if ($DeploymentMode -ceq 'ReconcileAssemblyUpdate') {
+            @($deploymentPlan.Writes | Where-Object Path -CNE 'pluginassemblies')
+        } else { @($deploymentPlan.Writes) }
+        foreach ($write in $baselineReadbacks) { Assert-RegistrationReadback -Write $write }
+        Assert-RegistrationMembership
+        Assert-RegistrationInventoryExact
+        if ($inventory.Assemblies.Count -ne 1 -or
+            [string]$inventory.Assemblies[0].pluginassemblyid -ine [string](@($deploymentPlan.Writes | Where-Object Path -CEQ 'pluginassemblies')[0].Id)) {
+            throw 'Existing assembly identity differs from the pinned deployment plan.'
+        }
+        $assemblyId = [string]$inventory.Assemblies[0].pluginassemblyid
+        $assemblyName = [Reflection.AssemblyName]::GetAssemblyName($deploymentAssemblyPath)
+        $newPublicKeyToken = [BitConverter]::ToString($assemblyName.GetPublicKeyToken()).Replace('-', '').ToLowerInvariant()
+        $existingAssemblyWrite = @($deploymentPlan.Writes | Where-Object Path -CEQ 'pluginassemblies')[0]
+        if ($assemblyName.Name -cne 'os_sr_cact' -or [string]$assemblyName.Version -cne '1.0.0.0' -or
+            $newPublicKeyToken -cne [string]$existingAssemblyWrite.Body.publickeytoken) {
+            throw 'New assembly name, version, or signing identity differs from the pinned registration.'
+        }
+        $newContent = [Convert]::ToBase64String([IO.File]::ReadAllBytes($deploymentAssemblyPath))
+        $payload = [ordered]@{ content = $newContent }
+        $payloadJson = ConvertTo-Json -InputObject $payload -Depth 20 -Compress
+        $payloadHash = Get-Sha256 -Bytes ([Text.Encoding]::UTF8.GetBytes($payloadJson))
+        if ($DeploymentMode -ceq 'PreflightAssemblyUpdate') {
+            if (-not $AssemblyUpdatePlanPath -or
+                [IO.Path]::GetFullPath($AssemblyUpdatePlanPath) -eq [IO.Path]::GetFullPath($DeploymentPlanPath)) {
+                throw 'A distinct new assembly-update plan path is required.'
+            }
+            $script:assemblyUpdatePlan = [ordered]@{
+                DeploymentPlanSha256 = $actualPlanHash
+                CoreManifestSha256 = $storage.CoreManifestSha256
+                ReceiptPlanSha256 = $storage.PlanSha256
+                ContractSha256 = $contractHash
+                AssemblyId = $assemblyId
+                ExpectedCurrentAssemblySha256 = $ExpectedCurrentAssemblySha256
+                ExpectedNewAssemblySha256 = $ExpectedNewAssemblySha256
+                PayloadSha256 = $payloadHash
+                Content = $newContent
+                AutomaticRetries = 0
+                MaximumPatchDispatches = 1
+            }
+            $stream = [IO.File]::Open($AssemblyUpdatePlanPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+            try {
+                $bytes = [Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject $script:assemblyUpdatePlan -Depth 20))
+                $stream.Write($bytes, 0, $bytes.Length); $stream.Flush($true)
+            } finally { $stream.Dispose() }
+        } elseif ($DeploymentMode -ceq 'ApplyAssemblyUpdate') {
+            if (-not $DispatchEvidencePath -or -not $AssemblyUpdatePlanPath) {
+                throw 'Assembly update plan and one-shot dispatch evidence paths are required.'
+            }
+            $updatePlanHash = (Get-FileHash -LiteralPath $AssemblyUpdatePlanPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($ExpectedAssemblyUpdatePlanSha256 -cne $updatePlanHash) { throw 'Assembly update plan fingerprint mismatch.' }
+            $script:assemblyUpdatePlan = Get-Content -Raw $AssemblyUpdatePlanPath | ConvertFrom-Json
+            if ($assemblyUpdatePlan.DeploymentPlanSha256 -cne $actualPlanHash -or
+                $assemblyUpdatePlan.CoreManifestSha256 -cne $storage.CoreManifestSha256 -or
+                $assemblyUpdatePlan.ReceiptPlanSha256 -cne $storage.PlanSha256 -or
+                $assemblyUpdatePlan.ContractSha256 -cne $contractHash -or
+                $assemblyUpdatePlan.AssemblyId -cne $assemblyId -or
+                $assemblyUpdatePlan.ExpectedCurrentAssemblySha256 -cne $ExpectedCurrentAssemblySha256 -or
+                $assemblyUpdatePlan.ExpectedNewAssemblySha256 -cne $ExpectedNewAssemblySha256 -or
+                $assemblyUpdatePlan.PayloadSha256 -cne $payloadHash -or
+                $assemblyUpdatePlan.Content -cne $newContent -or
+                $assemblyUpdatePlan.MaximumPatchDispatches -ne 1 -or
+                $assemblyUpdatePlan.AutomaticRetries -ne 0) {
+                throw 'Assembly update payload or metadata differs from the immutable preflight plan.'
+            }
+            $script:deploymentJournal = [ordered]@{
+                AssemblyUpdatePlanSha256 = $updatePlanHash
+                Writes = @([ordered]@{
+                    Path = "pluginassemblies($assemblyId)"
+                    IdReferenceSha256 = Get-Sha256 -Bytes ([Text.Encoding]::UTF8.GetBytes($assemblyId))
+                    PayloadSha256 = $payloadHash
+                    State = 'PLANNED'
+                    HttpStatus = $null
+                })
+                AutomaticRetries = 0
+                MaximumPatchDispatches = 1
+            }
+            $stream = [IO.File]::Open($DispatchEvidencePath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+            $stream.Dispose()
+            Save-DeploymentJournal
+            try {
+                $null = Invoke-DeploymentRequest -Method PATCH -Path "pluginassemblies($assemblyId)" -Body $payload
+            } catch {
+                $original = $_
+                try {
+                    $readback = Invoke-DeploymentRequest -Method GET -Path "pluginassemblies($assemblyId)?`$select=pluginassemblyid,content"
+                    if ([string]$readback.pluginassemblyid -ine $assemblyId -or
+                        (Get-Sha256 -Bytes ([Convert]::FromBase64String([string]$readback.content))) -cne $ExpectedNewAssemblySha256) {
+                        throw 'Immediate assembly reconciliation did not prove the new binary.'
+                    }
+                    $script:deploymentJournal.Writes[0].State = 'GET_RECONCILED'
+                    Save-DeploymentJournal
+                } catch { Write-Warning 'Immediate GET could not prove the assembly update; no resend.' }
+                throw $original
+            }
+            $readback = Invoke-DeploymentRequest -Method GET -Path "pluginassemblies($assemblyId)?`$select=pluginassemblyid,name,version,culture,publickeytoken,isolationmode,sourcetype,content"
+            if ([string]$readback.pluginassemblyid -ine $assemblyId -or $readback.name -cne 'os_sr_cact' -or
+                $readback.version -cne '1.0.0.0' -or $readback.culture -cne 'neutral' -or
+                $readback.publickeytoken -cne [string](@($deploymentPlan.Writes | Where-Object Path -CEQ 'pluginassemblies')[0].Body.publickeytoken) -or
+                [int]$readback.isolationmode -ne 2 -or [int]$readback.sourcetype -ne 0 -or
+                (Get-Sha256 -Bytes ([Convert]::FromBase64String([string]$readback.content))) -cne $ExpectedNewAssemblySha256) {
+                throw 'Updated assembly metadata or binary did not reconcile exactly.'
+            }
+            $script:deploymentJournal.Writes[0].State = 'GET_RECONCILED'
+            Save-DeploymentJournal
+        } else {
+            if (-not $DispatchEvidencePath -or -not $AssemblyUpdatePlanPath) {
+                throw 'Assembly update plan and consumed dispatch evidence paths are required for reconciliation.'
+            }
+            $updatePlanHash = (Get-FileHash -LiteralPath $AssemblyUpdatePlanPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($ExpectedAssemblyUpdatePlanSha256 -cne $updatePlanHash) { throw 'Assembly update plan fingerprint mismatch.' }
+            $script:assemblyUpdatePlan = Get-Content -Raw $AssemblyUpdatePlanPath | ConvertFrom-Json
+            if ($assemblyUpdatePlan.DeploymentPlanSha256 -cne $actualPlanHash -or
+                $assemblyUpdatePlan.CoreManifestSha256 -cne $storage.CoreManifestSha256 -or
+                $assemblyUpdatePlan.ReceiptPlanSha256 -cne $storage.PlanSha256 -or
+                $assemblyUpdatePlan.ContractSha256 -cne $contractHash -or
+                $assemblyUpdatePlan.AssemblyId -cne $assemblyId -or
+                $assemblyUpdatePlan.ExpectedCurrentAssemblySha256 -cne $ExpectedCurrentAssemblySha256 -or
+                $assemblyUpdatePlan.ExpectedNewAssemblySha256 -cne $ExpectedNewAssemblySha256 -or
+                $assemblyUpdatePlan.PayloadSha256 -cne $payloadHash -or
+                $assemblyUpdatePlan.Content -cne $newContent -or
+                $assemblyUpdatePlan.MaximumPatchDispatches -ne 1 -or
+                $assemblyUpdatePlan.AutomaticRetries -ne 0) {
+                throw 'Assembly update payload or metadata differs from the immutable preflight plan.'
+            }
+            $script:deploymentJournal = Get-Content -Raw $DispatchEvidencePath | ConvertFrom-Json
+            if ($script:deploymentJournal.AssemblyUpdatePlanSha256 -cne $updatePlanHash -or
+                $script:deploymentJournal.AutomaticRetries -ne 0 -or
+                $script:deploymentJournal.MaximumPatchDispatches -ne 1 -or
+                $script:deploymentJournal.Writes.Count -ne 1 -or
+                $script:deploymentJournal.Writes[0].Path -cne "pluginassemblies($assemblyId)" -or
+                $script:deploymentJournal.Writes[0].IdReferenceSha256 -cne (Get-Sha256 -Bytes ([Text.Encoding]::UTF8.GetBytes($assemblyId))) -or
+                $script:deploymentJournal.Writes[0].PayloadSha256 -cne $payloadHash -or
+                $script:deploymentJournal.Writes[0].State -cne 'GET_RECONCILED') {
+                throw 'Consumed assembly update journal does not prove exactly one reconciled dispatch.'
+            }
+            $readback = Invoke-DeploymentRequest -Method GET -Path "pluginassemblies($assemblyId)?`$select=pluginassemblyid,name,version,culture,publickeytoken,isolationmode,sourcetype,content"
+            if ([string]$readback.pluginassemblyid -ine $assemblyId -or $readback.name -cne 'os_sr_cact' -or
+                $readback.version -cne '1.0.0.0' -or $readback.culture -cne 'neutral' -or
+                $readback.publickeytoken -cne [string]$existingAssemblyWrite.Body.publickeytoken -or
+                [int]$readback.isolationmode -ne 2 -or [int]$readback.sourcetype -ne 0 -or
+                (Get-Sha256 -Bytes ([Convert]::FromBase64String([string]$readback.content))) -cne $ExpectedNewAssemblySha256) {
+                throw 'Read-only assembly reconciliation did not match the approved binary and identity.'
+            }
+        }
+        foreach ($write in $deploymentPlan.Writes | Where-Object Path -CNE 'pluginassemblies') {
+            Assert-RegistrationReadback -Write $write
+        }
+        Assert-RegistrationMembership
+        Assert-RegistrationInventoryExact
     } else {
         $actualPlanHash = (Get-FileHash $DeploymentPlanPath -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($ExpectedDeploymentPlanSha256 -cne $actualPlanHash) { throw 'Deployment plan hash guard failed.' }
@@ -366,22 +553,44 @@ try {
         Assert-RegistrationMembership
         Assert-RegistrationInventoryExact
     }
-    $paths = @($deploymentPlan.Writes | ForEach-Object { [pscustomobject]@{ Path = $_.Path } } |
-        Group-Object Path | ForEach-Object { @{ Path = $_.Name; Maximum = $_.Count } })
+    $paths = if ($DeploymentMode -in @('PreflightAssemblyUpdate', 'ApplyAssemblyUpdate', 'ReconcileAssemblyUpdate')) {
+        @(@{ Path = 'pluginassemblies PATCH'; Maximum = 1 })
+    } else {
+        @($deploymentPlan.Writes | ForEach-Object { [pscustomobject]@{ Path = $_.Path } } |
+            Group-Object Path | ForEach-Object { @{ Path = $_.Name; Maximum = $_.Count } })
+    }
     [ordered]@{
-        Result = if ($DeploymentMode -ceq 'Preflight') { 'CANDIDATE_API_DEPLOYMENT_PLAN_READY' } elseif ($storage.OrganizationAuditing) {
+        Result = if ($DeploymentMode -ceq 'Preflight') { 'CANDIDATE_API_DEPLOYMENT_PLAN_READY' }
+            elseif ($DeploymentMode -ceq 'PreflightAssemblyUpdate') { 'CANDIDATE_CORE_ASSEMBLY_UPDATE_PLAN_READY' }
+            elseif ($DeploymentMode -ceq 'ApplyAssemblyUpdate') { 'CANDIDATE_CORE_ASSEMBLY_UPDATED' }
+            elseif ($DeploymentMode -ceq 'ReconcileAssemblyUpdate') { 'CANDIDATE_CORE_ASSEMBLY_RECONCILED' }
+            elseif ($storage.OrganizationAuditing) {
             'CANDIDATE_CORE_API_DEPLOYED'
         } else { 'CANDIDATE_CORE_API_DEPLOYED_AUDIT_ACTIVATION_PENDING' }
         DeploymentPlanSha256 = (Get-FileHash $DeploymentPlanPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        AssemblyUpdatePlanSha256 = if ($AssemblyUpdatePlanPath -and (Test-Path -LiteralPath $AssemblyUpdatePlanPath)) {
+            (Get-FileHash -LiteralPath $AssemblyUpdatePlanPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        } else { $null }
         AssemblySha256 = $assemblyHash; ContractSha256 = $contractHash
         PlannedCounts = $paths; GuardCoverage = $deploymentPlan.GuardCoverage
         GET = $script:deploymentCounts.GET; StorageGateGET = $deploymentStorageGets; POST = $script:deploymentCounts.POST
+        PATCH = $script:deploymentCounts.PATCH
+        AssemblyUpdateDispatches = if ($script:deploymentJournal) { $script:deploymentJournal.Writes.Count } else { 0 }
+        AssemblyUpdateDispatchState = if ($script:deploymentJournal -and $script:deploymentJournal.Writes.Count -eq 1) {
+            $script:deploymentJournal.Writes[0].State
+        } else { $null }
+        AssemblyUpdateHttpStatus = if ($script:deploymentJournal -and $script:deploymentJournal.Writes.Count -eq 1) {
+            $script:deploymentJournal.Writes[0].HttpStatus
+        } else { $null }
+        OrganizationAuditing = [bool]$storage.OrganizationAuditing
         APIInvocations = 0; BusinessDataWrites = 0; AppWrites = 0; PublishXml = 0; AutomaticRetries = 0
     } | ConvertTo-Json -Depth 20
 } catch {
-    [ordered]@{ Result = if ($script:deploymentCounts.POST) { 'PARTIAL_API_METADATA_STATE' } else { 'PRE_DEPLOYMENT_GATE_BLOCKED' }
+    [ordered]@{ Result = if ($script:deploymentCounts.PATCH) { 'UNCERTAIN_ASSEMBLY_UPDATE_OUTCOME' }
+        elseif ($script:deploymentCounts.POST) { 'PARTIAL_API_METADATA_STATE' } else { 'PRE_DEPLOYMENT_GATE_BLOCKED' }
         Error = Get-SanitizedFailureMessage -Message $_.Exception.Message
         GET = $script:deploymentCounts.GET; StorageGateGET = $deploymentStorageGets; POST = $script:deploymentCounts.POST
+        PATCH = $script:deploymentCounts.PATCH
         AutomaticRetries = 0; BusinessDataWrites = 0 } | ConvertTo-Json
     throw 'Candidate operation deployment stopped; no automatic retry.'
 } finally {

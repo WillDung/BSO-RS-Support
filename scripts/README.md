@@ -10,6 +10,10 @@ Do not blindly rerun Apply after any partial registration. Use the retained jour
 
 Scripts here support reviewed build, validation, migration, and ALM tasks. They must be safe by default, avoid embedded credentials and personal data, clearly identify environment effects, and include verification instructions.
 
+## Phase 3D synthetic runtime acceptance
+
+[Test-BsoRsCandidateCoreRuntime.ps1](Test-BsoRsCandidateCoreRuntime.ps1) has a GET-only `Preflight` mode and a bounded `Apply` mode for at most one `[SYNTHETIC-E2E]` Candidate and 21 Custom API dispatches. Apply requires a new empty evidence file, a fresh zero-row gate, and a durable one-shot lock; automatic retries are fixed at zero. The current lock is already consumed, and no corresponding runtime dispatch journal was found among retained session artifacts inspected. Do not remove the lock or rerun Apply. Four fresh count-only queries found zero Candidate, Call Log, History, and Receipt rows, but the earlier API dispatch count remains unknown. Current outcome and required continuation are recorded in the [Phase 3D report](../docs/PHASE_3D_CANDIDATE_CORE_RUNTIME_ACCEPTANCE_REPORT.md).
+
 ## VS Code Readiness
 
 [Test-BsoVsCodeReadiness.ps1](Test-BsoVsCodeReadiness.ps1) performs local tool checks and read-only PAC environment/Solution checks. Its PAC app-authoring capability result is based on the `create` entry in successful `pac model help` output, not the literal phrase `model create`. Run the synthetic parser regression checks with `& ./tests/ReadinessChecks.Tests.ps1`; they do not invoke PAC or contact an environment.

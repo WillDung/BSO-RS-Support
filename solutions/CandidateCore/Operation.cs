@@ -153,7 +153,7 @@ namespace os_sr_cact
 
     public interface IOperationStore
     {
-        void RequireTransactionAndAudit();
+        void RequireTransaction();
         Receipt? FindReceipt(Guid correlation);
         CandidateState GetCandidate(Guid id);
         Guid CreateCandidate(ActionRequest request);
@@ -186,7 +186,7 @@ namespace os_sr_cact
 
         public static ActionResult Execute(ActionRequest request, IOperationStore store)
         {
-            store.RequireTransactionAndAudit();
+            store.RequireTransaction();
             var receipt = store.FindReceipt(request.Correlation);
             if (receipt != null)
             {

@@ -60,12 +60,10 @@ namespace os_sr_cact
             this.context = context;
         }
 
-        public void RequireTransactionAndAudit()
+        public void RequireTransaction()
         {
             if (!context.IsInTransaction || context.UserId != context.InitiatingUserId)
                 throw new OperationError("UNSUPPORTED_EXECUTION_CONTEXT");
-            var organization = service.Retrieve("organization", context.OrganizationId, new ColumnSet("isauditenabled"));
-            if (!organization.GetAttributeValue<bool>("isauditenabled")) throw new OperationError("AUDIT_ACTIVATION_PENDING");
         }
 
         public Receipt? FindReceipt(Guid correlation)

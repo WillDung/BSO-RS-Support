@@ -2,13 +2,13 @@
 
 **Date:** 24 October 2026
 **Final classification:** `PRE_WRITE_GATE_BLOCKED`
-**Tenant requests / writes:** 0 / 0
+**Tenant requests / writes:** 31 GET / 0 writes
 
 ## 1. Executive Summary
 
-The owner authorized a fresh Candidate reconciliation and, only after an exact match, bounded provisioning of Call Log and Candidate Status History. The run did not reach the environment because the exact VN LMV IT organization URL was not confirmed. The existing Candidate-only runner is also not an executor for this expanded scope: its guards explicitly exclude the two child tables and assume they are absent.
+The owner authorized a fresh Candidate reconciliation and, only after an exact match, bounded provisioning of Call Log and Candidate Status History. The confirmed VN LMV IT target was verified against PAC, the Az credential context, and Dataverse `WhoAmI`; a process-scoped expected-user guard was established. Fresh read-only reconciliation found Candidate exact against the current manifest and both child tables absent.
 
-No PAC command, authentication, token acquisition, Dataverse request, or metadata write was performed. The current manifest was used as the local design source. This report does not claim a fresh live Candidate reconciliation or fresh absence check for either child table.
+Provisioning stopped before any write because the current manifest does not provide relationship schema names for the required `systemuser` lookups (Contacted By and Actor), and the existing runner is Candidate-only. No technical names were invented and no child-table payload was dispatched.
 
 ## 2. Git / Manifest Baseline
 
@@ -18,10 +18,10 @@ No PAC command, authentication, token acquisition, Dataverse request, or metadat
 | HEAD | `07c03abeeae8fb897f39bd8d2482c148d51f4d8d` |
 | `origin/main` | `07c03abeeae8fb897f39bd8d2482c148d51f4d8d` |
 | Ahead / behind | 0 / 0 |
-| Worktree | Clean |
+| Worktree | Clean at run start; previous disposition documentation was committed before this run |
 | Manifest path | `docs/PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json` |
 
-No reset, restore, stash, pull, rebase, branch switch, commit, or push was performed.
+No reset, restore, stash, pull, rebase, branch switch, commit, or push was performed for this run.
 
 ## 3. Current Manifest SHA
 
@@ -33,29 +33,29 @@ Manifest identity: solution `os_sr_bso_rs_support`, Publisher prefix `os`, proje
 
 ## 4. Authentication Path
 
-Source inspection of [`Provision-BsoRsCandidateTable.ps1`](../scripts/Provision-BsoRsCandidateTable.ps1) shows that its Dataverse bearer token is acquired through `Az.Accounts\Get-AzAccessToken`, following PAC identity checks. The implementation therefore uses `AZURE_IDENTITY_CREDENTIAL_PATH`. This is source-path classification only: no current-request credential was acquired or used.
+The guarded reconciliation process acquired a Dataverse bearer token through `Az.Accounts\Get-AzAccessToken`, after PAC identity checks. It validated the actual token context against PAC, including Dataverse audience/scope/tenant/expiry, and confirmed identity agreement with Dataverse `WhoAmI`. The runner's credential path is therefore `AZURE_IDENTITY_CREDENTIAL_PATH`; the current-request credential was used only for the authorized read-only reconciliation.
 
 The runner itself is scoped to the prior Candidate-only operation and was not run in `-Apply`, `-PreflightOnly`, or `-ReconcileOnly` mode.
 
 ## 5. Target / Identity Guards
 
-Current repository and prior project records identify the intended environment as VN LMV IT and the existing container as Solution `os_sr_bso_rs_support`, Publisher `os_bso_rs_support`, prefix `os`. The exact organization URL was not supplied/confirmed for this run. The previous request to confirm it received no usable URL or confirmation.
+The owner supplied and confirmed the organization URL in the current request. PAC `org who` reported the approved VN LMV IT environment and an Org URL matching the supplied URL exactly. The request did not display or persist user/environment/organization identifiers in this report.
 
-No PAC identity, Azure identity, Dataverse `WhoAmI`, process expected-user pin, Solution, or Publisher live guard was executed. Environment and user identifiers are omitted; no URL was inferred or recovered from local configuration.
+The guarded Candidate reconciliation re-ran PAC identity checks, validated the actual Az token credential context against PAC and its Dataverse audience/scope/tenant/expiry, called `WhoAmI`, and confirmed PAC/WhoAmI identity agreement. The process-scoped expected-user pin was established from the verified request identity. The same read-only run verified the manifest Solution and Publisher linkage and prefix. No login or environment switch occurred.
 
 ## 6. Fresh Candidate Live State
 
-No live metadata GET was made. The most recent documented live reconciliation is the 23 October Candidate-only run, which reported Candidate present and exact. That historical result is not a fresh observation for this Phase 3B.2 run.
+Fresh live metadata reads were made in the guarded run. Candidate was present. The two remaining manifest tables were reported absent. The Call Outcome Choice `os_sr_callout` was not read in this reconciliation and remains unknown for this run.
 
 ## 7. Candidate Reconciliation
 
-Classification for this run: **not performed**. The Candidate status, table/column schema, AutoNumber and MaxLength, ownership, audit metadata, two keys, three reference lookups, status Choice binding/mapping, relationships, and Solution inclusion were not re-read.
+Classification for this run: **`CANDIDATE_RECONCILED_EXACT`**.
 
-The prior Candidate-only report documents exact reconciliation at that time. It cannot satisfy the explicit fresh-read gate for this run. No Candidate create, replacement, destructive, or corrective operation was attempted.
+Fresh reconciliation verified Candidate table identity, UserOwned ownership, primary name, audit metadata, all approved custom attributes/types/requiredness/lengths, Candidate Number AutoNumber format and MaxLength, Status Choice binding and default, both alternate keys (Active), all three approved reference lookups/relationships, and Solution root/subcomponent inclusion. No Candidate create, replacement, destructive, or corrective operation was attempted.
 
 ## 8. Candidate Choice Mapping
 
-No Choice GET was made. The last documented mapping for `os_sr_candstat` remains:
+The fresh reconciliation GET returned the following actual `os_sr_candstat` mapping:
 
 | Value | Label |
 |---:|---|
@@ -66,33 +66,33 @@ No Choice GET was made. The last documented mapping for `os_sr_candstat` remains
 | 100010004 | Offer Extended |
 | 100010005 | Candidate Failed |
 
-These values are cited as prior verified evidence only; they were not refreshed. No values were inferred from label order.
+Values were read from live option metadata, not inferred from label ordering.
 
 ## 9. Organization Audit State
 
-No organization-audit GET was made. The last documented live state says organization-level auditing is disabled, while Candidate table audit metadata is enabled. This is historical, not a fresh state check. No organization audit setting was changed.
+The guarded reconciliation freshly read organization audit state as **disabled**. Candidate table audit metadata is enabled. No organization audit setting was changed.
 
 The current manifest requires table-audit metadata for Candidate, Call Log, and Candidate Status History. Organization audit inactivity alone does not authorize changing the environment setting; no Candidate workflow/business data is authorized in this run.
 
 ## 10. Remaining Table Preflight
 
-No live GET was made for Call Log (`os_sr_call`) or Candidate Status History (`os_sr_csh`). Their current existence or absence is **unknown** for this run. No table was created or reconciled.
+Fresh metadata GETs found Call Log (`os_sr_call`) and Candidate Status History (`os_sr_csh`) absent. The Call Outcome Choice was not part of the Candidate-only reconciliation and was not checked. No child table was created or fully schema-reconciled.
 
 ## 11. Call Log Payload
 
 No Dataverse payload was constructed or dispatched. The current manifest describes a `UserOwned`, audit-enabled table with primary name `os_sr_call_ref` (`CALL-{SEQNUM:8}`), required Candidate lookup, Call Outcome, Contacted At, Contacted By, and operation Correlation ID, optional Notes (maximum 4,000), plus alternate key `os_sr_call_ak_cand_action` over Candidate and Correlation ID.
 
-This is a summary of approved local design, not a live payload or verified environment metadata.
+The manifest does not define the relationship schema name for lookup `os_sr_call_ctby` → `systemuser`. This is a summary of approved local design, not a live payload.
 
 ## 12. Status History Payload
 
 No Dataverse payload was constructed or dispatched. The current manifest describes a `UserOwned`, audit-enabled table with primary name `os_sr_csh_ref` (`HIST-{SEQNUM:8}`), required Candidate, Previous Status, New Status, Actor, Changed At, and Candidate Action; Reason (maximum 1,000) is required for reschedule, and Correlation ID is required for operation-created transitions. The alternate key is `os_sr_csh_ak_cand_action` over Candidate and Correlation ID.
 
-This is a summary of approved local design, not a live payload or verified environment metadata.
+The manifest does not define the relationship schema name for lookup `os_sr_csh_actr` → `systemuser`. This is a summary of approved local design, not a live payload.
 
 ## 13. Planned Write Counts / Fingerprints
 
-Because the target gate failed before environment access and the child-table runner does not exist, there was no ordered executable write plan, no request payload, and no payload hash. The current manifest SHA in Section 3 is the only fingerprint captured.
+Candidate reconciliation passed, but the missing `systemuser` lookup relationship names prevented a complete approved payload plan. There is no executable ordered write plan or payload hash. The current manifest SHA in Section 3 is the design fingerprint retained for this run.
 
 The permitted child scope, if re-authorized after the target gate, is limited to the two manifest tables, their approved Candidate relationships, required `os_sr_callout` Choice metadata, and approved keys/audit flags. Candidate create/replacement, Custom API, plug-in, roles, app/Site Map, publishing, and business records remain excluded.
 
@@ -114,7 +114,7 @@ Not performed. Its fields, status Choice bindings, Candidate lookup, relationshi
 
 ## 18. Relationship Reconciliation
 
-No relationship GET or POST was made. The current manifest defines five relationships total:
+The fresh Candidate reconciliation verified the three existing Candidate reference relationships and their inclusion through the Candidate root. The current manifest defines five relationships total:
 
 - Candidate → Call Log: `os_sr_cand_call`, lookup `os_sr_call_cand`.
 - Candidate → Candidate Status History: `os_sr_cand_csh`, lookup `os_sr_csh_cand`.
@@ -122,7 +122,7 @@ No relationship GET or POST was made. The current manifest defines five relation
 - Candidate Source → Candidate: `os_sr_csrc_cand`.
 - TA Directory → Candidate: `os_sr_ta_cand`.
 
-The two child relationships specify Delete Restrict and no Assign/Share/Reparent cascade. The five-item count is sourced from the current manifest, not assumed from an earlier report. None were freshly reconciled in this run.
+The two child-to-Candidate relationships specify Delete Restrict and no Assign/Share/Reparent cascade, but they were not created or reconciled. The manifest has required Call Log Contacted By and Status History Actor lookups to `systemuser` without corresponding relationship schema names. The five-item count is sourced from the current manifest; no additional custom names were inferred.
 
 ## 19. Choice Freeze
 
@@ -136,19 +136,19 @@ No live-assigned Choice values or verified metadata normalization occurred, so t
 
 ## 21. Full Candidate Core Storage State
 
-No fresh full three-table reconciliation was performed. Prior documentation records Candidate present; the current run did not verify Candidate, Call Log, Candidate Status History, the five relationships, or unexpected components. No new Candidate Core component was created by this run.
+The fresh read verified Candidate exact and Call Log/Candidate Status History absent. Because writes were blocked, the resulting three-table storage state was not provisioned. The `os_sr_callout` Choice was not checked and the two `systemuser` lookup relationships remain unspecified in the manifest.
 
 ## 22. Deferred Custom API / Security Scope
 
 No Custom API, plug-in, Execute privilege, role, app, Site Map, form/view, scheduling, Outlook, Teams, email flow, LEGO Career, or Candidate business-record operation was performed.
 
-Status for handover: **`API_PRIVILEGE_READY_FOR_NEXT_PHASE_REVIEW`** means only that Candidate is known to exist from the prior verified run and privilege design may be reviewed in a later phase. It does not mean that an API privilege was inspected, validated, or approved. No final API security validation was done here.
+Status for handover: **`API_PRIVILEGE_READY_FOR_NEXT_PHASE_REVIEW`**. Candidate is now freshly verified to exist, so API privilege design may be reviewed in a later phase. It does not mean that an API privilege was inspected, validated, or approved. No final API security validation was done here.
 
 ## 23. Request / Write Counts
 
 | Operation | Count |
 |---|---:|
-| GET | 0 |
+| GET | 31 |
 | Table-create writes | 0 |
 | Attribute writes | 0 |
 | Choice writes | 0 |
@@ -160,18 +160,19 @@ Status for handover: **`API_PRIVILEGE_READY_FOR_NEXT_PHASE_REVIEW`** means only 
 | `PublishXml` | 0 |
 | `PublishAllXml` | 0 |
 | Retries | 0 |
-| **All tenant requests** | **0** |
+| **All tenant requests** | **31 GET / 0 POST** |
 
 ## 24. No-Retry Proof
 
-No request was dispatched; retries were **0**. There was no uncertain write outcome.
+Thirty-one read-only GETs were completed in the guarded reconciliation process. No POST or other write was dispatched; retries were **0**. There was no uncertain write outcome.
 
 ## 25. Regression Results
 
 | Check | Result |
 |---|---|
 | Phase 3A design / current manifest suite | PASS — 43 synthetic assertions |
-| Candidate reconciliation, Call Log, History, relationship, Choice mapping, idempotency, and audit live tests | NOT RUN — no such new scope runner was implemented or live call made |
+| Candidate reconciliation | PASS — 31 GET guarded reconciliation; exact Candidate schema, Choice mapping, keys, relationships, and Solution inclusion |
+| Child-table, Call Outcome Choice, systemuser relationship, idempotency, and child audit live checks | NOT RUN / BLOCKED before writes |
 | Reference provisioning suite | PASS — 550 synthetic assertions |
 | Readiness suite | PASS — 11 synthetic assertions |
 | App composition suite | PASS — 329 synthetic assertions |
@@ -188,19 +189,19 @@ This disposition updates this report and [Current State](CURRENT_STATE.md) only.
 
 ## 27. Final Classification
 
-**`PRE_WRITE_GATE_BLOCKED`**. The exact approved organization URL was not confirmed, so identity/target checks and the required fresh Candidate reconciliation could not begin. Consequently, neither child-table provisioning nor the full three-table reconciliation was attempted.
+**`PRE_WRITE_GATE_BLOCKED`**. Target and identity guards passed, and Candidate reconciled exactly. The current manifest lacks stable relationship schema names for the required `systemuser` lookups; the existing Candidate-only runner cannot provision these child tables. The Call Outcome Choice was not freshly preflighted. No write was dispatched.
 
 ## 28. Exact Recommended Next Task
 
-Confirm the exact VN LMV IT Dataverse organization URL and the existing Solution/Publisher container (`os_sr_bso_rs_support` / `os_bso_rs_support`, prefix `os`). Then implement or prepare a separately reviewed, child-table-only guarded runner using the current manifest SHA, zero retries, explicit payload/write allowlists, immediate readback, and Candidate exact-match stop gate. Execute only after a fresh Candidate reconciliation passes. Do not reuse the Candidate-only runner by weakening its exclusions.
+Add and approve stable relationship schema names for the `systemuser` lookups (`os_sr_call_ctby` and `os_sr_csh_actr`) in the current manifest, or explicitly confirm a supported Dataverse-generated relationship naming approach. Then prepare a child-table-only guarded runner with a fixed write allowlist, zero retries, and immediate readback. Re-read the Call Outcome Choice and full existing schema immediately before any write. Do not reuse the Candidate-only runner by weakening its exclusions.
 
 ## 29. AI HANDOVER
 
 - Current manifest SHA-256: `7cfe13bb7450946c17e3659e02a4b78aecfd93f50c272561b1e88c6084d566d1`.
-- Candidate is present in the last 23 October verification, but no fresh Phase 3B.2 Candidate GET was made.
-- Call Log and Candidate Status History existence is unknown for this run.
-- Exact target URL was not supplied/confirmed; no PAC, authentication, token, or Dataverse call occurred.
+- Fresh target/credential/WhoAmI guards passed; expected-user process pin was established in the guarded process.
+- Fresh Candidate reconciliation was exact (31 GET, 0 POST); both child tables were absent. `os_sr_callout` was not checked.
+- Organization audit was freshly read as disabled; no organization setting was changed.
+- Two systemuser lookup relationship schema names are missing from the current manifest, so no complete child-table write plan could be built.
 - The existing runner is Candidate-only and explicitly excludes the two child tables.
-- All tenant request/write counts for this run are zero, including Candidate, business data, app, publishing, and retries.
-- Organization-level auditing was disabled in prior evidence; not refreshed or changed.
+- No tenant writes, Candidate changes, business data, app changes, publication, or retries occurred.
 - No commit or push occurred.

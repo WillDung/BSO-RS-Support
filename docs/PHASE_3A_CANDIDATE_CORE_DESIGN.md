@@ -2,9 +2,11 @@
 
 **As of:** 24 October 2026
 **Current Candidate-only schema status:** `CANDIDATE_TABLE_KEYS_LOOKUPS_AND_SOLUTION_MEMBERSHIP_RECONCILED`
-**Current Phase 3B.2 status:** `STOPPED_AFTER_REMAINING_METADATA_MISMATCH_NO_FURTHER_WRITES`
-**Full Candidate Core classification:** `BLOCKED_STATUS_HISTORY_CHOICE_BINDING_MISMATCH_AND_EXTERNAL_AUDIT_API_PRIVILEGE_PREREQUISITES`
-**Phase:** Owner-approved design; Candidate, Call Outcome Choice, Call Log, Candidate Status History, four approved relationships, and two Active child keys are present and GET-reconciled. However, both Candidate Status History status fields are bound to `os_sr_callout` instead of approved Choice `os_sr_candstat`. No further metadata write is authorized; Custom API/plugin, publication, app/access changes, and business records remain outside the completed slice.
+**Current Phase 3B.2 status:** `CANDIDATE_CORE_STORAGE_PROVISIONED_AUDIT_ACTIVATION_PENDING`
+**Current Phase 3C status:** `BLOCKED_PHASE3C_OPERATION_RECEIPT_DESIGN_REVIEW`
+**Phase:** Owner-approved Candidate Core storage is reconciled, including both repaired History fields bound to `os_sr_candstat`. Phase 3C API/plugin implementation and metadata deployment are conditionally authorized, but the required update-operation replay contract has a proven storage dependency requiring owner review. No Phase 3C write has occurred. Organization auditing remains an external business-data prerequisite, not an API/plugin metadata deployment blocker.
+
+> Current implementation evidence and the Phase 3C dependency/proposal are in [Section 27](#27-phase-3c-preflight-and-operation-evidence-dependency). Earlier sections describing the wrong live History bindings or recommending another binding repair are historical and superseded by [the successful Phase 3B.2 replacement](PHASE_3B2_CANDIDATE_CHILD_TABLES_REPORT.md#34-owner-authorized-two-column-replacement). The existing JSON manifest's approved schema contract is unchanged.
 
 **Phase 3A.1 follow-up:** The first closure attempt received no owner-authored choices; its historical result remains in the [Phase 3A.1 report](PHASE_3A1_CANDIDATE_CORE_DECISION_CLOSURE.md). On 23 October 2026, the owner explicitly approved all eight decision areas. This revision applies those decisions and records remaining external gates in the [Phase 3A.2 decision application and readiness report](PHASE_3A2_CANDIDATE_CORE_DECISION_APPLICATION.md).
 
@@ -377,3 +379,77 @@ First obtain new bounded authorization to plan a non-destructive correction for 
 - Organization auditing is disabled; no Candidate records were created and none may be created until audit governance is resolved.
 - Candidate-only provisioning used seven authorized writes, zero retries, and a final GET-only reconciliation (31 GET, 0 POST). Phase 3B.2's corrected Call Log create plus seven remaining-scope writes were dispatched once; the latest child-scope reconciliation returned 17 GET and 0 POST. No Candidate data or other prohibited writes occurred.
 - Next action: obtain a new bounded authorization to correct the two History Choice bindings after supported non-destructive repair analysis; do not repeat any of the seven writes. Organization auditing and API privilege design remain separate gates.
+
+## 27. Phase 3C Preflight and Operation Evidence Dependency
+
+**Date:** 24 October 2026. **Implementation status:** blocked for owner review, not deployed.
+
+### Verified preflight
+
+The owner authorized the approved API/plugin implementation, bounded registration and metadata reconciliation, with no business rows, schema changes without review, access grants, integration, app changes, broad publication, commit, or push.
+
+Fresh read-only checks confirmed:
+
+- Current manifest SHA-256 `63f56173f61265f539d23d6ceffb5631e23f438e4e254755c1e24c7d17eb1915`.
+- Owner-confirmed VN LMV IT target; PAC/Az.Accounts request identity/WhoAmI/process-user agreement; exact unmanaged Solution and Publisher.
+- Candidate exact; Call Log exact; History exact; approved Choices, relationships, keys, table ownership/audit metadata, and Solution inclusion exact.
+- Previous Status and New Status both bind to `os_sr_candstat`; their MetadataId hashes match the retained successful replacement journal.
+- History business-row count 0 using an aggregate count; Candidate optimistic concurrency enabled.
+- Exact API-name query for `os_sr_cact`: 0 matches. Assembly-name search restricted to `BsoRs*` / `BSO*`: 0 matches; no claim of exhaustive assembly/type/step absence.
+- Candidate generated privileges exist: `prvCreateos_sr_cand`, `prvReados_sr_cand`, `prvWriteos_sr_cand`, and the standard delete/assign/share/append/append-to privileges. Availability is not an access grant or proof that a proposed non-admin caller holds them.
+- 31 Candidate-runner GET + 43 child/contract GET = **74 Dataverse GET**, zero mutations, zero automatic retries. Two prior local initialization failures occurred before any PAC/network/authentication call; corrected local initialization reused existing guarded project functions and did not dispatch a write.
+
+### Proven contract dependency
+
+The approved API requires a mandatory caller CorrelationId, identical-request replay, changed-intent conflict rejection, and deterministic original outcomes. `UpdateCandidate` must not create Call Log or Status History rows.
+
+The current manifest has:
+
+1. Candidate creation CorrelationId and its unique key, which identify creation rather than subsequent edits.
+2. Call Log `(Candidate, CorrelationId)` for actual calls.
+3. History `(Candidate, CorrelationId)` for actual transitions.
+
+It has no durable accepted-payload/result receipt for non-transition updates. Consider two possible request histories with the same update CorrelationId but different earlier replacement values, each followed by a later edit producing the same final Candidate. Both can leave the same current Candidate, Call Log, and History state. A replay of the earlier request must be accepted in one case and rejected in the other, but current fields cannot distinguish those histories. RowVersion detects a current race; it does not recover original intent or result. Mutable Candidate fields also do not retain an original create payload after later edits. Dataverse audit history is not an approved substitute for an operation receipt and organization auditing is currently disabled.
+
+No implementation may silently overwrite creation correlation, fabricate History/Call rows for profile edits, put request payloads in Notes/Reason, use process-memory replay caches, or weaken changed-intent rejection. The owner explicitly reserved schema dependencies for review, so no extension or partial API implementation was deployed.
+
+### Proposed minimal additive operation receipt - NOT APPROVED
+
+Use one dedicated immutable operation-receipt table, in the existing Solution, written only in the same synchronous transaction as the accepted operation. This is a proposed fourth table, not part of the current manifest or current deployment authorization. Exact technical names and abbreviation additions require the reviewed schema plan; none is assigned or provisioned here.
+
+| Proposed field / constraint | Purpose and boundary |
+|---|---|
+| Primary GUID and nonpersonal primary name derived from operation identity | No candidate names/email in record names |
+| CorrelationId, GUID text 36, unique alternate key | Proposed single API-wide operation identity; scope must be explicitly approved rather than silently changing current child-key semantics |
+| Initiating user lookup | Preserve caller identity; bind replay to the original authorized actor |
+| Candidate lookup | Result Candidate for creation and target Candidate for later operations; no cascade delete of receipts |
+| ActionType, controlled string | Distinguish actions sharing the endpoint |
+| Canonical request fingerprint and fingerprint-version identifier | Compare exact validated semantic intent, including omitted/null distinctions and caller/target/action; no raw contact values or notes persisted in the receipt |
+| Previous/current status, when applicable | Reconstruct the original operation result, not today's mutable status |
+| Call Log / Status History result references, when applicable | Return the original effect IDs without fabricating business history |
+| Completion timestamp | Server-generated UTC; only successful operations commit their receipts |
+| Immutable append-only enforcement and concurrency-safe unique insert | Duplicate racing submissions roll back atomically; no internal retry or swallowed transaction fault |
+
+Fingerprints remain privacy-sensitive and do not replace access controls; low-entropy contact data may be guessable from an unkeyed digest. Receipt access/retention, whether a keyed digest is required, and any approved key-management dependency must be settled before provisioning. No key/secret store or service identity is invented. Failed operations should leave neither effects nor a committed success receipt. Any later receipt retention policy must define the replay guarantee explicitly rather than silently permitting re-execution after deletion.
+
+The approved response list lacks a CandidateId output for creation. Returning the created Candidate identity is a recommended API-contract addition for review; it is not silently introduced. The exact editable replacement fields, optional/null semantics, receipt identity scope, and deterministic replay response must be frozen in the reviewed contract before code or parameter metadata is deployed.
+
+### Execution privilege and direct-write protection
+
+Microsoft documents that Custom API `ExecutePrivilegeName` must refer to an existing privilege; developers cannot create a new custom privilege through this mechanism. The fresh table metadata supplies Candidate privileges. A candidate for a mutating endpoint is `prvWriteos_sr_cand`, **proposal only**; a read privilege alone must not grant mutation authority. Candidate creation would still require Create, and each operation must check the initiating caller's applicable table privileges and record access.
+
+An endpoint privilege check does not itself enforce record-level access, append/append-to permissions, caller ownership boundaries, or block direct CRUD. Proposed implementation should use caller-context service operations without SYSTEM/fixed-owner elevation, capture the initiating actor server-side, and reject business execution while required organization auditing is inactive. This runtime gate is distinct from the owner's explicit permission to deploy metadata while audit activation is pending.
+
+If caller-context child writes require child Create/Write privileges, direct writes must also be protected by narrowly scoped synchronous table-message guard steps (including relevant bulk/alternate message paths), not just hidden UI fields or an API gate. Exact guarded messages, trusted parent-context validation, and compatibility with existing integrations must be reviewed and then enumerated in the bounded deployment plan. The current review has not registered steps or selected an elevated identity. No role/access change is authorized.
+
+No effective non-admin positive/negative execution test was run: business rows are prohibited and no approved test principal or grant is assumed. The exact least-privilege model is therefore **not validated for production acceptance** merely because the privilege names exist.
+
+### Disposition and validation
+
+The owner-review form could not be answered because the user was unavailable. The safe default is this **review-only proposal**, not approval to expand schema or weaken the contract. Phase 3C implementation/deployment remains incomplete. Do not provision the receipt, create the API, or register an incomplete assembly before the owner resolves this dependency.
+
+Offline checks passed: 50 Phase 3B.2 synthetic assertions, 46 Candidate Core assertions, current-contract inspection, and a synthetic indistinguishable-state example. These tests validate existing schema/guard behavior and the identified gap; they are not a compiled Phase 3C plug-in test or live business-operation acceptance. No package restore, plug-in project/assembly build, registration, API/parameter creation, table/Choice change, business row, publication, role grant, commit, or push occurred.
+
+Next owner decision: review/authorize the additive operation-evidence and API-contract design, or retain the current schema and leave Phase 3C blocked. After approval, freeze the contract; implement transaction/caller/direct-write guards; run synthetic concurrency/replay/authorization tests; precompute exact assembly/type/step/API/parameter payloads and counts; repeat fresh storage and identity checks; then perform bounded zero-retry deployment and GET-only reconciliation. Live business-operation tests require a separate data/audit authorization.
+
+Reference: [Microsoft Custom API guidance - secure your custom API by requiring a privilege](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/custom-api#secure-your-custom-api-by-requiring-a-privilege).

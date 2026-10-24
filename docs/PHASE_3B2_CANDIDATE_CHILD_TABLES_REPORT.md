@@ -464,3 +464,25 @@ Supported API references:
 
 - [RetrieveDependenciesForDelete](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/reference/retrievedependenciesfordelete?view=dataverse-latest)
 - [Create and update column definitions](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/create-update-column-definitions-using-web-api)
+
+### 34.6 Duplicate Resume Disposition (16:55 +07)
+
+The subsequent 24 October resume request described the pre-replacement `PARTIAL_METADATA_STATE` and required manifest SHA-256 `59180b226555ef44b4c41da73b902e8faa001fa87cb4dc10e1eaf661541bf72b`, with an explicit stop on changed state. Local inspection instead found:
+
+- Current manifest SHA-256 `63f56173f61265f539d23d6ceffb5631e23f438e4e254755c1e24c7d17eb1915`, unchanged from the successful replacement.
+- The retained execution journal records all four prior dispatches as HTTP 204 / `GET_RECONCILED`, both recreated columns bound to `os_sr_candstat`, and the successful audit-activation-pending result.
+- The repository already documents the completed replacement in Section 34.
+
+Execution therefore stopped at the local gate. The requested fingerprint was not silently replaced, no new replacement journal was created, and no authentication, PAC environment request, Dataverse read, dependency check, count query, or metadata mutation was performed for this resume. No new live-state verification is claimed.
+
+| This resume request | Count |
+|---|---:|
+| Dataverse GET | 0 |
+| Previous Status DELETE | 0 |
+| Previous Status CREATE | 0 |
+| New Status DELETE | 0 |
+| New Status CREATE | 0 |
+| PUT / other writes / publication | 0 |
+| Automatic retries | 0 |
+
+Last verified live classification remains `CANDIDATE_CORE_STORAGE_PROVISIONED_AUDIT_ACTIVATION_PENDING`; it is not a new success claim for this stopped request. Historical write counts remain unchanged at 16. Do not delete the already-corrected columns to replay this stale request. Any further continuation must first reconcile the owner-supplied baseline with the current evidence; no new destructive authorization is inferred.

@@ -36,6 +36,9 @@ Assert-Test ($runner -match "Assert-ChildTableAbsent" -and
     $runner -match "Assert-InitialState" -and
     $runner -match "Assert-TableReadback" -and
     $runner -match "Assert-RelationshipsAndKeys") 'Preflight and exact post-write reconciliation paths are required'
+Assert-Test ($runner -match 'primaryName\.maxLength' -and
+    $runner -match 'MaxLength = \$primaryMaxLength' -and
+    $runner -match 'Primary-name MaxLength is missing or invalid') 'Table payload creation fails closed unless primary-name MaxLength is specified'
 Assert-Test ($runner -match 'GlobalOptionSetDefinitions\(Name=' -and
     $runner -match "Update-ManifestChoiceValues" -and
     $runner.Contains('"relationships"\s*:')) 'Call Outcome Choice existence check and value freeze are wired'
@@ -54,5 +57,7 @@ Assert-Test ($manifest.callOutcomeChoice.options.Count -eq 3 -and
 Assert-Test ($manifest.provisioning.phase3B2AuthorizedContinuation.status -ceq 'STOPPED_AFTER_REJECTED_TABLE_CREATE_NO_RETRY' -and
     $manifest.provisioning.phase3B2AuthorizedContinuation.executionOutcome.successfulChildTableWrites -eq 0 -and
     $manifest.provisioning.phase3B2AuthorizedContinuation.automaticRetries -eq 0) 'Rejected Call Log create is recorded with authorization stopped and no retry'
+Assert-Test ($null -eq $manifest.tables[1].primaryName.maxLength -and
+    $null -eq $manifest.tables[2].primaryName.maxLength) 'Current child AutoNumber primary-name lengths remain an explicit unresolved metadata requirement'
 
 Write-Output "PASS: $script:Passed synthetic Phase 3B.2 provisioning assertions; no authentication, network, PAC, or tenant calls."

@@ -9,7 +9,7 @@
 
 The owner authorized technical normalization and bounded Phase 3B.2 provisioning. The two deterministic `systemuser` relationship names were added to the manifest. A guarded Choice creation POST succeeded; GET reconciliation confirmed the approved labels and Dataverse-allocated values. The current manifest was then updated to freeze those values. A later guarded child-table attempt passed its pre-write checks but its first `EntityDefinitions` POST for Call Log returned HTTP 400. The runner stopped without retrying. A separate guarded read-only reconciliation confirmed Candidate remains exact, the Choice remains present, and both child tables remain absent. Candidate Status History creation was not attempted.
 
-The rejected request's response body was suppressed, so the exact server-side validation error is unknown. No further metadata write may be made under the consumed/stopped authorization. The report does not infer that either child table exists.
+The rejected request's response body was suppressed, so the exact server-side validation error is unknown. Local static inspection found that the table payload builder omitted `MaxLength` from the AutoNumber primary-name `StringAttributeMetadata`; the current Call Log and Candidate Status History manifest entries also omit `primaryName.maxLength`. This is a plausible payload defect consistent with the HTTP 400, not a confirmed server diagnosis. The runner now refuses to build such a payload until a valid length is explicitly present. No length was invented and no metadata request was repeated. No further tenant write may be made under the consumed/stopped authorization. The report does not infer that either child table exists.
 
 ## 2. Git / Manifest Baseline
 
@@ -95,6 +95,10 @@ Candidate reconciliation, Choice reconciliation, and the complete fixed-scope pr
 
 The attempted write scope was limited to `os_sr_callout` (created once), the two child tables, four relationships, and two alternate keys. Candidate create/replacement, Custom API, plug-in, roles, app/Site Map, publishing, and business records remained excluded.
 
+## 13a. Local HTTP 400 Payload Diagnosis
+
+Read-only source inspection found one concrete payload omission: `New-TablePayload` generated the AutoNumber primary-name `StringAttributeMetadata` without `MaxLength`, while neither child table's current manifest `primaryName` defines a length. This can make the metadata payload invalid; however, the server response content was suppressed and is unavailable, so the HTTP 400 cause remains **unconfirmed**. The local runner now fails closed before building a child-table payload unless an explicit valid `primaryName.maxLength` is present, and includes that value in the generated attribute. No value was selected or written to the manifest because the approved design does not specify one. A new bounded authorization and an explicit approved length are prerequisites before any future table-create attempt.
+
 ## 14. Call Log Provisioning
 
 One table-create POST was attempted and rejected with HTTP 400. Subsequent GET-only reconciliation confirmed Call Log remains absent. Automatic retries: **0**.
@@ -178,7 +182,7 @@ No automatic retry occurred. The Call Outcome Choice was POSTed once and confirm
 | Check | Result |
 |---|---|
 | Phase 3A design / current manifest suite | PASS — 46 synthetic assertions |
-| Phase 3B.2 child runner suite | PASS — 12 synthetic assertions |
+| Phase 3B.2 child runner suite | PASS — 14 synthetic assertions |
 | Candidate reconciliation | PASS — fresh guarded reconciliation; exact Candidate schema, Choice mapping, keys, relationships, and Solution inclusion |
 | Call Outcome Choice | PASS — created once, GET-reconciled with exact labels/values and Solution membership |
 | Child-table create/reconciliation | BLOCKED — Call Log POST returned HTTP 400; both child tables are GET-confirmed absent |
@@ -195,7 +199,7 @@ Synthetic tests validate local proposal/regression behavior only; they are not a
 
 ## 26. Files Changed
 
-This continuation updates the report, [Current State](CURRENT_STATE.md), [Project Context](PROJECT_CONTEXT.md), [Data Model](DATA_MODEL.md), manifest, design fingerprint, fixed-scope runner guard, and focused synthetic tests. The Call Outcome Choice is the sole successful live metadata change; the Call Log create request was rejected. No other live environment component was changed.
+This continuation updates the report, [Current State](CURRENT_STATE.md), [Project Context](PROJECT_CONTEXT.md), [Data Model](DATA_MODEL.md), manifest, design fingerprint, fixed-scope runner guard, and focused synthetic tests. The Call Outcome Choice is the sole successful live metadata change; the Call Log create request was rejected. A local fail-closed check for the missing child primary-name MaxLength was added; no schema length was chosen. No other live environment component was changed.
 
 ## 27. Final Classification
 
@@ -203,7 +207,7 @@ This continuation updates the report, [Current State](CURRENT_STATE.md), [Projec
 
 ## 28. Exact Recommended Next Task
 
-Under a new explicit bounded authorization, diagnose the rejected Call Log payload using safe local inspection and read-only live reconciliation first. Reconcile the exact manifest and live absence, confirm target/identity/Solution/Publisher guards, then submit only the newly authorized corrected operation with zero retries and immediate readback. Do not retry the rejected payload, recreate the existing Choice, or weaken/repurpose the Candidate-only runner. Organization auditing is disabled; no Candidate business data may be created.
+First obtain an explicit approved `MaxLength` for both child AutoNumber primary-name columns and a new bounded authorization. Then perform fresh read-only reconciliation and target/identity/Solution/Publisher guards before preparing a corrected payload. Do not retry the rejected payload, recreate the existing Choice, or weaken/repurpose the Candidate-only runner. Organization auditing is disabled; no Candidate business data may be created.
 
 ## 29. AI HANDOVER
 
@@ -214,6 +218,7 @@ Under a new explicit bounded authorization, diagnose the rejected Call Log paylo
 - Relationship names are frozen locally: `os_sr_usr_call_ctby` and `os_sr_usr_csh_actr`, plus Candidate links `os_sr_cand_call` and `os_sr_cand_csh`. No child relationships or keys were written.
 - Organization audit was freshly read as disabled; no organization setting was changed.
 - Guarded POST count: 2 (one successful Choice create, one rejected Call Log table create); GET aggregate unavailable in retained output; zero retries.
+- Local diagnosis: table payload omitted primary-name `MaxLength`; likely invalid-payload cause, not confirmed because the HTTP 400 body was suppressed. Both child primary-name lengths remain unspecified; runner now blocks payload construction until set.
 - Manifest authorization status is `STOPPED_AFTER_REJECTED_TABLE_CREATE_NO_RETRY`; the runner blocks future requests/writes under this stopped authorization.
 - No Candidate changes, business data, app changes, publication, roles, or access changes occurred.
 - No commit or push occurred.

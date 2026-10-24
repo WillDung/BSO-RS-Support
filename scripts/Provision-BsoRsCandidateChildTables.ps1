@@ -205,6 +205,13 @@ function New-TablePayload {
         [Parameter(Mandatory = $true)][object]$Manifest,
         [Parameter(Mandatory = $true)][object]$ChoiceMetadata
     )
+    $primaryMaxLength = 0
+    if ($null -ne $Table.primaryName.maxLength) {
+        $primaryMaxLength = [int]$Table.primaryName.maxLength
+    }
+    if ($primaryMaxLength -lt 1 -or $primaryMaxLength -gt 4000) {
+        throw "Primary-name MaxLength is missing or invalid for $($Table.logicalName); no table payload can be created safely."
+    }
     $attributes = [System.Collections.Generic.List[object]]::new()
     $attributes.Add([ordered]@{
         '@odata.type' = 'Microsoft.Dynamics.CRM.StringAttributeMetadata'
@@ -214,6 +221,7 @@ function New-TablePayload {
         DisplayName = New-Label -Text ([string]$Table.primaryName.displayName)
         RequiredLevel = New-RequiredLevel -Required $true
         FormatName = [ordered]@{ Value = 'Text' }
+        MaxLength = $primaryMaxLength
         IsPrimaryName = $true
         AutoNumberFormat = [string]$Table.primaryName.format
     })

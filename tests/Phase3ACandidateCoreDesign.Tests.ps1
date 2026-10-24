@@ -116,11 +116,20 @@ Assert-Test ($userRelationships.Count -eq 2 -and
 Assert-Test ((@($userRelationships | Where-Object { $_.delete -cne 'Restrict' -or $_.assignShareReparent -cne 'NoCascade' }).Count -eq 0) -and
     ($manifest.tables | Where-Object logicalName -ceq 'os_sr_call').columns.Where({ $_.logicalName -ceq 'os_sr_call_ctby' }).relationship -ceq 'os_sr_usr_call_ctby' -and
     ($manifest.tables | Where-Object logicalName -ceq 'os_sr_csh').columns.Where({ $_.logicalName -ceq 'os_sr_csh_actr' }).relationship -ceq 'os_sr_usr_csh_actr') 'System-user relationships preserve lookup names and non-destructive history cascades'
-Assert-Test ($manifest.provisioning.phase3B2AuthorizedContinuation.status -ceq 'STOPPED_AFTER_REJECTED_TABLE_CREATE_NO_RETRY' -and
+Assert-Test ($manifest.provisioning.phase3B2AuthorizedContinuation.status -in @(
+        'AUTHORIZED_CORRECTED_CALLLOG_AND_REMAINING_CHILD_METADATA',
+        'CORRECTED_CALLLOG_DISPATCHED_RECONCILIATION_PENDING',
+        'CORRECTED_CALLLOG_RECONCILED_REMAINING_SCOPE_AUTHORIZED',
+        'STOPPED_AFTER_CORRECTED_CONTINUATION_REQUIRES_RECONCILIATION',
+        'CALL_LOG_RECONCILED_REMAINING_SCOPE_AUTHORIZED',
+        'REMAINING_SCOPE_AUTHORIZATION_CONSUMED_RECONCILIATION_PENDING',
+        'STOPPED_AFTER_REMAINING_METADATA_MISMATCH_NO_FURTHER_WRITES',
+        'PHASE_3B2_STORAGE_RECONCILED_AUTHORIZATION_CONSUMED'
+    ) -and
     $manifest.provisioning.phase3B2AuthorizedContinuation.automaticRetries -eq 0 -and
     -not $manifest.provisioning.phase3B2AuthorizedContinuation.businessDataWrites -and
     -not $manifest.provisioning.phase3B2AuthorizedContinuation.candidateCreateOrModification -and
-    $manifest.provisioning.phase3B2AuthorizedContinuation.executionOutcome.callOutcomeChoice -match 'GET-reconciled') 'Phase 3B.2 stop disposition preserves the bounded zero-retry outcome'
+    $manifest.provisioning.phase3B2AuthorizedContinuation.executionOutcome.callOutcomeChoice -match 'GET-reconciled') 'Phase 3B.2 authorization disposition preserves the bounded zero-retry outcome'
 
 $expectedTransitions = @(
     'Need Call Candidate|RecordCall|Candidate Answered',
@@ -186,7 +195,7 @@ Assert-Test (($api.rules -join '|') -match 'UpdateCandidate uses replacement val
 Assert-Test (-not $manifest.provisioning.authorized -and $manifest.provisioning.maximumTenantWrites -eq 7 -and
     $manifest.testSafety.tenantRequests -eq 0 -and $manifest.testSafety.tenantWrites -eq 0) 'Manifest records the consumed write authorization and keeps offline tests tenant-free'
 Assert-Test ($manifest.unresolvedDecisions.Count -eq 0 -and $manifest.externalPrerequisites.Count -ge 4 -and
-    $report -match 'BLOCKED_EXTERNAL_AUDIT_AND_API_PRIVILEGE_PREREQUISITES') 'Owner decisions are closed; external audit/security gates remain'
+    $report -match 'BLOCKED_STATUS_HISTORY_CHOICE_BINDING_MISMATCH_AND_EXTERNAL_AUDIT_API_PRIVILEGE_PREREQUISITES') 'Owner decisions are closed; schema, audit, and security gates remain'
 
 $hash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([IO.File]::ReadAllBytes((Resolve-Path $manifestPath)))).ToLowerInvariant()
 $fingerprintMatch = [regex]::Match($report, '(?m)^Local manifest SHA-256: \*\*([0-9a-f]{64})\*\*')

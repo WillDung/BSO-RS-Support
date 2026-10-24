@@ -164,6 +164,9 @@
         "logicalName": "os_sr_call_ref",
         "displayName": "Call Reference",
         "type": "AutoNumber",
+        "storageType": "String",
+        "maxLength": 100,
+        "formatName": "Text",
         "format": "CALL-{SEQNUM:8}",
         "required": "SystemGenerated"
       },
@@ -242,6 +245,9 @@
         "logicalName": "os_sr_csh_ref",
         "displayName": "Transition Reference",
         "type": "AutoNumber",
+        "storageType": "String",
+        "maxLength": 100,
+        "formatName": "Text",
         "format": "HIST-{SEQNUM:8}",
         "required": "SystemGenerated"
       },
@@ -584,7 +590,7 @@
       }
     },
     "phase3B2AuthorizedContinuation": {
-      "status": "STOPPED_AFTER_REJECTED_TABLE_CREATE_NO_RETRY",
+      "status": "STOPPED_AFTER_REMAINING_METADATA_MISMATCH_NO_FURTHER_WRITES",
       "scope": [
         "os_sr_call",
         "os_sr_csh",
@@ -601,13 +607,42 @@
       "securityOrAppChanges": false,
       "publication": false,
       "automaticRetries": 0,
+      "correctedCallLogCreateDispatchLimit": 1,
+      "correctedCallLogCreateDispatches": 1,
+      "remainingMetadataDispatchLimit": 7,
+      "remainingMetadataWritesDispatched": 7,
+      "remainingMetadataAuthorizationConsumed": true,
+      "remainingMetadataScope": [
+        "os_sr_csh",
+        "os_sr_cand_call",
+        "os_sr_cand_csh",
+        "os_sr_usr_call_ctby",
+        "os_sr_usr_csh_actr",
+        "os_sr_call_ak_cand_action",
+        "os_sr_csh_ak_cand_action"
+      ],
       "choiceValues": "GET-reconciled and frozen in this manifest before child table schema creation.",
       "executionOutcome": {
         "callOutcomeChoice": "Created once; exact labels and allocated values GET-reconciled and Solution membership verified.",
-        "callLogTable": "One EntityDefinitions POST returned HTTP 400; subsequent guarded GET confirmed absent; no retry authorized.",
-        "candidateStatusHistoryTable": "Not attempted after Call Log table rejection.",
-        "successfulChildTableWrites": 0,
+        "callLogTable": "One corrected EntityDefinitions POST returned successfully; immediate readback returned HTTP 404. Subsequent GET-only reconciliation confirmed the table exists in the approved Solution with UserOwned ownership, audit enabled, exact primary-name metadata, and exact pre-relationship custom attribute inventory. The POST was not repeated.",
+        "candidateStatusHistoryTable": "One EntityDefinitions POST returned successfully. The four approved relationship and two key POSTs also returned successfully, for seven remaining-scope dispatches total. Fresh GET-only reconciliation confirmed both status columns are incorrectly bound to os_sr_callout instead of the approved os_sr_candstat. No corrective write is authorized under the consumed scope.",
+        "successfulChildTableWrites": 2,
+        "remainingMetadataWritesDispatched": 7,
         "businessDataWrites": 0,
+        "automaticRetries": 0
+      },
+      "lastReadOnlyReconciliation": {
+        "result": "READ_ONLY_RECONCILIATION_COMPLETE_WITH_SCHEMA_MISMATCH",
+        "callOutcomeChoice": "PRESENT; Answered=100010000, No Answer=100010001, Call Back Requested=100010002; one Solution association",
+        "callLog": "Present; exact primary-name metadata and approved attributes; Call Outcome bound to os_sr_callout; table audit enabled; one Solution root includes subcomponents",
+        "candidateStatusHistory": "Present; exact primary-name metadata and approved attribute inventory; both os_sr_csh_prevstat and os_sr_csh_newstat bind to os_sr_callout but must bind to os_sr_candstat; table audit enabled; one Solution root includes subcomponents",
+        "relationships": "All four approved relationships present with Restrict delete and NoCascade assign/share/reparent",
+        "alternateKeys": "Both approved keys Active with exact two-column definitions",
+        "organizationAuditing": "DISABLED",
+        "childScopeRequests": {
+          "GET": 17,
+          "POST": 0
+        },
         "automaticRetries": 0
       }
     },

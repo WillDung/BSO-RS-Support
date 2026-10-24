@@ -24,7 +24,7 @@ $parseErrors = $null
 Assert-Test ($parseErrors.Count -eq 0) 'Child-table runner parses without diagnostics'
 Assert-Test ($runner -match "MaximumRetryCount\s*=\s*0" -and
     $runner -match "AutomaticRetries\s*=\s*0") 'Automatic retry count is fixed at zero'
-Assert-Test ($runner -match "MaximumWrites\s*=\s*9" -and
+Assert-Test ($runner -match "MaximumWrites\s*=\s*8" -and
     $runner -match "GlobalOptionSetDefinitions" -and
     $runner -match "RelationshipDefinitions" -and
     $runner -match "/Keys") 'Write ceiling and metadata endpoint allowlist are explicit'
@@ -46,18 +46,37 @@ Assert-Test ($runner -match "candidateCreateOrModification" -and
     $runner -match "customApiOrPlugin" -and
     $runner -match "securityOrAppChanges" -and
     $runner -match "publication") 'Manifest scope exclusions are enforced before any write'
-Assert-Test ($runner -match "STOPPED_AFTER_REJECTED_TABLE_CREATE_NO_RETRY" -and
-    $runner -match "no further writes are permitted") 'Stopped authorization fails closed before target checks or network requests'
+Assert-Test ($runner -match 'AUTHORIZED_CORRECTED_CALLLOG_AND_REMAINING_CHILD_METADATA' -and
+    $runner -match 'CORRECTED_CALLLOG_DISPATCHED_RECONCILIATION_PENDING' -and
+    $runner -match 'CorrectedCallLogCreateDispatches -ge 1') 'Corrected authorization is specific and corrected Call Log create is limited to one dispatch'
+Assert-Test ($runner -match 'ResumeRemainingScope' -and
+    $runner -match 'Assert-CallLogResumeReadback' -and
+    $runner.Contains("`$script:ExpectedTableCreateNames = @('os_sr_csh')") -and
+    $runner -match 'remainingMetadataDispatchLimit -eq 7') 'Resume path reconciles existing Call Log and limits table creation to Status History'
+$historyChoiceColumns = @((@($manifest.tables | Where-Object logicalName -CEQ 'os_sr_csh')[0]).columns |
+    Where-Object { $_.type -ceq 'GlobalChoice' -and $_.target -ceq 'os_sr_candstat' })
+Assert-Test ($runner.Contains('ChoiceMetadataByName[$targetName]') -and
+    $runner.Contains('-ChoiceMetadataByName $choiceMetadataByName') -and
+    $historyChoiceColumns.Count -eq 2) 'Each Choice attribute binds to its own manifest target'
 Assert-Test ($manifest.relationships.Count -eq 7 -and
     @($manifest.relationships | ForEach-Object schemaName | Select-Object -Unique).Count -eq 7) 'Seven manifest relationship schema names are unique'
 Assert-Test ($model -match '`usr` = Dataverse system user' -and
     $model -match 'os_sr_usr_call_ctby' -and $model -match 'os_sr_usr_csh_actr') 'User lookup naming follows the documented publisher/project convention'
 Assert-Test ($manifest.callOutcomeChoice.options.Count -eq 3 -and
     @($manifest.callOutcomeChoice.options | ForEach-Object label) -join '|' -ceq 'Answered|No Answer|Call Back Requested') 'Call Outcome taxonomy remains exact'
-Assert-Test ($manifest.provisioning.phase3B2AuthorizedContinuation.status -ceq 'STOPPED_AFTER_REJECTED_TABLE_CREATE_NO_RETRY' -and
-    $manifest.provisioning.phase3B2AuthorizedContinuation.executionOutcome.successfulChildTableWrites -eq 0 -and
-    $manifest.provisioning.phase3B2AuthorizedContinuation.automaticRetries -eq 0) 'Rejected Call Log create is recorded with authorization stopped and no retry'
-Assert-Test ($null -eq $manifest.tables[1].primaryName.maxLength -and
-    $null -eq $manifest.tables[2].primaryName.maxLength) 'Current child AutoNumber primary-name lengths remain an explicit unresolved metadata requirement'
+Assert-Test ($manifest.provisioning.phase3B2AuthorizedContinuation.status -ceq 'STOPPED_AFTER_REMAINING_METADATA_MISMATCH_NO_FURTHER_WRITES' -and
+    $manifest.provisioning.phase3B2AuthorizedContinuation.executionOutcome.successfulChildTableWrites -eq 2 -and
+    $manifest.provisioning.phase3B2AuthorizedContinuation.automaticRetries -eq 0 -and
+    $manifest.provisioning.phase3B2AuthorizedContinuation.correctedCallLogCreateDispatchLimit -eq 1 -and
+    $manifest.provisioning.phase3B2AuthorizedContinuation.correctedCallLogCreateDispatches -eq 1 -and
+    $manifest.provisioning.phase3B2AuthorizedContinuation.remainingMetadataDispatchLimit -eq 7 -and
+    $manifest.provisioning.phase3B2AuthorizedContinuation.remainingMetadataWritesDispatched -eq 7 -and
+    $manifest.provisioning.phase3B2AuthorizedContinuation.remainingMetadataAuthorizationConsumed -and
+    $manifest.provisioning.phase3B2AuthorizedContinuation.lastReadOnlyReconciliation.childScopeRequests.POST -eq 0) 'Remaining authorization is consumed and the Choice binding mismatch is reconciled without a retry'
+Assert-Test (@($manifest.tables | Where-Object logicalName -in @('os_sr_call', 'os_sr_csh') | Where-Object {
+        $_.primaryName.type -ceq 'AutoNumber' -and $_.primaryName.storageType -ceq 'String' -and
+        $_.primaryName.maxLength -eq 100 -and $_.primaryName.formatName -ceq 'Text' -and
+        $_.primaryName.format -in @('CALL-{SEQNUM:8}', 'HIST-{SEQNUM:8}')
+    }).Count -eq 2) 'Both child primary-name String/AutoNumber metadata definitions are exact'
 
 Write-Output "PASS: $script:Passed synthetic Phase 3B.2 provisioning assertions; no authentication, network, PAC, or tenant calls."

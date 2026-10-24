@@ -7,7 +7,8 @@ param(
     [Parameter(Mandatory = $true)][string]$ExpectedOrganizationId,
     [Parameter(Mandatory = $true)][string]$AuthorizationReference,
     [switch]$ReconcileOnly,
-    [switch]$PreflightOnly
+    [switch]$PreflightOnly,
+    [switch]$ResumeRemainingScope
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,7 +17,7 @@ $script:PublisherName = 'os_bso_rs_support'
 $script:PublisherPrefix = 'os'
 $script:ManifestPath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\docs\PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json'))
 $script:CandidateRunner = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'Provision-BsoRsCandidateTable.ps1'))
-$script:ExpectedManifestSha256 = 'b7d0abb9335fd30925911059ef9744a1a519c84338354549768879083cc30ca4'
+$script:ExpectedManifestSha256 = '4ad1f47edaea1ee23add24c8aa5e8566357c3e913bf30ac198397f73b98e7bb1'
 $script:RequestCounts = @{ GET = 0; POST = 0 }
 $script:WriteStages = [System.Collections.Generic.List[string]]::new()
 $script:WriteHashes = [System.Collections.Generic.List[object]]::new()
@@ -27,11 +28,14 @@ $script:PacUserEmail = $null
 $script:Publisher = $null
 $script:Solution = $null
 $script:CurrentStage = 'LOCAL_MANIFEST'
-$script:MaximumWrites = 9
+$script:MaximumWrites = 8
+$script:CorrectedCallLogCreateDispatches = 0
+$script:ProvisioningReconciled = $false
 $script:ExpectedWritePaths = @()
 $script:ChoiceName = 'os_sr_callout'
 $script:OutcomeLabels = @('Answered', 'No Answer', 'Call Back Requested')
 $script:TableNames = @('os_sr_call', 'os_sr_csh')
+$script:ExpectedTableCreateNames = @('os_sr_call', 'os_sr_csh')
 $script:RelationshipNames = @(
     'os_sr_cand_call',
     'os_sr_cand_csh',
@@ -39,14 +43,80 @@ $script:RelationshipNames = @(
     'os_sr_usr_csh_actr'
 )
 $script:KeyNames = @('os_sr_call_ak_cand_action', 'os_sr_csh_ak_cand_action')
+$script:ExpectedRelationshipNames = $script:RelationshipNames
+$script:ExpectedKeyNames = $script:KeyNames
+$script:TableCreateDispatches = 0
+$script:RelationshipDispatches = 0
+$script:KeyDispatches = 0
+$script:RemainingScopeDispatches = 0
+$script:RemainingScopeAuthorizationConsumed = $false
 
 function Get-Sha256 {
     param([Parameter(Mandatory = $true)][byte[]]$Bytes)
     [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($Bytes)).ToLowerInvariant()
 }
 
+function Set-ManifestContinuationState {
+    param(
+        [Parameter(Mandatory = $true)][string]$Status,
+        [Parameter(Mandatory = $true)][int]$CorrectedCallLogDispatches,
+        [int]$RemainingScopeWritesDispatched = -1,
+        [switch]$ConsumeRemainingScopeAuthorization
+    )
+    $manifest = Get-Content -LiteralPath $script:ManifestPath -Raw | ConvertFrom-Json
+    $continuation = $manifest.provisioning.phase3B2AuthorizedContinuation
+    $continuation.status = $Status
+    $continuation.correctedCallLogCreateDispatches = $CorrectedCallLogDispatches
+    if ($RemainingScopeWritesDispatched -ge 0) {
+        $continuation.remainingMetadataWritesDispatched = $RemainingScopeWritesDispatched
+    }
+    if ($ConsumeRemainingScopeAuthorization) {
+        $continuation.remainingMetadataAuthorizationConsumed = $true
+    }
+    $json = ConvertTo-Json -InputObject $manifest -Depth 100
+    [IO.File]::WriteAllText($script:ManifestPath, $json + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+    $script:ExpectedManifestSha256 = Get-ManifestHash
+}
+
 function Get-ManifestHash {
     Get-Sha256 -Bytes ([IO.File]::ReadAllBytes($script:ManifestPath))
+}
+
+function Get-SanitizedDataverseError {
+    param(
+        [Parameter(Mandatory = $true)][int]$StatusCode,
+        [object]$Response
+    )
+    $code = ''
+    $message = ''
+    if ($null -ne $Response) {
+        if ($Response.error) {
+            $code = [string]$Response.error.code
+            $message = [string]$Response.error.message
+        }
+        elseif ($Response -is [string]) {
+            try {
+                $parsed = $Response | ConvertFrom-Json -ErrorAction Stop
+                if ($parsed.error) {
+                    $code = [string]$parsed.error.code
+                    $message = [string]$parsed.error.message
+                }
+            }
+            catch {
+                $message = $Response
+            }
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($message)) {
+        $message = 'Dataverse returned an error response without a readable error message.'
+    }
+    $message = $message -replace '(?i)https?://\S+', '[URL]'
+    $message = $message -replace '(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b', '[EMAIL]'
+    $message = $message -replace '\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b', '[ID]'
+    $message = $message -replace '(?i)\bBearer\s+\S+', 'Bearer [REDACTED]'
+    if ($message.Length -gt 600) { $message = $message.Substring(0, 600) }
+    $safeCode = if ($code -match '^(0x[0-9a-fA-F]{8}|[A-Za-z0-9_.-]{1,80})$') { $code } else { 'UNAVAILABLE' }
+    "HTTP $StatusCode; Dataverse code $safeCode; $message"
 }
 
 function Assert-Manifest {
@@ -54,12 +124,28 @@ function Assert-Manifest {
     if ((Get-ManifestHash) -cne $script:ExpectedManifestSha256) {
         throw 'Current manifest fingerprint differs from the authorized Phase 3B.2 baseline.'
     }
-    if ($Manifest.provisioning.phase3B2AuthorizedContinuation.status -ceq 'STOPPED_AFTER_REJECTED_TABLE_CREATE_NO_RETRY') {
-        throw 'The Phase 3B.2 authorization was stopped after a rejected table-create request; no further writes are permitted.'
-    }
+    $continuation = $Manifest.provisioning.phase3B2AuthorizedContinuation
+    $writeAuthorizationIsFresh = $continuation.status -ceq 'AUTHORIZED_CORRECTED_CALLLOG_AND_REMAINING_CHILD_METADATA' -and
+        $continuation.correctedCallLogCreateDispatchLimit -eq 1 -and
+        $continuation.correctedCallLogCreateDispatches -eq 0
+    $remainingScopeAuthorizationIsAvailable = $ResumeRemainingScope -and
+        $continuation.status -ceq 'CALL_LOG_RECONCILED_REMAINING_SCOPE_AUTHORIZED' -and
+        $continuation.correctedCallLogCreateDispatches -eq 1 -and
+        $continuation.remainingMetadataDispatchLimit -eq 7 -and
+        $continuation.remainingMetadataWritesDispatched -eq 0 -and
+        -not $continuation.remainingMetadataAuthorizationConsumed
+    $readOnlyRecoveryIsAllowed = $ReconcileOnly -and
+        $continuation.correctedCallLogCreateDispatches -eq 1 -and
+        $continuation.status -in @(
+            'CALL_LOG_RECONCILED_REMAINING_SCOPE_AUTHORIZED',
+            'STOPPED_AFTER_CORRECTED_CONTINUATION_REQUIRES_RECONCILIATION',
+            'STOPPED_AFTER_REMAINING_METADATA_MISMATCH_NO_FURTHER_WRITES',
+            'REMAINING_SCOPE_AUTHORIZATION_CONSUMED_RECONCILIATION_PENDING',
+            'PHASE_3B2_STORAGE_RECONCILED_AUTHORIZATION_CONSUMED'
+        )
     if ($Manifest.phase -cne '3A' -or $Manifest.solutionUniqueName -cne $script:SolutionName -or
         $Manifest.publisherPrefix -cne $script:PublisherPrefix -or
-        $Manifest.provisioning.phase3B2AuthorizedContinuation.status -cne 'AUTHORIZED_CHILD_TABLE_METADATA_ONLY' -or
+        (-not $writeAuthorizationIsFresh -and -not $remainingScopeAuthorizationIsAvailable -and -not $readOnlyRecoveryIsAllowed) -or
         $Manifest.provisioning.phase3B2AuthorizedContinuation.automaticRetries -ne 0 -or
         $Manifest.provisioning.phase3B2AuthorizedContinuation.candidateCreateOrModification -or
         $Manifest.provisioning.phase3B2AuthorizedContinuation.businessDataWrites -or
@@ -104,6 +190,14 @@ function Assert-Manifest {
         (Compare-Object $script:OutcomeLabels @($Manifest.callOutcomeChoice.options | ForEach-Object label)).Count -ne 0) {
         throw 'Child table, auditing, AutoNumber, or Call Outcome Choice proposal is not exact.'
     }
+    foreach ($table in @($call[0], $history[0])) {
+        if ($table.primaryName.type -cne 'AutoNumber' -or
+            $table.primaryName.storageType -cne 'String' -or
+            [int]$table.primaryName.maxLength -ne 100 -or
+            $table.primaryName.formatName -cne 'Text') {
+            throw "Approved String/AutoNumber primary-name metadata is incomplete for $($table.logicalName)."
+        }
+    }
     foreach ($key in $script:KeyNames) {
         $matches = @($Manifest.tables.alternateKeys | Where-Object name -CEQ $key)
         if ($matches.Count -ne 1) { throw 'An approved child-table idempotency key is missing or ambiguous.' }
@@ -139,7 +233,7 @@ function Get-Required {
 function New-AttributePayload {
     param(
         [Parameter(Mandatory = $true)][object]$Column,
-        [Parameter(Mandatory = $true)][object]$ChoiceMetadata
+        [Parameter(Mandatory = $true)][hashtable]$ChoiceMetadataByName
     )
     $required = Get-Required -Requirement ([string]$Column.required)
     switch ([string]$Column.type) {
@@ -184,6 +278,10 @@ function New-AttributePayload {
             }
         }
         'GlobalChoice' {
+            $targetName = [string]$Column.target
+            if (-not $ChoiceMetadataByName.ContainsKey($targetName)) {
+                throw "Global Choice metadata for $targetName is unavailable; no table payload can be created safely."
+            }
             [ordered]@{
                 '@odata.type' = 'Microsoft.Dynamics.CRM.PicklistAttributeMetadata'
                 AttributeType = 'Picklist'
@@ -192,7 +290,7 @@ function New-AttributePayload {
                 DisplayName = New-Label -Text ([string]$Column.displayName)
                 RequiredLevel = New-RequiredLevel -Required $required
                 IsPrimaryName = $false
-                'GlobalOptionSet@odata.bind' = "/GlobalOptionSetDefinitions($($ChoiceMetadata.MetadataId))"
+                'GlobalOptionSet@odata.bind' = "/GlobalOptionSetDefinitions($($ChoiceMetadataByName[$targetName].MetadataId))"
             }
         }
         default { throw "Unsupported child column type in approved manifest: $($Column.type)" }
@@ -203,7 +301,7 @@ function New-TablePayload {
     param(
         [Parameter(Mandatory = $true)][object]$Table,
         [Parameter(Mandatory = $true)][object]$Manifest,
-        [Parameter(Mandatory = $true)][object]$ChoiceMetadata
+        [Parameter(Mandatory = $true)][hashtable]$ChoiceMetadataByName
     )
     $primaryMaxLength = 0
     if ($null -ne $Table.primaryName.maxLength) {
@@ -211,6 +309,9 @@ function New-TablePayload {
     }
     if ($primaryMaxLength -lt 1 -or $primaryMaxLength -gt 4000) {
         throw "Primary-name MaxLength is missing or invalid for $($Table.logicalName); no table payload can be created safely."
+    }
+    if ([string]$Table.primaryName.formatName -cne 'Text') {
+        throw "Primary-name FormatName must be Text for $($Table.logicalName)."
     }
     $attributes = [System.Collections.Generic.List[object]]::new()
     $attributes.Add([ordered]@{
@@ -220,13 +321,13 @@ function New-TablePayload {
         SchemaName = [string]$Table.primaryName.logicalName
         DisplayName = New-Label -Text ([string]$Table.primaryName.displayName)
         RequiredLevel = New-RequiredLevel -Required $true
-        FormatName = [ordered]@{ Value = 'Text' }
+        FormatName = [ordered]@{ Value = [string]$Table.primaryName.formatName }
         MaxLength = $primaryMaxLength
         IsPrimaryName = $true
         AutoNumberFormat = [string]$Table.primaryName.format
     })
     foreach ($column in @($Table.columns | Where-Object type -ne 'Lookup')) {
-        $attributes.Add((New-AttributePayload -Column $column -ChoiceMetadata $ChoiceMetadata))
+        $attributes.Add((New-AttributePayload -Column $column -ChoiceMetadataByName $ChoiceMetadataByName))
     }
     [ordered]@{
         '@odata.type' = 'Microsoft.Dynamics.CRM.EntityMetadata'
@@ -351,17 +452,16 @@ function Invoke-DataverseRequest {
             }
             '^EntityDefinitions$' {
                 $Body.SchemaName -in $script:TableNames -and $Body.OwnershipType -ceq 'UserOwned' -and
-                $Body.SchemaName -ceq $(if ($index -eq $(if ($script:ExpectedWritePaths[0] -ceq 'GlobalOptionSetDefinitions') { 1 } else { 0 })) {
-                    'os_sr_call'
-                } else {
-                    'os_sr_csh'
-                }) -and $Body.IsAuditEnabled.Value -eq $true -and @($Body.Attributes).Count -gt 0
+                $script:TableCreateDispatches -lt $script:ExpectedTableCreateNames.Count -and
+                $Body.SchemaName -ceq $script:ExpectedTableCreateNames[$script:TableCreateDispatches] -and
+                $Body.IsAuditEnabled.Value -eq $true -and @($Body.Attributes).Count -gt 0
                 break
             }
             '^RelationshipDefinitions$' {
                 $Body.SchemaName -in $script:RelationshipNames -and
                 $Body.ReferencingEntity -in $script:TableNames -and
-                $Body.SchemaName -ceq $script:RelationshipNames[$index - $(if ($script:ExpectedWritePaths[0] -ceq 'GlobalOptionSetDefinitions') { 3 } else { 2 })] -and
+                $script:RelationshipDispatches -lt $script:ExpectedRelationshipNames.Count -and
+                $Body.SchemaName -ceq $script:ExpectedRelationshipNames[$script:RelationshipDispatches] -and
                 $Body.CascadeConfiguration.Delete -ceq 'Restrict' -and
                 $Body.CascadeConfiguration.Assign -ceq 'NoCascade' -and
                 $Body.CascadeConfiguration.Share -ceq 'NoCascade' -and
@@ -369,7 +469,10 @@ function Invoke-DataverseRequest {
                 break
             }
             '/Keys$' {
-                $Body.SchemaName -in $script:KeyNames -and @($Body.KeyAttributes).Count -eq 2
+                $Body.SchemaName -in $script:KeyNames -and
+                $script:KeyDispatches -lt $script:ExpectedKeyNames.Count -and
+                $Body.SchemaName -ceq $script:ExpectedKeyNames[$script:KeyDispatches] -and
+                @($Body.KeyAttributes).Count -eq 2
                 break
             }
             default { $false }
@@ -377,6 +480,27 @@ function Invoke-DataverseRequest {
         if (-not $pathIsApproved -or -not $bodyIsApproved) {
             throw 'POST path or payload is outside the fixed Phase 3B.2 allowlist.'
         }
+        if ($ResumeRemainingScope) {
+            if (-not $script:RemainingScopeAuthorizationConsumed) {
+                Set-ManifestContinuationState -Status 'REMAINING_SCOPE_AUTHORIZATION_CONSUMED_RECONCILIATION_PENDING' `
+                    -CorrectedCallLogDispatches 1 -RemainingScopeWritesDispatched 0 -ConsumeRemainingScopeAuthorization
+                $script:RemainingScopeAuthorizationConsumed = $true
+            }
+            $script:RemainingScopeDispatches++
+            Set-ManifestContinuationState -Status 'REMAINING_SCOPE_AUTHORIZATION_CONSUMED_RECONCILIATION_PENDING' `
+                -CorrectedCallLogDispatches 1 -RemainingScopeWritesDispatched $script:RemainingScopeDispatches `
+                -ConsumeRemainingScopeAuthorization
+        }
+        if ($Path -ceq 'EntityDefinitions' -and $Body.SchemaName -ceq 'os_sr_call') {
+            if ($script:CorrectedCallLogCreateDispatches -ge 1) {
+                throw 'The separately authorized corrected Call Log table-create dispatch limit has been reached.'
+            }
+            $script:CorrectedCallLogCreateDispatches++
+            Set-ManifestContinuationState -Status 'CORRECTED_CALLLOG_DISPATCHED_RECONCILIATION_PENDING' -CorrectedCallLogDispatches 1
+        }
+        if ($Path -ceq 'EntityDefinitions') { $script:TableCreateDispatches++ }
+        elseif ($Path -ceq 'RelationshipDefinitions') { $script:RelationshipDispatches++ }
+        elseif ($Path -match '/Keys$') { $script:KeyDispatches++ }
         $payloadHash = Get-Sha256 -Bytes ([Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject $Body -Depth 80 -Compress)))
         $script:WriteStages.Add($Path)
         $script:WriteHashes.Add([ordered]@{ Path = $Path; PayloadSha256 = $payloadHash })
@@ -412,7 +536,10 @@ function Invoke-DataverseRequest {
         throw 'A Dataverse GET failed; no write was sent by this request.'
     }
     if ([int]$statusCode -lt 200 -or [int]$statusCode -ge 300) {
-        throw "Dataverse returned HTTP $statusCode; response content suppressed and no retry was attempted."
+        if ($Method -eq 'POST') {
+            throw (Get-SanitizedDataverseError -StatusCode ([int]$statusCode) -Response $response)
+        }
+        throw "Dataverse returned HTTP $statusCode; response content suppressed."
     }
     $response
 }
@@ -513,6 +640,97 @@ function Assert-ChildTableAbsent {
     }
 }
 
+function Assert-CallLogResumeReadback {
+    param(
+        [Parameter(Mandatory = $true)][object]$Table,
+        [Parameter(Mandatory = $true)][object]$Choice
+    )
+    $name = [string]$Table.logicalName
+    $metadata = Get-OptionalMetadata -Path "EntityDefinitions(LogicalName='$name')?`$select=LogicalName,MetadataId,OwnershipType,PrimaryNameAttribute,IsAuditEnabled"
+    if ($null -eq $metadata -or $metadata.LogicalName -cne $name -or
+        $metadata.OwnershipType -cne 'UserOwned' -or
+        $metadata.PrimaryNameAttribute -cne $Table.primaryName.logicalName -or
+        $metadata.IsAuditEnabled.Value -ne $true) {
+        throw 'Existing Call Log identity, ownership, primary name, or audit metadata differs from the approved manifest.'
+    }
+
+    $attributes = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$name')/Attributes")
+    $customAttributes = @($attributes | Where-Object {
+        [string]$_.LogicalName -like "$name`_*" -and
+        [string]$_.AttributeType -cne 'Virtual' -and
+        [string]::IsNullOrWhiteSpace([string]$_.AttributeOf)
+    })
+    $expectedNames = @($Table.primaryName.logicalName) + @(
+        $Table.columns | Where-Object type -ne 'Lookup' | ForEach-Object logicalName
+    )
+    if ((Compare-Object $expectedNames @($customAttributes | ForEach-Object LogicalName)).Count -ne 0) {
+        throw 'Existing Call Log non-lookup attribute inventory differs from the approved pre-relationship state.'
+    }
+    $primary = @($customAttributes | Where-Object LogicalName -CEQ $Table.primaryName.logicalName)
+    if ($primary.Count -ne 1 -or $primary[0].AttributeType -cne 'String' -or
+        [int]$primary[0].MaxLength -ne [int]$Table.primaryName.maxLength -or
+        [string]$primary[0].FormatName.Value -cne [string]$Table.primaryName.formatName -or
+        [string]$primary[0].AutoNumberFormat -cne [string]$Table.primaryName.format -or
+        $primary[0].IsPrimaryName -ne $true) {
+        throw 'Existing Call Log AutoNumber primary-name metadata differs from the approved manifest.'
+    }
+
+    foreach ($column in @($Table.columns | Where-Object type -ne 'Lookup')) {
+        $field = @($customAttributes | Where-Object LogicalName -CEQ $column.logicalName)
+        $expectedType = switch ([string]$column.type) {
+            'String' { 'String' }
+            'Memo' { 'Memo' }
+            'DateTime' { 'DateTime' }
+            'GlobalChoice' { 'Picklist' }
+            default { throw 'Resume encountered an unsupported Call Log non-lookup column type.' }
+        }
+        if ($field.Count -ne 1 -or $field[0].AttributeType -cne $expectedType -or
+            $field[0].RequiredLevel.Value -cne $(if (Get-Required -Requirement ([string]$column.required)) {
+                'ApplicationRequired'
+            } else {
+                'None'
+            })) {
+            throw "Existing Call Log column $($column.logicalName) type or requiredness differs from the manifest."
+        }
+        if ($column.type -in @('String', 'Memo') -and [int]$field[0].MaxLength -ne [int]$column.maxLength) {
+            throw "Existing Call Log column $($column.logicalName) length differs from the manifest."
+        }
+        if ($column.type -eq 'GlobalChoice') {
+            $filter = [Uri]::EscapeDataString("LogicalName eq '$($column.logicalName)'")
+            $picklist = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$name')/Attributes/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?`$select=LogicalName&`$filter=$filter&`$expand=GlobalOptionSet" |
+                Where-Object LogicalName -CEQ $column.logicalName)
+            if ($picklist.Count -ne 1 -or
+                [string]$picklist[0].GlobalOptionSet.Name -cne $script:ChoiceName) {
+                throw "Existing Call Log Choice binding for $($column.logicalName) differs from the approved Choice."
+            }
+        }
+    }
+
+    $solutionFilter = [Uri]::EscapeDataString("_solutionid_value eq $($script:Solution.solutionid)")
+    $components = @(Get-ODataRows -Path "solutioncomponents?`$select=componenttype,objectid,rootcomponentbehavior&`$filter=$solutionFilter")
+    $tableRoots = @($components | Where-Object {
+        [string]$_.objectid -ieq [string]$metadata.MetadataId -and [int]$_.componenttype -eq 1
+    })
+    $choiceRoots = @($components | Where-Object {
+        [string]$_.objectid -ieq [string]$Choice.MetadataId -and [int]$_.componenttype -eq 9
+    })
+    if ($tableRoots.Count -ne 1 -or [int]$tableRoots[0].rootcomponentbehavior -ne 0 -or
+        $choiceRoots.Count -ne 1) {
+        throw 'Existing Call Log or Call Outcome Choice Solution membership differs from the approved root-component baseline.'
+    }
+
+    $relationships = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$name')/ManyToOneRelationships?`$select=SchemaName")
+    if (@($relationships | Where-Object {
+            [string]$_.SchemaName -like 'os_sr_*' -or [string]$_.SchemaName -in $script:RelationshipNames
+        }).Count -ne 0) {
+        throw 'Existing Call Log has an unexpected project relationship before the approved resume.'
+    }
+    $keys = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$name')/Keys?`$select=SchemaName")
+    if ($keys.Count -ne 0) {
+        throw 'Existing Call Log has an unexpected key before the approved resume.'
+    }
+}
+
 function Assert-InitialState {
     $who = Invoke-DataverseRequest -Method GET -Path 'WhoAmI'
     if ([string]$who.OrganizationId -ine $ExpectedOrganizationId -or
@@ -530,6 +748,22 @@ function Assert-InitialState {
     }
     $script:Publisher = $publishers[0]
     $script:Solution = $solutions[0]
+    $script:CurrentStage = 'CALL_OUTCOME_CHOICE_READ'
+    $choice = Get-OptionalMetadata -Path "GlobalOptionSetDefinitions(Name='$($script:ChoiceName)')"
+    if ($null -eq $choice) {
+        throw 'The previously created Call Outcome Choice is absent; do not recreate it in this corrected continuation.'
+    }
+    $null = Assert-Choice -Choice $choice
+    if ($ResumeRemainingScope) {
+        foreach ($expectedOption in $manifest.callOutcomeChoice.options) {
+            $liveOption = @($choice.Options | Where-Object {
+                $_.Label.UserLocalizedLabel.Label -ceq $expectedOption.label
+            })
+            if ($liveOption.Count -ne 1 -or [int]$liveOption[0].Value -ne [int]$expectedOption.value) {
+                throw 'The existing Call Outcome Choice mapping differs from the frozen manifest.'
+            }
+        }
+    }
     Assert-GlobalPrivileges
     foreach ($relationName in $script:RelationshipNames) {
         $escapedName = $relationName.Replace("'", "''")
@@ -548,26 +782,51 @@ function Assert-InitialState {
     if ($null -eq $candidateStatus -or $candidateStatus.IsGlobal -ne $true) {
         throw 'The reconciled Candidate Status Choice is unavailable.'
     }
-    Assert-ChildTableAbsent
-    $script:CurrentStage = 'CALL_OUTCOME_CHOICE_READ'
-    $choice = Get-OptionalMetadata -Path "GlobalOptionSetDefinitions(Name='$($script:ChoiceName)')"
-    if ($null -ne $choice) { $null = Assert-Choice -Choice $choice }
+    if ($ResumeRemainingScope) {
+        $script:CurrentStage = 'CALL_LOG_RESUME_RECONCILIATION'
+        Assert-CallLogResumeReadback -Table (@($manifest.tables | Where-Object logicalName -CEQ 'os_sr_call')[0]) -Choice $choice
+        $history = Get-OptionalMetadata -Path "EntityDefinitions(LogicalName='os_sr_csh')?`$select=LogicalName,MetadataId"
+        if ($null -ne $history) {
+            throw 'Candidate Status History already exists; no create or replacement is authorized by resume.'
+        }
+    } else {
+        Assert-ChildTableAbsent
+    }
+    $systemUser = Invoke-DataverseRequest -Method GET -Path "EntityDefinitions(LogicalName='systemuser')?`$select=LogicalName,PrimaryIdAttribute"
+    if ($systemUser.LogicalName -cne 'systemuser' -or $systemUser.PrimaryIdAttribute -cne 'systemuserid') {
+        throw 'System User primary key metadata did not reconcile.'
+    }
     $script:CurrentStage = 'ORGANIZATION_AUDIT_READ'
     $organization = Invoke-DataverseRequest -Method GET -Path "organizations($ExpectedOrganizationId)?`$select=organizationid,isauditenabled"
     if ([string]$organization.organizationid -ine $ExpectedOrganizationId) {
         throw 'Organization audit response target did not match the approved organization.'
     }
-    $script:ExpectedWritePaths = @()
-    if ($null -eq $choice) { $script:ExpectedWritePaths += 'GlobalOptionSetDefinitions' }
-    $script:ExpectedWritePaths += @('EntityDefinitions', 'EntityDefinitions')
-    $script:ExpectedWritePaths += @('RelationshipDefinitions', 'RelationshipDefinitions', 'RelationshipDefinitions', 'RelationshipDefinitions')
-    $script:ExpectedWritePaths += @(
-        "EntityDefinitions(LogicalName='os_sr_call')/Keys",
-        "EntityDefinitions(LogicalName='os_sr_csh')/Keys"
-    )
+    if ($ResumeRemainingScope) {
+        $script:ExpectedTableCreateNames = @('os_sr_csh')
+        $script:ExpectedRelationshipNames = $script:RelationshipNames
+        $script:ExpectedKeyNames = $script:KeyNames
+        $script:ExpectedWritePaths = @('EntityDefinitions')
+        $script:ExpectedWritePaths += @('RelationshipDefinitions', 'RelationshipDefinitions', 'RelationshipDefinitions', 'RelationshipDefinitions')
+        $script:ExpectedWritePaths += @(
+            "EntityDefinitions(LogicalName='os_sr_call')/Keys",
+            "EntityDefinitions(LogicalName='os_sr_csh')/Keys"
+        )
+    } else {
+        $script:ExpectedTableCreateNames = @('os_sr_call', 'os_sr_csh')
+        $script:ExpectedRelationshipNames = $script:RelationshipNames
+        $script:ExpectedKeyNames = $script:KeyNames
+        $script:ExpectedWritePaths = @('EntityDefinitions', 'EntityDefinitions')
+        $script:ExpectedWritePaths += @('RelationshipDefinitions', 'RelationshipDefinitions', 'RelationshipDefinitions', 'RelationshipDefinitions')
+        $script:ExpectedWritePaths += @(
+            "EntityDefinitions(LogicalName='os_sr_call')/Keys",
+            "EntityDefinitions(LogicalName='os_sr_csh')/Keys"
+        )
+    }
     $script:MaximumWrites = $script:ExpectedWritePaths.Count
+    $script:RemainingScopeAuthorizationConsumed = [bool]$manifest.provisioning.phase3B2AuthorizedContinuation.remainingMetadataAuthorizationConsumed
     [pscustomobject]@{
         Candidate = $candidate
+        SystemUser = $systemUser
         CandidateStatusChoice = $candidateStatus
         CallOutcomeChoice = $choice
         OrganizationAuditing = [bool]$organization.isauditenabled
@@ -612,6 +871,27 @@ function Get-ReconciliationSnapshot {
     foreach ($name in $script:TableNames) {
         $table = Get-OptionalMetadata -Path "EntityDefinitions(LogicalName='$name')?`$select=LogicalName,MetadataId,OwnershipType,PrimaryNameAttribute,IsAuditEnabled"
         if ($null -ne $table) {
+            $attributes = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$name')/Attributes")
+            $primary = @($attributes | Where-Object LogicalName -CEQ $table.PrimaryNameAttribute)
+            $customAttributes = @($attributes | Where-Object {
+                [string]$_.LogicalName -like "$name`_*" -and
+                [string]$_.AttributeType -cne 'Virtual' -and
+                [string]::IsNullOrWhiteSpace([string]$_.AttributeOf)
+            })
+            $choiceBindings = @()
+            foreach ($attribute in @($customAttributes | Where-Object AttributeType -CEQ 'Picklist')) {
+                $filter = [Uri]::EscapeDataString("LogicalName eq '$($attribute.LogicalName)'")
+                $picklist = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$name')/Attributes/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?`$select=LogicalName&`$filter=$filter&`$expand=GlobalOptionSet" |
+                    Where-Object LogicalName -CEQ $attribute.LogicalName)
+                $choiceBindings += [ordered]@{
+                    LogicalName = [string]$attribute.LogicalName
+                    GlobalChoiceName = if ($picklist.Count -eq 1) {
+                        [string]$picklist[0].GlobalOptionSet.Name
+                    } else {
+                        'NOT_FOUND_OR_AMBIGUOUS'
+                    }
+                }
+            }
             $tableComponents = @($components | Where-Object {
                 [string]$_.objectid -ieq [string]$table.MetadataId -and [int]$_.componenttype -eq 1
             })
@@ -622,6 +902,31 @@ function Get-ReconciliationSnapshot {
                 Auditing = [bool]$table.IsAuditEnabled.Value
                 SolutionRootCount = $tableComponents.Count
                 RootIncludesSubcomponents = ($tableComponents.Count -eq 1 -and [int]$tableComponents[0].rootcomponentbehavior -eq 0)
+                PrimaryNameMetadata = if ($primary.Count -eq 1) {
+                    [ordered]@{
+                        AttributeType = [string]$primary[0].AttributeType
+                        MaxLength = [int]$primary[0].MaxLength
+                        FormatName = [string]$primary[0].FormatName.Value
+                        AutoNumberFormat = [string]$primary[0].AutoNumberFormat
+                        IsPrimaryName = [bool]$primary[0].IsPrimaryName
+                    }
+                } else { 'NOT_FOUND_OR_AMBIGUOUS' }
+                Attributes = @($attributes | Where-Object {
+                    [string]$_.LogicalName -like "$name`_*" -and
+                    [string]$_.AttributeType -cne 'Virtual' -and
+                    [string]::IsNullOrWhiteSpace([string]$_.AttributeOf)
+                } | ForEach-Object { [string]$_.LogicalName })
+                CustomAttributes = @($customAttributes | ForEach-Object {
+                    [ordered]@{
+                        LogicalName = [string]$_.LogicalName
+                        AttributeType = [string]$_.AttributeType
+                        MaxLength = if ($null -ne $_.MaxLength) { [int]$_.MaxLength } else { $null }
+                        FormatName = [string]$_.FormatName.Value
+                        AutoNumberFormat = [string]$_.AutoNumberFormat
+                        RequiredLevel = [string]$_.RequiredLevel.Value
+                    }
+                })
+                ChoiceBindings = $choiceBindings
             }
             $relationships += @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$name')/ManyToOneRelationships?`$select=SchemaName,ReferencedEntity,ReferencingEntity,ReferencedAttribute,ReferencingAttribute,CascadeConfiguration" |
                 ForEach-Object {
@@ -728,6 +1033,15 @@ function Assert-TableReadback {
         $metadata.IsAuditEnabled.Value -ne $true) {
         throw "Created child table $name failed identity, ownership, primary-name, or audit reconciliation."
     }
+    $primary = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$name')/Attributes" |
+        Where-Object LogicalName -CEQ $Table.primaryName.logicalName)
+    if ($primary.Count -ne 1 -or
+        [int]$primary[0].MaxLength -ne [int]$Table.primaryName.maxLength -or
+        [string]$primary[0].FormatName.Value -cne [string]$Table.primaryName.formatName -or
+        [string]$primary[0].AutoNumberFormat -cne [string]$Table.primaryName.format -or
+        $primary[0].IsPrimaryName -ne $true) {
+        throw "Created child table $name primary-name String/AutoNumber metadata did not reconcile."
+    }
     $filter = [Uri]::EscapeDataString("_solutionid_value eq $($script:Solution.solutionid)")
     $components = @(Get-ODataRows -Path "solutioncomponents?`$select=componenttype,objectid,rootcomponentbehavior&`$filter=$filter")
     $roots = @($components | Where-Object {
@@ -778,6 +1092,36 @@ function Assert-TableReadback {
     [pscustomobject]@{ Metadata = $metadata; Root = $roots[0]; Attributes = $actual }
 }
 
+function Assert-TableCreateReadback {
+    param([Parameter(Mandatory = $true)][object]$Table)
+    $name = [string]$Table.logicalName
+    $metadata = Get-OptionalMetadata -Path "EntityDefinitions(LogicalName='$name')?`$select=LogicalName,MetadataId,OwnershipType,PrimaryNameAttribute,IsAuditEnabled"
+    if ($null -eq $metadata -or $metadata.LogicalName -cne $name -or
+        $metadata.OwnershipType -cne 'UserOwned' -or
+        $metadata.PrimaryNameAttribute -cne $Table.primaryName.logicalName -or
+        $metadata.IsAuditEnabled.Value -ne $true) {
+        throw "Immediate readback did not verify the created table identity, ownership, primary name, and audit flag for $name."
+    }
+    $filter = [Uri]::EscapeDataString("LogicalName eq '$($Table.primaryName.logicalName)'")
+    $primary = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$name')/Attributes/Microsoft.Dynamics.CRM.StringAttributeMetadata?`$select=LogicalName,MaxLength,FormatName,AutoNumberFormat,IsPrimaryName&`$filter=$filter")
+    if ($primary.Count -ne 1 -or
+        $primary[0].LogicalName -cne $Table.primaryName.logicalName -or
+        [int]$primary[0].MaxLength -ne [int]$Table.primaryName.maxLength -or
+        [string]$primary[0].FormatName.Value -cne [string]$Table.primaryName.formatName -or
+        [string]$primary[0].AutoNumberFormat -cne [string]$Table.primaryName.format -or
+        $primary[0].IsPrimaryName -ne $true) {
+        throw "Immediate readback did not verify the corrected AutoNumber primary-name metadata for $name."
+    }
+    [pscustomobject]@{
+        LogicalName = $name
+        PrimaryName = [string]$primary[0].LogicalName
+        MaxLength = [int]$primary[0].MaxLength
+        FormatName = [string]$primary[0].FormatName.Value
+        AutoNumberFormat = [string]$primary[0].AutoNumberFormat
+        TableAuditEnabled = $true
+    }
+}
+
 function Assert-RelationshipsAndKeys {
     foreach ($name in $script:TableNames) {
         $relationships = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$name')/ManyToOneRelationships")
@@ -813,6 +1157,7 @@ function Assert-RelationshipsAndKeys {
 
 $failure = $null
 $manifest = Get-Content -LiteralPath $script:ManifestPath -Raw | ConvertFrom-Json
+$script:CorrectedCallLogCreateDispatches = [int]$manifest.provisioning.phase3B2AuthorizedContinuation.correctedCallLogCreateDispatches
 $candidateResult = $null
 $choiceReadback = $null
 try {
@@ -826,10 +1171,18 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Fresh Candidate-only guarded reconciliation failed; no child write was attempted.' }
     try { $candidateResult = ($candidateOutput -join "`n") | ConvertFrom-Json }
     catch { throw 'Candidate runner did not return a parseable reconciliation result.' }
+    $excludedTablesMatchMode = if ($ResumeRemainingScope) {
+        (Compare-Object @('os_sr_call') @($candidateResult.ExcludedTablesPresent)).Count -eq 0
+    } elseif ($ReconcileOnly) {
+        $true
+    } else {
+        $candidateResult.ExcludedTablesPresent.Count -eq 0
+    }
     if ($candidateResult.Result -cne 'CANDIDATE_TABLE_KEYS_LOOKUPS_AND_SOLUTION_MEMBERSHIP_RECONCILED' -or
         $candidateResult.CandidateTable -cne 'EXACT_SCHEMA_AND_AUDIT_RECONCILED' -or
-        $candidateResult.ExcludedTablesPresent.Count -ne 0 -or $candidateResult.Requests.POST -ne 0) {
-        throw 'Fresh Candidate reconciliation, child absence, or zero-write condition did not pass.'
+        -not $excludedTablesMatchMode -or
+        $candidateResult.Requests.POST -ne 0) {
+        throw 'Fresh Candidate reconciliation, mode-specific child state, or zero-write condition did not pass.'
     }
 
     $script:CurrentStage = 'TARGET_AND_IDENTITY'
@@ -845,8 +1198,11 @@ try {
     $initialState = Assert-InitialState
     $script:CurrentStage = 'CHOICE_CREATE_OR_REUSE'
     $choice = $initialState.CallOutcomeChoice
+    $choiceMetadataByName = @{
+        os_sr_callout = $initialState.CallOutcomeChoice
+        os_sr_candstat = $initialState.CandidateStatusChoice
+    }
     if ($PreflightOnly) {
-        if ($null -eq $choice) { throw 'Preflight-only mode requires the Call Outcome Choice to exist; no writes are allowed.' }
         $choiceReadback = Assert-Choice -Choice $choice
         foreach ($expectedOption in $manifest.callOutcomeChoice.options) {
             $liveOption = @($choiceReadback.Options | Where-Object Label -CEQ $expectedOption.label)
@@ -854,47 +1210,87 @@ try {
                 throw 'Live Call Outcome Choice mapping differs from its frozen manifest values.'
             }
         }
-        $previewTables = @($manifest.tables | Where-Object logicalName -in $script:TableNames | ForEach-Object {
-            (New-TablePayload -Table $_ -Manifest $manifest -ChoiceMetadata $choice).SchemaName
-        })
+        $payloadPlan = [System.Collections.Generic.List[object]]::new()
+        foreach ($table in $manifest.tables | Where-Object logicalName -in $script:ExpectedTableCreateNames) {
+            $payload = New-TablePayload -Table $table -Manifest $manifest -ChoiceMetadataByName $choiceMetadataByName
+            $payloadPlan.Add([ordered]@{
+                Path = 'EntityDefinitions'
+                SchemaName = [string]$payload.SchemaName
+                PayloadSha256 = Get-Sha256 -Bytes ([Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject $payload -Depth 80 -Compress)))
+            })
+        }
+        foreach ($relationshipName in $script:RelationshipNames) {
+            $relation = @($manifest.relationships | Where-Object schemaName -CEQ $relationshipName)[0]
+            $parent = if ($relation.parent -ceq 'os_sr_cand') { $initialState.Candidate } else { $initialState.SystemUser }
+            $payload = Get-RelationshipPayload -Relation $relation -ReferencedAttribute ([string]$parent.PrimaryIdAttribute)
+            $payloadPlan.Add([ordered]@{
+                Path = 'RelationshipDefinitions'
+                SchemaName = [string]$payload.SchemaName
+                PayloadSha256 = Get-Sha256 -Bytes ([Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject $payload -Depth 80 -Compress)))
+            })
+        }
+        foreach ($name in $script:TableNames) {
+            $table = @($manifest.tables | Where-Object logicalName -CEQ $name)[0]
+            foreach ($definition in $table.alternateKeys) {
+                $payload = [ordered]@{
+                    '@odata.type' = 'Microsoft.Dynamics.CRM.EntityKeyMetadata'
+                    SchemaName = [string]$definition.name
+                    DisplayName = New-Label -Text ([string]$definition.name)
+                    KeyAttributes = @($definition.columns)
+                }
+                $payloadPlan.Add([ordered]@{
+                    Path = "EntityDefinitions(LogicalName='$name')/Keys"
+                    SchemaName = [string]$definition.name
+                    PayloadSha256 = Get-Sha256 -Bytes ([Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject $payload -Depth 80 -Compress)))
+                })
+            }
+        }
         [ordered]@{
-            Result = 'READ_ONLY_CHILD_PREFLIGHT_PASSED'
+            Result = if ($ResumeRemainingScope) {
+                'READ_ONLY_REMAINING_SCOPE_RESUME_PREFLIGHT_PASSED'
+            } else {
+                'READ_ONLY_CHILD_PREFLIGHT_PASSED'
+            }
             Candidate = $candidateResult.Result
             CallOutcomeChoice = 'EXACT_LABEL_VALUE_MAPPING_AND_SOLUTION_MEMBERSHIP'
-            PlannedTables = $previewTables
+            PlannedTables = @($script:ExpectedTableCreateNames)
             PlannedRelationships = $script:RelationshipNames
             PlannedKeys = $script:KeyNames
+            ManifestSha256 = Get-ManifestHash
+            PlannedWrites = $payloadPlan.ToArray()
+            CorrectedCallLogCreateDispatchLimit = 1
             Requests = [ordered]@{
                 CandidateReconciliationGET = [int]$candidateResult.Requests.GET
                 ChildScopeGET = $script:RequestCounts.GET
             }
             Writes = @()
             AutomaticRetries = 0
+            CorrectedCallLogCreateDispatches = [int]$manifest.provisioning.phase3B2AuthorizedContinuation.correctedCallLogCreateDispatches
+            RemainingScopeAuthorizationConsumed = [bool]$manifest.provisioning.phase3B2AuthorizedContinuation.remainingMetadataAuthorizationConsumed
         } | ConvertTo-Json -Depth 20
         return
     }
-    if ($null -eq $choice) {
-        $choicePayload = New-CallOutcomeChoicePayload
-        $null = Invoke-DataverseRequest -Method POST -Path 'GlobalOptionSetDefinitions' -Body $choicePayload -WithSolutionHeader
-        Start-Sleep -Seconds 5
-        $choice = Get-OptionalMetadata -Path "GlobalOptionSetDefinitions(Name='$($script:ChoiceName)')"
-        if ($null -eq $choice) { throw 'Call Outcome Choice POST returned without a visible GET-reconciled component; do not retry.' }
-        $choiceReadback = Assert-Choice -Choice $choice
+    $choiceReadback = Assert-Choice -Choice $choice
+    if (-not $ResumeRemainingScope) {
+        Update-ManifestChoiceValues -Options $choiceReadback.Options
+        $script:ExpectedManifestSha256 = Get-ManifestHash
+        $manifest = Get-Content -LiteralPath $script:ManifestPath -Raw | ConvertFrom-Json
+        Assert-Manifest -Manifest $manifest
     }
-    else {
-        $choiceReadback = Assert-Choice -Choice $choice
-    }
-    Update-ManifestChoiceValues -Options $choiceReadback.Options
-    $script:ExpectedManifestSha256 = Get-ManifestHash
-    $manifest = Get-Content -LiteralPath $script:ManifestPath -Raw | ConvertFrom-Json
-    Assert-Manifest -Manifest $manifest
     $choice = $choiceReadback.Metadata
+    $choiceMetadataByName.os_sr_callout = $choice
 
     $script:CurrentStage = 'CREATE_CHILD_TABLES'
-    foreach ($name in $script:TableNames) {
+    foreach ($name in $script:ExpectedTableCreateNames) {
         $table = @($manifest.tables | Where-Object logicalName -CEQ $name)[0]
-        $payload = New-TablePayload -Table $table -Manifest $manifest -ChoiceMetadata $choice
+        $payload = New-TablePayload -Table $table -Manifest $manifest -ChoiceMetadataByName $choiceMetadataByName
         $null = Invoke-DataverseRequest -Method POST -Path 'EntityDefinitions' -Body $payload -WithSolutionHeader
+        if ($name -ceq 'os_sr_call') {
+            $script:CurrentStage = 'CALL_LOG_IMMEDIATE_READBACK'
+            $null = Assert-TableCreateReadback -Table $table
+            Set-ManifestContinuationState -Status 'CORRECTED_CALLLOG_RECONCILED_REMAINING_SCOPE_AUTHORIZED' -CorrectedCallLogDispatches 1
+            $script:CurrentStage = 'CREATE_CHILD_TABLES'
+        }
     }
     Start-Sleep -Seconds 20
     $candidateMetadata = Get-OptionalMetadata -Path "EntityDefinitions(LogicalName='os_sr_cand')?`$select=LogicalName,PrimaryIdAttribute"
@@ -903,7 +1299,7 @@ try {
         throw 'A relationship target disappeared after child table creation; no further writes were sent.'
     }
     $script:CurrentStage = 'CREATE_CHILD_RELATIONSHIPS'
-    foreach ($relationName in $script:RelationshipNames) {
+    foreach ($relationName in $script:ExpectedRelationshipNames) {
         $relation = @($manifest.relationships | Where-Object schemaName -CEQ $relationName)[0]
         $parent = if ($relation.parent -ceq 'os_sr_cand') { $candidateMetadata } else { $systemUserMetadata }
         $payload = Get-RelationshipPayload -Relation $relation -ReferencedAttribute ([string]$parent.PrimaryIdAttribute)
@@ -912,18 +1308,19 @@ try {
     }
     Start-Sleep -Seconds 20
     $script:CurrentStage = 'CREATE_CHILD_KEYS'
-    foreach ($name in $script:TableNames) {
-        $table = @($manifest.tables | Where-Object logicalName -CEQ $name)[0]
-        foreach ($definition in $table.alternateKeys) {
-            $payload = [ordered]@{
-                '@odata.type' = 'Microsoft.Dynamics.CRM.EntityKeyMetadata'
-                SchemaName = [string]$definition.name
-                DisplayName = New-Label -Text ([string]$definition.name)
-                KeyAttributes = @($definition.columns)
-            }
-            $null = Invoke-DataverseRequest -Method POST -Path "EntityDefinitions(LogicalName='$name')/Keys" -Body $payload -WithSolutionHeader
-            Start-Sleep -Seconds 5
+    foreach ($keyName in $script:ExpectedKeyNames) {
+        $table = @($manifest.tables | Where-Object {
+            @($_.alternateKeys | Where-Object name -CEQ $keyName).Count -eq 1
+        })[0]
+        $definition = @($table.alternateKeys | Where-Object name -CEQ $keyName)[0]
+        $payload = [ordered]@{
+            '@odata.type' = 'Microsoft.Dynamics.CRM.EntityKeyMetadata'
+            SchemaName = [string]$definition.name
+            DisplayName = New-Label -Text ([string]$definition.name)
+            KeyAttributes = @($definition.columns)
         }
+        $null = Invoke-DataverseRequest -Method POST -Path "EntityDefinitions(LogicalName='$($table.logicalName)')/Keys" -Body $payload -WithSolutionHeader
+        Start-Sleep -Seconds 5
     }
     Start-Sleep -Seconds 20
     $script:CurrentStage = 'FINAL_SCHEMA_RECONCILIATION'
@@ -936,10 +1333,14 @@ try {
     if ([string]$org.organizationid -ine $ExpectedOrganizationId) {
         throw 'Final organization audit read returned a different target.'
     }
+    Set-ManifestContinuationState -Status 'PHASE_3B2_STORAGE_RECONCILED_AUTHORIZATION_CONSUMED' `
+        -CorrectedCallLogDispatches 1 -RemainingScopeWritesDispatched $script:RemainingScopeDispatches
+    $script:ProvisioningReconciled = $true
     [ordered]@{
         Result = 'PHASE_3B2_CHILD_TABLES_AND_CALL_OUTCOME_CHOICE_RECONCILED'
         ManifestSha256AtStart = $initialHash
         ManifestSha256AfterChoiceFreeze = Get-ManifestHash
+        FinalManifestSha256 = Get-ManifestHash
         Candidate = $candidateResult.Result
         CandidateStatusChoice = 'RECONCILED_UNMODIFIED'
         CallOutcomeChoice = [ordered]@{
@@ -969,6 +1370,12 @@ try {
 }
 catch {
     $failure = $_
+    if ($script:WriteStages.Count -gt 0 -and -not $script:ProvisioningReconciled) {
+        Set-ManifestContinuationState -Status 'STOPPED_AFTER_CORRECTED_CONTINUATION_REQUIRES_RECONCILIATION' `
+            -CorrectedCallLogDispatches $script:CorrectedCallLogCreateDispatches `
+            -RemainingScopeWritesDispatched $script:RemainingScopeDispatches `
+            -ConsumeRemainingScopeAuthorization:$script:RemainingScopeAuthorizationConsumed
+    }
     [ordered]@{
         Result = if ($script:WriteStages.Count -eq 0) { 'BLOCKED_BEFORE_WRITE' } else { 'STOPPED_AFTER_WRITE_REQUIRES_REVIEW' }
         Stage = $script:CurrentStage
@@ -983,6 +1390,8 @@ catch {
         Requests = $script:RequestCounts
         Writes = $script:WriteStages.ToArray()
         WritePayloadHashes = $script:WriteHashes.ToArray()
+        CorrectedCallLogCreateDispatches = $script:CorrectedCallLogCreateDispatches
+        RemainingScopeWritesDispatched = $script:RemainingScopeDispatches
         AutomaticRetries = 0
         CandidateWrites = 0
         BusinessDataWrites = 0

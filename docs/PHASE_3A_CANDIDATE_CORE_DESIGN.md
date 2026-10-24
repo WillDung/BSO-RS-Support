@@ -1,10 +1,10 @@
 # Phase 3A — Candidate Core Domain Design & Provisioning Readiness Report
 
-**As of:** 23 October 2026  
+**As of:** 24 October 2026
 **Current Candidate-only schema status:** `CANDIDATE_TABLE_KEYS_LOOKUPS_AND_SOLUTION_MEMBERSHIP_RECONCILED`
-**Current Phase 3B.2 status:** `STOPPED_AFTER_REJECTED_TABLE_CREATE_NO_RETRY`
-**Full Candidate Core classification:** `BLOCKED_CHILD_TABLE_CREATE_AND_EXTERNAL_AUDIT_API_PRIVILEGE_PREREQUISITES`
-**Phase:** Owner-approved design; Candidate-only metadata and Call Outcome Choice are provisioned and reconciled. Call Log and Candidate Status History remain absent after a rejected Call Log create request. Custom API/plugin, publication, app/access changes, and business records remain outside the completed slice.
+**Current Phase 3B.2 status:** `STOPPED_AFTER_REMAINING_METADATA_MISMATCH_NO_FURTHER_WRITES`
+**Full Candidate Core classification:** `BLOCKED_STATUS_HISTORY_CHOICE_BINDING_MISMATCH_AND_EXTERNAL_AUDIT_API_PRIVILEGE_PREREQUISITES`
+**Phase:** Owner-approved design; Candidate, Call Outcome Choice, Call Log, Candidate Status History, four approved relationships, and two Active child keys are present and GET-reconciled. However, both Candidate Status History status fields are bound to `os_sr_callout` instead of approved Choice `os_sr_candstat`. No further metadata write is authorized; Custom API/plugin, publication, app/access changes, and business records remain outside the completed slice.
 
 **Phase 3A.1 follow-up:** The first closure attempt received no owner-authored choices; its historical result remains in the [Phase 3A.1 report](PHASE_3A1_CANDIDATE_CORE_DECISION_CLOSURE.md). On 23 October 2026, the owner explicitly approved all eight decision areas. This revision applies those decisions and records remaining external gates in the [Phase 3A.2 decision application and readiness report](PHASE_3A2_CANDIDATE_CORE_DECISION_APPLICATION.md).
 
@@ -12,7 +12,7 @@
 
 The owner-approved design has a deterministic shape for Candidate, Call Log, Candidate Status History, the status and call-outcome Choices, and the server-enforced operation contract. Approved requirements include server-generated nonpersonal Candidate Numbers; Answered / No Answer / Call Back Requested outcomes; required Candidate Name and Email with optional Phone; Dataverse Owner as the responsible BSO; a mandatory reschedule reason; table auditing for all three tables; caller-generated GUID CorrelationId idempotency; and deferral of the LEGO Career lookup to the later scheduling/booking boundary. The Candidate Status Choice and Candidate table-only schema (including two Active alternate keys and three approved lookups) are now provisioned and GET-reconciled under the separate bounded authorization recorded in the [Candidate-only provisioning report](PHASE_3A_CANDIDATE_TABLE_PROVISIONING_REPORT.md). No Candidate business rows were created.
 
-Further Candidate Core work remains blocked by external gates and the rejected Phase 3B.2 table-create request, not unresolved owner product choices. Organization-level auditing is disabled, with retention/access/capacity governance still open; the least-privilege Custom API execution privilege model has not been approved or tested. No Candidate data may be created while organization auditing remains disabled. Candidate Status Choice allocation/binding, Candidate AutoNumber metadata, table audit flag, keys, lookup targets, and Solution inclusion are verified. The Call Outcome Choice is also provisioned and reconciled with Answered `100010000`, No Answer `100010001`, and Call Back Requested `100010002`. The Call Log and Candidate Status History tables remain absent; the Phase 3B.2 authorization is stopped. The synthetic proposal snapshot and current execution state are in [the metadata plan](PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json).
+Further Candidate Core work is blocked by the Phase 3B.2 Choice-binding mismatch and external gates, not unresolved owner product choices. Organization-level auditing is disabled, with retention/access/capacity governance still open; the least-privilege Custom API execution privilege model has not been approved or tested. No Candidate data may be created while organization auditing remains disabled. Candidate Status Choice allocation/binding, Candidate AutoNumber metadata, Candidate table audit flag, keys, lookup targets, and Solution inclusion are verified. The Call Outcome Choice is also provisioned and reconciled with Answered `100010000`, No Answer `100010001`, and Call Back Requested `100010002`. Call Log and Candidate Status History tables, their audit flags, all four approved child relationships, and both Active alternate keys are present. Fresh read-only reconciliation found that `os_sr_csh_prevstat` and `os_sr_csh_newstat` both bind to `os_sr_callout` instead of `os_sr_candstat`; no further write is authorized. The synthetic proposal snapshot and current execution state are in [the metadata plan](PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json).
 
 The proposal uses global Choices `os_sr_candstat` and `os_sr_callout`, and one synchronous server operation, `os_sr_cact`, with a main-operation plug-in. Direct status editing is blocked. Candidate state, an applicable Call Log, and exactly one Status History row must commit atomically. Non-answer calls create only a Call Log. Reschedule requires a reason and captures actor, server timestamp, CorrelationId, previous/new status, and reason; actual calendar/event cancellation evidence and execution remain deferred to the scheduling phase. Booking, interview-result capture, email, and integrations remain out of this slice.
 
@@ -274,7 +274,7 @@ Separate Candidate/Call/History schema writes from API/plugin implementation for
 
 The synthetic canonical proposal and current verified Candidate-only state are in [PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json](PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json). It defines the three-table target, status and call-outcome Choices, lookups/relationships, keys, transition matrix, Custom API contract, owner-decision record, and external prerequisites. It is **not** a Dataverse Web API payload, solution export, or generated PAC artifact.
 
-Local manifest SHA-256: **b7d0abb9335fd30925911059ef9744a1a519c84338354549768879083cc30ca4**. This fingerprint identifies the exact JSON file bytes only; it is not a request-body fingerprint.
+Local manifest SHA-256: **4ad1f47edaea1ee23add24c8aa5e8566357c3e913bf30ac198397f73b98e7bb1**. This fingerprint identifies the exact JSON file bytes only; it is not a request-body fingerprint.
 
 ## 18. Provisioning Safety Gates
 
@@ -323,11 +323,11 @@ External prerequisites remain:
 
 1. Enablement and governance for organization-level Dataverse auditing. The last documented environment review found auditing disabled; retention, authorized audit readers, legal-hold/DSR, and capacity ownership remain to be settled by IT/Compliance.
 2. Least-privilege Custom API Execute privilege/effective-access design and validation; preserve the authenticated initiating BSO without System Administrator or fixed Flow-owner impersonation.
-3. Candidate-only provisioning is complete: the Candidate Status Choice allocation and binding, Candidate table, AutoNumber metadata, audit flag, keys, lookup targets, and Solution inclusion are GET-reconciled. The separately authorized Phase 3B.2 continuation created and reconciled the Call Outcome Choice. Its child-table portion stopped after the Call Log table-create request returned HTTP 400; Call Log and Candidate Status History remain absent. See the [Phase 3B.2 report](PHASE_3B2_CANDIDATE_CHILD_TABLES_REPORT.md).
+3. Candidate-only provisioning remains exact. Phase 3B.2 created/reconciled the Call Outcome Choice and both child tables, then dispatched the four approved relationships and two alternate keys. The latest GET-only reconciliation confirms these components but finds both Status History status columns bound to the wrong global Choice (`os_sr_callout`, expected `os_sr_candstat`). The seven-write remaining authorization is consumed; corrective work requires new explicit authorization. See the [Phase 3B.2 report](PHASE_3B2_CANDIDATE_CHILD_TABLES_REPORT.md).
 4. Before any further metadata operation, verify the exact target, publisher, Solution, and dependencies in a fresh guarded preflight.
 5. Implement cancellation-attempt evidence before enabling the reschedule action in the later scheduling phase. This is an explicitly deferred implementation dependency, not an unresolved Candidate Core product choice.
 
-These items do not change the accepted Candidate Core product requirements. Audit governance blocks Candidate data creation and reliance on audit history; API privilege design blocks Custom API/plugin implementation. Candidate-only schema provisioning is complete.
+These items do not change the accepted Candidate Core product requirements. The Phase 3B.2 status-field Choice binding mismatch blocks acceptance of child-table schema; audit governance blocks Candidate data creation and reliance on audit history; API privilege design blocks Custom API/plugin implementation. Candidate-only schema provisioning is complete.
 
 ## 22. Request / Write Counts
 
@@ -357,23 +357,23 @@ No solution source, environment configuration, business data, or published app c
 
 ## 24. Final Classification
 
-**`BLOCKED_EXTERNAL_AUDIT_AND_API_PRIVILEGE_PREREQUISITES` for further Candidate Core implementation.**
+**`BLOCKED_STATUS_HISTORY_CHOICE_BINDING_MISMATCH_AND_EXTERNAL_AUDIT_API_PRIVILEGE_PREREQUISITES` for further Candidate Core implementation.**
 
-All owner product decisions are recorded. Candidate-only metadata provisioning is complete and reconciled. Organization auditing is disabled, so no Candidate business data may be created; the least-privilege Custom API execution privilege model remains unapproved/untested. The seven authorized metadata writes were completed without retry; no Candidate data, API/plugin, app, access, or publication change occurred.
+All owner product decisions are recorded. Candidate-only metadata is exact. Phase 3B.2's seven remaining metadata writes completed without retry, but final reconciliation found two Status History attributes bound to the wrong Choice; the authorization is consumed and no corrective write was attempted. Organization auditing is disabled, so no Candidate business data may be created; the least-privilege Custom API execution privilege model remains unapproved/untested. No Candidate data, API/plugin, app, access, or publication change occurred.
 
 ## 25. Exact Recommended Next Task
 
-Resolve organization-level audit governance with IT/Compliance before Candidate data creation, and approve/test the least-privilege Custom API execution privilege model before API/plugin implementation. Keep Candidate-only schema intact; do not recreate it. Any Call Log/History or Call Outcome Choice work requires separate bounded authorization and fresh guarded preflight.
+First obtain new bounded authorization to plan a non-destructive correction for `os_sr_csh_prevstat` and `os_sr_csh_newstat`, currently bound to `os_sr_callout` but required to bind to `os_sr_candstat`; start with fresh read-only metadata reconciliation and supported-correction analysis. Do not retry table/relationship/key creation or modify Candidate. Separately resolve organization-audit governance before Candidate data creation and approve/test least-privilege Custom API execution before API/plugin implementation.
 
 ## 26. AI HANDOVER
 
 - Phase 2D remains `PHASE_2D_COMPLETE`; the published reference app/navigation was not touched.
-- Candidate Status Choice and Candidate table schema (two Active keys, three approved lookups) are provisioned and GET-reconciled. Call Log, Candidate Status History, Call Outcome Choice, Custom API, and plug-in are not provisioned.
+- Candidate Status Choice and Candidate table schema (two Active keys, three approved lookups) are provisioned and GET-reconciled. Call Outcome Choice, Call Log, Candidate Status History, four relationships, and two Active keys are present. The two Status History status fields have an incorrect Choice binding, so Phase 3B.2 remains blocked; its remaining-write authorization is consumed.
 - Use [the metadata plan](PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json) as the synthetic design/current-state manifest, not as a request or generated solution artifact.
 - The workflow uses the six canonical statuses, defaulting to Need Call Candidate. No legacy TA approval state is allowed.
 - Proposed `os_sr_cact` must require a caller-generated GUID CorrelationId for every state-changing operation, compare expected status/version, and atomically persist Candidate status, applicable Call Log, and exactly one Status History row.
 - Answered logs and transitions atomically; No Answer and Call Back Requested log only. Reschedule requires a reason and full history evidence but stays disabled until the later cancellation-attempt boundary is implemented.
 - Candidate Number, call outcomes, contact requiredness, Owner-as-BSO, auditing, contact field-security, and LEGO Career deferral are owner-approved decisions.
 - Organization auditing is disabled; no Candidate records were created and none may be created until audit governance is resolved.
-- Candidate-only provisioning used seven authorized writes, zero retries, and a final GET-only reconciliation (31 GET, 0 POST). The authorization is consumed; no commit or push occurred.
-- Next action: resolve audit governance and API privilege design, then plan separately authorized Call Log/History work without recreating Candidate metadata.
+- Candidate-only provisioning used seven authorized writes, zero retries, and a final GET-only reconciliation (31 GET, 0 POST). Phase 3B.2's corrected Call Log create plus seven remaining-scope writes were dispatched once; the latest child-scope reconciliation returned 17 GET and 0 POST. No Candidate data or other prohibited writes occurred.
+- Next action: obtain a new bounded authorization to correct the two History Choice bindings after supported non-destructive repair analysis; do not repeat any of the seven writes. Organization auditing and API privilege design remain separate gates.

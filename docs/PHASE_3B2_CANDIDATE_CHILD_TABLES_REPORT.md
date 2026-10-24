@@ -1,15 +1,17 @@
 # Phase 3B.2 — Candidate Core Storage Provisioning Report
 
 **Date:** 24 October 2026
-**Final classification:** `STOPPED_AFTER_REJECTED_TABLE_CREATE_NO_RETRY`
-**Provisioning execution:** one Call Outcome Choice POST succeeded and reconciled; one Call Log table-create POST returned HTTP 400; no retry
-**Final guarded reconciliation:** Candidate exact; Call Outcome Choice present; Call Log and Candidate Status History absent
+**Current classification:** `STOPPED_AFTER_REMAINING_METADATA_MISMATCH_NO_FURTHER_WRITES`
+**Latest provisioning execution:** corrected Call Log create and seven remaining metadata POSTs were dispatched once; zero retries
+**Latest read-only reconciliation:** Candidate exact; both child tables, four relationships, and two Active keys present; both Candidate Status History status columns bind to the wrong global Choice
+
+> The original HTTP 400 attempt is retained below as historical evidence. The latest bounded continuation and current handover are recorded in Section 30 and supersede earlier statements that the child tables were absent.
 
 ## 1. Executive Summary
 
-The owner authorized technical normalization and bounded Phase 3B.2 provisioning. The two deterministic `systemuser` relationship names were added to the manifest. A guarded Choice creation POST succeeded; GET reconciliation confirmed the approved labels and Dataverse-allocated values. The current manifest was then updated to freeze those values. A later guarded child-table attempt passed its pre-write checks but its first `EntityDefinitions` POST for Call Log returned HTTP 400. The runner stopped without retrying. A separate guarded read-only reconciliation confirmed Candidate remains exact, the Choice remains present, and both child tables remain absent. Candidate Status History creation was not attempted.
+The owner-authorized initial Phase 3B.2 attempt created and reconciled the Call Outcome Choice, then its Call Log create returned HTTP 400. That original failure and its zero-retry disposition are historical. The owner later approved the corrected primary-name metadata and one corrected Call Log create dispatch, followed by remaining child metadata if Call Log reconciled exactly. The corrected Call Log create returned successfully, its immediate GET returned HTTP 404, and subsequent GET-only reconciliation found it present and exact. A guarded resume then dispatched exactly seven remaining-scope metadata writes. Final read-only reconciliation found both child tables, their four approved relationships, and both Active keys, but exposed a Choice-binding mismatch on the two Candidate Status History status attributes. No retry or corrective write was sent.
 
-The rejected request's response body was suppressed, so the exact server-side validation error is unknown. Local static inspection found that the table payload builder omitted `MaxLength` from the AutoNumber primary-name `StringAttributeMetadata`; the current Call Log and Candidate Status History manifest entries also omit `primaryName.maxLength`. This is a plausible payload defect consistent with the HTTP 400, not a confirmed server diagnosis. The runner now refuses to build such a payload until a valid length is explicitly present. No length was invented and no metadata request was repeated. No further tenant write may be made under the consumed/stopped authorization. The report does not infer that either child table exists.
+The original HTTP 400 body remains unavailable, so its exact cause is unknown. The later approved normalization set both child String/AutoNumber primary-name MaxLength values to 100 and FormatName to Text. The remaining-scope runner incorrectly supplied the Call Outcome Choice metadata for every GlobalChoice column, so the two Status History status fields were bound to `os_sr_callout` instead of `os_sr_candstat`. This mismatch is directly verified by fresh read-only metadata. The seven-write authorization is consumed; no additional tenant write is authorized by it. No Candidate or business records were created.
 
 ## 2. Git / Manifest Baseline
 
@@ -26,7 +28,7 @@ No reset, restore, stash, pull, rebase, branch switch, commit, or push was perfo
 
 The final local manifest SHA-256 after freezing the live Choice mapping and recording the stopped authorization is:
 
-`b7d0abb9335fd30925911059ef9744a1a519c84338354549768879083cc30ca4`
+`9bf9be601451f307ca523eac2a8a109e1dd32be4ba11b71d499f66688390d435`
 
 Manifest identity: solution `os_sr_bso_rs_support`, Publisher prefix `os`, project namespace `sr_`. It contains the Candidate Core tables, seven unique relationships, and frozen `os_sr_callout` labels/values. The child continuation status is now `STOPPED_AFTER_REJECTED_TABLE_CREATE_NO_RETRY`; both provisioning-runner manifest pins match this SHA. A future attempt requires new bounded authorization and a new safe diagnosis of the rejected payload.
 
@@ -143,7 +145,7 @@ These allocated values are frozen in the manifest before Custom API/plugin imple
 
 The live Choice mapping and relationship names were frozen locally, and the failed execution disposition was recorded. Final SHA-256 is:
 
-`b7d0abb9335fd30925911059ef9744a1a519c84338354549768879083cc30ca4`
+`9bf9be601451f307ca523eac2a8a109e1dd32be4ba11b71d499f66688390d435`
 
 ## 21. Full Candidate Core Storage State
 
@@ -211,7 +213,7 @@ First obtain an explicit approved `MaxLength` for both child AutoNumber primary-
 
 ## 29. AI HANDOVER
 
-- Current manifest SHA-256: `b7d0abb9335fd30925911059ef9744a1a519c84338354549768879083cc30ca4`.
+- Current manifest SHA-256: `9bf9be601451f307ca523eac2a8a109e1dd32be4ba11b71d499f66688390d435`.
 - PAC/Az/Dataverse identity and process-scoped expected-user guards passed during guarded provisioning; exact Candidate, Solution, and Publisher checks passed.
 - `os_sr_callout` exists in the approved Solution and is frozen as Answered `100010000`, No Answer `100010001`, Call Back Requested `100010002`.
 - Call Log table-create POST returned HTTP 400; no retry. Final GET-only reconciliation confirmed both Call Log and Candidate Status History absent; Candidate remains exact.
@@ -221,4 +223,65 @@ First obtain an explicit approved `MaxLength` for both child AutoNumber primary-
 - Local diagnosis: table payload omitted primary-name `MaxLength`; likely invalid-payload cause, not confirmed because the HTTP 400 body was suppressed. Both child primary-name lengths remain unspecified; runner now blocks payload construction until set.
 - Manifest authorization status is `STOPPED_AFTER_REJECTED_TABLE_CREATE_NO_RETRY`; the runner blocks future requests/writes under this stopped authorization.
 - No Candidate changes, business data, app changes, publication, roles, or access changes occurred.
+- No commit or push occurred.
+
+## 30. Latest Corrected Continuation and Read-Only Reconciliation
+
+**Date:** 24 October 2026
+**Current classification:** `STOPPED_AFTER_REMAINING_METADATA_MISMATCH_NO_FURTHER_WRITES`
+
+### 30.1 Corrected Call Log Create
+
+The one explicitly authorized corrected `EntityDefinitions` POST for `os_sr_call` returned successfully. Its immediate GET returned HTTP 404, so the runner stopped without retry. A later GET-only reconciliation confirmed Call Log exists in the approved Solution with `UserOwned` ownership, auditing enabled, root inclusion of subcomponents, primary name `os_sr_call_ref`, String MaxLength 100, Text format, AutoNumber format `CALL-{SEQNUM:8}`, and the approved pre-relationship custom attributes. Its Call Outcome field is bound to `os_sr_callout`.
+
+### 30.2 Remaining-Scope Dispatch
+
+After the existing Call Log reconciled, a same-process guarded resume dispatched the seven remaining approved metadata writes exactly once:
+
+| Metadata component | POSTs | Result |
+|---|---:|---|
+| Candidate Status History table | 1 | HTTP success response; later read as present |
+| Approved child relationships | 4 | HTTP success responses; later read as present |
+| Approved alternate keys | 2 | HTTP success responses; later read as Active |
+| **Total remaining-scope writes** | **7** | Authorization consumed; automatic retries 0 |
+
+No Call Log create was repeated. The run made no Candidate, business-data, Custom API/plugin, security/access, app/navigation, or publication writes.
+
+### 30.3 Fresh GET-Only Reconciliation
+
+The subsequent child-scope reconciliation completed with **17 GET, 0 POST**, and zero retries. Candidate reconciled exact. Both child tables are present, UserOwned, audit-enabled, and included as Solution roots with subcomponents. The four approved relationships exist with Delete Restrict and NoCascade Assign/Share/Reparent. Both approved two-column alternate keys are Active:
+
+- `os_sr_call_ak_cand_action`: Candidate + Correlation ID.
+- `os_sr_csh_ak_cand_action`: Candidate + Correlation ID.
+
+The Call Outcome Choice remains exact and has one Solution association. Organization-level auditing remains disabled; no business rows were created.
+
+### 30.4 Blocking Metadata Mismatch
+
+The approved manifest requires both `os_sr_csh_prevstat` and `os_sr_csh_newstat` to bind to global Choice `os_sr_candstat`. Fresh read-only `PicklistAttributeMetadata` expansion instead reports both bound to `os_sr_callout`. This is a verified schema mismatch, not a readback uncertainty. The local payload-builder defect was that it reused the Call Outcome Choice metadata for every Choice column rather than resolving each field's manifest `target`. The local builder is corrected to select the metadata by target and the offline tests cover that distinction; this code correction does not repair deployed metadata.
+
+The seven-write remaining-scope authorization is consumed. No attribute update, replacement, recreate, relationship retry, key retry, or other corrective write was attempted. **Do not run the writer again under this consumed authorization.** Any correction requires new bounded owner authorization, fresh target and metadata preflight, and a supported non-destructive correction plan. Do not create Candidate records while organization auditing is disabled.
+
+### 30.5 Current Manifest and Request Accounting
+
+The current manifest SHA-256 is `4ad1f47edaea1ee23add24c8aa5e8566357c3e913bf30ac198397f73b98e7bb1`. The latest reconciliation's 17 GET / 0 POST count is the child runner's count; the separately invoked Candidate reconciler's request count is not included in that counter. During the guarded resume, the child runner reported 35 GET and 7 POST before final validation stopped at the first Choice-binding mismatch. Aggregate cross-runner GET totals are not asserted.
+
+| Boundary | Count |
+|---|---:|
+| Corrected Call Log table create | 1 POST |
+| Remaining-scope metadata writes | 7 POST |
+| Automatic retries | 0 |
+| Candidate schema writes | 0 |
+| Business-data writes | 0 |
+| App / Site Map / access / publication writes | 0 |
+
+### 30.6 Current Handover
+
+- Candidate and Call Outcome Choice remain exact and unchanged.
+- Call Log, Candidate Status History, all four approved relationships, and both Active keys are present.
+- The two Candidate Status History Choice columns have the verified wrong binding: `os_sr_callout` instead of `os_sr_candstat`.
+- The corrected Call Log create was dispatched once; the seven remaining writes were each dispatched once. Total automatic retries: 0.
+- Current authorization is consumed; no further tenant write is authorized.
+- Organization auditing is disabled; no Candidate business data was created.
+- The local runner now binds each Choice column using its manifest target and has a fail-closed resume path that cannot be used with the consumed authorization.
 - No commit or push occurred.

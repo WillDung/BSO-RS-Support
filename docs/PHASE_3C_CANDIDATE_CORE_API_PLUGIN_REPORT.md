@@ -28,6 +28,8 @@ Organization auditing remains disabled. No business API was invoked, no Candidat
 
 No fetch, reset, restore, stash, pull, rebase, branch switch, commit, or push. The local remote-tracking reference is not a claim of a fresh network fetch. The separate receipt/API manifests preserve the existing three-table manifest and its historical execution ledger.
 
+**18:59 +07 repeated attachment:** current `main` HEAD is `a7baa5f6075fdb19ea6125a22f41069a175b66e9` (`2026-10-24T18:59:22+07:00`, `Add Candidate Core operations and tests`); starting worktree clean. Local `origin/main` initially remained `1a124f1157d160ea63a43678952755f893f5b91d`, then advanced externally to the same current HEAD during inspection. This assistant did not commit, fetch, or push. The three contract hashes above remain unchanged. The attachment's blocked starting classification is superseded; no deployment write is repeated.
+
 ## 3. Environment / Identity Guard
 
 Every live runner used the owner-confirmed VN LMV IT organization, existing active PAC target, existing Az.Accounts delegated user credential, JWT audience/tenant/scope/expiry validation, WhoAmI, and process-scoped expected-user agreement. No login/context/environment switch occurred.
@@ -158,13 +160,15 @@ Outputs (5): ResultCode String, PreviousStatus Integer, CurrentStatus Integer, C
 | App composition | 329 | PASS |
 | Receipt plan/payload/safety | 27 | PASS |
 | Deployment contract/safety | 23 | PASS |
-| Shared operation engine | 56 | PASS |
+| Shared operation engine, including attachment follow-up | 68 | PASS |
 | Real SDK adapter/guard types with synthetic services | 53 | PASS |
-| Total | **1,145** | PASS |
+| Current total | **1,157** | PASS |
 
 Covered: three outcomes, queue transition, future transition contracts and fail-closed execution, invalid/terminal/stale paths, reason/outcome/correlation/actor validation, exact replay, conflicting reuse, later-edit replay, no fabricated history, rollback simulation, concurrency rejection, audit gate, caller context, conditional SDK writes, tampered mutation rejection, and unrelated-association isolation.
 
 PowerShell deployment tests are source/contract assertions, not live writes. The in-memory rollback test is not a live Dataverse transaction test. All test data is synthetic. See [test instructions](../tests/README.md).
+
+The follow-up adds 12 assertions to the original 56 engine assertions: fixed update/null/call SHA-256 golden vectors derived from explicit length-prefixed canonical strings, trimmed equivalent input, null versus empty distinction, culture/order invariance, and identical/conflicting uniqueness-race scenarios. The race harness models a receipt pre-read miss followed by unique insertion rejection, rollback of the losing Call Log effect, preservation of the winning receipt, and later replay of its original result. It is deterministic fault injection, not a live parallel Dataverse test. No production source or deployed assembly changed.
 
 ## 18. Assembly Build / Fingerprint
 
@@ -175,6 +179,8 @@ Strong-name identity: `os_sr_cact, Version=1.0.0.0, Culture=neutral, PublicKeyTo
 **Deployed assembly SHA-256:** `f11d6db0db3a190806ef48daa46a3f3b6befbf7070f236bac5a44b6e40598f0f`.
 
 Private signing material is not in the repository. Future compatible updates must preserve signing identity. No plugin NuGet package/dependent assembly was needed; this is direct signed assembly registration.
+
+**Duplicate-resume build caveat:** a fresh signed build at the newer HEAD passed with zero warnings/errors and produced local SHA-256 `17c36745e680eb86b13f39746c9d51231a35f5d2eb9d116ea1a50bb8149835aa`; its informational version includes the newer commit. An additional build with `SourceRevisionId=1a124f1157d160ea63a43678952755f893f5b91d` also passed but produced `d6941d74195f49c3edc0a3694fa782caae19c95c7a761ee897ebd7d491e2df93`, so revision metadata alone does not establish byte-for-byte reproducibility. The remaining build-input difference was not established; neither new binary was deployed. Current production source has no diff. Live reconciliation and the SHA-verified retained registration payload independently confirm deployed hash `f11d6db0db3a190806ef48daa46a3f3b6befbf7070f236bac5a44b6e40598f0f`. The exact retained binary was restored only to ignored local build output, preserving the pinned reconciliation artifact. Do not interpret it as the output of the fresh build or resend deployment to make hashes agree.
 
 ## 19. Pre-Deployment Live State
 
@@ -266,6 +272,8 @@ The new relationship is the explicit receipt-only exception, not a modification 
 
 One supported PAC Solution export and one local unpack also completed. **PAC internal reads are not instrumented**, so 1,425 is not presented as the total network request count across PAC and Web API. No solution import/publication was invoked. PAC target/auth informational calls are not counted as instrumented Web API GETs.
 
+**18:59 +07 duplicate-resume counts, separate from deployment above:** fresh reconciliation made 258 registration/identity GETs plus 77 storage-gate GETs = **335 instrumented GETs**. Receipt table/column/relationship/key writes 0; existing Candidate Core schema writes 0; plug-in writes 0; Custom API writes 0; parameter/response writes 0; business writes/API invocations 0; app/access/publication writes 0; retries 0. The printed `PlannedCounts` describes the retained 72-write plan, not new dispatches. Combined instrumented GETs across the original receipt-authorized continuation and this follow-up are 1,760; historical POST/PUT totals remain 75/2. PAC internal reads remain excluded.
+
 ## 26. No-Retry Proof
 
 Each schema/registration write was reserved durably before network dispatch. Journals record its fingerprint, acknowledgment, and reconciliation. No create/update was dispatched twice. Later read-only reconciliation after local verifier fixes or asynchronous indexing is not a write retry.
@@ -275,6 +283,8 @@ Receipt chronology: table POST returned 204 but primary-name defaults were 850/o
 ## 27. Regression Results
 
 All nine offline suites passed, **1,145 assertions**. Release build passed with zero warnings/errors. Final local checks passed: PowerShell parser for 15 files; 209 relative file links; all 32 report sections in sequence; privacy literal scan across 24 changed/new files; unchanged core manifest and exact receipt/API/deployed-assembly hashes; tracked/new-file whitespace and `git diff --check`. The signed SDK harness rebuild reproduced the deployed assembly hash. Live business acceptance is deliberately not claimed.
+
+The duplicate-resume follow-up reran the nine-suite baseline (1,145 PASS), then all nine suites with the extended engine harness (68 PASS), bringing current total coverage to **1,157**. Fresh GET-only reconciliation returned the same success classification and unchanged deployed assembly SHA-256. Local checks passed for 15 PowerShell parsers, 82 relative file links in the three changed Markdown files, 32 numbered report sections, privacy/whitespace across the four changed files, and `git diff --check`. The fresh signed build passed but did not reproduce deployed bytes; see Section 18 for the explicit build-evidence distinction. Four-table zero-row counts remain the prior closeout observation; the follow-up did not newly count all business tables.
 
 Supported metadata export/unpack was retained in private session storage, not copied wholesale into source: it includes the wider existing Solution beyond this surgical change. Snapshot ZIP SHA-256: `1884ae34b2096631003eba6f7effefca44cd3e879f33a699ba16e13bc70193f0`. No hand-authored Solution XML or fake export is presented as generated source.
 

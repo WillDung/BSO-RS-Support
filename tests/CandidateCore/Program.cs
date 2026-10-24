@@ -104,6 +104,41 @@ static class Program
         Check(Request(ordered).Fingerprint == Request(reversed).Fingerprint, "Canonical input order");
         reversed["CandidatePhone"] = null;
         Check(Request(ordered).Fingerprint != Request(reversed).Fingerprint, "Omitted and explicit null differ");
+        var vectorId = Guid.Parse("00000000-0000-0000-0000-000000000004");
+        var vector = Input("UpdateCandidate", vectorId);
+        Check(Request(vector).Fingerprint == "4e5eb0d4c3e770c2fd219dd2f3ddad71ca261af3a87220d1148cd9af8a46d0b5", "Update fingerprint golden vector");
+        vector["CandidateName"] = "  Synthetic Replacement  ";
+        Check(Request(vector).Fingerprint == "4e5eb0d4c3e770c2fd219dd2f3ddad71ca261af3a87220d1148cd9af8a46d0b5", "Trimmed equivalent request golden vector");
+        vector["CandidatePhone"] = null;
+        Check(Request(vector).Fingerprint == "c35231ed0a55b5c76c91f24e0db6c90fd086a4d94997f0279ceea8f11391ca81", "Explicit null fingerprint golden vector");
+        vector["CandidatePhone"] = "";
+        Check(Request(vector).Fingerprint != "c35231ed0a55b5c76c91f24e0db6c90fd086a4d94997f0279ceea8f11391ca81", "Empty string differs from explicit null");
+        var callVector = Input("RecordCall", vectorId);
+        Check(Request(callVector).Fingerprint == "6da0c75875c5e6fc97e34e59df7b0a64631b5874f8f75d4c922173d5b67ca4e2", "Call UTC and Choice fingerprint golden vector");
+        var originalCulture = System.Globalization.CultureInfo.CurrentCulture;
+        try
+        {
+            System.Globalization.CultureInfo.CurrentCulture = new System.Globalization.CultureInfo("vi-VN");
+            Check(Request(callVector.Reverse().ToDictionary(x => x.Key, x => x.Value)).Fingerprint ==
+                "6da0c75875c5e6fc97e34e59df7b0a64631b5874f8f75d4c922173d5b67ca4e2", "Culture and ordering preserve golden vector");
+        }
+        finally { System.Globalization.CultureInfo.CurrentCulture = originalCulture; }
+        foreach (bool conflict in new[] { false, true })
+        {
+            var uniqueStore = new MemoryStore();
+            var racingInput = Input("RecordCall", vectorId);
+            racingInput["CallOutcome"] = 100010001;
+            var accepted = uniqueStore.Atomic(Request(racingInput));
+            var retained = uniqueStore.Receipts[vectorId];
+            if (conflict) racingInput["Notes"] = "Different concurrent request";
+            uniqueStore.HideReceiptOnce = true;
+            Reject(() => uniqueStore.Atomic(Request(racingInput)), "RECEIPT_UNIQUENESS_CONFLICT");
+            Check(uniqueStore.Calls == 1 && uniqueStore.Histories == 0 && uniqueStore.Updates == 0 &&
+                uniqueStore.Status == ActionRequest.NeedCall && uniqueStore.Receipts.Count == 1 &&
+                ReferenceEquals(uniqueStore.Receipts[vectorId], retained), "Unique insertion race rolls back loser and preserves accepted receipt");
+            racingInput.Remove("Notes");
+            Check(uniqueStore.Atomic(Request(racingInput)).CallId == accepted.CallId, "Accepted result survives duplicate insertion race");
+        }
         var createStore = new MemoryStore();
         var create = Request(Input("CreateCandidate"));
         var created = createStore.Atomic(create);
@@ -115,7 +150,7 @@ static class Program
     sealed class MemoryStore : IOperationStore
     {
         public int Status = ActionRequest.NeedCall, Calls, Histories, Updates, Creates, Version = 1, FailMutation, Mutation;
-        public bool Audit = true, StaleVersion, CandidateExists = true;
+        public bool Audit = true, StaleVersion, CandidateExists = true, HideReceiptOnce;
         public Dictionary<Guid, Receipt> Receipts = new();
         void Mutate() { if (++Mutation == FailMutation) throw new OperationError("SYNTHETIC_MUTATION_FAILURE"); }
         public ActionResult Atomic(ActionRequest request)
@@ -129,7 +164,12 @@ static class Program
             }
         }
         public void RequireTransactionAndAudit() { if (!Audit) throw new OperationError("AUDIT_ACTIVATION_PENDING"); }
-        public Receipt? FindReceipt(Guid correlation) => Receipts.GetValueOrDefault(correlation);
+        public Receipt? FindReceipt(Guid correlation)
+        {
+            // Model a losing transaction that read before the winning receipt committed.
+            if (HideReceiptOnce) { HideReceiptOnce = false; return null; }
+            return Receipts.GetValueOrDefault(correlation);
+        }
         public CandidateState GetCandidate(Guid id)
         {
             if (!CandidateExists || id != Candidate) throw new OperationError("INVALID_CANDIDATE");
@@ -146,8 +186,9 @@ static class Program
         public void CreateReceipt(ActionRequest request, ActionResult result)
         {
             Mutate();
-            Receipts.Add(request.Correlation, new Receipt { Actor = request.Actor, Action = request.Action,
-                Fingerprint = request.Fingerprint, Version = "1", Result = result });
+            if (!Receipts.TryAdd(request.Correlation, new Receipt { Actor = request.Actor, Action = request.Action,
+                Fingerprint = request.Fingerprint, Version = "1", Result = result }))
+                throw new OperationError("RECEIPT_UNIQUENESS_CONFLICT");
         }
     }
 }

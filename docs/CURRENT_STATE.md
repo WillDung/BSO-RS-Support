@@ -2,9 +2,9 @@
 
 ## Phase 3B.2 Candidate Child-Table Provisioning (2026-10-24)
 
-Outcome: **`BLOCKED_TARGET_CONFIRMATION`**. The owner authorized fresh Candidate reconciliation followed by Call Log and Candidate Status History provisioning only on an exact Candidate match. The exact target organization URL and solution-container confirmation was not received; no PAC, authentication, Dataverse request, or tenant write was made. This is not a fresh live Candidate check. Local manifest requirements and the block are recorded in the [Phase 3B.2 disposition report](PHASE_3B2_CANDIDATE_CHILD_TABLES_REPORT.md).
+Outcome: **`PRE_WRITE_GATE_BLOCKED`**. The owner authorized fresh Candidate reconciliation followed by Call Log and Candidate Status History provisioning only on an exact Candidate match. The exact target organization URL was not confirmed; no PAC, authentication, Dataverse request, or tenant write was made. This is not a fresh live Candidate check. The current manifest requirements, baseline SHA, and complete request/write counts are recorded in the [Phase 3B.2 report](PHASE_3B2_CANDIDATE_CHILD_TABLES_REPORT.md).
 
-The existing Candidate-only runner excludes Call Log and Status History and is not suitable for the new scope. No runner or schema was changed. Existing Phase 3B.1 worktree changes were preserved; no commit or push occurred.
+The existing Candidate-only runner excludes Call Log and Status History and is not suitable for the new scope. No runner or schema was changed. All four offline regression suites passed; no commit or push occurred.
 
 ## Phase 3B.1 Candidate Fast-Track Request Disposition (2026-10-24)
 

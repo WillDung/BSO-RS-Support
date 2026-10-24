@@ -1,11 +1,11 @@
 # Phase 3B.2 — Candidate Core Storage Provisioning Report
 
 **Date:** 24 October 2026
-**Current classification:** `PARTIAL_METADATA_STATE`
-**Latest provisioning execution:** after a fresh guarded preflight, the latest owner-authorized repair dispatched one Attribute-MetadataId-targeted Previous Status PUT. Dataverse returned HTTP 204, but the immediate typed GET still reported `os_sr_callout`; execution stopped before New Status. No retry occurred.
-**Latest read-only reconciliation:** Candidate, Call Log, Candidate Status History structure, relationships, keys, Solution/Publisher, and both global Choices reconcile; the two Status History columns remain bound to `os_sr_callout`. Candidate Status History still has zero rows. Current classification remains `PARTIAL_METADATA_STATE`.
+**Current classification:** `CANDIDATE_CORE_STORAGE_PROVISIONED_AUDIT_ACTIVATION_PENDING`
+**Latest provisioning execution:** the owner-authorized two-column replacement dispatched one DELETE and one column POST per History status field, Previous Status first. All four returned HTTP 204 and passed immediate GET reconciliation. No in-place rebind or retry occurred.
+**Latest read-only reconciliation:** Candidate, Call Log, and Candidate Status History reconcile to the approved storage model, including status bindings, relationships, keys, ownership, and audit metadata. Both History status fields now point to `os_sr_candstat`. Both Choices remain unchanged, History contains zero rows, and organization auditing remains disabled.
 
-> The original HTTP 400 attempt is retained below as historical evidence. The latest bounded continuation and current handover are recorded in Section 30 and supersede earlier statements that the child tables were absent.
+> Earlier attempts, partial states, and authorizations are historical evidence. [Section 34](#34-owner-authorized-two-column-replacement) records the latest successful replacement and supersedes earlier statements that the child tables were absent or their status bindings were incorrect.
 
 ## 1. Executive Summary
 
@@ -374,3 +374,93 @@ For the guarded repair invocation: table creates **0**, column creates **0**, Ch
 Historical Phase 3B.2 metadata dispatches, including the original definite Call Log HTTP 400 and the prior unreconciled Previous Status PUT, are **12**: one Call Outcome Choice create, one original failed Call Log create, one corrected Call Log create, seven remaining child metadata writes, one earlier Previous Status PUT, and this run's one Previous Status PUT. New Status update dispatches remain **0**. The separate count of automatic retries remains **0**.
 
 No Candidate, Call Log, Choice definition, security, app, business data, or publication changes occurred in this repair. No commit or push occurred.
+
+## 34. Owner-Authorized Two-Column Replacement
+
+**Date:** 24 October 2026
+
+**Final classification:** `CANDIDATE_CORE_STORAGE_PROVISIONED_AUDIT_ACTIVATION_PENDING`
+
+The owner separately authorized deletion/recreation of exactly Previous Status and New Status after the earlier MetadataId-targeted Previous Status PUT returned HTTP 204 without changing its global Choice binding. This authorization did not permit another in-place rebind, table replacement, other metadata changes, business rows, publication, security/app changes, or automatic retries.
+
+### 34.1 Preflight and migration boundary
+
+- Current manifest SHA-256: `63f56173f61265f539d23d6ceffb5631e23f438e4e254755c1e24c7d17eb1915`; unchanged by this task. The manifest's prior provisioning ledger remains historical; its desired schema already specifies the correct status bindings.
+- Exact owner-confirmed VN LMV IT target matched PAC; the existing Az.Accounts request credential (`Get-AzAccessToken`), Dataverse WhoAmI, process-scoped expected-user guard, unmanaged Solution, and `os` Publisher passed fresh verification. No login, target switch, or identity/security modification occurred.
+- Candidate exact; Call Log exact, including its correct `os_sr_callout` binding; History exact except for its two known incorrect bindings.
+- Count-only History read: **0** business rows. No candidate/history field values were retrieved.
+- Fresh `RetrieveDependenciesForDelete(ObjectId=<Attribute MetadataId>,ComponentType=2)` returned **0** blocking dependencies for each exact existing attribute. Unknown, incomplete, paged, or blocking responses fail closed.
+- Both dependency checks passed before any deletion; zero-row, exact attribute identity/properties, and dependency checks were repeated immediately before each column's deletion.
+- Approved migration plan: delete Previous Status by exact existing MetadataId, prove absence, create the same logical/schema name bound to the approved global Choice, reconcile completely, then perform the same sequence for New Status.
+- Replacement creates new Attribute MetadataIds; hashes are retained below. No table, lookup, relationship, key, or Choice definition was recreated. Because History was empty, no business-value conversion or data migration was performed.
+
+The local runner reserves each dispatch in a new JSON execution journal before sending it. An existing journal cannot be reused. Within the guarded process the only permitted sequence is DELETE Previous, POST Previous, DELETE New, POST New, with exact paths/payload hashes, the approved Solution header, a four-dispatch ceiling, strong-consistency GET metadata reads, and `MaximumRetryCount=0`. A failure or uncertain outcome is reconciled once and stops; it never authorizes another request or rollback write. The successful journal is retained in session evidence, not as a tenant export.
+
+### 34.2 Exact dispatch and readback evidence
+
+| Order | Method / target | HTTP | Immediate GET |
+|---|---|---:|---|
+| 1 | DELETE existing `os_sr_csh_prevstat` by its MetadataId | 204 | Attribute absent |
+| 2 | POST `os_sr_csh_prevstat` to History's Attributes collection | 204 | Present; exact approved properties; bound to `os_sr_candstat`; new MetadataId |
+| 3 | DELETE existing `os_sr_csh_newstat` by its MetadataId | 204 | Attribute absent |
+| 4 | POST `os_sr_csh_newstat` to History's Attributes collection | 204 | Present; exact approved properties; bound to `os_sr_candstat`; new MetadataId |
+
+Each dispatch occurred **once**. New Status was not touched until Previous Status fully reconciled. No PUT was sent.
+
+| Display name | Actual logical and schema name | Type | Global Choice |
+|---|---|---|---|
+| Previous Status | `os_sr_csh_prevstat` | Picklist | `os_sr_candstat` |
+| New Status | `os_sr_csh_newstat` | Picklist | `os_sr_candstat` |
+
+The recreation preserved the approved schema/logical names, display/description localized labels, ApplicationRequired requiredness, default form value, auditing, field-security setting, customizability, advanced-find setting, and non-primary-name semantics. Typed readback verified exact approved Choice identity and all six frozen label/value mappings. No option values were copied into or created on either attribute.
+
+| Evidence | SHA-256 |
+|---|---|
+| Previous Status create payload | `043fa6047cbbb0d1c4f614616a5c621fc12dc57505ea58bf0fd3c46725b26800` |
+| New Status create payload | `48e9596ddab0cbf4a1c66c4d70a1881329da5917166f4ec940f8b4d16e3d253b` |
+| Previous Status new Attribute MetadataId | `6ed63930c2ce3a845cc0a616a46b4abbb44e67f23e2409235587a7f4636f6926` |
+| New Status new Attribute MetadataId | `0adf2dbde97832dc641eb837a5f5d942ab92d2d09a83b2bed46c45472ea94549` |
+
+DELETE requests had no body. Their journal payload hash `74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b` is the SHA-256 of serialized JSON `null`, not a dispatched body.
+
+### 34.3 Final Candidate Core reconciliation
+
+- Candidate: exact schema, audit metadata, lookups, keys, and Solution membership; unchanged.
+- Call Log: exact schema/audit/Solution membership, correct `os_sr_callout` binding, approved relationships and Active key; unchanged.
+- Candidate Status History: exact approved columns, corrected bindings, ownership, audit metadata, relationships, Active key, and Solution inclusion.
+- Both global Choice identities and frozen approved labels/values unchanged. Call Outcome retains Answered `100010000`, No Answer `100010001`, Call Back Requested `100010002`; Candidate Status retains the six values `100010000` through `100010005` in the approved workflow order.
+- History count remains **0**.
+- Organization auditing remains **disabled**. Its activation is externally governed; no Candidate business data may be created pending that prerequisite.
+
+This completes the approved storage metadata repair, not the Candidate business-operation implementation. Custom API/plugin, least-privilege execution design, scheduling, integrations, and business-runtime acceptance remain outside this authorization. No export/unpack, publication, commit, or push was performed or is implied.
+
+### 34.4 Request counts and authorization consumption
+
+| Boundary | Candidate-runner GET | Child-runner GET | DELETE | Column POST | PUT | Other writes | Automatic retries |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Preliminary read-only replacement preflight | 31 | 29 | 0 | 0 | 0 | 0 | 0 |
+| Guarded replacement, including its fresh preflight and final reconciliation | 62 | 60 | 2 | 2 | 0 | 0 | 0 |
+| Task totals | 93 | 89 | 2 | 2 | 0 | 0 | 0 |
+
+Total Dataverse GET: **182**. Table creates/deletes, Choice-definition writes, Candidate/Call Log writes, relationship/key writes, business-data writes, Custom API/plugin writes, app/security writes, `PublishXml`, and `PublishAllXml`: **0**.
+
+Historical Phase 3B.2 metadata dispatches are now **16**, comprising the 12 historical dispatches recorded in Section 33 plus these four separately owner-authorized delete/create dispatches. Automatic retries remain **0**. The replacement authorization is consumed. Do not rerun the replacement or attempt further metadata writes without new explicit authorization.
+
+### 34.5 Validation and API references
+
+The Phase 3B.2 suite covers wrong-choice regression, intended status bindings, both frozen Choice mappings, preservation of recreated properties, fail-closed dependency responses, exact replacement order, zero-row gates, journal consumption, and stop boundaries for uncertain deletion, create failure, and incorrect recreated binding. These are offline synthetic tests; the actual live operation/readback evidence is separately recorded above.
+
+| Local validation | Result |
+|---|---|
+| `& .\tests\Phase3B2CandidateChildProvisioning.Tests.ps1` | PASS - 50 synthetic assertions |
+| `& .\tests\Phase3ACandidateCoreDesign.Tests.ps1` | PASS - 46 synthetic assertions |
+| PowerShell parser: child runner and both assertion suites | PASS |
+| Relative Markdown file links in all changed documentation | PASS |
+| Added-line privacy scan: email, organization URL, bearer-token, and credential-assignment patterns | PASS |
+| `git diff --check` | PASS |
+| Current manifest SHA-256 unchanged | PASS |
+
+Supported API references:
+
+- [RetrieveDependenciesForDelete](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/reference/retrievedependenciesfordelete?view=dataverse-latest)
+- [Create and update column definitions](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/create-update-column-definitions-using-web-api)

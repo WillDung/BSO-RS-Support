@@ -34,7 +34,7 @@ Assert-Test ($runner -match "CandidateWrites\s*=\s*0" -and
     $runner -notmatch "PublishAllXml") 'Candidate, business data, and publication remain excluded'
 Assert-Test ($runner -match '\[switch\]\$RepairStatusChoiceBindings' -and
     $runner -match '\[switch\]\$RepairPreflightOnly' -and
-    $runner -match "ValidateSet\('GET', 'PUT', 'POST'\)" -and
+    $runner -match "ValidateSet\('GET', 'PUT', 'POST', 'DELETE'\)" -and
     $runner -match 'MaximumWrites = 2' -and
     $runner -match 'Get-StatusChoiceAttributePath' -and
     $runner -match 'Attributes\(\$\(\$Attribute\.MetadataId\)\)' -and
@@ -221,5 +221,186 @@ $repairSource = $repairFunction.Extent.Text
 $rowCountIndex = $repairSource.IndexOf('Get-CandidateStatusHistoryRowCount')
 $putIndex = $repairSource.IndexOf('Invoke-DataverseRequest -Method PUT')
 Assert-Test ($rowCountIndex -ge 0 -and $putIndex -gt $rowCountIndex) 'Zero-row count is rechecked before the first authorized metadata update'
+
+foreach ($name in @('Get-ReplacementLabel', 'Get-ReplacementPreservedProperties',
+    'New-StatusChoiceReplacementPayload', 'New-AttributePayload', 'New-RequiredLevel', 'New-Label', 'Get-Required',
+    'Assert-NoAttributeDeleteDependencies', 'Assert-ReplacementDispatch')) {
+    $definition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -ceq $name }, $true)
+    if ($null -eq $definition) { throw "FAIL: Replacement helper $name is missing." }
+    Invoke-Expression $definition.Extent.Text
+}
+# Only the metadata validator is stubbed; payload construction remains the real implementation.
+function Assert-StatusChoiceColumn {}
+$sourceMetadata | Add-Member -NotePropertyMembers @{
+    Description = [pscustomobject]@{ LocalizedLabels = @([pscustomobject]@{ Label = ''; LanguageCode = 1033 }) }
+    IsAuditEnabled = [pscustomobject]@{ Value = $true }
+    IsSecured = $false
+    IsValidForAdvancedFind = [pscustomobject]@{ Value = $true }
+}
+$choice = [pscustomobject]@{
+    Name = 'os_sr_candstat'; IsGlobal = $true; MetadataId = '00000000-0000-0000-0000-000000000013'
+}
+$replacementPayload = New-StatusChoiceReplacementPayload -Attribute $sourceMetadata `
+    -Column $historyChoiceColumns[0] -Choice $choice
+Assert-Test ($replacementPayload.'GlobalOptionSet@odata.bind' -ceq '/GlobalOptionSetDefinitions(00000000-0000-0000-0000-000000000013)' -and
+    -not $replacementPayload.Contains('Options') -and -not $replacementPayload.Contains('OptionSet') -and
+    -not $replacementPayload.Contains('MetadataId')) 'Replacement creates a binding to the approved global Choice without defining options or reusing the deleted MetadataId'
+Assert-Test ($replacementPayload.LogicalName -ceq $sourceMetadata.LogicalName -and
+    $replacementPayload.DisplayName.LocalizedLabels[0].Label -ceq 'Previous Status' -and
+    $replacementPayload.RequiredLevel.Value -ceq 'ApplicationRequired' -and
+    $replacementPayload.DefaultFormValue -eq 100010000 -and
+    $replacementPayload.IsAuditEnabled.Value -eq $true -and -not $replacementPayload.IsSecured) 'Replacement payload preserves labels, default, audit, security, and requiredness'
+$script:dependencyResponse = [pscustomobject]@{ value = @() }
+function Invoke-DataverseRequest { $script:dependencyResponse }
+Assert-NoAttributeDeleteDependencies -MetadataId '00000000-0000-0000-0000-000000000011'
+Assert-Test $true 'Empty deletion-dependency collection passes'
+foreach ($response in @(
+    [pscustomobject]@{ value = @([pscustomobject]@{ dependentcomponenttype = 60 }) },
+    [pscustomobject]@{ other = @() },
+    [pscustomobject]@{ value = $null },
+    [pscustomobject]@{ value = @(); '@odata.nextLink' = 'synthetic-next-page' }
+)) {
+    $script:dependencyResponse = $response
+    $blocked = $false
+    try { Assert-NoAttributeDeleteDependencies -MetadataId '00000000-0000-0000-0000-000000000011' }
+    catch { $blocked = $true }
+    Assert-Test $blocked 'Blocking, malformed, null, or paged dependency results fail closed'
+}
+$replacementDefinition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -ceq 'Invoke-StatusChoiceColumnReplacement' }, $true)
+$replacementSource = $replacementDefinition.Extent.Text
+Assert-Test ($replacementSource -match "foreach \(\`$method in @\('DELETE', 'POST'\)\)" -and
+    $replacementSource -notmatch 'Method PUT' -and
+    $replacementSource -match 'FileMode\]::CreateNew' -and
+    $runner -match 'Save-ReplacementJournal\s+\$script:WriteStages.Add') 'Replacement order is delete then create with durable reservation before dispatch and no in-place update'
+Assert-Test ($replacementSource.IndexOf('Get-CandidateStatusHistoryRowCount') -lt $replacementSource.IndexOf('Invoke-DataverseRequest -Method DELETE') -and
+    $replacementSource.IndexOf('Assert-NoAttributeDeleteDependencies') -lt $replacementSource.IndexOf('Invoke-DataverseRequest -Method DELETE') -and
+    $replacementSource -match 'if \(\$null -ne \$dispatchFailure\) \{ throw \$dispatchFailure \}') 'Zero-row and dependency gates precede deletion; even reconciled failed dispatches stop'
+Assert-Test ($runner -match '\$Method -eq ''DELETE'' -and -not \$ReplaceStatusChoiceColumns' -and
+    $runner -match '\$ReplacementPreflightOnly -and \$Method -cne ''GET''' -and
+    $runner -match '\$index -ge 4' -and $runner -match '\$hash -cne \$step.PayloadSha256') 'DELETE is isolated from other modes and replacement has a four-dispatch exact-payload ceiling'
+
+foreach ($name in @('Invoke-StatusChoiceColumnReplacement', 'Save-ReplacementJournal')) {
+    $definition = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -ceq $name }, $true)
+    Invoke-Expression $definition.Extent.Text
+}
+function Get-ManifestHash { 'synthetic-manifest' }
+function Get-MetadataIdFingerprint { param([string]$MetadataId) $MetadataId }
+function Get-SanitizedFailureMessage { param([string]$Message) $Message }
+function Assert-StatusChoiceRepairPreflight { $script:syntheticPreflight }
+function Get-StatusChoiceAttribute { param([string]$LogicalName) $script:syntheticAttributes[$LogicalName] }
+function Assert-StatusChoiceColumn {
+    param($Attribute, $ManifestColumn, $ExpectedChoiceName, $ExpectedChoice)
+    if ($Attribute.GlobalOptionSet.Name -cne $ExpectedChoiceName) { throw 'Synthetic binding mismatch.' }
+}
+function Get-CandidateStatusHistoryRowCount {
+    if ($script:scenario -ceq 'rows') { return 1 }
+    0
+}
+function Assert-NoAttributeDeleteDependencies {
+    if ($script:scenario -ceq 'dependencies') { throw 'Synthetic dependency blocks deletion.' }
+}
+function Get-OptionalMetadata {
+    param([string]$Path)
+    if ($Path -like 'GlobalOptionSetDefinitions*') {
+        if ($Path -like '*os_sr_callout*') { return $script:RepairWrongChoice }
+        return $choice
+    }
+    $matched = [regex]::Match($Path, "Attributes\(LogicalName='([^']+)'\)")
+    $script:syntheticAttributes[$matched.Groups[1].Value]
+}
+function Get-ChoiceOptionsForRepair {}
+function Assert-TableReadback {}
+function Assert-RelationshipsAndKeys {}
+function Invoke-DataverseRequest {
+    param($Method, $Path, $Body, [switch]$WithSolutionHeader)
+    if ($Method -ceq 'GET') {
+        return [pscustomobject]@{ organizationid = $ExpectedOrganizationId; isauditenabled = $false }
+    }
+    Assert-ReplacementDispatch -Method $Method -Path $Path -Body $Body -WithSolutionHeader:$WithSolutionHeader
+    $script:RequestCounts[$Method]++
+    $script:LastWriteHttpStatus = 204
+    $name = $script:ReplacementPlan[$script:WriteStages.Count - 1].LogicalName
+    if ($Method -ceq 'DELETE') {
+        $script:syntheticAttributes.Remove($name)
+        if ($script:scenario -ceq 'uncertain-delete') {
+            $script:LastWriteOutcomeUncertain = $true
+            throw 'Synthetic uncertain delete; no resend.'
+        }
+    } else {
+        if ($script:scenario -ceq 'create-failure') {
+            $script:LastWriteHttpStatus = 400
+            throw 'Synthetic definite create failure.'
+        }
+        $created = $script:syntheticPreflight.Attributes[$name] | ConvertTo-Json -Depth 30 | ConvertFrom-Json
+        $created.MetadataId = if ($name -ceq 'os_sr_csh_prevstat') {
+            '00000000-0000-0000-0000-000000000021'
+        } else { '00000000-0000-0000-0000-000000000022' }
+        if ($script:scenario -cne 'binding-mismatch') { $created.GlobalOptionSet = $choice }
+        $script:syntheticAttributes[$name] = $created
+    }
+}
+$ReplaceStatusChoiceColumns = $true
+$script:ExpectedManifestSha256 = 'synthetic-manifest'
+$script:ExpectedUserId = 'synthetic-user'
+$ExpectedOrganizationId = '00000000-0000-0000-0000-000000000031'
+$candidateResult = [pscustomobject]@{ Requests = [pscustomobject]@{ GET = 31 } }
+$script:CandidateRunner = {
+    $global:LASTEXITCODE = 0
+    '{"Result":"CANDIDATE_TABLE_KEYS_LOOKUPS_AND_SOLUTION_MEMBERSHIP_RECONCILED","Requests":{"POST":0,"GET":31}}'
+}
+$oldUserGuard = [Environment]::GetEnvironmentVariable('BSO_RS_EXPECTED_USER_ID', 'Process')
+try {
+    [Environment]::SetEnvironmentVariable('BSO_RS_EXPECTED_USER_ID', 'synthetic-user', 'Process')
+    foreach ($script:scenario in @('success', 'rows', 'dependencies', 'uncertain-delete', 'create-failure', 'binding-mismatch')) {
+        $ReplacementEvidencePath = Join-Path ([IO.Path]::GetTempPath()) ("bso-synthetic-replacement-" + [Guid]::NewGuid().ToString('N') + '.json')
+        try {
+            $script:WriteStages = [System.Collections.Generic.List[string]]::new()
+            $script:WriteHashes = [System.Collections.Generic.List[object]]::new()
+            $script:RequestCounts = @{ GET = 0; POST = 0; PUT = 0; DELETE = 0 }
+            $script:ReplacementJournal = $null
+            $script:RepairWrongChoice = $sourceMetadata.GlobalOptionSet
+            $attributes = @{}
+            foreach ($column in $historyChoiceColumns) {
+                $attribute = $sourceMetadata | ConvertTo-Json -Depth 30 | ConvertFrom-Json
+                $attribute.LogicalName = [string]$column.logicalName
+                $attribute.SchemaName = [string]$column.logicalName
+                $attribute.DisplayName.LocalizedLabels[0].Label = [string]$column.displayName
+                $attributes[[string]$column.logicalName] = $attribute
+            }
+            $script:syntheticPreflight = [pscustomobject]@{
+                Columns = @($historyChoiceColumns | Sort-Object { if ($_.displayName -ceq 'Previous Status') { 0 } else { 1 } })
+                Attributes = $attributes
+                CandidateStatusChoice = $choice
+                CallOutcomeChoice = $script:RepairWrongChoice
+                Table = [pscustomobject]@{ EntitySetName = 'synthetic_history'; PrimaryIdAttribute = 'synthetic_id' }
+            }
+            $script:RepairAllowedColumns = @($script:syntheticPreflight.Columns.logicalName)
+            $script:syntheticAttributes = $attributes.Clone()
+            $stopped = $false
+            try { $result = Invoke-StatusChoiceColumnReplacement -Manifest $manifest }
+            catch { $stopped = $true }
+            if ($script:scenario -ceq 'success') {
+                Assert-Test (-not $stopped -and $result.Result -ceq 'CANDIDATE_CORE_STORAGE_PROVISIONED_AUDIT_ACTIVATION_PENDING' -and
+                    ($script:WriteStages -join '|') -ceq 'DELETE os_sr_csh_prevstat|POST os_sr_csh_prevstat|DELETE os_sr_csh_newstat|POST os_sr_csh_newstat') 'Synthetic replacement completes in the exact four-dispatch order'
+                $reuseBlocked = $false
+                try { $null = Invoke-StatusChoiceColumnReplacement -Manifest $manifest }
+                catch { $reuseBlocked = $true }
+                Assert-Test ($reuseBlocked -and $script:WriteStages.Count -eq 4) 'A consumed evidence journal cannot be reused for another dispatch'
+            } else {
+                $expectedWrites = switch ($script:scenario) {
+                    'rows' { 0 }; 'dependencies' { 0 }; 'uncertain-delete' { 1 }; default { 2 }
+                }
+                Assert-Test ($stopped -and $script:WriteStages.Count -eq $expectedWrites) "Synthetic $($script:scenario) stops at the required boundary without a resend or New Status write"
+            }
+        } finally {
+            if (Test-Path -LiteralPath $ReplacementEvidencePath) { Remove-Item -LiteralPath $ReplacementEvidencePath }
+        }
+    }
+} finally {
+    [Environment]::SetEnvironmentVariable('BSO_RS_EXPECTED_USER_ID', $oldUserGuard, 'Process')
+}
 
 Write-Output "PASS: $script:Passed synthetic Phase 3B.2 provisioning assertions; no authentication, network, PAC, or tenant calls."

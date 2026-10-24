@@ -10,6 +10,9 @@ param(
     [switch]$PreflightOnly,
     [switch]$ResumeRemainingScope,
     [switch]$RepairPreflightOnly,
+    [switch]$ReplacementPreflightOnly,
+    [switch]$ReplaceStatusChoiceColumns,
+    [string]$ReplacementEvidencePath,
     [switch]$RepairStatusChoiceBindings
 )
 
@@ -20,7 +23,7 @@ $script:PublisherPrefix = 'os'
 $script:ManifestPath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\docs\PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json'))
 $script:CandidateRunner = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'Provision-BsoRsCandidateTable.ps1'))
 $script:ExpectedManifestSha256 = '63f56173f61265f539d23d6ceffb5631e23f438e4e254755c1e24c7d17eb1915'
-$script:RequestCounts = @{ GET = 0; PUT = 0; POST = 0 }
+$script:RequestCounts = @{ GET = 0; PUT = 0; POST = 0; DELETE = 0 }
 $script:WriteStages = [System.Collections.Generic.List[string]]::new()
 $script:WriteHashes = [System.Collections.Generic.List[object]]::new()
 $script:ApiRoot = $null
@@ -58,6 +61,8 @@ $script:LastSanitizedWriteError = $null
 $script:LastWriteHttpStatus = $null
 $script:RepairAllowedColumns = @()
 $script:StatusChoiceRepairResults = [System.Collections.Generic.List[object]]::new()
+$script:ReplacementPlan = @()
+$script:ReplacementJournal = $null
 
 function Get-Sha256 {
     param([Parameter(Mandatory = $true)][byte[]]$Bytes)
@@ -152,7 +157,7 @@ function Assert-Manifest {
         $continuation.remainingMetadataDispatchLimit -eq 7 -and
         $continuation.remainingMetadataWritesDispatched -eq 0 -and
         -not $continuation.remainingMetadataAuthorizationConsumed
-    $statusChoiceRepairRequested = $RepairPreflightOnly -or $RepairStatusChoiceBindings
+    $statusChoiceRepairRequested = $RepairPreflightOnly -or $RepairStatusChoiceBindings -or $ReplacementPreflightOnly -or $ReplaceStatusChoiceColumns
     $statusChoiceRepairIsAuthorized = $statusChoiceRepairRequested -and
         $continuation.status -ceq 'STOPPED_AFTER_REMAINING_METADATA_MISMATCH_NO_FURTHER_WRITES' -and
         $continuation.remainingMetadataAuthorizationConsumed -and
@@ -171,7 +176,7 @@ function Assert-Manifest {
     if ($statusChoiceRepairRequested -and [string]::IsNullOrWhiteSpace($AuthorizationReference)) {
         throw 'Status Choice repair requires an explicit owner authorization reference.'
     }
-    $modeCount = @($ReconcileOnly, $PreflightOnly, $ResumeRemainingScope, $RepairPreflightOnly, $RepairStatusChoiceBindings |
+    $modeCount = @($ReconcileOnly, $PreflightOnly, $ResumeRemainingScope, $RepairPreflightOnly, $ReplacementPreflightOnly, $ReplaceStatusChoiceColumns, $RepairStatusChoiceBindings |
         Where-Object { $_ }).Count
     if ($modeCount -gt 1) { throw 'Provisioning modes are mutually exclusive.' }
     if ($Manifest.phase -cne '3A' -or $Manifest.solutionUniqueName -cne $script:SolutionName -or
@@ -480,12 +485,15 @@ function Get-ValidatedToken {
 
 function Invoke-DataverseRequest {
     param(
-        [Parameter(Mandatory = $true)][ValidateSet('GET', 'PUT', 'POST')][string]$Method,
+        [Parameter(Mandatory = $true)][ValidateSet('GET', 'PUT', 'POST', 'DELETE')][string]$Method,
         [Parameter(Mandatory = $true)][string]$Path,
         [object]$Body,
         [switch]$WithSolutionHeader,
         [switch]$WithMergeLabels
     )
+    if ($ReplacementPreflightOnly -and $Method -cne 'GET') {
+        throw 'Replacement preflight is GET-only; no metadata dispatch is authorized in this mode.'
+    }
     $uri = if ([Uri]::IsWellFormedUriString($Path, [UriKind]::Absolute)) {
         [Uri]$Path
     } else {
@@ -495,7 +503,12 @@ function Invoke-DataverseRequest {
         $uri.AbsolutePath -notmatch '^/api/data/v9\.2/' -or $uri.UserInfo -or $uri.Fragment) {
         throw 'Dataverse request target is outside the verified organization API.'
     }
-    if ($Method -in @('PUT', 'POST')) {
+    if ($Method -eq 'DELETE' -and -not $ReplaceStatusChoiceColumns) {
+        throw 'DELETE is available only in the explicitly authorized two-column replacement mode.'
+    }
+    if ($ReplaceStatusChoiceColumns -and $Method -ne 'GET') {
+        Assert-ReplacementDispatch -Method $Method -Path $Path -Body $Body -WithSolutionHeader:$WithSolutionHeader
+    } elseif ($Method -in @('PUT', 'POST')) {
         $index = $script:WriteStages.Count
         if ($index -ge $script:MaximumWrites -or -not $WithSolutionHeader) {
             throw 'Write ceiling or approved Solution header guard failed.'
@@ -604,6 +617,7 @@ function Invoke-DataverseRequest {
         'OData-Version' = '4.0'
         'If-None-Match' = 'null'
     }
+    if ($Method -ceq 'GET') { $headers['Consistency'] = 'Strong' }
     if ($WithSolutionHeader) { $headers['MSCRM.SolutionUniqueName'] = $script:SolutionName }
     if ($WithMergeLabels) { $headers['MSCRM.MergeLabels'] = 'true' }
     $request = @{
@@ -625,16 +639,16 @@ function Invoke-DataverseRequest {
     $script:RequestCounts[$Method]++
     try { $response = Invoke-RestMethod @request }
     catch {
-        if ($Method -in @('PUT', 'POST')) {
+        if ($Method -in @('PUT', 'POST', 'DELETE')) {
             $script:LastWriteOutcomeUncertain = $true
             $script:LastSanitizedWriteError = "HTTP status unavailable; transport outcome uncertain; Dataverse $Method was not retried."
             throw "A metadata $Method transport outcome is uncertain; do not retry."
         }
         throw 'A Dataverse GET failed; no write was sent by this request.'
     }
-    if ($Method -in @('PUT', 'POST')) { $script:LastWriteHttpStatus = [int]$statusCode }
+    if ($Method -in @('PUT', 'POST', 'DELETE')) { $script:LastWriteHttpStatus = [int]$statusCode }
     if ([int]$statusCode -lt 200 -or [int]$statusCode -ge 300) {
-        if ($Method -in @('PUT', 'POST')) {
+        if ($Method -in @('PUT', 'POST', 'DELETE')) {
         $script:LastSanitizedWriteError = Get-SanitizedDataverseError -StatusCode ([int]$statusCode) -Response $response
         throw $script:LastSanitizedWriteError
     }
@@ -1625,6 +1639,306 @@ function Assert-StatusChoiceRepairPreflight {
     }
 }
 
+function Get-ReplacementLabel {
+    param([AllowNull()][object]$Label)
+    if ($null -eq $Label) { return $null }
+    [ordered]@{
+        '@odata.type' = 'Microsoft.Dynamics.CRM.Label'
+        LocalizedLabels = @($Label.LocalizedLabels | Sort-Object LanguageCode | ForEach-Object {
+            [ordered]@{ Label = [string]$_.Label; LanguageCode = [int]$_.LanguageCode }
+        })
+    }
+}
+
+function Get-ReplacementPreservedProperties {
+    param([Parameter(Mandatory = $true)][object]$Attribute)
+    [ordered]@{
+        LogicalName = [string]$Attribute.LogicalName
+        SchemaName = [string]$Attribute.SchemaName
+        DisplayName = Get-ReplacementLabel -Label $Attribute.DisplayName
+        Description = Get-ReplacementLabel -Label $Attribute.Description
+        RequiredLevel = [string]$Attribute.RequiredLevel.Value
+        DefaultFormValue = $Attribute.DefaultFormValue
+        IsAuditEnabled = [bool]$Attribute.IsAuditEnabled.Value
+        IsSecured = [bool]$Attribute.IsSecured
+        IsCustomizable = [bool]$Attribute.IsCustomizable.Value
+        IsValidForAdvancedFind = [bool]$Attribute.IsValidForAdvancedFind.Value
+        IsPrimaryName = [bool]$Attribute.IsPrimaryName
+    }
+}
+
+function New-StatusChoiceReplacementPayload {
+    param(
+        [Parameter(Mandatory = $true)][object]$Attribute,
+        [Parameter(Mandatory = $true)][object]$Column,
+        [Parameter(Mandatory = $true)][object]$Choice
+    )
+    Assert-StatusChoiceColumn -Attribute $Attribute -ManifestColumn $Column `
+        -ExpectedChoiceName $script:ChoiceName -ExpectedChoice $script:RepairWrongChoice
+    if ($Choice.Name -cne 'os_sr_candstat' -or $Choice.IsGlobal -ne $true -or
+        [string]$Choice.MetadataId -notmatch '^[0-9a-fA-F-]{36}$' -or
+        $Attribute.IsAuditEnabled.Value -ne $true -or $Attribute.IsSecured -ne $false) {
+        throw 'Replacement Choice identity, audit, or field-security contract is not exact.'
+    }
+    $payload = New-AttributePayload -Column $Column -ChoiceMetadataByName @{ os_sr_candstat = $Choice }
+    $payload.LogicalName = [string]$Attribute.LogicalName
+    $payload.DisplayName = Get-ReplacementLabel -Label $Attribute.DisplayName
+    $payload.Description = Get-ReplacementLabel -Label $Attribute.Description
+    $payload.IsAuditEnabled = [ordered]@{ Value = $true }
+    $payload.IsSecured = $false
+    $payload.IsCustomizable = [ordered]@{ Value = [bool]$Attribute.IsCustomizable.Value }
+    $payload.IsValidForAdvancedFind = [ordered]@{ Value = [bool]$Attribute.IsValidForAdvancedFind.Value }
+    if ($null -ne $Attribute.DefaultFormValue) {
+        $payload.DefaultFormValue = [int]$Attribute.DefaultFormValue
+    }
+    $payload
+}
+
+function Save-ReplacementJournal {
+    $json = ConvertTo-Json -InputObject $script:ReplacementJournal -Depth 40
+    [IO.File]::WriteAllText($ReplacementEvidencePath, $json + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+}
+
+function Assert-ReplacementDispatch {
+    param(
+        [string]$Method, [string]$Path, [object]$Body, [switch]$WithSolutionHeader
+    )
+    $index = $script:WriteStages.Count
+    if (-not $ReplaceStatusChoiceColumns -or -not $WithSolutionHeader -or
+        $null -eq $script:ReplacementJournal -or $index -ge 4 -or
+        $script:ReplacementPlan.Count -ne 4) {
+        throw 'Replacement dispatch ceiling, evidence journal, or Solution guard failed.'
+    }
+    $step = $script:ReplacementPlan[$index]
+    $hash = Get-Sha256 -Bytes ([Text.Encoding]::UTF8.GetBytes(
+        (ConvertTo-Json -InputObject $Body -Depth 80 -Compress)
+    ))
+    if ($Method -cne $step.Method -or $Path -cne $step.Path -or $hash -cne $step.PayloadSha256 -or
+        (Get-ManifestHash) -cne $script:ExpectedManifestSha256 -or
+        [Environment]::GetEnvironmentVariable('BSO_RS_EXPECTED_USER_ID', 'Process') -cne $script:ExpectedUserId) {
+        throw 'Replacement method, exact target, payload fingerprint, manifest, or identity guard failed.'
+    }
+    $script:ReplacementJournal.Dispatches += [ordered]@{
+        Method = $Method
+        LogicalName = $step.LogicalName
+        PayloadSha256 = $hash
+        Outcome = 'DISPATCH_RESERVED_OUTCOME_UNKNOWN'
+    }
+    # Persist consumption before the request; a process interruption must not permit a resend.
+    Save-ReplacementJournal
+    $script:WriteStages.Add("$Method $($step.LogicalName)")
+    $script:WriteHashes.Add([ordered]@{ LogicalName = $step.LogicalName; PayloadSha256 = $hash })
+}
+
+function Assert-NoAttributeDeleteDependencies {
+    param([Parameter(Mandatory = $true)][string]$MetadataId)
+    if ($MetadataId -notmatch '^[0-9a-fA-F-]{36}$') { throw 'Invalid attribute identity for dependency check.' }
+    $response = Invoke-DataverseRequest -Method GET -Path "RetrieveDependenciesForDelete(ObjectId=$MetadataId,ComponentType=2)"
+    if ($null -eq $response -or $null -eq $response.PSObject.Properties['value'] -or
+        $null -eq $response.value -or $response.'@odata.nextLink') {
+        throw 'Dependency-for-delete response is incomplete or unknown; no deletion is permitted.'
+    }
+    if (@($response.value).Count -ne 0) { throw 'Deletion-blocking Attribute dependencies exist; stopped without deletion.' }
+}
+
+function Invoke-StatusChoiceColumnReplacement {
+    param([Parameter(Mandatory = $true)][object]$Manifest)
+    if ([string]::IsNullOrWhiteSpace($ReplacementEvidencePath) -or
+        -not [IO.Path]::IsPathFullyQualified($ReplacementEvidencePath) -or
+        [IO.Path]::GetExtension($ReplacementEvidencePath) -cne '.json' -or
+        -not (Test-Path -LiteralPath (Split-Path -Parent $ReplacementEvidencePath) -PathType Container) -or
+        (Test-Path -LiteralPath $ReplacementEvidencePath)) {
+        throw 'A new absolute JSON evidence path in an existing directory is required; never reuse a consumed journal.'
+    }
+    $script:CurrentStage = 'STATUS_CHOICE_REPLACEMENT_PREFLIGHT'
+    $preflight = Assert-StatusChoiceRepairPreflight -Manifest $Manifest
+    $plan = foreach ($column in $preflight.Columns) {
+        $attribute = $preflight.Attributes[[string]$column.logicalName]
+        Assert-NoAttributeDeleteDependencies -MetadataId ([string]$attribute.MetadataId)
+        $payload = New-StatusChoiceReplacementPayload -Attribute $attribute -Column $column -Choice $preflight.CandidateStatusChoice
+        foreach ($method in @('DELETE', 'POST')) {
+            $body = if ($method -ceq 'POST') { $payload } else { $null }
+            [ordered]@{
+                Method = $method
+                LogicalName = [string]$column.logicalName
+                Path = if ($method -ceq 'DELETE') {
+                    Get-StatusChoiceAttributePath -Attribute $attribute
+                } else { "EntityDefinitions(LogicalName='os_sr_csh')/Attributes" }
+                Body = $body
+                PayloadSha256 = Get-Sha256 -Bytes ([Text.Encoding]::UTF8.GetBytes(
+                    (ConvertTo-Json -InputObject $body -Depth 80 -Compress)
+                ))
+            }
+        }
+    }
+    $script:ReplacementPlan = @($plan)
+    $journal = [ordered]@{
+        AuthorizationReference = $AuthorizationReference
+        ManifestSha256 = Get-ManifestHash
+        Result = 'AUTHORIZED_REPLACEMENT_STARTED'
+        AutomaticRetries = 0
+        Dispatches = @()
+        ReconciledColumns = @()
+    }
+    $stream = [IO.File]::Open($ReplacementEvidencePath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    $stream.Dispose()
+    $script:ReplacementJournal = $journal
+    Save-ReplacementJournal
+    foreach ($column in $preflight.Columns) {
+        $name = [string]$column.logicalName
+        $before = $preflight.Attributes[$name]
+        $script:CurrentStage = "REPLACEMENT_ZERO_ROW_AND_DEPENDENCY_GATE_$name"
+        $rows = Get-CandidateStatusHistoryRowCount -EntitySetName ([string]$preflight.Table.EntitySetName) `
+            -PrimaryIdAttribute ([string]$preflight.Table.PrimaryIdAttribute)
+        if ($rows -ne 0) { throw 'History business rows are present; stopped before deletion.' }
+        $fresh = Get-StatusChoiceAttribute -LogicalName $name
+        Assert-StatusChoiceColumn -Attribute $fresh -ManifestColumn $column `
+            -ExpectedChoiceName $script:ChoiceName -ExpectedChoice $preflight.CallOutcomeChoice
+        if ([string]$fresh.MetadataId -ine [string]$before.MetadataId -or
+            (Get-StatusChoicePreservationFingerprint -Attribute $fresh) -cne
+            (Get-StatusChoicePreservationFingerprint -Attribute $before)) {
+            throw 'Attribute metadata changed since replacement preflight; stopped.'
+        }
+        Assert-NoAttributeDeleteDependencies -MetadataId ([string]$fresh.MetadataId)
+        foreach ($method in @('DELETE', 'POST')) {
+            $step = $script:ReplacementPlan[$script:WriteStages.Count]
+            $script:CurrentStage = "REPLACEMENT_${method}_$name"
+            $script:LastWriteHttpStatus = $null
+            $script:LastSanitizedWriteError = $null
+            $script:LastWriteOutcomeUncertain = $false
+            $dispatchFailure = $null
+            $previousDispatchCount = $script:ReplacementJournal.Dispatches.Count
+            try {
+                if ($method -ceq 'DELETE') {
+                    $null = Invoke-DataverseRequest -Method DELETE -Path $step.Path -WithSolutionHeader
+                } else {
+                    $null = Invoke-DataverseRequest -Method POST -Path $step.Path -Body $step.Body -WithSolutionHeader
+                }
+            } catch { $dispatchFailure = $_ }
+            if ($null -ne $dispatchFailure -and
+                $script:ReplacementJournal.Dispatches.Count -eq $previousDispatchCount) {
+                throw $dispatchFailure
+            }
+            $dispatch = $script:ReplacementJournal.Dispatches[-1]
+            $dispatch.HttpStatus = $script:LastWriteHttpStatus
+            $dispatch.SanitizedError = $script:LastSanitizedWriteError
+            $dispatch.Outcome = if ($null -ne $dispatchFailure) { 'FAILED_OR_UNCERTAIN_STOPPED' } else { 'GET_RECONCILIATION_PENDING' }
+            Save-ReplacementJournal
+            $script:CurrentStage = "REPLACEMENT_${method}_IMMEDIATE_GET_$name"
+            try {
+                $live = Get-OptionalMetadata -Path "EntityDefinitions(LogicalName='os_sr_csh')/Attributes(LogicalName='$name')"
+                $dispatch.AttributePresentAfter = $null -ne $live
+                if ($method -ceq 'DELETE') {
+                    if ($null -ne $live) { throw 'Deleted attribute remains visible; stop without recreating or resending.' }
+                } elseif ($null -eq $live) {
+                    throw 'Recreated attribute is not visible; stop without resending.'
+                } else {
+                    $after = Get-StatusChoiceAttribute -LogicalName $name
+                    Assert-StatusChoiceColumn -Attribute $after -ManifestColumn $column `
+                        -ExpectedChoiceName ([string]$Manifest.globalChoice.logicalName) -ExpectedChoice $preflight.CandidateStatusChoice
+                    $oldPreserved = Get-ReplacementPreservedProperties -Attribute $before | ConvertTo-Json -Depth 30 -Compress
+                    $newPreserved = Get-ReplacementPreservedProperties -Attribute $after | ConvertTo-Json -Depth 30 -Compress
+                    if ($oldPreserved -cne $newPreserved -or
+                        [string]$after.MetadataId -ieq [string]$before.MetadataId) {
+                        throw 'Replacement property preservation or new metadata identity did not reconcile exactly.'
+                    }
+                    $dispatch.NewAttributeMetadataIdSha256 = Get-MetadataIdFingerprint -MetadataId ([string]$after.MetadataId)
+                    $dispatch.GlobalChoiceName = [string]$after.GlobalOptionSet.Name
+                    $script:ReplacementJournal.ReconciledColumns += $name
+                }
+                $dispatch.Outcome = if ($null -ne $dispatchFailure) { 'FAILED_OR_UNCERTAIN_GET_RECONCILED_STOPPED' } else { 'GET_RECONCILED' }
+            } catch {
+                $dispatch.ReconciliationError = Get-SanitizedFailureMessage -Message ([string]$_.Exception.Message)
+                $dispatch.Outcome = 'GET_RECONCILIATION_FAILED_STOPPED'
+                Save-ReplacementJournal
+                throw
+            }
+            Save-ReplacementJournal
+            if ($null -ne $dispatchFailure) { throw $dispatchFailure }
+        }
+    }
+    $script:CurrentStage = 'REPLACEMENT_FINAL_CORE_RECONCILIATION'
+    $wrongChoice = Get-OptionalMetadata -Path "GlobalOptionSetDefinitions(Name='$($script:ChoiceName)')"
+    $targetChoice = Get-OptionalMetadata -Path "GlobalOptionSetDefinitions(Name='$($Manifest.globalChoice.logicalName)')"
+    foreach ($pair in @(@($wrongChoice, $preflight.CallOutcomeChoice), @($targetChoice, $preflight.CandidateStatusChoice))) {
+        if ($null -eq $pair[0] -or [string]$pair[0].MetadataId -ine [string]$pair[1].MetadataId) {
+            throw 'Global Choice identity changed during replacement.'
+        }
+        $null = Get-ChoiceOptionsForRepair -Choice $pair[0] -ExpectedOptions @($pair[1].Options | ForEach-Object {
+            [pscustomobject]@{ label = [string]$_.Label.UserLocalizedLabel.Label; value = [int]$_.Value }
+        }) -ExpectedName ([string]$pair[1].Name)
+    }
+    foreach ($table in @($Manifest.tables | Where-Object logicalName -in $script:TableNames)) {
+        $choice = if ($table.logicalName -ceq 'os_sr_call') { $wrongChoice } else { $targetChoice }
+        $null = Assert-TableReadback -Table $table -Choice $choice
+    }
+    $null = Assert-RelationshipsAndKeys
+    $finalRows = Get-CandidateStatusHistoryRowCount -EntitySetName ([string]$preflight.Table.EntitySetName) `
+        -PrimaryIdAttribute ([string]$preflight.Table.PrimaryIdAttribute)
+    if ($finalRows -ne 0) { throw 'History count changed during replacement; stopped.' }
+    $finalCandidateOutput = @(& $script:CandidateRunner -ReconcileOnly -EnvironmentName $EnvironmentName `
+        -OrganizationUrl $OrganizationUrl -ExpectedEnvironmentId $ExpectedEnvironmentId `
+        -ExpectedOrganizationId $ExpectedOrganizationId 2>&1 | ForEach-Object { [string]$_ })
+    if ($LASTEXITCODE -ne 0) { throw 'Final Candidate-only reconciliation failed.' }
+    $finalCandidate = ($finalCandidateOutput -join "`n") | ConvertFrom-Json
+    if ($finalCandidate.Result -cne 'CANDIDATE_TABLE_KEYS_LOOKUPS_AND_SOLUTION_MEMBERSHIP_RECONCILED' -or
+        $finalCandidate.Requests.POST -ne 0) { throw 'Final Candidate-only state is not exact and read-only.' }
+    $organization = Invoke-DataverseRequest -Method GET -Path "organizations($ExpectedOrganizationId)?`$select=organizationid,isauditenabled"
+    if ([string]$organization.organizationid -ine $ExpectedOrganizationId -or $null -eq $organization.isauditenabled) {
+        throw 'Organization audit state could not be proven.'
+    }
+    $script:ReplacementJournal.Result = if ($organization.isauditenabled) {
+        'CANDIDATE_CORE_STORAGE_PROVISIONED'
+    } else { 'CANDIDATE_CORE_STORAGE_PROVISIONED_AUDIT_ACTIVATION_PENDING' }
+    $script:ReplacementJournal.Requests = $script:RequestCounts
+    $script:ReplacementJournal.CandidateReconciliationGET = [int]$candidateResult.Requests.GET + [int]$finalCandidate.Requests.GET
+    $script:ReplacementJournal.CandidateStatusHistoryRows = $finalRows
+    $script:ReplacementJournal.OtherWrites = 0
+    Save-ReplacementJournal
+    $script:ReplacementJournal
+}
+
+function Get-StatusChoiceReplacementPreflight {
+    param(
+        [Parameter(Mandatory = $true)][object]$Manifest,
+        [Parameter(Mandatory = $true)][object]$CandidateResult
+    )
+    $result = Get-StatusChoiceRepairPreflightResult -Manifest $Manifest -CandidateResult $CandidateResult
+    $dependencies = foreach ($column in $result.Attributes) {
+        $script:CurrentStage = "DEPENDENCIES_FOR_DELETE_$($column.LogicalName)"
+        $attribute = Get-StatusChoiceAttribute -LogicalName ([string]$column.LogicalName)
+        if ((Get-MetadataIdFingerprint -MetadataId ([string]$attribute.MetadataId)) -cne
+            [string]$column.AttributeMetadataIdSha256) {
+            throw 'Attribute identity changed before its dependency-for-delete check.'
+        }
+        $response = Invoke-DataverseRequest -Method GET -Path (
+            "RetrieveDependenciesForDelete(ObjectId=$($attribute.MetadataId),ComponentType=2)"
+        )
+        if ($null -eq $response -or $null -eq $response.PSObject.Properties['value'] -or
+            $null -eq $response.value -or $response.'@odata.nextLink') {
+            throw 'Dependency-for-delete response is incomplete or unknown; no deletion is permitted.'
+        }
+        [ordered]@{
+            LogicalName = [string]$column.LogicalName
+            AttributeMetadataIdSha256 = [string]$column.AttributeMetadataIdSha256
+            BlockingDependencyCount = @($response.value).Count
+            BlockingComponentTypes = @($response.value | ForEach-Object {
+                [int]$_.dependentcomponenttype
+            } | Sort-Object -Unique)
+        }
+    }
+    $result.Result = if (@($dependencies | Where-Object BlockingDependencyCount -GT 0).Count) {
+        'REPLACEMENT_BLOCKED_DEPENDENCIES'
+    } else {
+        'READ_ONLY_STATUS_CHOICE_REPLACEMENT_PREFLIGHT_PASSED'
+    }
+    $result.DependenciesForDelete = @($dependencies)
+    $result.Requests.ChildScopeGET = [int]$script:RequestCounts.GET
+    $result.ColumnDeletes = 0
+    $result.ColumnCreates = 0
+    $result
+}
+
 function Invoke-StatusChoiceBindingRepair {
     param([Parameter(Mandatory = $true)][object]$Manifest)
     $script:CurrentStage = 'STATUS_CHOICE_REPAIR_PREFLIGHT'
@@ -1825,7 +2139,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Fresh Candidate-only guarded reconciliation failed; no child write was attempted.' }
     try { $candidateResult = ($candidateOutput -join "`n") | ConvertFrom-Json }
     catch { throw 'Candidate runner did not return a parseable reconciliation result.' }
-    $excludedTablesMatchMode = if ($RepairStatusChoiceBindings -or $RepairPreflightOnly) {
+    $excludedTablesMatchMode = if ($RepairStatusChoiceBindings -or $RepairPreflightOnly -or $ReplacementPreflightOnly -or $ReplaceStatusChoiceColumns) {
         (Compare-Object @('os_sr_call', 'os_sr_csh') @($candidateResult.ExcludedTablesPresent)).Count -eq 0
     } elseif ($ResumeRemainingScope) {
         (Compare-Object @('os_sr_call') @($candidateResult.ExcludedTablesPresent)).Count -eq 0
@@ -1849,6 +2163,16 @@ try {
     if ($ReconcileOnly) {
         $script:CurrentStage = 'READ_ONLY_RECONCILIATION'
         Get-ReconciliationSnapshot | ConvertTo-Json -Depth 30
+        return
+    }
+    if ($ReplaceStatusChoiceColumns) {
+        Invoke-StatusChoiceColumnReplacement -Manifest $manifest | ConvertTo-Json -Depth 40
+        return
+    }
+    if ($ReplacementPreflightOnly) {
+        $script:CurrentStage = 'STATUS_CHOICE_REPLACEMENT_READ_ONLY_PREFLIGHT'
+        Get-StatusChoiceReplacementPreflight -Manifest $manifest -CandidateResult $candidateResult |
+            ConvertTo-Json -Depth 40
         return
     }
     if ($RepairPreflightOnly) {
@@ -2039,15 +2363,21 @@ try {
 catch {
     $failure = $_
     if ($script:WriteStages.Count -gt 0 -and -not $script:ProvisioningReconciled -and
-        -not $RepairStatusChoiceBindings) {
+        -not $RepairStatusChoiceBindings -and -not $ReplaceStatusChoiceColumns) {
         Set-ManifestContinuationState -Status 'STOPPED_AFTER_CORRECTED_CONTINUATION_REQUIRES_RECONCILIATION' `
             -CorrectedCallLogDispatches $script:CorrectedCallLogCreateDispatches `
             -RemainingScopeWritesDispatched $script:RemainingScopeDispatches `
             -ConsumeRemainingScopeAuthorization:$script:RemainingScopeAuthorizationConsumed
     }
-    $repairMode = $RepairPreflightOnly -or $RepairStatusChoiceBindings
+    $repairMode = $RepairPreflightOnly -or $RepairStatusChoiceBindings -or $ReplacementPreflightOnly -or $ReplaceStatusChoiceColumns
     $repairClassification = if ($script:LastWriteOutcomeUncertain) {
         'UNCERTAIN_WRITE_OUTCOME'
+    } elseif ($ReplaceStatusChoiceColumns -and ([string]$failure.Exception.Message -match 'dependenc')) {
+        'REPLACEMENT_BLOCKED_DEPENDENCIES'
+    } elseif ($ReplaceStatusChoiceColumns -and ([string]$failure.Exception.Message -match 'business rows|aggregate count')) {
+        'REBIND_BLOCKED_DATA_PRESENT_OR_UNKNOWN'
+    } elseif ($ReplaceStatusChoiceColumns) {
+        'PARTIAL_METADATA_STATE'
     } elseif ($repairMode -and $null -ne $script:LastSanitizedWriteError -and
         @($script:StatusChoiceRepairResults | Where-Object Outcome -CEQ 'UPDATED_AND_GET_RECONCILED').Count -eq 0) {
         'IN_PLACE_CHOICE_REBIND_UNSUPPORTED_OR_REJECTED'
@@ -2070,6 +2400,12 @@ catch {
     } else {
         'STOPPED_AFTER_WRITE_REQUIRES_REVIEW'
     }
+    if ($ReplaceStatusChoiceColumns -and $null -ne $script:ReplacementJournal) {
+        $script:ReplacementJournal.Result = $repairClassification
+        $script:ReplacementJournal.Requests = $script:RequestCounts
+        $script:ReplacementJournal.FailureReason = Get-SanitizedFailureMessage -Message ([string]$failure.Exception.Message)
+        Save-ReplacementJournal
+    }
     [ordered]@{
         Result = $repairClassification
         Stage = $script:CurrentStage
@@ -2087,11 +2423,13 @@ catch {
         Writes = $script:WriteStages.ToArray()
         WritePayloadHashes = $script:WriteHashes.ToArray()
         StatusChoiceRepairResults = $script:StatusChoiceRepairResults.ToArray()
+        ReplacementJournal = $script:ReplacementJournal
         CorrectedCallLogCreateDispatches = $script:CorrectedCallLogCreateDispatches
         RemainingScopeWritesDispatched = $script:RemainingScopeDispatches
         AutomaticRetries = 0
         TableCreates = 0
-        ColumnCreates = 0
+        ColumnCreates = if ($ReplaceStatusChoiceColumns) { [int]$script:RequestCounts.POST } else { 0 }
+        ColumnDeletes = [int]$script:RequestCounts.DELETE
         ChoiceDefinitionWrites = 0
         CandidateWrites = 0
         BusinessDataWrites = 0

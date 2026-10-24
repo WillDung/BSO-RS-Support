@@ -635,6 +635,65 @@
         },
         "automaticRetries": 0
       },
+      "latestStatusChoiceBindingRepair": {
+        "authorizationSource": "Explicit owner authorization dated 2026-10-24",
+        "manifestSha256AtDispatch": "53b98d3168927660d42f90c5f74d35ef8192592f14c748782e2f4563e5716ad0",
+        "scope": [
+          "os_sr_csh_prevstat",
+          "os_sr_csh_newstat"
+        ],
+        "targetGlobalChoice": "os_sr_candstat",
+        "maxUpdatesPerColumn": 1,
+        "automaticRetries": 0,
+        "status": "STOPPED_AFTER_FIRST_UPDATE_READBACK_MISMATCH",
+        "callOutcomeChoiceModified": false,
+        "candidateStatusChoiceModified": false,
+        "candidateStatusHistoryRowsBeforeUpdate": 0,
+        "candidateStatusHistoryRowsAfterUpdate": 0,
+        "candidateStatusChoice": "Freshly reconciled to the six approved labels and frozen values; unchanged.",
+        "callOutcomeChoice": "Freshly reconciled to the three approved labels and frozen values; unchanged.",
+        "previousStatusColumn": {
+          "updateDispatches": 1,
+          "payloadSha256": "42455db120ae665773849fe45d12c9a2980aa5adfcbed4e8b1449651f58cdf6a",
+          "httpOutcome": "2xx response; exact status code was not captured in emitted evidence",
+          "immediateReadback": "FAILED_STRICT_POSTCONDITION",
+          "finalObservedBinding": "os_sr_callout"
+        },
+        "newStatusColumn": {
+          "updateDispatches": 0,
+          "readback": "NOT_ATTEMPTED"
+        },
+        "requests": {
+          "initialBlockedPreflight": {
+            "GET": 8,
+            "PUT": 0,
+            "POST": 0
+          },
+          "singleUpdateAttempt": {
+            "GET": 13,
+            "PUT": 1,
+            "POST": 0
+          },
+          "followUpReadOnlyReconciliation": {
+            "GET": 17,
+            "PUT": 0,
+            "POST": 0
+          },
+          "candidateStatusChoiceReconciliation": {
+            "GET": 31,
+            "PUT": 0,
+            "POST": 0
+          }
+        },
+        "finalBindings": {
+          "os_sr_csh_prevstat": "os_sr_callout",
+          "os_sr_csh_newstat": "os_sr_callout"
+        },
+        "candidateWrites": 0,
+        "callLogWrites": 0,
+        "businessDataWrites": 0,
+        "publicationWrites": 0
+      },
       "remainingMetadataScope": [
         "os_sr_csh",
         "os_sr_cand_call",

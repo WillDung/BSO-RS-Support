@@ -32,6 +32,20 @@ Assert-Test ($runner -match "CandidateWrites\s*=\s*0" -and
     $runner -match "BusinessDataWrites\s*=\s*0" -and
     $runner -match "PublicationWrites\s*=\s*0" -and
     $runner -notmatch "PublishAllXml") 'Candidate, business data, and publication remain excluded'
+Assert-Test ($runner -match '\[switch\]\$RepairStatusChoiceBindings' -and
+    $runner -match "ValidateSet\('GET', 'PUT', 'POST'\)" -and
+    $runner -match 'MaximumWrites = 2' -and
+    $runner -match 'EntityDefinitions\(LogicalName=''os_sr_csh''\)/Attributes\(LogicalName=''os_sr_csh_prevstat''\)' -and
+    $runner -match 'EntityDefinitions\(LogicalName=''os_sr_csh''\)/Attributes\(LogicalName=''os_sr_csh_newstat''\)' -and
+    $runner -notmatch "ValidateSet\([^\r\n]*PATCH") 'Repair mode is restricted to two in-place PUT paths and excludes PATCH'
+Assert-Test ($runner -match 'statusChoiceRepairIsAuthorized' -and
+    $runner -match 'latestResumeClassification -ceq ''PARTIAL_METADATA_STATE''' -and
+    $runner -match 'remainingMetadataAuthorizationConsumed' -and
+    $runner -match 'StatusChoiceRepairWriteCount -lt 2') 'Repair mode requires the consumed-scope mismatch state and enforces the two-write ceiling'
+Assert-Test ($runner -match '-not \$RepairStatusChoiceBindings' -and
+    $runner -match 'LastWriteOutcomeUncertain' -and
+    $runner -match 'UNCERTAIN_STOPPED' -and
+    $runner -match "MaximumRetryCount\s*=\s*0") 'Repair failures do not rewrite historical provisioning state or retry uncertain PUTs'
 Assert-Test ($runner -match "Assert-ChildTableAbsent" -and
     $runner -match "Assert-InitialState" -and
     $runner -match "Assert-TableReadback" -and
@@ -94,8 +108,50 @@ Assert-Test ($manifest.provisioning.phase3B2AuthorizedContinuation.latestResumeC
     $manifest.provisioning.phase3B2AuthorizedContinuation.latestResumeAttempt.childScopeRequests.POST -eq 0 -and
     $manifest.provisioning.phase3B2AuthorizedContinuation.latestResumeAttempt.automaticRetries -eq 0 -and
     -not $manifest.provisioning.phase3B2AuthorizedContinuation.latestResumeAttempt.correctedPayloadDispatchedThisAttempt) 'Latest resume is recorded as GET-only partial-state stop'
+Assert-Test ($manifest.provisioning.phase3B2AuthorizedContinuation.latestStatusChoiceBindingRepair.status -ceq 'STOPPED_AFTER_FIRST_UPDATE_READBACK_MISMATCH' -and
+    $manifest.provisioning.phase3B2AuthorizedContinuation.latestStatusChoiceBindingRepair.previousStatusColumn.updateDispatches -eq 1 -and
+    $manifest.provisioning.phase3B2AuthorizedContinuation.latestStatusChoiceBindingRepair.newStatusColumn.updateDispatches -eq 0 -and
+    $manifest.provisioning.phase3B2AuthorizedContinuation.latestStatusChoiceBindingRepair.automaticRetries -eq 0 -and
+    $manifest.provisioning.phase3B2AuthorizedContinuation.latestStatusChoiceBindingRepair.finalBindings.os_sr_csh_prevstat -ceq 'os_sr_callout' -and
+    $manifest.provisioning.phase3B2AuthorizedContinuation.latestStatusChoiceBindingRepair.finalBindings.os_sr_csh_newstat -ceq 'os_sr_callout') 'Repair ledger records one unreconciled Previous Status PUT, no New Status write, and the verified final bindings'
 Assert-Test ($manifest.provisioning.phase3B2AuthorizedContinuation.primaryNameTechnicalNormalization.ownerApprovedMaxLength -eq 100 -and
     $manifest.provisioning.phase3B2AuthorizedContinuation.primaryNameTechnicalNormalization.formatName -ceq 'Text' -and
     -not $manifest.provisioning.phase3B2AuthorizedContinuation.primaryNameTechnicalNormalization.schemaDisplayRequirednessAndProductSemanticsChanged) 'Primary-name normalization is technical-only and does not change product or schema semantics'
+$payloadFunction = $null
+$ast = [System.Management.Automation.Language.Parser]::ParseFile($runnerPath, [ref]$tokens, [ref]$parseErrors)
+$payloadFunction = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -ceq 'New-StatusChoiceBindingUpdatePayload' }, $true)
+if ($null -eq $payloadFunction) { throw 'FAIL: Full-metadata PUT payload helper is missing.' }
+$script:ChoiceName = 'os_sr_callout'
+Invoke-Expression $payloadFunction.Extent.Text
+$sourceMetadata = [pscustomobject]@{
+    '@odata.type' = 'Microsoft.Dynamics.CRM.PicklistAttributeMetadata'
+    '@odata.context' = 'synthetic-context'
+    LogicalName = 'os_sr_csh_prevstat'
+    SchemaName = 'os_sr_csh_prevstat'
+    MetadataId = '00000000-0000-0000-0000-000000000011'
+    DisplayName = [pscustomobject]@{
+        LocalizedLabels = @([pscustomobject]@{ Label = 'Previous Status'; LanguageCode = 1033 })
+    }
+    RequiredLevel = [pscustomobject]@{ Value = 'ApplicationRequired'; CanBeChanged = $true }
+    IsPrimaryName = $false
+    GlobalOptionSet = [pscustomobject]@{
+        Name = 'os_sr_callout'
+        MetadataId = '00000000-0000-0000-0000-000000000012'
+    }
+    OptionSet = $null
+}
+$updatePayload = New-StatusChoiceBindingUpdatePayload -Attribute $sourceMetadata `
+    -TargetMetadataId '00000000-0000-0000-0000-000000000013'
+Assert-Test ($updatePayload.LogicalName -ceq $sourceMetadata.LogicalName -and
+    $updatePayload.SchemaName -ceq $sourceMetadata.SchemaName -and
+    $updatePayload.MetadataId -ceq $sourceMetadata.MetadataId -and
+    $updatePayload.DisplayName.LocalizedLabels[0].Label -ceq 'Previous Status' -and
+    $updatePayload.RequiredLevel.Value -ceq 'ApplicationRequired' -and
+    $updatePayload.IsPrimaryName -eq $false -and
+    $updatePayload.'GlobalOptionSet@odata.bind' -ceq '/GlobalOptionSetDefinitions(00000000-0000-0000-0000-000000000013)' -and
+    -not $updatePayload.ContainsKey('GlobalOptionSet') -and
+    -not $updatePayload.ContainsKey('OptionSet') -and
+    -not $updatePayload.ContainsKey('@odata.context')) 'In-place PUT changes only the intended binding and preserves writable definition metadata'
 
 Write-Output "PASS: $script:Passed synthetic Phase 3B.2 provisioning assertions; no authentication, network, PAC, or tenant calls."

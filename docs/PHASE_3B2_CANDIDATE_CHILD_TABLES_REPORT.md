@@ -2,8 +2,8 @@
 
 **Date:** 24 October 2026
 **Current classification:** `PARTIAL_METADATA_STATE`
-**Latest provisioning execution:** the prior corrected Call Log create and seven remaining metadata POSTs were each dispatched once; zero retries
-**Latest read-only reconciliation:** Candidate exact; both child tables, four relationships, and two Active keys present; both Candidate Status History status columns bind to the wrong global Choice. The latest resume made 17 GET and 0 POST.
+**Latest provisioning execution:** the prior corrected Call Log create and seven remaining metadata POSTs were each dispatched once. A later authorized repair dispatched one Previous Status PUT; no retry occurred.
+**Latest read-only reconciliation:** Candidate exact; both child tables, four relationships, and two Active keys present; both Candidate Status History status columns still bind to `os_sr_callout`. No repair was confirmed.
 
 > The original HTTP 400 attempt is retained below as historical evidence. The latest bounded continuation and current handover are recorded in Section 30 and supersede earlier statements that the child tables were absent.
 
@@ -299,3 +299,28 @@ The owner-approved primary-name normalization is now enforced locally for every 
 | Corrected Call Log payload from the earlier authorized correction | `18cc58450bdcf5aa03119dc497db37b7842daf61f0f6ed8f8e0987ec0c40f7be` |
 
 The corrected payload fingerprint is historical pre-dispatch evidence for the previously authorized Call Log correction; it was not dispatched during this latest resume because Call Log already exists. The earlier HTTP 400 remains historical; the authorized corrected create later returned success and was GET-reconciled. This run's dispatch count is zero. Historical Phase 3B.2 write attempts remain one corrected Call Log create plus seven remaining-scope metadata writes; automatic retries remain zero. The remaining-scope authorization is consumed, and this reconciliation does not authorize repairing the live Choice mismatch.
+
+## 32. Owner-Authorized Status Choice Repair Attempt
+
+The owner explicitly authorized one in-place update per affected Status History picklist, with a fresh read-only gate and zero rows required. The active PAC target and guarded identity matched the previously confirmed VN LMV IT organization. The current manifest required both columns to target the existing global Choice `os_sr_candstat`; the live Candidate Status Choice reconciled to all six approved labels/values, and `os_sr_callout` reconciled to its three frozen labels/values. Candidate Status History row count was **0** before the update and remained **0** after it. The Solution/Publisher and table-root checks passed.
+
+Microsoft documents `PicklistAttributeMetadata` as supporting GET, PUT, and DELETE, and documents PUT—not PATCH—for replacing metadata definitions. The repair runner used the full live attribute definition and changed only its `GlobalOptionSet` binding reference; it included the existing Solution and label-merge headers. See [PicklistAttributeMetadata](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/reference/picklistattributemetadata?view=dataverse-latest) and [Use the Web API with table definitions](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/use-web-api-metadata).
+
+The first eligible update targeted **Previous Status** (`os_sr_csh_prevstat`) and returned a successful 2xx response; the exact HTTP status code was not captured in the runner output. Its immediate GET failed the strict postcondition. A subsequent fresh, read-only reconciliation confirmed both `os_sr_csh_prevstat` and `os_sr_csh_newstat` still bind to `os_sr_callout`, not `os_sr_candstat`. Because the update did not reconcile, execution stopped: **New Status was not updated and Previous Status was not resent**. This is an unreconciled/no-effect outcome, not evidence that the second update is supported or authorized to proceed. Further writes require a new bounded authorization and a supported correction plan.
+
+| Current repair boundary | Count / outcome |
+|---|---:|
+| Initial unsupported-key GET preflight attempt | 8 GET, 0 PUT, 0 POST |
+| Guarded repair attempt | 13 GET, 1 PUT, 0 POST |
+| Immediate readback | Failed strict postcondition |
+| Follow-up child reconciliation | 17 GET, 0 PUT, 0 POST; both bindings remain `os_sr_callout` |
+| Follow-up Candidate Choice reconciliation | 31 GET, 0 PUT, 0 POST; Candidate Status Choice exact |
+| Candidate Status History rows | 0 before and after |
+| Previous Status updates | 1 dispatched, not reconciled |
+| New Status updates | 0 |
+| Automatic retries | 0 |
+| Candidate / Call Log / business-data / security / app / publication writes | 0 |
+
+The request payload SHA-256 for the single Previous Status PUT was `42455db120ae665773849fe45d12c9a2980aa5adfcbed4e8b1449651f58cdf6a`. The PUT did not alter Choice labels or values, Candidate, Call Log, security, app navigation, or published state. No PublishXml/PublishAllXml, commit, or push occurred.
+
+Repair ledger manifest SHA-256: `63f56173f61265f539d23d6ceffb5631e23f438e4e254755c1e24c7d17eb1915`. The manifest fingerprint used at the time of the PUT was `53b98d3168927660d42f90c5f74d35ef8192592f14c748782e2f4563e5716ad0`.

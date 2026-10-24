@@ -197,6 +197,7 @@
           "type": "Lookup",
           "target": "systemuser",
           "required": "Required",
+          "relationship": "os_sr_usr_call_ctby",
           "valueSource": "AuthenticatedInitiatingUser"
         },
         {
@@ -273,6 +274,7 @@
           "type": "Lookup",
           "target": "systemuser",
           "required": "Required",
+          "relationship": "os_sr_usr_csh_actr",
           "valueSource": "AuthenticatedInitiatingUser"
         },
         {
@@ -364,19 +366,19 @@
     "valuePrefix": null,
     "options": [
       {
-        "value": null,
+        "value": 100010000,
         "label": "Answered"
       },
       {
-        "value": null,
+        "value": 100010001,
         "label": "No Answer"
       },
       {
-        "value": null,
+        "value": 100010002,
         "label": "Call Back Requested"
       }
     ],
-    "valueStatus": "Dataverse system-assigned values; reconcile and freeze exact integers before Custom API/plugin implementation."
+    "valueStatus": "Dataverse option values GET-reconciled and frozen during the authorized Phase 3B.2 continuation."
   },
   "relationships": [
     {
@@ -393,6 +395,24 @@
       "parent": "os_sr_cand",
       "child": "os_sr_csh",
       "lookup": "os_sr_csh_cand",
+      "required": true,
+      "delete": "Restrict",
+      "assignShareReparent": "NoCascade"
+    },
+    {
+      "schemaName": "os_sr_usr_call_ctby",
+      "parent": "systemuser",
+      "child": "os_sr_call",
+      "lookup": "os_sr_call_ctby",
+      "required": true,
+      "delete": "Restrict",
+      "assignShareReparent": "NoCascade"
+    },
+    {
+      "schemaName": "os_sr_usr_csh_actr",
+      "parent": "systemuser",
+      "child": "os_sr_csh",
+      "lookup": "os_sr_csh_actr",
       "required": true,
       "delete": "Restrict",
       "assignShareReparent": "NoCascade"
@@ -563,13 +583,40 @@
         "POST": 0
       }
     },
+    "phase3B2AuthorizedContinuation": {
+      "status": "STOPPED_AFTER_REJECTED_TABLE_CREATE_NO_RETRY",
+      "scope": [
+        "os_sr_call",
+        "os_sr_csh",
+        "os_sr_callout",
+        "os_sr_cand_call",
+        "os_sr_cand_csh",
+        "os_sr_usr_call_ctby",
+        "os_sr_usr_csh_actr",
+        "approved child-table alternate keys and audit metadata"
+      ],
+      "candidateCreateOrModification": false,
+      "businessDataWrites": false,
+      "customApiOrPlugin": false,
+      "securityOrAppChanges": false,
+      "publication": false,
+      "automaticRetries": 0,
+      "choiceValues": "GET-reconciled and frozen in this manifest before child table schema creation.",
+      "executionOutcome": {
+        "callOutcomeChoice": "Created once; exact labels and allocated values GET-reconciled and Solution membership verified.",
+        "callLogTable": "One EntityDefinitions POST returned HTTP 400; subsequent guarded GET confirmed absent; no retry authorized.",
+        "candidateStatusHistoryTable": "Not attempted after Call Log table rejection.",
+        "successfulChildTableWrites": 0,
+        "businessDataWrites": 0,
+        "automaticRetries": 0
+      }
+    },
     "sequence": [
-      "Verify the GET-reconciled Dataverse-allocated Candidate Status Choice; create the Call Outcome Choice only under its later bounded authorization",
-      "Create Candidate table",
-      "Add Candidate columns and lookups to the existing approved Position, Candidate Source, and TA Directory tables",
-      "Create Call Log table and columns",
-      "Create Candidate Status History table and columns",
-      "Create alternate keys after table/column metadata propagation",
+      "Reconcile the existing Candidate table, Candidate Status Choice, keys, lookups, and Solution inclusion; do not recreate Candidate",
+      "GET-reconcile the existing Call Outcome Choice and frozen option mapping; do not recreate it",
+      "Create Call Log table and columns only after the rejected HTTP 400 request is diagnosed under new bounded authorization",
+      "Create Candidate Status History table and columns after Call Log creation is successfully reconciled under new bounded authorization",
+      "Create child alternate keys after table/column metadata propagation under new bounded authorization",
       "Set table auditing enabled on Candidate, Call Log, and Candidate Status History; verify organization auditing is enabled under approved governance before relying on it",
       "Verify exact Solution membership",
       "Use only separately approved bounded publication/reconciliation"
@@ -578,7 +625,7 @@
   },
   "unresolvedDecisions": [],
   "externalPrerequisites": [
-    "Candidate Status Choice allocation is frozen; verify Publisher option-value allocation for the later Call Outcome Choice immediately before its separately authorized metadata write.",
+    "Candidate Status and Call Outcome Choice allocations are frozen; verify existing mappings read-only and do not recreate the Call Outcome Choice.",
     "The last documented environment assessment found organization auditing disabled; verify approved organization-level audit enablement, retention, access, and capacity before relying on table audit flags.",
     "Complete least-privilege Custom API execution and effective-access design while preserving the authenticated initiating user; no role/access change is authorized here.",
     "Verify the exact authorized environment, solution/publisher, and supported AutoNumber metadata path during a separately authorized provisioning preflight.",

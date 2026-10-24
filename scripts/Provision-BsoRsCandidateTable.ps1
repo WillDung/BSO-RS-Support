@@ -33,7 +33,7 @@ $script:LastWriteHttpStatus = $null
 $script:SafeBlockReason = $null
 $script:LastSolutionMembershipCount = $null
 $script:CandidateAttributeSummary = @()
-$script:ExpectedManifestSha256 = '7cfe13bb7450946c17e3659e02a4b78aecfd93f50c272561b1e88c6084d566d1'
+$script:ExpectedManifestSha256 = 'b7d0abb9335fd30925911059ef9744a1a519c84338354549768879083cc30ca4'
 $script:ExpectedCandidateProjectionSha256 = '7168980f2d13d8e406a25854fef3dafad118673e1c5661fb9461e52f41b4f7d8'
 $script:StatusLabels = @(
     'Need Call Candidate',

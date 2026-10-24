@@ -90,9 +90,12 @@ Assert-Test ($choiceLabels.Count -eq 6 -and (Compare-Object $expectedLabels $cho
 Assert-Test ($choiceValues.Count -eq 6 -and
     (Compare-Object $expectedChoiceValues $choiceValues).Count -eq 0) 'Status option values match the GET-reconciled frozen mapping'
 Assert-Test (($candidate.columns | Where-Object logicalName -ceq 'os_sr_cand_stat').defaultValue -eq $choice.defaultValue) 'Candidate Status default matches the allocated Need Call Candidate value'
+$callOutcomeValues = @($manifest.callOutcomeChoice.options | ForEach-Object value)
+$callOutcomeUnassigned = @($callOutcomeValues | Where-Object { $null -eq $_ }).Count -eq 3
+$callOutcomeFrozen = @($callOutcomeValues | Where-Object { $null -ne $_ -and [int]$_ -gt 0 } | Select-Object -Unique).Count -eq 3
 Assert-Test ($manifest.callOutcomeChoice.options.Count -eq 3 -and
-    @($manifest.callOutcomeChoice.options | Where-Object { $null -eq $_.value }).Count -eq 3 -and
-    $manifest.callOutcomeChoice.valueStatus -match 'system-assigned') 'Call Outcome values remain explicitly deferred to Dataverse allocation'
+    ($callOutcomeUnassigned -or $callOutcomeFrozen) -and
+    $manifest.callOutcomeChoice.valueStatus -match 'system-assigned|GET-reconciled and frozen') 'Call Outcome values are unassigned before provisioning or uniquely frozen after Dataverse allocation'
 Assert-Test ($choiceLabels -notcontains 'Draft Created' -and $choiceLabels -notcontains 'BSO Reviewing' -and
     $choiceLabels -notcontains 'Sent to TA' -and $choiceLabels -notcontains 'TA Approval') 'No deprecated approval stages in Choice'
 
@@ -104,6 +107,20 @@ Assert-Test (($manifest.callOutcomeRules | Where-Object outcome -ceq 'Answered')
     ($manifest.callOutcomeRules | Where-Object outcome -ceq 'Answered').atomic -and
     -not ($manifest.callOutcomeRules | Where-Object outcome -ceq 'No Answer').createsStatusHistory -and
     -not ($manifest.callOutcomeRules | Where-Object outcome -ceq 'Call Back Requested').createsStatusHistory) 'Answer transitions atomically; non-answer outcomes log only'
+
+$userRelationships = @($manifest.relationships | Where-Object parent -ceq 'systemuser')
+$expectedUserRelationships = @('os_sr_usr_call_ctby', 'os_sr_usr_csh_actr')
+Assert-Test ($userRelationships.Count -eq 2 -and
+    (Compare-Object $expectedUserRelationships @($userRelationships | ForEach-Object schemaName)).Count -eq 0 -and
+    @($manifest.relationships | ForEach-Object schemaName | Select-Object -Unique).Count -eq $manifest.relationships.Count) 'System-user relationship technical names are unique and deterministic'
+Assert-Test ((@($userRelationships | Where-Object { $_.delete -cne 'Restrict' -or $_.assignShareReparent -cne 'NoCascade' }).Count -eq 0) -and
+    ($manifest.tables | Where-Object logicalName -ceq 'os_sr_call').columns.Where({ $_.logicalName -ceq 'os_sr_call_ctby' }).relationship -ceq 'os_sr_usr_call_ctby' -and
+    ($manifest.tables | Where-Object logicalName -ceq 'os_sr_csh').columns.Where({ $_.logicalName -ceq 'os_sr_csh_actr' }).relationship -ceq 'os_sr_usr_csh_actr') 'System-user relationships preserve lookup names and non-destructive history cascades'
+Assert-Test ($manifest.provisioning.phase3B2AuthorizedContinuation.status -ceq 'STOPPED_AFTER_REJECTED_TABLE_CREATE_NO_RETRY' -and
+    $manifest.provisioning.phase3B2AuthorizedContinuation.automaticRetries -eq 0 -and
+    -not $manifest.provisioning.phase3B2AuthorizedContinuation.businessDataWrites -and
+    -not $manifest.provisioning.phase3B2AuthorizedContinuation.candidateCreateOrModification -and
+    $manifest.provisioning.phase3B2AuthorizedContinuation.executionOutcome.callOutcomeChoice -match 'GET-reconciled') 'Phase 3B.2 stop disposition preserves the bounded zero-retry outcome'
 
 $expectedTransitions = @(
     'Need Call Candidate|RecordCall|Candidate Answered',
@@ -129,7 +146,7 @@ Assert-Test (@($history.columns | Where-Object logicalName -ceq 'os_sr_csh_prevs
 Assert-Test (@($history.columns | Where-Object logicalName -ceq 'os_sr_csh_cact').Count -eq 1 -and
     @($history.columns | Where-Object logicalName -ceq 'os_sr_csh_corid').Count -eq 1) 'History action and GUID correlation fields'
 
-Assert-Test ($manifest.relationships.Count -eq 5 -and
+Assert-Test ($manifest.relationships.Count -eq 7 -and
     @($manifest.relationships | Where-Object { $_.delete -cne 'Restrict' -or $_.assignShareReparent -cne 'NoCascade' }).Count -eq 0) 'All proposed relationships restrict deletes and disable cascades'
 Assert-Test (@($call.alternateKeys | Where-Object name -ceq 'os_sr_call_ak_cand_action').Count -eq 1 -and
     @($call.alternateKeys[0].columns | Where-Object { $_ -ceq 'os_sr_call_corid' }).Count -eq 1 -and

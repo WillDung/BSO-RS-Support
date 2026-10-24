@@ -9,6 +9,7 @@ param(
     [switch]$ReconcileOnly,
     [switch]$PreflightOnly,
     [switch]$ResumeRemainingScope,
+    [switch]$RepairPreflightOnly,
     [switch]$RepairStatusChoiceBindings
 )
 
@@ -53,6 +54,9 @@ $script:RemainingScopeDispatches = 0
 $script:RemainingScopeAuthorizationConsumed = $false
 $script:StatusChoiceRepairWriteCount = 0
 $script:LastWriteOutcomeUncertain = $false
+$script:LastSanitizedWriteError = $null
+$script:LastWriteHttpStatus = $null
+$script:RepairAllowedColumns = @()
 $script:StatusChoiceRepairResults = [System.Collections.Generic.List[object]]::new()
 
 function Get-Sha256 {
@@ -123,6 +127,16 @@ function Get-SanitizedDataverseError {
     "HTTP $StatusCode; Dataverse code $safeCode; $message"
 }
 
+function Get-SanitizedFailureMessage {
+    param([Parameter(Mandatory = $true)][string]$Message)
+    $safe = $Message -replace '(?i)https?://\S+', '[URL]'
+    $safe = $safe -replace '(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b', '[EMAIL]'
+    $safe = $safe -replace '\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b', '[ID]'
+    $safe = $safe -replace '(?i)\bBearer\s+\S+', '******'
+    if ($safe.Length -gt 600) { $safe = $safe.Substring(0, 600) }
+    $safe
+}
+
 function Assert-Manifest {
     param([Parameter(Mandatory = $true)][object]$Manifest)
     if ((Get-ManifestHash) -cne $script:ExpectedManifestSha256) {
@@ -138,7 +152,8 @@ function Assert-Manifest {
         $continuation.remainingMetadataDispatchLimit -eq 7 -and
         $continuation.remainingMetadataWritesDispatched -eq 0 -and
         -not $continuation.remainingMetadataAuthorizationConsumed
-    $statusChoiceRepairIsAuthorized = $RepairStatusChoiceBindings -and
+    $statusChoiceRepairRequested = $RepairPreflightOnly -or $RepairStatusChoiceBindings
+    $statusChoiceRepairIsAuthorized = $statusChoiceRepairRequested -and
         $continuation.status -ceq 'STOPPED_AFTER_REMAINING_METADATA_MISMATCH_NO_FURTHER_WRITES' -and
         $continuation.remainingMetadataAuthorizationConsumed -and
         $continuation.latestResumeClassification -ceq 'PARTIAL_METADATA_STATE' -and
@@ -153,10 +168,10 @@ function Assert-Manifest {
             'REMAINING_SCOPE_AUTHORIZATION_CONSUMED_RECONCILIATION_PENDING',
             'PHASE_3B2_STORAGE_RECONCILED_AUTHORIZATION_CONSUMED'
         )
-    if ($RepairStatusChoiceBindings -and [string]::IsNullOrWhiteSpace($AuthorizationReference)) {
+    if ($statusChoiceRepairRequested -and [string]::IsNullOrWhiteSpace($AuthorizationReference)) {
         throw 'Status Choice repair requires an explicit owner authorization reference.'
     }
-    $modeCount = @($ReconcileOnly, $PreflightOnly, $ResumeRemainingScope, $RepairStatusChoiceBindings |
+    $modeCount = @($ReconcileOnly, $PreflightOnly, $ResumeRemainingScope, $RepairPreflightOnly, $RepairStatusChoiceBindings |
         Where-Object { $_ }).Count
     if ($modeCount -gt 1) { throw 'Provisioning modes are mutually exclusive.' }
     if ($Manifest.phase -cne '3A' -or $Manifest.solutionUniqueName -cne $script:SolutionName -or
@@ -487,13 +502,18 @@ function Invoke-DataverseRequest {
         }
         $pathIsApproved = $index -lt $script:ExpectedWritePaths.Count -and $Path -ceq $script:ExpectedWritePaths[$index]
         $bodyIsApproved = if ($Method -eq 'PUT' -and $RepairStatusChoiceBindings) {
-            $allowedColumns = @('os_sr_csh_prevstat', 'os_sr_csh_newstat')
             $columnName = [string]$Body.LogicalName
             $targetChoiceId = [string]$script:RepairTargetChoice.MetadataId
-            $expectedColumn = if ($index -eq 0) { 'os_sr_csh_prevstat' } elseif ($index -eq 1) { 'os_sr_csh_newstat' } else { $null }
-            $columnName -in $allowedColumns -and
+            $expectedColumn = if ($index -lt $script:RepairAllowedColumns.Count) {
+                [string]$script:RepairAllowedColumns[$index]
+            } else { $null }
+            $metadataId = [regex]::Match($Path, '/Attributes\(([0-9a-fA-F-]{36})\)$')
+            $columnName -in $script:RepairAllowedColumns -and
             $columnName -ceq $expectedColumn -and
             $script:StatusChoiceRepairWriteCount -lt 2 -and
+            $metadataId.Success -and
+            $metadataId.Groups[1].Value -ieq [string]$script:RepairAttributeIds[$columnName] -and
+            [string]$Body.MetadataId -ieq [string]$script:RepairAttributeIds[$columnName] -and
             [string]$Body.SchemaName -ceq $columnName -and
             [string]$Body.'@odata.type' -ceq 'Microsoft.Dynamics.CRM.PicklistAttributeMetadata' -and
             [string]$Body.'GlobalOptionSet@odata.bind' -ceq "/GlobalOptionSetDefinitions($targetChoiceId)" -and
@@ -564,8 +584,18 @@ function Invoke-DataverseRequest {
         elseif ($Method -eq 'POST' -and $Path -ceq 'RelationshipDefinitions') { $script:RelationshipDispatches++ }
         elseif ($Method -eq 'POST' -and $Path -match '/Keys$') { $script:KeyDispatches++ }
         $payloadHash = Get-Sha256 -Bytes ([Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject $Body -Depth 80 -Compress)))
-        $script:WriteStages.Add($Path)
-        $script:WriteHashes.Add([ordered]@{ Path = $Path; PayloadSha256 = $payloadHash })
+        if ($Method -eq 'PUT' -and $RepairStatusChoiceBindings) {
+            $logicalName = [string]$Body.LogicalName
+            $script:WriteStages.Add("PUT $logicalName")
+            $script:WriteHashes.Add([ordered]@{
+                LogicalName = $logicalName
+                AttributeMetadataIdSha256 = Get-MetadataIdFingerprint -MetadataId ([string]$script:RepairAttributeIds[$logicalName])
+                PayloadSha256 = $payloadHash
+            })
+        } else {
+            $script:WriteStages.Add($Path)
+            $script:WriteHashes.Add([ordered]@{ Path = $Path; PayloadSha256 = $payloadHash })
+        }
     }
     $headers = @{
         Authorization = 'Bearer ' + $script:AccessToken
@@ -597,14 +627,17 @@ function Invoke-DataverseRequest {
     catch {
         if ($Method -in @('PUT', 'POST')) {
             $script:LastWriteOutcomeUncertain = $true
+            $script:LastSanitizedWriteError = "HTTP status unavailable; transport outcome uncertain; Dataverse $Method was not retried."
             throw "A metadata $Method transport outcome is uncertain; do not retry."
         }
         throw 'A Dataverse GET failed; no write was sent by this request.'
     }
+    if ($Method -in @('PUT', 'POST')) { $script:LastWriteHttpStatus = [int]$statusCode }
     if ([int]$statusCode -lt 200 -or [int]$statusCode -ge 300) {
         if ($Method -in @('PUT', 'POST')) {
-            throw (Get-SanitizedDataverseError -StatusCode ([int]$statusCode) -Response $response)
-        }
+        $script:LastSanitizedWriteError = Get-SanitizedDataverseError -StatusCode ([int]$statusCode) -Response $response
+        throw $script:LastSanitizedWriteError
+    }
         throw "Dataverse returned HTTP $statusCode; response content suppressed."
     }
     $response
@@ -1089,10 +1122,11 @@ function Get-RelationshipPayload {
 function Assert-TableReadback {
     param(
         [Parameter(Mandatory = $true)][object]$Table,
-        [Parameter(Mandatory = $true)][object]$Choice
+        [Parameter(Mandatory = $true)][object]$Choice,
+        [switch]$AllowKnownStatusChoiceMismatch
     )
     $name = [string]$Table.logicalName
-    $metadata = Get-OptionalMetadata -Path "EntityDefinitions(LogicalName='$name')?`$select=LogicalName,MetadataId,OwnershipType,PrimaryIdAttribute,PrimaryNameAttribute,IsAuditEnabled"
+    $metadata = Get-OptionalMetadata -Path "EntityDefinitions(LogicalName='$name')?`$select=LogicalName,MetadataId,EntitySetName,OwnershipType,PrimaryIdAttribute,PrimaryNameAttribute,IsAuditEnabled"
     if ($null -eq $metadata -or $metadata.LogicalName -cne $name -or
         $metadata.OwnershipType -cne 'UserOwned' -or
         $metadata.PrimaryNameAttribute -cne $Table.primaryName.logicalName -or
@@ -1102,9 +1136,12 @@ function Assert-TableReadback {
     $primary = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$name')/Attributes" |
         Where-Object LogicalName -CEQ $Table.primaryName.logicalName)
     if ($primary.Count -ne 1 -or
+        [string]$primary[0].SchemaName -cne [string]$Table.primaryName.logicalName -or
+        [string]$primary[0].DisplayName.UserLocalizedLabel.Label -cne [string]$Table.primaryName.displayName -or
         [int]$primary[0].MaxLength -ne [int]$Table.primaryName.maxLength -or
         [string]$primary[0].FormatName.Value -cne [string]$Table.primaryName.formatName -or
         [string]$primary[0].AutoNumberFormat -cne [string]$Table.primaryName.format -or
+        [string]$primary[0].RequiredLevel.Value -cne 'ApplicationRequired' -or
         $primary[0].IsPrimaryName -ne $true) {
         throw "Created child table $name primary-name String/AutoNumber metadata did not reconcile."
     }
@@ -1139,19 +1176,44 @@ function Assert-TableReadback {
         if ($field[0].AttributeType -cne $expectedType) {
             throw "Column $($column.logicalName) type did not reconcile."
         }
+        if ([string]$field[0].SchemaName -cne [string]$column.logicalName -or
+            [string]$field[0].DisplayName.UserLocalizedLabel.Label -cne [string]$column.displayName -or
+            [string]$field[0].RequiredLevel.Value -cne $(if (Get-Required -Requirement ([string]$column.required)) {
+                'ApplicationRequired'
+            } else {
+                'None'
+            })) {
+            throw "Column $($column.logicalName) schema, display label, or requiredness did not reconcile."
+        }
         if ($column.type -eq 'String' -and [int]$field[0].MaxLength -ne [int]$column.maxLength) {
             throw "Column $($column.logicalName) max length did not reconcile."
         }
         if ($column.type -eq 'Memo' -and [int]$field[0].MaxLength -ne [int]$column.maxLength) {
             throw "Column $($column.logicalName) memo max length did not reconcile."
         }
+        if ($column.type -eq 'String') {
+            $expectedFormat = if ($column.format -in @('Email', 'Phone', 'Url')) {
+                [string]$column.format
+            } else { 'Text' }
+            if ([string]$field[0].FormatName.Value -cne $expectedFormat) {
+                throw "Column $($column.logicalName) format did not reconcile."
+            }
+        }
     }
     foreach ($column in @($Table.columns | Where-Object type -eq 'GlobalChoice')) {
         $filter = [Uri]::EscapeDataString("LogicalName eq '$($column.logicalName)'")
-        $picklist = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$name')/Attributes/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?`$select=LogicalName&`$filter=$filter&`$expand=GlobalOptionSet" |
+        $picklist = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$name')/Attributes/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?`$select=LogicalName,MetadataId&`$filter=$filter&`$expand=GlobalOptionSet" |
             Where-Object LogicalName -CEQ $column.logicalName)
+        $knownMismatchIsAllowed = $false
+        if ($picklist.Count -eq 1) {
+            $knownMismatchIsAllowed = $AllowKnownStatusChoiceMismatch -and
+                $name -ceq 'os_sr_csh' -and
+                $column.logicalName -in $script:RepairAllowedColumns -and
+                [string]$picklist[0].GlobalOptionSet.Name -ceq $script:ChoiceName
+        }
         if ($picklist.Count -ne 1 -or
-            [string]$picklist[0].GlobalOptionSet.Name -cne [string]$column.target) {
+            ([string]$picklist[0].GlobalOptionSet.Name -cne [string]$column.target -and
+                -not $knownMismatchIsAllowed)) {
             throw "Global Choice binding for $($column.logicalName) did not reconcile."
         }
     }
@@ -1190,17 +1252,33 @@ function Assert-TableCreateReadback {
 
 function Assert-RelationshipsAndKeys {
     foreach ($name in $script:TableNames) {
-        $relationships = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$name')/ManyToOneRelationships")
-        $expected = @($script:RelationshipNames | Where-Object { $_ -in @(
-            if ($name -ceq 'os_sr_call') { 'os_sr_cand_call'; 'os_sr_usr_call_ctby' }
-            else { 'os_sr_cand_csh'; 'os_sr_usr_csh_actr' }
-        ) })
-        foreach ($relationshipName in $expected) {
+        $relationships = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$name')/ManyToOneRelationships?`$select=SchemaName,ReferencedEntity,ReferencingEntity,ReferencedAttribute,ReferencingAttribute,CascadeConfiguration")
+        $expectedDefinitions = @($manifest.relationships | Where-Object child -CEQ $name)
+        $expected = @($expectedDefinitions | ForEach-Object schemaName)
+        $actualProjectRelationships = @($relationships | Where-Object {
+            [string]$_.SchemaName -like 'os_sr_*'
+        } | ForEach-Object SchemaName)
+        if ((Compare-Object $expected $actualProjectRelationships).Count -ne 0) {
+            throw "Project relationship inventory for $name differs from the approved manifest."
+        }
+        foreach ($definition in $expectedDefinitions) {
+            $relationshipName = [string]$definition.schemaName
+            $referencedAttribute = if ([string]$definition.parent -ceq 'systemuser') {
+                'systemuserid'
+            } else {
+                $parent = Get-OptionalMetadata -Path "EntityDefinitions(LogicalName='$($definition.parent)')?`$select=PrimaryIdAttribute"
+                if ($null -eq $parent) { throw "Relationship parent $($definition.parent) is absent." }
+                [string]$parent.PrimaryIdAttribute
+            }
             $match = @($relationships | Where-Object SchemaName -CEQ $relationshipName)
             if ($match.Count -ne 1 -or $match[0].CascadeConfiguration.Delete -cne 'Restrict' -or
                 $match[0].CascadeConfiguration.Assign -cne 'NoCascade' -or
                 $match[0].CascadeConfiguration.Share -cne 'NoCascade' -or
-                $match[0].CascadeConfiguration.Reparent -cne 'NoCascade') {
+                $match[0].CascadeConfiguration.Reparent -cne 'NoCascade' -or
+                [string]$match[0].ReferencedEntity -cne [string]$definition.parent -or
+                [string]$match[0].ReferencingEntity -cne [string]$definition.child -or
+                [string]$match[0].ReferencingAttribute -cne [string]$definition.lookup -or
+                [string]$match[0].ReferencedAttribute -cne $referencedAttribute) {
                 throw "Relationship $relationshipName did not reconcile to the manifest."
             }
         }
@@ -1209,6 +1287,13 @@ function Assert-RelationshipsAndKeys {
     foreach ($name in $script:TableNames) {
         $table = @($manifest.tables | Where-Object logicalName -CEQ $name)[0]
         $actual = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$name')/Keys")
+        $expectedNames = @($table.alternateKeys | ForEach-Object name)
+        $actualProjectKeys = @($actual | Where-Object {
+            [string]$_.SchemaName -like 'os_sr_*'
+        } | ForEach-Object SchemaName)
+        if ((Compare-Object $expectedNames $actualProjectKeys).Count -ne 0) {
+            throw "Project alternate-key inventory for $name differs from the approved manifest."
+        }
         foreach ($definition in $table.alternateKeys) {
             $match = @($actual | Where-Object SchemaName -CEQ $definition.name)
             if ($match.Count -ne 1 -or [string]$match[0].EntityKeyIndexStatus -cne 'Active' -or
@@ -1252,7 +1337,7 @@ function Get-ChoiceOptionsForRepair {
 function Get-StatusChoiceAttribute {
     param([Parameter(Mandatory = $true)][string]$LogicalName)
     $filter = [Uri]::EscapeDataString("LogicalName eq '$LogicalName'")
-    $matches = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='os_sr_csh')/Attributes/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?`$filter=$filter&`$expand=GlobalOptionSet" |
+    $matches = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='os_sr_csh')/Attributes/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?`$filter=$filter&`$expand=OptionSet,GlobalOptionSet" |
         Where-Object LogicalName -CEQ $LogicalName)
     if ($matches.Count -ne 1) {
         throw "Picklist metadata for $LogicalName did not resolve to exactly one definition."
@@ -1269,17 +1354,33 @@ function Assert-StatusChoiceColumn {
     )
     $label = [string]$Attribute.DisplayName.UserLocalizedLabel.Label
     $failedChecks = [System.Collections.Generic.List[string]]::new()
+    if ([string]$Attribute.MetadataId -notmatch '^[0-9a-fA-F-]{36}$') { $failedChecks.Add('MetadataId') }
     if ($Attribute.LogicalName -cne $ManifestColumn.logicalName) { $failedChecks.Add('LogicalName') }
     if ($Attribute.SchemaName -cne $ManifestColumn.logicalName) { $failedChecks.Add('SchemaName') }
     if ($Attribute.AttributeType -cne 'Picklist') { $failedChecks.Add('AttributeType') }
+    if ($Attribute.AttributeTypeName.Value -cne 'PicklistType') { $failedChecks.Add('AttributeTypeName') }
     if ($Attribute.IsCustomAttribute -ne $true) { $failedChecks.Add('IsCustomAttribute') }
     if ($Attribute.IsManaged -ne $false) { $failedChecks.Add('IsManaged') }
+    if ($Attribute.IsCustomizable.Value -ne $true) { $failedChecks.Add('IsCustomizable') }
     if ($label -cne $ManifestColumn.displayName) { $failedChecks.Add('DisplayName') }
     if ($Attribute.RequiredLevel.Value -cne 'ApplicationRequired') { $failedChecks.Add('RequiredLevel') }
     if ($Attribute.IsPrimaryName -ne $false) { $failedChecks.Add('IsPrimaryName') }
     if ($Attribute.GlobalOptionSet.Name -cne $ExpectedChoiceName) { $failedChecks.Add('GlobalOptionSet.Name') }
     if ([string]$Attribute.GlobalOptionSet.MetadataId -ine [string]$ExpectedChoice.MetadataId) {
         $failedChecks.Add('GlobalOptionSet.MetadataId')
+    }
+    if ($null -ne $ManifestColumn.defaultValue -and
+        [int]$Attribute.DefaultFormValue -ne [int]$ManifestColumn.defaultValue) {
+        $failedChecks.Add('DefaultFormValue')
+    }
+    $actualOptionMappings = @($Attribute.GlobalOptionSet.Options | ForEach-Object {
+        "$([string]$_.Label.UserLocalizedLabel.Label)|$([int]$_.Value)"
+    })
+    $expectedOptionMappings = @($ExpectedChoice.Options | ForEach-Object {
+        "$([string]$_.Label.UserLocalizedLabel.Label)|$([int]$_.Value)"
+    })
+    if ((Compare-Object $expectedOptionMappings $actualOptionMappings).Count -ne 0) {
+        $failedChecks.Add('GlobalOptionSet.Options')
     }
     if ($failedChecks.Count -gt 0) {
         throw "Status Choice column $($ManifestColumn.logicalName) failed readback checks: $($failedChecks -join ', '); observed binding '$($Attribute.GlobalOptionSet.Name)'."
@@ -1291,7 +1392,8 @@ function New-StatusChoiceBindingUpdatePayload {
         [Parameter(Mandatory = $true)][object]$Attribute,
         [Parameter(Mandatory = $true)][string]$TargetMetadataId
     )
-    if ([string]$Attribute.LogicalName -notin @('os_sr_csh_prevstat', 'os_sr_csh_newstat') -or
+    if ([string]$Attribute.LogicalName -notin $script:RepairAllowedColumns -or
+        [string]$Attribute.MetadataId -notmatch '^[0-9a-fA-F-]{36}$' -or
         $TargetMetadataId -notmatch '^[0-9a-fA-F-]{36}$' -or
         [string]$Attribute.GlobalOptionSet.Name -cne $script:ChoiceName) {
         throw 'Refusing to build an in-place binding payload outside the two approved Status History columns.'
@@ -1309,6 +1411,117 @@ function New-StatusChoiceBindingUpdatePayload {
     $payload['@odata.type'] = 'Microsoft.Dynamics.CRM.PicklistAttributeMetadata'
     $payload['GlobalOptionSet@odata.bind'] = "/GlobalOptionSetDefinitions($TargetMetadataId)"
     $payload
+}
+
+function Get-StatusChoiceAttributePath {
+    param([Parameter(Mandatory = $true)][object]$Attribute)
+    if ([string]$Attribute.LogicalName -notin $script:RepairAllowedColumns -or
+        [string]$Attribute.MetadataId -notmatch '^[0-9a-fA-F-]{36}$') {
+        throw 'Refusing to target an attribute outside the manifest-resolved repair set.'
+    }
+    "EntityDefinitions(LogicalName='os_sr_csh')/Attributes($($Attribute.MetadataId))"
+}
+
+function Get-MetadataIdFingerprint {
+    param([AllowNull()][string]$MetadataId)
+    if ([string]::IsNullOrWhiteSpace($MetadataId)) { return $null }
+    Get-Sha256 -Bytes ([Text.Encoding]::UTF8.GetBytes($MetadataId.ToLowerInvariant()))
+}
+
+function Get-StatusChoicePreservationFingerprint {
+    param([Parameter(Mandatory = $true)][object]$Attribute)
+    $snapshot = ConvertFrom-Json -InputObject (ConvertTo-Json -InputObject $Attribute -Depth 80 -Compress) -AsHashtable
+    foreach ($property in @(
+        '@odata.context',
+        '@odata.etag',
+        'GlobalOptionSet',
+        'OptionSet',
+        'ModifiedOn',
+        'HasChanged'
+    )) {
+        $snapshot.Remove($property)
+    }
+    Get-Sha256 -Bytes ([Text.Encoding]::UTF8.GetBytes((ConvertTo-Json -InputObject $snapshot -Depth 80 -Compress)))
+}
+
+function Get-StatusChoiceRepairPreflightResult {
+    param(
+        [Parameter(Mandatory = $true)][object]$Manifest,
+        [Parameter(Mandatory = $true)][object]$CandidateResult
+    )
+    $preflight = Assert-StatusChoiceRepairPreflight -Manifest $Manifest
+    $attributeSummaries = foreach ($column in $preflight.Columns) {
+        $attribute = $preflight.Attributes[[string]$column.logicalName]
+        $payload = New-StatusChoiceBindingUpdatePayload -Attribute $attribute `
+            -TargetMetadataId ([string]$preflight.CandidateStatusChoice.MetadataId)
+        [ordered]@{
+            DisplayName = [string]$column.displayName
+            LogicalName = [string]$attribute.LogicalName
+            SchemaName = [string]$attribute.SchemaName
+            AttributeMetadataIdSha256 = Get-MetadataIdFingerprint -MetadataId ([string]$attribute.MetadataId)
+            AttributeType = [string]$attribute.AttributeType
+            AttributeTypeName = [string]$attribute.AttributeTypeName.Value
+            RequiredLevel = [string]$attribute.RequiredLevel.Value
+            DefaultFormValue = $attribute.DefaultFormValue
+            IsManaged = [bool]$attribute.IsManaged
+            IsCustomizable = [bool]$attribute.IsCustomizable.Value
+            IsAuditEnabled = [bool]$attribute.IsAuditEnabled.Value
+            IsSecured = [bool]$attribute.IsSecured
+            OptionSet = [ordered]@{
+                Name = [string]$attribute.OptionSet.Name
+                MetadataIdSha256 = Get-MetadataIdFingerprint -MetadataId ([string]$attribute.OptionSet.MetadataId)
+            }
+            GlobalOptionSet = [ordered]@{
+                Name = [string]$attribute.GlobalOptionSet.Name
+                MetadataIdSha256 = Get-MetadataIdFingerprint -MetadataId ([string]$attribute.GlobalOptionSet.MetadataId)
+                Options = @($attribute.GlobalOptionSet.Options | ForEach-Object {
+                    [ordered]@{
+                        Label = [string]$_.Label.UserLocalizedLabel.Label
+                        Value = [int]$_.Value
+                    }
+                })
+            }
+            CorrectedPayloadSha256 = Get-Sha256 -Bytes ([Text.Encoding]::UTF8.GetBytes(
+                (ConvertTo-Json -InputObject $payload -Depth 80 -Compress)
+            ))
+        }
+    }
+    [ordered]@{
+        Result = 'READ_ONLY_STATUS_CHOICE_REPAIR_PREFLIGHT_PASSED'
+        ManifestSha256 = Get-ManifestHash
+        Target = 'Owner-confirmed VN LMV IT organization URL matched PAC and Dataverse'
+        CredentialSource = 'Existing Az.Accounts context via Get-AzAccessToken; PAC identity agreement validated'
+        IdentityGuard = 'Dataverse WhoAmI matched PAC user, organization, and process-scoped expected-user pin'
+        SolutionPublisher = 'Approved unmanaged Solution and os Publisher prefix reconciled'
+        Candidate = $CandidateResult.Result
+        CandidateStatusChoice = [ordered]@{
+            Name = [string]$preflight.CandidateStatusChoice.Name
+            MetadataIdSha256 = Get-MetadataIdFingerprint -MetadataId ([string]$preflight.CandidateStatusChoice.MetadataId)
+            Options = @($Manifest.globalChoice.options | ForEach-Object {
+                [ordered]@{ Label = [string]$_.label; Value = [int]$_.value }
+            })
+        }
+        CallOutcomeChoice = [ordered]@{
+            Name = [string]$preflight.CallOutcomeChoice.Name
+            MetadataIdSha256 = Get-MetadataIdFingerprint -MetadataId ([string]$preflight.CallOutcomeChoice.MetadataId)
+            Options = @($Manifest.callOutcomeChoice.options | ForEach-Object {
+                [ordered]@{ Label = [string]$_.label; Value = [int]$_.value }
+            })
+        }
+        CallLog = 'EXACT_SCHEMA_AUDIT_SOLUTION_RELATIONSHIPS_AND_KEYS'
+        CandidateStatusHistory = 'EXACT_EXCEPT_TWO_APPROVED_CHOICE_BINDINGS'
+        CandidateStatusHistoryRows = [long]$preflight.InitialRowCount
+        Attributes = @($attributeSummaries)
+        RelationshipAndKeyChecks = 'EXACT_MANIFEST_INVENTORY_AND_CONFIGURATION'
+        Requests = [ordered]@{
+            CandidateReconciliationGET = [int]$CandidateResult.Requests.GET
+            ChildScopeGET = [int]$script:RequestCounts.GET
+            ChildScopePUT = 0
+            ChildScopePOST = 0
+        }
+        Writes = @()
+        AutomaticRetries = 0
+    }
 }
 
 function Get-CandidateStatusHistoryRowCount {
@@ -1348,6 +1561,11 @@ function Assert-StatusChoiceRepairPreflight {
     if ($null -eq $targetChoice -or $null -eq $wrongChoice) {
         throw 'One of the required global Choices is absent; no binding write is authorized.'
     }
+    foreach ($choice in @($targetChoice, $wrongChoice)) {
+        if ($choice.IsManaged -ne $false -or $choice.IsCustomizable.Value -ne $true) {
+            throw "Global Choice $($choice.Name) is not the expected unmanaged customizable component."
+        }
+    }
     $null = Get-ChoiceOptionsForRepair -Choice $targetChoice `
         -ExpectedOptions @($Manifest.globalChoice.options) -ExpectedName $targetChoiceName
     $null = Get-ChoiceOptionsForRepair -Choice $wrongChoice `
@@ -1358,49 +1576,49 @@ function Assert-StatusChoiceRepairPreflight {
     $script:RepairTargetChoice = $targetChoice
     $script:RepairWrongChoice = $wrongChoice
 
-    $table = Invoke-DataverseRequest -Method GET -Path "EntityDefinitions(LogicalName='os_sr_csh')?`$select=LogicalName,MetadataId,EntitySetName,PrimaryIdAttribute,OwnershipType,IsAuditEnabled"
-    if ($table.LogicalName -cne 'os_sr_csh' -or $table.OwnershipType -cne 'UserOwned' -or
-        $table.IsAuditEnabled.Value -ne $true -or
-        [string]::IsNullOrWhiteSpace([string]$table.EntitySetName) -or
-        [string]::IsNullOrWhiteSpace([string]$table.PrimaryIdAttribute)) {
-        throw 'Candidate Status History table identity, audit metadata, or row-count metadata differs from the approved baseline.'
+    $historyDefinition = @($Manifest.tables | Where-Object logicalName -CEQ 'os_sr_csh')
+    $callDefinition = @($Manifest.tables | Where-Object logicalName -CEQ 'os_sr_call')
+    if ($historyDefinition.Count -ne 1 -or $callDefinition.Count -ne 1) {
+        throw 'Candidate child table definitions are missing or ambiguous in the current manifest.'
     }
-    $components = @(Get-ODataRows -Path "solutioncomponents?`$select=componenttype,objectid,rootcomponentbehavior&`$filter=_solutionid_value eq $($script:Solution.solutionid)")
-    $tableRoots = @($components | Where-Object {
-        [string]$_.objectid -ieq [string]$table.MetadataId -and [int]$_.componenttype -eq 1
+    $columns = @($historyDefinition[0].columns | Where-Object {
+        $_.type -ceq 'GlobalChoice' -and $_.target -ceq $targetChoiceName
     })
-    foreach ($choice in @($targetChoice, $wrongChoice)) {
-        $membership = @($components | Where-Object {
-            [string]$_.objectid -ieq [string]$choice.MetadataId -and [int]$_.componenttype -eq 9
-        })
-        if ($membership.Count -ne 1) { throw "Global Choice $($choice.Name) is not included exactly once in the approved Solution." }
-    }
-    if ($tableRoots.Count -ne 1 -or [int]$tableRoots[0].rootcomponentbehavior -ne 0) {
-        throw 'Candidate Status History is not an exact root component with subcomponents in the approved Solution.'
-    }
-
-    $historyTable = @($Manifest.tables | Where-Object logicalName -CEQ 'os_sr_csh')
-    if ($historyTable.Count -ne 1) { throw 'Candidate Status History manifest definition is missing or ambiguous.' }
-    $columns = @($historyTable[0].columns | Where-Object {
-        $_.logicalName -in @('os_sr_csh_prevstat', 'os_sr_csh_newstat')
-    })
-    if ($columns.Count -ne 2 -or @($columns | Where-Object target -cne $targetChoiceName).Count -ne 0) {
+    $previousColumn = @($columns | Where-Object displayName -CEQ 'Previous Status')
+    $newColumn = @($columns | Where-Object displayName -CEQ 'New Status')
+    if ($columns.Count -ne 2 -or $previousColumn.Count -ne 1 -or $newColumn.Count -ne 1) {
         throw 'Manifest does not define exactly the two authorized columns against Candidate Status Choice.'
     }
+    $orderedColumns = @($previousColumn[0], $newColumn[0])
+    $script:RepairAllowedColumns = @($orderedColumns | ForEach-Object { [string]$_.logicalName })
+
+    $callReadback = Assert-TableReadback -Table $callDefinition[0] -Choice $wrongChoice
+    $historyReadback = Assert-TableReadback -Table $historyDefinition[0] -Choice $targetChoice `
+        -AllowKnownStatusChoiceMismatch
+    $keys = @(Assert-RelationshipsAndKeys)
+
     $attributes = @{}
-    foreach ($column in $columns) {
+    $attributeIds = @{}
+    foreach ($column in $orderedColumns) {
         $attribute = Get-StatusChoiceAttribute -LogicalName ([string]$column.logicalName)
         Assert-StatusChoiceColumn -Attribute $attribute -ManifestColumn $column `
             -ExpectedChoiceName $script:ChoiceName -ExpectedChoice $wrongChoice
         $attributes[[string]$column.logicalName] = $attribute
+        $attributeIds[[string]$column.logicalName] = [string]$attribute.MetadataId
     }
+    $script:RepairAttributeIds = $attributeIds
+    $table = $historyReadback.Metadata
     $rowCount = Get-CandidateStatusHistoryRowCount -EntitySetName ([string]$table.EntitySetName) `
         -PrimaryIdAttribute ([string]$table.PrimaryIdAttribute)
     if ($rowCount -ne 0) { throw "Candidate Status History contains $rowCount business rows; binding repair is not authorized." }
     [pscustomobject]@{
         Table = $table
-        Columns = $columns
+        Columns = $orderedColumns
         Attributes = $attributes
+        AttributeIds = $attributeIds
+        CallLog = $callReadback
+        CandidateStatusHistory = $historyReadback
+        Keys = $keys
         CandidateStatusChoice = $targetChoice
         CallOutcomeChoice = $wrongChoice
         InitialRowCount = $rowCount
@@ -1409,28 +1627,36 @@ function Assert-StatusChoiceRepairPreflight {
 
 function Invoke-StatusChoiceBindingRepair {
     param([Parameter(Mandatory = $true)][object]$Manifest)
-    $script:ExpectedWritePaths = @(
-        "EntityDefinitions(LogicalName='os_sr_csh')/Attributes(LogicalName='os_sr_csh_prevstat')",
-        "EntityDefinitions(LogicalName='os_sr_csh')/Attributes(LogicalName='os_sr_csh_newstat')"
-    )
-    $script:MaximumWrites = 2
     $script:CurrentStage = 'STATUS_CHOICE_REPAIR_PREFLIGHT'
     $preflight = Assert-StatusChoiceRepairPreflight -Manifest $Manifest
-    foreach ($logicalName in @('os_sr_csh_prevstat', 'os_sr_csh_newstat')) {
-        $column = @($preflight.Columns | Where-Object logicalName -CEQ $logicalName)[0]
+    $script:ExpectedWritePaths = @($preflight.Columns | ForEach-Object {
+        Get-StatusChoiceAttributePath -Attribute $preflight.Attributes[[string]$_.logicalName]
+    })
+    $script:MaximumWrites = 2
+    foreach ($column in $preflight.Columns) {
+        $logicalName = [string]$column.logicalName
         $count = Get-CandidateStatusHistoryRowCount -EntitySetName ([string]$preflight.Table.EntitySetName) `
             -PrimaryIdAttribute ([string]$preflight.Table.PrimaryIdAttribute)
         if ($count -ne 0) { throw "Candidate Status History count changed to $count before $logicalName update." }
         $attribute = Get-StatusChoiceAttribute -LogicalName $logicalName
+        if ([string]$attribute.MetadataId -ine [string]$preflight.AttributeIds[$logicalName]) {
+            throw "Status History attribute identity changed before the authorized $logicalName update."
+        }
         Assert-StatusChoiceColumn -Attribute $attribute -ManifestColumn $column `
             -ExpectedChoiceName $script:ChoiceName -ExpectedChoice $preflight.CallOutcomeChoice
         $payload = New-StatusChoiceBindingUpdatePayload -Attribute $attribute `
             -TargetMetadataId ([string]$preflight.CandidateStatusChoice.MetadataId)
+        $preservedFingerprint = Get-StatusChoicePreservationFingerprint -Attribute $attribute
+        $payloadFingerprint = Get-Sha256 -Bytes ([Text.Encoding]::UTF8.GetBytes(
+            (ConvertTo-Json -InputObject $payload -Depth 80 -Compress)
+        ))
         $script:CurrentStage = "PUT_$logicalName"
         $script:LastWriteOutcomeUncertain = $false
+        $script:LastSanitizedWriteError = $null
+        $script:LastWriteHttpStatus = $null
         try {
             $null = Invoke-DataverseRequest -Method PUT `
-                -Path "EntityDefinitions(LogicalName='os_sr_csh')/Attributes(LogicalName='$logicalName')" `
+                -Path $script:ExpectedWritePaths[$script:StatusChoiceRepairWriteCount] `
                 -Body $payload -WithSolutionHeader -WithMergeLabels
         } catch {
             if ($script:LastWriteOutcomeUncertain) {
@@ -1443,31 +1669,133 @@ function Invoke-StatusChoiceBindingRepair {
                 }
                 $script:StatusChoiceRepairResults.Add([ordered]@{
                     LogicalName = $logicalName
+                    AttributeMetadataIdSha256 = Get-MetadataIdFingerprint -MetadataId ([string]$attribute.MetadataId)
+                    PayloadSha256 = $payloadFingerprint
+                    HttpStatus = $null
                     Outcome = 'UNCERTAIN_STOPPED'
                     ObservedBinding = $bindingAfterUncertain
+                })
+            } elseif ($null -ne $script:LastSanitizedWriteError) {
+                $script:StatusChoiceRepairResults.Add([ordered]@{
+                    LogicalName = $logicalName
+                    AttributeMetadataIdSha256 = Get-MetadataIdFingerprint -MetadataId ([string]$attribute.MetadataId)
+                    PayloadSha256 = $payloadFingerprint
+                    HttpStatus = $script:LastWriteHttpStatus
+                    Outcome = 'DEFINITE_FAILURE_STOPPED'
+                    SanitizedError = [string]$script:LastSanitizedWriteError
                 })
             }
             throw
         }
-        $script:CurrentStage = "IMMEDIATE_GET_$logicalName"
-        $readback = Get-StatusChoiceAttribute -LogicalName $logicalName
-        Assert-StatusChoiceColumn -Attribute $readback -ManifestColumn $column `
-            -ExpectedChoiceName ([string]$Manifest.globalChoice.logicalName) `
-            -ExpectedChoice $preflight.CandidateStatusChoice
-        $script:StatusChoiceRepairResults.Add([ordered]@{
+        $dispatch = [ordered]@{
             LogicalName = $logicalName
-            Outcome = 'UPDATED_AND_GET_RECONCILED'
-            GlobalChoiceName = [string]$readback.GlobalOptionSet.Name
-        })
+            AttributeMetadataIdSha256 = Get-MetadataIdFingerprint -MetadataId ([string]$attribute.MetadataId)
+            PayloadSha256 = $payloadFingerprint
+            HttpStatus = $script:LastWriteHttpStatus
+            Outcome = 'DISPATCHED_READBACK_PENDING'
+        }
+        $script:StatusChoiceRepairResults.Add($dispatch)
+        $script:CurrentStage = "IMMEDIATE_GET_$logicalName"
+        try {
+            $readback = Get-StatusChoiceAttribute -LogicalName $logicalName
+        } catch {
+            $script:LastWriteOutcomeUncertain = $true
+            $script:CurrentStage = "UNCERTAIN_GET_$logicalName"
+            try {
+                $readback = Get-StatusChoiceAttribute -LogicalName $logicalName
+                $dispatch.ObservedBinding = [string]$readback.GlobalOptionSet.Name
+            } catch {
+                $dispatch.ObservedBinding = 'RECONCILIATION_FAILED'
+            }
+            $dispatch.Outcome = 'UNCERTAIN_STOPPED'
+            throw 'Immediate metadata readback failed; one GET reconciliation was attempted and the repair stopped.'
+        }
+        try {
+            Assert-StatusChoiceColumn -Attribute $readback -ManifestColumn $column `
+                -ExpectedChoiceName ([string]$Manifest.globalChoice.logicalName) `
+                -ExpectedChoice $preflight.CandidateStatusChoice
+            if ([string]$readback.MetadataId -ine [string]$attribute.MetadataId -or
+                (Get-StatusChoicePreservationFingerprint -Attribute $readback) -cne $preservedFingerprint) {
+                throw "Status Choice rebind altered preserved metadata for $logicalName."
+            }
+        } catch {
+            $dispatch.ObservedBinding = [string]$readback.GlobalOptionSet.Name
+            $dispatch.ReconciliationFailure = Get-SanitizedFailureMessage -Message ([string]$_.Exception.Message)
+            $dispatch.Outcome = 'IMMEDIATE_GET_MISMATCH_STOPPED'
+            throw
+        }
+        $dispatch.Outcome = 'UPDATED_AND_GET_RECONCILED'
+        $dispatch.GlobalChoiceName = [string]$readback.GlobalOptionSet.Name
+    }
+
+    $callOutcomeAfter = Get-OptionalMetadata -Path "GlobalOptionSetDefinitions(Name='$($script:ChoiceName)')"
+    $candidateStatusAfter = Get-OptionalMetadata -Path "GlobalOptionSetDefinitions(Name='$($Manifest.globalChoice.logicalName)')"
+    if ($null -eq $callOutcomeAfter -or $null -eq $candidateStatusAfter -or
+        [string]$callOutcomeAfter.MetadataId -ine [string]$preflight.CallOutcomeChoice.MetadataId -or
+        [string]$candidateStatusAfter.MetadataId -ine [string]$preflight.CandidateStatusChoice.MetadataId) {
+        throw 'A global Choice identity changed during the attribute-binding repair.'
+    }
+    $null = Get-ChoiceOptionsForRepair -Choice $callOutcomeAfter `
+        -ExpectedOptions @($Manifest.callOutcomeChoice.options) -ExpectedName $script:ChoiceName
+    $null = Get-ChoiceOptionsForRepair -Choice $candidateStatusAfter `
+        -ExpectedOptions @($Manifest.globalChoice.options) -ExpectedName ([string]$Manifest.globalChoice.logicalName)
+
+    $callDefinition = @($Manifest.tables | Where-Object logicalName -CEQ 'os_sr_call')[0]
+    $historyDefinition = @($Manifest.tables | Where-Object logicalName -CEQ 'os_sr_csh')[0]
+    $null = Assert-TableReadback -Table $callDefinition -Choice $callOutcomeAfter
+    $null = Assert-TableReadback -Table $historyDefinition -Choice $candidateStatusAfter
+    $keys = @(Assert-RelationshipsAndKeys)
+    $finalCount = Get-CandidateStatusHistoryRowCount -EntitySetName ([string]$preflight.Table.EntitySetName) `
+        -PrimaryIdAttribute ([string]$preflight.Table.PrimaryIdAttribute)
+    if ($finalCount -ne 0) { throw "Candidate Status History contains $finalCount rows after repair." }
+
+    $finalCandidateOutput = @(& $script:CandidateRunner -ReconcileOnly `
+        -EnvironmentName $EnvironmentName -OrganizationUrl $OrganizationUrl `
+        -ExpectedEnvironmentId $ExpectedEnvironmentId -ExpectedOrganizationId $ExpectedOrganizationId 2>&1 |
+        ForEach-Object { [string]$_ })
+    if ($LASTEXITCODE -ne 0) { throw 'Fresh final Candidate reconciliation failed after the Choice binding updates.' }
+    try { $finalCandidateResult = ($finalCandidateOutput -join "`n") | ConvertFrom-Json }
+    catch { throw 'Final Candidate runner did not return a parseable reconciliation result.' }
+    if ($finalCandidateResult.Result -cne 'CANDIDATE_TABLE_KEYS_LOOKUPS_AND_SOLUTION_MEMBERSHIP_RECONCILED' -or
+        $finalCandidateResult.CandidateTable -cne 'EXACT_SCHEMA_AND_AUDIT_RECONCILED' -or
+        $finalCandidateResult.Requests.POST -ne 0) {
+        throw 'Fresh final Candidate schema reconciliation did not pass without writes.'
+    }
+
+    $organization = Invoke-DataverseRequest -Method GET `
+        -Path "organizations($ExpectedOrganizationId)?`$select=organizationid,isauditenabled"
+    if ([string]$organization.organizationid -ine $ExpectedOrganizationId) {
+        throw 'Final organization audit read returned a different target.'
+    }
+    $classification = if ($organization.isauditenabled) {
+        'CANDIDATE_CORE_STORAGE_PROVISIONED'
+    } else {
+        'CANDIDATE_CORE_STORAGE_PROVISIONED_AUDIT_ACTIVATION_PENDING'
     }
     [ordered]@{
-        Result = 'STATUS_HISTORY_CHOICE_BINDINGS_REPAIRED_AND_RECONCILED'
+        Result = $classification
         PreviousStatus = [string]$script:StatusChoiceRepairResults[0].Outcome
         NewStatus = [string]$script:StatusChoiceRepairResults[1].Outcome
         TargetChoice = [string]$preflight.CandidateStatusChoice.Name
         CallOutcomeChoice = 'READ_ONLY_RECONCILED_UNMODIFIED'
+        CandidateStatusChoice = 'READ_ONLY_RECONCILED_UNMODIFIED'
         CandidateStatusHistoryRowsBeforeEachWrite = 0
-        Requests = $script:RequestCounts
+        CandidateStatusHistoryRowsAfter = $finalCount
+        OrganizationAuditing = if ($organization.isauditenabled) { 'ENABLED' } else { 'DISABLED' }
+        RelationshipsAndKeys = $keys
+        Requests = [ordered]@{
+            CandidateReconciliationGET = [int]$candidateResult.Requests.GET + [int]$finalCandidateResult.Requests.GET
+            GET = [int]$script:RequestCounts.GET
+            PreviousStatusMetadataUpdate = [int](@($script:WriteStages | Where-Object { $_ -ceq "PUT $($script:RepairAllowedColumns[0])" }).Count)
+            NewStatusMetadataUpdate = [int](@($script:WriteStages | Where-Object { $_ -ceq "PUT $($script:RepairAllowedColumns[1])" }).Count)
+            TableCreates = 0
+            ColumnCreates = 0
+            ChoiceDefinitionWrites = 0
+            BusinessDataWrites = 0
+            AppWrites = 0
+            PublishXml = 0
+            AutomaticRetries = 0
+        }
         Writes = $script:WriteStages.ToArray()
         WritePayloadHashes = $script:WriteHashes.ToArray()
         AutomaticRetries = 0
@@ -1497,7 +1825,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Fresh Candidate-only guarded reconciliation failed; no child write was attempted.' }
     try { $candidateResult = ($candidateOutput -join "`n") | ConvertFrom-Json }
     catch { throw 'Candidate runner did not return a parseable reconciliation result.' }
-    $excludedTablesMatchMode = if ($RepairStatusChoiceBindings) {
+    $excludedTablesMatchMode = if ($RepairStatusChoiceBindings -or $RepairPreflightOnly) {
         (Compare-Object @('os_sr_call', 'os_sr_csh') @($candidateResult.ExcludedTablesPresent)).Count -eq 0
     } elseif ($ResumeRemainingScope) {
         (Compare-Object @('os_sr_call') @($candidateResult.ExcludedTablesPresent)).Count -eq 0
@@ -1521,6 +1849,12 @@ try {
     if ($ReconcileOnly) {
         $script:CurrentStage = 'READ_ONLY_RECONCILIATION'
         Get-ReconciliationSnapshot | ConvertTo-Json -Depth 30
+        return
+    }
+    if ($RepairPreflightOnly) {
+        $script:CurrentStage = 'STATUS_CHOICE_REPAIR_READ_ONLY_PREFLIGHT'
+        Get-StatusChoiceRepairPreflightResult -Manifest $manifest -CandidateResult $candidateResult |
+            ConvertTo-Json -Depth 40
         return
     }
     if ($RepairStatusChoiceBindings) {
@@ -1711,28 +2045,60 @@ catch {
             -RemainingScopeWritesDispatched $script:RemainingScopeDispatches `
             -ConsumeRemainingScopeAuthorization:$script:RemainingScopeAuthorizationConsumed
     }
+    $repairMode = $RepairPreflightOnly -or $RepairStatusChoiceBindings
+    $repairClassification = if ($script:LastWriteOutcomeUncertain) {
+        'UNCERTAIN_WRITE_OUTCOME'
+    } elseif ($repairMode -and $null -ne $script:LastSanitizedWriteError -and
+        @($script:StatusChoiceRepairResults | Where-Object Outcome -CEQ 'UPDATED_AND_GET_RECONCILED').Count -eq 0) {
+        'IN_PLACE_CHOICE_REBIND_UNSUPPORTED_OR_REJECTED'
+    } elseif ($repairMode -and $null -ne $script:LastSanitizedWriteError) {
+        'PARTIAL_METADATA_STATE'
+    } elseif ($repairMode -and $script:WriteStages.Count -gt 0) {
+        'PARTIAL_METADATA_STATE'
+    } elseif ($repairMode -and
+        ([string]$failure.Exception.Message -match '(?i)row count|business rows|aggregate count')) {
+        'REBIND_BLOCKED_DATA_PRESENT_OR_UNKNOWN'
+    } elseif ($repairMode -and $script:CurrentStage -ceq 'TARGET_AND_IDENTITY') {
+        'FAILED_AUTH'
+    } elseif ($repairMode -and
+        ([string]$failure.Exception.Message -match 'WhoAmI|process-scoped identity')) {
+        'FAILED_AUTHZ'
+    } elseif ($repairMode) {
+        'PARTIAL_METADATA_STATE'
+    } elseif ($script:WriteStages.Count -eq 0) {
+        'BLOCKED_BEFORE_WRITE'
+    } else {
+        'STOPPED_AFTER_WRITE_REQUIRES_REVIEW'
+    }
     [ordered]@{
-        Result = if ($script:WriteStages.Count -eq 0) { 'BLOCKED_BEFORE_WRITE' } else { 'STOPPED_AFTER_WRITE_REQUIRES_REVIEW' }
+        Result = $repairClassification
         Stage = $script:CurrentStage
         SafeError = if ($script:WriteStages.Count -eq 0) {
             'A fresh guard, schema preflight, or payload validation failed; no child metadata write was sent.'
         } else {
             'A metadata write was sent; inspect reported write stages and reconcile live state before any further action. No retry occurred.'
         }
-        FailureReason = [string]$failure.Exception.Message
+        FailureReason = Get-SanitizedFailureMessage -Message ([string]$failure.Exception.Message)
+        HttpStatus = $script:LastWriteHttpStatus
+        SanitizedDataverseError = $script:LastSanitizedWriteError
         ManifestSha256 = Get-ManifestHash
         CandidateResult = if ($null -eq $candidateResult) { 'NOT_RECONCILED' } else { $candidateResult.Result }
         Requests = $script:RequestCounts
         Writes = $script:WriteStages.ToArray()
         WritePayloadHashes = $script:WriteHashes.ToArray()
+        StatusChoiceRepairResults = $script:StatusChoiceRepairResults.ToArray()
         CorrectedCallLogCreateDispatches = $script:CorrectedCallLogCreateDispatches
         RemainingScopeWritesDispatched = $script:RemainingScopeDispatches
         AutomaticRetries = 0
+        TableCreates = 0
+        ColumnCreates = 0
+        ChoiceDefinitionWrites = 0
         CandidateWrites = 0
         BusinessDataWrites = 0
         CustomApiOrPluginWrites = 0
         SecurityOrAppWrites = 0
         PublicationWrites = 0
+        PublishXml = 0
     } | ConvertTo-Json -Depth 30
     throw 'Phase 3B.2 stopped. Use sanitized output and fresh read-only reconciliation; never retry automatically.'
 }

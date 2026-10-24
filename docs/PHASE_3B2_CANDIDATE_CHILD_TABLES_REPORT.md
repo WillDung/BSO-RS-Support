@@ -2,14 +2,14 @@
 
 **Date:** 24 October 2026
 **Current classification:** `PARTIAL_METADATA_STATE`
-**Latest provisioning execution:** the prior corrected Call Log create and seven remaining metadata POSTs were each dispatched once. A later authorized repair dispatched one Previous Status PUT; no retry occurred.
-**Latest read-only reconciliation:** Candidate exact; both child tables, four relationships, and two Active keys present; both Candidate Status History status columns still bind to `os_sr_callout`. No repair was confirmed.
+**Latest provisioning execution:** after a fresh guarded preflight, the latest owner-authorized repair dispatched one Attribute-MetadataId-targeted Previous Status PUT. Dataverse returned HTTP 204, but the immediate typed GET still reported `os_sr_callout`; execution stopped before New Status. No retry occurred.
+**Latest read-only reconciliation:** Candidate, Call Log, Candidate Status History structure, relationships, keys, Solution/Publisher, and both global Choices reconcile; the two Status History columns remain bound to `os_sr_callout`. Candidate Status History still has zero rows. Current classification remains `PARTIAL_METADATA_STATE`.
 
 > The original HTTP 400 attempt is retained below as historical evidence. The latest bounded continuation and current handover are recorded in Section 30 and supersede earlier statements that the child tables were absent.
 
 ## 1. Executive Summary
 
-The owner-authorized initial Phase 3B.2 attempt created and reconciled the Call Outcome Choice, then its Call Log create returned HTTP 400. That original failure and its zero-retry disposition are historical. The owner later approved the corrected primary-name metadata and one corrected Call Log create dispatch, followed by remaining child metadata if Call Log reconciled exactly. The corrected Call Log create returned successfully, its immediate GET returned HTTP 404, and subsequent GET-only reconciliation found it present and exact. A guarded resume then dispatched exactly seven remaining-scope metadata writes. Final read-only reconciliation found both child tables, their four approved relationships, and both Active keys, but exposed a Choice-binding mismatch on the two Candidate Status History status attributes. No retry or corrective write was sent.
+The owner-authorized initial Phase 3B.2 attempt created and reconciled the Call Outcome Choice, then its Call Log create returned HTTP 400. That original failure and its zero-retry disposition are historical. The owner later approved the corrected primary-name metadata and one corrected Call Log create dispatch, followed by remaining child metadata if Call Log reconciled exactly. The corrected Call Log create returned successfully, its immediate GET returned HTTP 404, and subsequent GET-only reconciliation found it present and exact. A guarded resume then dispatched exactly seven remaining-scope metadata writes. Final read-only reconciliation found both child tables, their four approved relationships, and both Active keys, but exposed a Choice-binding mismatch on the two Candidate Status History status attributes. No retry or corrective write was sent in that continuation. A later separately authorized repair attempt is documented in Section 33.
 
 The original HTTP 400 body remains unavailable, so its exact cause is unknown. The later approved normalization set both child String/AutoNumber primary-name MaxLength values to 100 and FormatName to Text. The remaining-scope runner incorrectly supplied the Call Outcome Choice metadata for every GlobalChoice column, so the two Status History status fields were bound to `os_sr_callout` instead of `os_sr_candstat`. This mismatch is directly verified by fresh read-only metadata. The seven-write authorization is consumed; no additional tenant write is authorized by it. No Candidate or business records were created.
 
@@ -324,3 +324,53 @@ The first eligible update targeted **Previous Status** (`os_sr_csh_prevstat`) an
 The request payload SHA-256 for the single Previous Status PUT was `42455db120ae665773849fe45d12c9a2980aa5adfcbed4e8b1449651f58cdf6a`. The PUT did not alter Choice labels or values, Candidate, Call Log, security, app navigation, or published state. No PublishXml/PublishAllXml, commit, or push occurred.
 
 Repair ledger manifest SHA-256: `63f56173f61265f539d23d6ceffb5631e23f438e4e254755c1e24c7d17eb1915`. The manifest fingerprint used at the time of the PUT was `53b98d3168927660d42f90c5f74d35ef8192592f14c748782e2f4563e5716ad0`.
+
+## 33. MetadataId-Targeted Status Choice Rebind Continuation
+
+**Classification:** `PARTIAL_METADATA_STATE`
+**Authorization:** current owner authorization for up to one Previous Status update followed by up to one New Status update only after exact Previous Status reconciliation
+**Manifest used:** current local file SHA-256 `63f56173f61265f539d23d6ceffb5631e23f438e4e254755c1e24c7d17eb1915`
+
+The SHA supplied in the request (`59180b226555ef44b4c41da73b902e8faa001fa87cb4dc10e1eaf661541bf72b`) did not match the current local manifest file. Its schema definitions still require both Status History Choice fields to target `os_sr_candstat`. The guarded run used the actual current repository manifest and did not modify it.
+
+### 33.1 Fresh guards and live state
+
+The read-only runner verified the owner-confirmed VN LMV IT target against PAC, acquired the actual request credential through the existing `Az.Accounts` context using `Get-AzAccessToken`, and matched `WhoAmI` to the PAC identity and process-scoped expected-user pin. The approved unmanaged Solution and `os` Publisher were exact. No login or environment switch occurred.
+
+Candidate reconciled exact. Call Log reconciled exact, including its `os_sr_callout` binding. Candidate Status History reconciled exact except for the two authorized bindings. Its four relationships and two Active alternate keys reconciled to the manifest. Table auditing is enabled on all three Candidate Core tables. Organization auditing remains disabled. The count-only Candidate Status History query returned **0** rows before the attempted update and again in the final read-only reconciliation.
+
+Both affected columns were retrieved as typed `PicklistAttributeMetadata`, with both `OptionSet` and `GlobalOptionSet` expanded:
+
+| Display name | Logical / schema name | Attribute MetadataId SHA-256 | Metadata type | Required | Default form value | Managed / customizable | Field audit / secured | OptionSet / GlobalOptionSet |
+|---|---|---|---|---|---|---|---|---|
+| Previous Status | `os_sr_csh_prevstat` | `12f6251b2e8c86606f43d241be6f89a20fd1c09749b4434695ca8e78a72c83a6` | PicklistAttributeMetadata | ApplicationRequired | -1 | false / true | true / false | `os_sr_callout` / `os_sr_callout` |
+| New Status | `os_sr_csh_newstat` | Not retained in the handoff evidence | PicklistAttributeMetadata | ApplicationRequired | none | false / true | true / false | `os_sr_callout` / `os_sr_callout` |
+
+Both OptionSet and GlobalOptionSet references resolved to `os_sr_callout`. Its live labels/values remained Answered `100010000`, No Answer `100010001`, and Call Back Requested `100010002`. The intended `os_sr_candstat` Choice remained exact with the six frozen Candidate status values documented in [Section 8](#8-candidate-choice-mapping). Neither Choice definition was written.
+
+### 33.2 Corrected payloads and dispatch result
+
+The runner now derives the two logical names from the current manifest, targets each existing attribute by `EntityDefinitions(LogicalName='os_sr_csh')/Attributes(<Attribute MetadataId>)`, verifies the body MetadataId matches the URI target, preserves the retrieved definition, and changes only the `GlobalOptionSet@odata.bind` reference. The response path uses zero retries and performs an immediate typed GET after each dispatched update.
+
+| Attribute | Corrected payload SHA-256 | Dispatch | Result |
+|---|---|---:|---|
+| Previous Status | `0f2942c7a29bfd4ddc0c53a8fd6a1d4df5402a9a5c261432bd464bd3e3975e4e` | 1 PUT | HTTP 204; immediate typed GET still resolved to `os_sr_callout`; stopped |
+| New Status | `b197ceada257906d8696efb24a80adb4c2e68bf0d24eb23ed37d8ee5f3786db9` | 0 PUT | Prepared for the approved second step, but not dispatched because Previous Status did not reconcile |
+
+The final fresh read-only preflight again found both columns bound to `os_sr_callout`, Candidate Status History row count 0, Candidate exact, Call Log exact, and both Choices unchanged. It did not dispatch an update. The current post-read payload fingerprint for Previous Status was reported in the handoff as `96af01c7...007094e5`; its full fingerprint was not retained here and it was **not dispatched**. No conclusion is drawn about the fingerprint difference; no further update is authorized by this run.
+
+The 204 response is not a definite HTTP rejection, so the result is `PARTIAL_METADATA_STATE`, not `IN_PLACE_CHOICE_REBIND_UNSUPPORTED_OR_REJECTED`. The binding postcondition failed. The runner stopped immediately and did not attempt New Status, repeat Previous Status, delete/recreate a column, or modify either Choice.
+
+### 33.3 Counts
+
+| Boundary | Candidate-runner GET | Child-runner GET | Previous Status PUT | New Status PUT | Other writes |
+|---|---:|---:|---:|---:|---:|
+| Successful read-only repair preflight | Count not retained | Count not retained | 0 | 0 | 0 |
+| Guarded repair invocation (includes fresh preflight and immediate GET) | 31 | 28 | 1 | 0 | 0 |
+| Final read-only reconciliation | Count not retained | Count not retained | 0 | 0 | 0 |
+
+For the guarded repair invocation: table creates **0**, column creates **0**, Choice-definition writes **0**, business-data writes **0**, app/security writes **0**, `PublishXml`/`PublishAllXml` **0**, automatic retries **0**. Candidate Status History remained empty. The GET count is reported per captured invocation; no aggregate is claimed for wrapper/preflight attempts whose runner counters were not retained.
+
+Historical Phase 3B.2 metadata dispatches, including the original definite Call Log HTTP 400 and the prior unreconciled Previous Status PUT, are **12**: one Call Outcome Choice create, one original failed Call Log create, one corrected Call Log create, seven remaining child metadata writes, one earlier Previous Status PUT, and this run's one Previous Status PUT. New Status update dispatches remain **0**. The separate count of automatic retries remains **0**.
+
+No Candidate, Call Log, Choice definition, security, app, business data, or publication changes occurred in this repair. No commit or push occurred.

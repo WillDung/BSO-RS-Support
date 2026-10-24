@@ -33,12 +33,16 @@ Assert-Test ($runner -match "CandidateWrites\s*=\s*0" -and
     $runner -match "PublicationWrites\s*=\s*0" -and
     $runner -notmatch "PublishAllXml") 'Candidate, business data, and publication remain excluded'
 Assert-Test ($runner -match '\[switch\]\$RepairStatusChoiceBindings' -and
+    $runner -match '\[switch\]\$RepairPreflightOnly' -and
     $runner -match "ValidateSet\('GET', 'PUT', 'POST'\)" -and
     $runner -match 'MaximumWrites = 2' -and
-    $runner -match 'EntityDefinitions\(LogicalName=''os_sr_csh''\)/Attributes\(LogicalName=''os_sr_csh_prevstat''\)' -and
-    $runner -match 'EntityDefinitions\(LogicalName=''os_sr_csh''\)/Attributes\(LogicalName=''os_sr_csh_newstat''\)' -and
+    $runner -match 'Get-StatusChoiceAttributePath' -and
+    $runner -match 'Attributes\(\$\(\$Attribute\.MetadataId\)\)' -and
+    $runner -notmatch 'Attributes\(LogicalName=''os_sr_csh_(prevstat|newstat)''\)' -and
     $runner -notmatch "ValidateSet\([^\r\n]*PATCH") 'Repair mode is restricted to two in-place PUT paths and excludes PATCH'
 Assert-Test ($runner -match 'statusChoiceRepairIsAuthorized' -and
+    $runner -match 'statusChoiceRepairRequested' -and
+    $runner -match 'RepairPreflightOnly' -and
     $runner -match 'latestResumeClassification -ceq ''PARTIAL_METADATA_STATE''' -and
     $runner -match 'remainingMetadataAuthorizationConsumed' -and
     $runner -match 'StatusChoiceRepairWriteCount -lt 2') 'Repair mode requires the consumed-scope mismatch state and enforces the two-write ceiling'
@@ -46,10 +50,28 @@ Assert-Test ($runner -match '-not \$RepairStatusChoiceBindings' -and
     $runner -match 'LastWriteOutcomeUncertain' -and
     $runner -match 'UNCERTAIN_STOPPED' -and
     $runner -match "MaximumRetryCount\s*=\s*0") 'Repair failures do not rewrite historical provisioning state or retry uncertain PUTs'
+Assert-Test ($runner -match 'OptionSet,GlobalOptionSet' -and
+    $runner -match 'AttributeTypeName.Value' -and
+    $runner -match 'IsCustomizable.Value' -and
+    $runner -match 'DefaultFormValue' -and
+    $runner -match 'AttributeMetadataIdSha256' -and
+    $runner -match 'CorrectedPayloadSha256') 'Typed repair preflight captures the requested attribute metadata and payload evidence'
+Assert-Test ($runner -match 'IN_PLACE_CHOICE_REBIND_UNSUPPORTED_OR_REJECTED' -and
+    $runner -match 'REBIND_BLOCKED_DATA_PRESENT_OR_UNKNOWN' -and
+    $runner -match 'PARTIAL_METADATA_STATE' -and
+    $runner -match 'HttpStatus = \$script:LastWriteHttpStatus') 'Repair reports distinguish rejection, blocked safety gate, partial state, and exact HTTP status'
+Assert-Test ($runner -match 'IMMEDIATE_GET_MISMATCH_STOPPED' -and
+    $runner -match 'UNCERTAIN_GET_' -and
+    $runner -match 'one GET reconciliation was attempted') 'A failed or mismatching immediate GET stops without another metadata update'
+Assert-Test ($runner -match 'GlobalOptionSetDefinitions\(Name=' -and
+    $runner -match 'Get-ChoiceOptionsForRepair -Choice \$callOutcomeAfter' -and
+    $runner -match 'Get-ChoiceOptionsForRepair -Choice \$candidateStatusAfter' -and
+    $runner -match 'ChoiceDefinitionWrites = 0') 'Repair reconciles both Choices without writing either Choice definition'
 Assert-Test ($runner -match "Assert-ChildTableAbsent" -and
     $runner -match "Assert-InitialState" -and
     $runner -match "Assert-TableReadback" -and
-    $runner -match "Assert-RelationshipsAndKeys") 'Preflight and exact post-write reconciliation paths are required'
+    $runner -match "Assert-RelationshipsAndKeys" -and
+    $runner -match 'READ_ONLY_STATUS_CHOICE_REPAIR_PREFLIGHT_PASSED') 'Preflight and exact post-write reconciliation paths are required'
 Assert-Test ($runner -match 'primaryName\.maxLength' -and
     $runner -match 'MaxLength = \$primaryName\.MaxLength' -and
     $runner -match 'Primary-name String/AutoNumber definition is incomplete or outside the owner-approved contract' -and
@@ -79,13 +101,18 @@ $historyChoiceColumns = @((@($manifest.tables | Where-Object logicalName -CEQ 'o
     Where-Object { $_.type -ceq 'GlobalChoice' -and $_.target -ceq 'os_sr_candstat' })
 Assert-Test ($runner.Contains('ChoiceMetadataByName[$targetName]') -and
     $runner.Contains('-ChoiceMetadataByName $choiceMetadataByName') -and
-    $historyChoiceColumns.Count -eq 2) 'Each Choice attribute binds to its own manifest target'
+    $historyChoiceColumns.Count -eq 2 -and
+    @($historyChoiceColumns | ForEach-Object displayName | Sort-Object) -join '|' -ceq 'New Status|Previous Status') 'Both intended status bindings are resolved from the current manifest'
 Assert-Test ($manifest.relationships.Count -eq 7 -and
     @($manifest.relationships | ForEach-Object schemaName | Select-Object -Unique).Count -eq 7) 'Seven manifest relationship schema names are unique'
 Assert-Test ($model -match '`usr` = Dataverse system user' -and
     $model -match 'os_sr_usr_call_ctby' -and $model -match 'os_sr_usr_csh_actr') 'User lookup naming follows the documented publisher/project convention'
 Assert-Test ($manifest.callOutcomeChoice.options.Count -eq 3 -and
-    @($manifest.callOutcomeChoice.options | ForEach-Object label) -join '|' -ceq 'Answered|No Answer|Call Back Requested') 'Call Outcome taxonomy remains exact'
+    @($manifest.callOutcomeChoice.options | ForEach-Object { "$($_.label)|$($_.value)" }) -join ';' -ceq
+    'Answered|100010000;No Answer|100010001;Call Back Requested|100010002') 'Call Outcome labels and frozen integer values remain exact'
+Assert-Test ($manifest.globalChoice.options.Count -eq 6 -and
+    @($manifest.globalChoice.options | ForEach-Object { "$($_.label)|$($_.value)" }) -join ';' -ceq
+    'Need Call Candidate|100010000;Candidate Answered|100010001;Waiting Manual Scheduling|100010002;Round 1 Scheduled|100010003;Offer Extended|100010004;Candidate Failed|100010005') 'Candidate Status labels and frozen integer values remain exact'
 Assert-Test ($manifest.provisioning.phase3B2AuthorizedContinuation.status -ceq 'STOPPED_AFTER_REMAINING_METADATA_MISMATCH_NO_FURTHER_WRITES' -and
     $manifest.provisioning.phase3B2AuthorizedContinuation.executionOutcome.successfulChildTableWrites -eq 2 -and
     $manifest.provisioning.phase3B2AuthorizedContinuation.automaticRetries -eq 0 -and
@@ -123,35 +150,76 @@ $payloadFunction = $ast.Find({ param($node) $node -is [System.Management.Automat
         $node.Name -ceq 'New-StatusChoiceBindingUpdatePayload' }, $true)
 if ($null -eq $payloadFunction) { throw 'FAIL: Full-metadata PUT payload helper is missing.' }
 $script:ChoiceName = 'os_sr_callout'
+$script:RepairAllowedColumns = @('os_sr_csh_prevstat', 'os_sr_csh_newstat')
 Invoke-Expression $payloadFunction.Extent.Text
+$pathFunction = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -ceq 'Get-StatusChoiceAttributePath' }, $true)
+if ($null -eq $pathFunction) { throw 'FAIL: MetadataId-targeted repair path helper is missing.' }
+Invoke-Expression $pathFunction.Extent.Text
+$preservationFunction = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -ceq 'Get-StatusChoicePreservationFingerprint' }, $true)
+if ($null -eq $preservationFunction) { throw 'FAIL: Preservation fingerprint helper is missing.' }
+Invoke-Expression $preservationFunction.Extent.Text
+$hashFunction = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -ceq 'Get-Sha256' }, $true)
+if ($null -eq $hashFunction) { throw 'FAIL: SHA-256 helper is missing.' }
+Invoke-Expression $hashFunction.Extent.Text
 $sourceMetadata = [pscustomobject]@{
     '@odata.type' = 'Microsoft.Dynamics.CRM.PicklistAttributeMetadata'
     '@odata.context' = 'synthetic-context'
     LogicalName = 'os_sr_csh_prevstat'
     SchemaName = 'os_sr_csh_prevstat'
     MetadataId = '00000000-0000-0000-0000-000000000011'
+    AttributeType = 'Picklist'
+    AttributeTypeName = [pscustomobject]@{ Value = 'PicklistType' }
     DisplayName = [pscustomobject]@{
         LocalizedLabels = @([pscustomobject]@{ Label = 'Previous Status'; LanguageCode = 1033 })
     }
     RequiredLevel = [pscustomobject]@{ Value = 'ApplicationRequired'; CanBeChanged = $true }
+    DefaultFormValue = 100010000
     IsPrimaryName = $false
+    IsManaged = $false
+    IsCustomizable = [pscustomobject]@{ Value = $true; CanBeChanged = $true }
     GlobalOptionSet = [pscustomobject]@{
         Name = 'os_sr_callout'
         MetadataId = '00000000-0000-0000-0000-000000000012'
     }
-    OptionSet = $null
+    OptionSet = [pscustomobject]@{
+        Name = 'os_sr_callout'
+        MetadataId = '00000000-0000-0000-0000-000000000012'
+    }
 }
 $updatePayload = New-StatusChoiceBindingUpdatePayload -Attribute $sourceMetadata `
     -TargetMetadataId '00000000-0000-0000-0000-000000000013'
+$updatePath = Get-StatusChoiceAttributePath -Attribute $sourceMetadata
 Assert-Test ($updatePayload.LogicalName -ceq $sourceMetadata.LogicalName -and
     $updatePayload.SchemaName -ceq $sourceMetadata.SchemaName -and
     $updatePayload.MetadataId -ceq $sourceMetadata.MetadataId -and
     $updatePayload.DisplayName.LocalizedLabels[0].Label -ceq 'Previous Status' -and
     $updatePayload.RequiredLevel.Value -ceq 'ApplicationRequired' -and
+    $updatePayload.DefaultFormValue -eq 100010000 -and
     $updatePayload.IsPrimaryName -eq $false -and
     $updatePayload.'GlobalOptionSet@odata.bind' -ceq '/GlobalOptionSetDefinitions(00000000-0000-0000-0000-000000000013)' -and
     -not $updatePayload.ContainsKey('GlobalOptionSet') -and
     -not $updatePayload.ContainsKey('OptionSet') -and
     -not $updatePayload.ContainsKey('@odata.context')) 'In-place PUT changes only the intended binding and preserves writable definition metadata'
+Assert-Test ($updatePath -ceq "EntityDefinitions(LogicalName='os_sr_csh')/Attributes(00000000-0000-0000-0000-000000000011)" -and
+    $updatePath -notmatch 'Attributes\(LogicalName=') 'Update targets the exact existing Attribute MetadataId rather than a LogicalName alternate key'
+$sourceFingerprint = Get-StatusChoicePreservationFingerprint -Attribute $sourceMetadata
+$changedBinding = $sourceMetadata | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+$changedBinding.GlobalOptionSet.Name = 'os_sr_candstat'
+$changedBinding.GlobalOptionSet.MetadataId = '00000000-0000-0000-0000-000000000013'
+$changedBinding.OptionSet.Name = 'os_sr_candstat'
+$changedBinding.OptionSet.MetadataId = '00000000-0000-0000-0000-000000000013'
+Assert-Test ($sourceFingerprint -ceq (Get-StatusChoicePreservationFingerprint -Attribute $changedBinding)) 'Preservation fingerprint excludes only the intended Choice binding navigation properties'
+$changedBinding.RequiredLevel.Value = 'None'
+Assert-Test ($sourceFingerprint -cne (Get-StatusChoicePreservationFingerprint -Attribute $changedBinding)) 'Preservation fingerprint detects an unintended requiredness change'
+$repairFunction = $ast.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -ceq 'Invoke-StatusChoiceBindingRepair' }, $true)
+if ($null -eq $repairFunction) { throw 'FAIL: Guarded repair sequence is missing.' }
+$repairSource = $repairFunction.Extent.Text
+$rowCountIndex = $repairSource.IndexOf('Get-CandidateStatusHistoryRowCount')
+$putIndex = $repairSource.IndexOf('Invoke-DataverseRequest -Method PUT')
+Assert-Test ($rowCountIndex -ge 0 -and $putIndex -gt $rowCountIndex) 'Zero-row count is rechecked before the first authorized metadata update'
 
 Write-Output "PASS: $script:Passed synthetic Phase 3B.2 provisioning assertions; no authentication, network, PAC, or tenant calls."

@@ -23,7 +23,15 @@ function Test-ProposedAutoNumberFormat {
 
 $expectedTables = @('os_sr_cand', 'os_sr_call', 'os_sr_csh')
 $actualTables = @($manifest.tables | ForEach-Object { $_.logicalName })
-Assert-Test ($manifest.phase -ceq '3A' -and $manifest.status -ceq 'PROPOSAL_NOT_AUTHORIZED') 'Phase and non-authorized proposal status'
+Assert-Test ($manifest.phase -ceq '3A' -and
+    $manifest.status -ceq 'CANDIDATE_TABLE_KEYS_LOOKUPS_AND_SOLUTION_MEMBERSHIP_RECONCILED') 'Phase and reconciled Candidate-only provisioning status'
+Assert-Test ($manifest.provisioning.completedCandidateOnlyRun.status -ceq $manifest.status -and
+    $manifest.provisioning.completedCandidateOnlyRun.authorizationConsumed -and
+    $manifest.provisioning.completedCandidateOnlyRun.writeCounts.total -eq 7 -and
+    $manifest.provisioning.completedCandidateOnlyRun.automaticRetries -eq 0 -and
+    $manifest.provisioning.completedCandidateOnlyRun.businessDataWrites -eq 0) 'Candidate-only run record preserves the bounded write and no-data limits'
+Assert-Test ($manifest.provisioning.completedCandidateOnlyRun.finalGetOnlyReconciliation.GET -eq 31 -and
+    $manifest.provisioning.completedCandidateOnlyRun.finalGetOnlyReconciliation.POST -eq 0) 'Final live reconciliation is accurately recorded as GET-only'
 Assert-Test ($actualTables.Count -eq 3 -and (Compare-Object $expectedTables $actualTables).Count -eq 0) 'Exactly the three requested proposed tables'
 Assert-Test ($manifest.scope -contains 'os_sr_candstat' -and $manifest.scope -contains 'os_sr_callout' -and
     $manifest.scope -contains 'os_sr_cact') 'Both Choices and Custom API are in proposal scope, not extra tables'
@@ -74,14 +82,14 @@ $expectedChoicePairs = @(
 )
 $choiceLabels = @($choice.options | ForEach-Object label)
 $choiceValues = @($choice.options | ForEach-Object value)
+$expectedChoiceValues = @(100010000, 100010001, 100010002, 100010003, 100010004, 100010005)
 Assert-Test ($choice.logicalName -ceq 'os_sr_candstat' -and
     $choice.valueStatus -match 'system-assigned' -and
-    ($null -eq $choice.defaultValue -or $choice.defaultValue -eq $choiceValues[0])) 'Choice identity and system-assigned default'
+    $choice.defaultValue -eq $choiceValues[0] -and $choice.valuePrefix -eq 10001) 'Choice identity, assigned prefix, and default'
 Assert-Test ($choiceLabels.Count -eq 6 -and (Compare-Object $expectedLabels $choiceLabels).Count -eq 0) 'Exact six canonical status labels'
 Assert-Test ($choiceValues.Count -eq 6 -and
-    (($choiceValues | Where-Object { $null -eq $_ }).Count -eq 6 -or
-        ((@($choiceValues | Where-Object { $null -ne $_ } | Select-Object -Unique).Count -eq 6) -and
-            @($choiceValues | Where-Object { [string]$_ -match '^[1-9][0-9]*$' }).Count -eq 6))) 'Status option values are either pending allocation or unique frozen integers'
+    (Compare-Object $expectedChoiceValues $choiceValues).Count -eq 0) 'Status option values match the GET-reconciled frozen mapping'
+Assert-Test (($candidate.columns | Where-Object logicalName -ceq 'os_sr_cand_stat').defaultValue -eq $choice.defaultValue) 'Candidate Status default matches the allocated Need Call Candidate value'
 Assert-Test ($manifest.callOutcomeChoice.options.Count -eq 3 -and
     @($manifest.callOutcomeChoice.options | Where-Object { $null -eq $_.value }).Count -eq 3 -and
     $manifest.callOutcomeChoice.valueStatus -match 'system-assigned') 'Call Outcome values remain explicitly deferred to Dataverse allocation'
@@ -147,7 +155,7 @@ $candidateOnlyProjection = [ordered]@{
 }
 $candidateOnlyJson = ConvertTo-Json -InputObject $candidateOnlyProjection -Depth 80 -Compress
 $candidateOnlyHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($candidateOnlyJson))).ToLowerInvariant()
-Assert-Test ($candidateOnlyHash -ceq 'a992f943e913bab7892223e75cc15489f7e35a153977cf846cd4cbd59b87c571') 'Candidate-only local proposal projection fingerprint is deterministic'
+Assert-Test ($candidateOnlyHash -ceq '7168980f2d13d8e406a25854fef3dafad118673e1c5661fb9461e52f41b4f7d8') 'Candidate-only local proposal projection fingerprint is deterministic'
 
 $api = $manifest.customApi
 Assert-Test ($api.uniqueName -ceq 'os_sr_cact' -and $api.implementation -match 'Synchronous') 'Server operation name and synchronous implementation proposal'
@@ -158,8 +166,8 @@ Assert-Test (($api.inputs -join '|') -match 'CandidateId: Guid' -and
 Assert-Test (($api.rules -join '|') -match 'atomic' -and ($api.rules -join '|') -match 'authenticated initiating user') 'Operation requires transaction and authenticated actor'
 Assert-Test (($api.rules -join '|') -match 'UpdateCandidate uses replacement values' -and
     ($api.rules -join '|') -match 'identical replay is a no-op') 'Candidate edit replays are replacement-value idempotent without duplicate side effects'
-Assert-Test (-not $manifest.provisioning.authorized -and $manifest.provisioning.maximumTenantWrites -eq 0 -and
-    $manifest.testSafety.tenantRequests -eq 0 -and $manifest.testSafety.tenantWrites -eq 0) 'Manifest prohibits tenant writes and records zero operations'
+Assert-Test (-not $manifest.provisioning.authorized -and $manifest.provisioning.maximumTenantWrites -eq 7 -and
+    $manifest.testSafety.tenantRequests -eq 0 -and $manifest.testSafety.tenantWrites -eq 0) 'Manifest records the consumed write authorization and keeps offline tests tenant-free'
 Assert-Test ($manifest.unresolvedDecisions.Count -eq 0 -and $manifest.externalPrerequisites.Count -ge 4 -and
     $report -match 'BLOCKED_EXTERNAL_AUDIT_AND_API_PRIVILEGE_PREREQUISITES') 'Owner decisions are closed; external audit/security gates remain'
 

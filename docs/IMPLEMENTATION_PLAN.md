@@ -45,13 +45,13 @@ The first Position Apply attempt on 20 October 2026 returned HTTP 401. This is h
 
 ## Phase 3A — Candidate Core Design & Provisioning Readiness
 
-- **Objective:** Produce an owner-reviewable design for Candidate, Call Log, Candidate Status History, their state machine, and server-enforced transition contract.
-- **Scope:** Design/readiness only; exactly three proposed tables plus the shared Choice and business-operation contract. No tenant access, schema writes, business rows, API/plugin deployment, app changes, publication, or role changes.
-- **Dependencies:** Owner decisions for Candidate Number, Call Outcome, contact requiredness, owner model, reschedule reason, auditing/field security, operation correlation/idempotency, and LEGO Career deferral are approved. Remaining gates are organization-level audit governance, least-privilege Custom API execution/effective-access design, option-value/AutoNumber verification, and a guarded environment/solution preflight.
-- **Deliverables:** [Phase 3A design report](PHASE_3A_CANDIDATE_CORE_DESIGN.md), [synthetic metadata proposal manifest](PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json), and [offline assertion harness](../tests/Phase3ACandidateCoreDesign.Tests.ps1).
-- **Acceptance:** Candidate and child schemas deterministic; all transitions and negative cases defined; operation atomically enforces status/history/call writes and idempotency; relationships/security/integrity consistent; no material product decision remains open.
+- **Objective:** Define the Candidate, Call Log, and Candidate Status History model and server-enforced transition contract; complete only the separately authorized Candidate-table metadata slice.
+- **Scope:** The Candidate Status Choice, Candidate table, two alternate keys, and Position/Candidate Source/TA lookups are provisioned and reconciled. No Candidate business rows, Call Log/History tables, Call Outcome Choice, API/plugin deployment, app changes, publication, or role/access changes.
+- **Dependencies:** Owner decisions are approved. Organization audit governance remains required before Candidate data; least-privilege Custom API execution/effective-access design remains required before API/plugin implementation. The Candidate Status Choice allocation/binding and AutoNumber metadata path are verified; Call Outcome option allocation is deferred.
+- **Deliverables:** [Phase 3A design report](PHASE_3A_CANDIDATE_CORE_DESIGN.md), [synthetic metadata proposal/current-state manifest](PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json), [Candidate-only provisioning report](PHASE_3A_CANDIDATE_TABLE_PROVISIONING_REPORT.md), and [offline assertion harness](../tests/Phase3ACandidateCoreDesign.Tests.ps1).
+- **Acceptance:** Candidate-only metadata has exact schema, keys, lookup targets, audit metadata, and Solution inclusion; full business-operation acceptance remains pending API/plugin implementation and tests.
 - **Validation:** Offline proposal assertions, existing regression/readiness suites, and `git diff --check`. Runtime Dataverse/API/authorization/concurrency tests require a future implementation in an approved test environment.
-- **Status:** **`BLOCKED_EXTERNAL_AUDIT_AND_API_PRIVILEGE_PREREQUISITES`**. Product decisions are recorded; organization-level audit governance and operation privilege design remain blockers. Phase 3A.2 made zero tenant requests and zero writes; provisioning still requires separate authorization.
+- **Status:** Candidate-only schema is complete and GET-reconciled. Full Candidate Core remains **`BLOCKED_EXTERNAL_AUDIT_AND_API_PRIVILEGE_PREREQUISITES`**. The seven-write authorization is consumed; organization auditing is disabled, so no Candidate data may be created. No API/plugin has been deployed.
 
 ## Phase 3 — Email and Scheduling
 

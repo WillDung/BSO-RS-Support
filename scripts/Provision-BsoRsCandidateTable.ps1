@@ -3,6 +3,8 @@
 param(
     [switch]$Apply,
     [switch]$PreflightOnly,
+    [switch]$ReconcileOnly,
+    [switch]$ContinueAfterTable,
     [string]$Confirmation,
     [string]$AuthorizationReference,
     [string]$EnvironmentName = $env:BSO_RS_ENVIRONMENT_NAME,
@@ -25,10 +27,14 @@ $script:CandidateName = 'os_sr_cand'
 $script:ChoiceName = 'os_sr_candstat'
 $script:ExcludedTables = @('os_sr_call', 'os_sr_csh')
 $script:ExcludedChoice = 'os_sr_callout'
-$script:MaximumWrites = 7
+$script:MaximumWrites = 5
 $script:CurrentStage = 'LOCAL_MANIFEST'
-$script:ExpectedManifestSha256 = '98f94a2886614afc95a6285b2335a1283d7415c91da4754e98f26d373af26f56'
-$script:ExpectedCandidateProjectionSha256 = 'a992f943e913bab7892223e75cc15489f7e35a153977cf846cd4cbd59b87c571'
+$script:LastWriteHttpStatus = $null
+$script:SafeBlockReason = $null
+$script:LastSolutionMembershipCount = $null
+$script:CandidateAttributeSummary = @()
+$script:ExpectedManifestSha256 = '7cfe13bb7450946c17e3659e02a4b78aecfd93f50c272561b1e88c6084d566d1'
+$script:ExpectedCandidateProjectionSha256 = '7168980f2d13d8e406a25854fef3dafad118673e1c5661fb9461e52f41b4f7d8'
 $script:StatusLabels = @(
     'Need Call Candidate',
     'Candidate Answered',
@@ -80,7 +86,7 @@ function Assert-Manifest {
     if ($hash -cne $script:ExpectedManifestSha256) {
         throw 'Manifest fingerprint changed; no environment request or write is allowed.'
     }
-    if ($Manifest.status -cne 'PROPOSAL_NOT_AUTHORIZED' -or
+    if ($Manifest.status -cne 'CANDIDATE_TABLE_KEYS_LOOKUPS_AND_SOLUTION_MEMBERSHIP_RECONCILED' -or
         $Manifest.solutionUniqueName -cne $script:SolutionName -or
         $Manifest.publisherPrefix -cne $script:PublisherPrefix -or
         $Manifest.projectNamespace -cne $script:NamespacePrefix -or
@@ -97,12 +103,20 @@ function Assert-Manifest {
         throw 'Candidate table ownership, AutoNumber, length, or auditing proposal differs from the approved baseline.'
     }
     $options = @($Manifest.globalChoice.options)
+    $expectedValues = @(100010000, 100010001, 100010002, 100010003, 100010004, 100010005)
     if ($options.Count -ne $script:StatusLabels.Count -or
         (Compare-Object $script:StatusLabels @($options | ForEach-Object label)).Count -ne 0 -or
-        @($options | Where-Object { $null -ne $_.value }).Count -ne 0 -or
-        $Manifest.globalChoice.valueStatus -notmatch 'system-assigned') {
-        throw 'Candidate Status options must be the exact approved labels with values pending Dataverse allocation.'
+        (Compare-Object $expectedValues @($options | ForEach-Object value)).Count -ne 0 -or
+        [int]$Manifest.globalChoice.valuePrefix -ne 10001 -or
+        [int]$Manifest.globalChoice.defaultValue -ne 100010000 -or
+        $Manifest.globalChoice.valueStatus -notmatch 'GET-reconciled') {
+        throw 'Candidate Status options must match the frozen Dataverse GET-reconciled label/value mapping.'
     }
+    $statusColumn = @($candidate[0].columns | Where-Object logicalName -CEQ 'os_sr_cand_stat')
+    if ($statusColumn.Count -ne 1 -or [int]$statusColumn[0].defaultValue -ne 100010000) {
+        throw 'Candidate Status column default differs from the frozen Dataverse Choice allocation.'
+    }
+    $script:ApprovedStatusOptions = @($options)
     $expectedRelationships = @('os_sr_pos_cand', 'os_sr_csrc_cand', 'os_sr_ta_cand')
     if ((Compare-Object $expectedRelationships @($Manifest.relationships | Where-Object {
         $_.child -ceq $script:CandidateName -and $_.parent -in @('os_sr_pos', 'os_sr_csrc', 'os_sr_ta')
@@ -224,11 +238,11 @@ function New-CandidateTablePayload {
 }
 
 function Assert-ApplyAuthorization {
-    if ($Confirmation -cne 'CREATE-CANDIDATE-ONLY' -or
+    if (-not $ContinueAfterTable -or $Confirmation -cne 'CONTINUE-CANDIDATE-SCHEMA' -or
         [string]::IsNullOrWhiteSpace($AuthorizationReference)) {
-        throw 'Apply requires the exact Candidate-only confirmation and a non-empty owner-authorization reference.'
+        throw 'Apply requires the exact Candidate table continuation, confirmation, and owner-authorization reference.'
     }
-    if ($script:MaximumWrites -ne 7) { throw 'Candidate-only write ceiling changed.' }
+    if ($script:MaximumWrites -ne 5) { throw 'Candidate-only table continuation write ceiling changed.' }
 }
 
 function Assert-TargetConfiguration {
@@ -352,6 +366,7 @@ function Invoke-DataverseRequest {
             'RelationshipDefinitions',
             'RelationshipDefinitions'
         )
+        if ($ContinueAfterTable) { $expectedOrder = @($expectedOrder | Select-Object -Skip 2) }
         $expectedPath = if ($script:WriteStages.Count -lt $expectedOrder.Count) {
             $expectedOrder[$script:WriteStages.Count]
         } else { $null }
@@ -382,9 +397,6 @@ function Invoke-DataverseRequest {
             $script:RequestCounts.POST -ge $script:MaximumWrites) {
             throw 'Write path or count is outside the Candidate-only allowlist.'
         }
-        $script:RequestCounts.POST++
-        $script:LastWriteStage = $Path
-        $script:WriteStages.Add($Path)
     }
     $headers = @{
         Authorization = 'Bearer ' + $script:AccessToken
@@ -400,6 +412,7 @@ function Invoke-DataverseRequest {
         Headers = $headers
         SkipHeaderValidation = $true
         MaximumRedirection = 0
+        MaximumRetryCount = 0
         SkipHttpErrorCheck = $true
         TimeoutSec = 120
         ErrorAction = 'Stop'
@@ -411,7 +424,19 @@ function Invoke-DataverseRequest {
         $request.Body = ConvertTo-Json -InputObject $Body -Depth 80 -Compress
     }
     $script:RequestCounts[$Method]++
-    $response = Invoke-RestMethod @request
+    if ($Method -eq 'POST') {
+        $script:LastWriteStage = $Path
+        $script:LastWriteHttpStatus = 'UNKNOWN'
+        $script:WriteStages.Add($Path)
+    }
+    try { $response = Invoke-RestMethod @request }
+    catch {
+        if ($Method -eq 'POST') {
+            throw 'Dataverse POST transport failed; reconcile before any new write.'
+        }
+        throw 'Dataverse GET transport failed; no write was sent by this request.'
+    }
+    if ($Method -eq 'POST') { $script:LastWriteHttpStatus = [int]$statusCode }
     if ([int]$statusCode -lt 200 -or [int]$statusCode -ge 300) {
         throw "Dataverse returned HTTP $statusCode; response content suppressed."
     }
@@ -472,7 +497,7 @@ function Assert-LiveReadiness {
     $script:Solution = $solutions[0]
     $script:CurrentStage = 'LIVE_PRIVILEGES'
     Assert-GlobalPrivileges
-    foreach ($name in @($script:CandidateName) + $script:ExcludedTables) {
+    foreach ($name in $script:ExcludedTables) {
         $script:CurrentStage = "LIVE_TABLE_$name"
         $found = Get-OptionalMetadata -Path "EntityDefinitions(LogicalName='$name')?`$select=LogicalName,MetadataId,OwnershipType,PrimaryIdAttribute,PrimaryNameAttribute,IsAuditEnabled"
         if ($null -ne $found) { throw 'Candidate-only table inventory differs from the approved all-absent baseline.' }
@@ -491,10 +516,42 @@ function Assert-LiveReadiness {
             throw 'An approved Candidate reference table is absent or has invalid metadata.'
         }
     }
-    $script:CurrentStage = 'LIVE_CANDIDATE_STATUS_CHOICE'
+    $script:CurrentStage = 'LIVE_CANDIDATE_STATUS_CHOICE_LOOKUP'
     $choice = Get-OptionalMetadata -Path "GlobalOptionSetDefinitions(Name='$($script:ChoiceName)')?`$select=MetadataId,Name"
-    if ($null -ne $choice) { throw 'Candidate Status Choice already exists; no write is allowed.' }
-    $script:CandidateStatusChoiceAbsent = $true
+    if ($null -eq $choice) {
+        $script:CandidateStatusChoiceAbsent = $true
+        $script:CandidateStatusChoiceOptions = @()
+    }
+    else {
+        $script:CandidateStatusChoiceAbsent = $false
+        $script:CurrentStage = 'LIVE_CANDIDATE_STATUS_CHOICE_RECONCILIATION'
+        $choiceState = Assert-ChoiceReadback
+        $script:CandidateStatusChoiceOptions = $choiceState.Options
+        if ((Compare-Object @($script:ApprovedStatusOptions | ForEach-Object { [int]$_.value }) `
+                @($script:CandidateStatusChoiceOptions | ForEach-Object { [int]$_.Value })).Count -ne 0) {
+            $script:SafeBlockReason = 'LIVE_CHOICE_VALUES_DIFFER_FROM_FROZEN_MANIFEST'
+            throw 'Live Candidate Status values differ from the frozen local manifest.'
+        }
+    }
+    $script:CurrentStage = 'LIVE_CANDIDATE_TABLE_STATE'
+    $candidateMetadata = Get-OptionalMetadata -Path "EntityDefinitions(LogicalName='$($script:CandidateName)')?`$select=LogicalName,MetadataId,OwnershipType,PrimaryIdAttribute,PrimaryNameAttribute,IsAuditEnabled"
+    if ($ContinueAfterTable) {
+        if ($null -eq $candidateMetadata) { throw 'Candidate table is not visible; continuation cannot create or retry it.' }
+        $candidateState = Assert-CandidateReadback -ChoiceState $choiceState
+        $keyNames = @('os_sr_cand_ak_cnum', 'os_sr_cand_ak_corid')
+        $existingKeys = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$($script:CandidateName)')/Keys")
+        if (@($existingKeys | Where-Object { $_.SchemaName -in $keyNames }).Count -ne 0) {
+            throw 'A Candidate alternate key already exists; no duplicate or recovery write is permitted.'
+        }
+        $relationshipNames = @('os_sr_pos_cand', 'os_sr_csrc_cand', 'os_sr_ta_cand')
+        $existingRelationships = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$($script:CandidateName)')/ManyToOneRelationships")
+        if (@($existingRelationships | Where-Object { $_.SchemaName -in $relationshipNames }).Count -ne 0) {
+            throw 'A Candidate reference relationship already exists; no duplicate or recovery write is permitted.'
+        }
+    }
+    elseif ($null -ne $candidateMetadata) {
+        throw 'Candidate table already exists; creation is not safe under the initial-provisioning path.'
+    }
     $script:CurrentStage = 'LIVE_ORGANIZATION_AUDIT'
     $organization = Invoke-DataverseRequest -Method GET -Path "organizations($script:ExpectedOrganizationId)?`$select=organizationid,isauditenabled,isuseraccessauditenabled"
     if ([string]$organization.organizationid -ine $script:ExpectedOrganizationId) {
@@ -507,9 +564,15 @@ function Assert-LiveReadiness {
         ExpectedUserProcessGuard = 'PASS'
         SolutionPublisher = 'PASS'
         MetadataPrivileges = 'GLOBAL'
-        CandidateAndExcludedTables = 'ABSENT'
+        CandidateTable = if ($null -ne $candidateMetadata) { 'PRESENT_AND_RECONCILED' } else { 'ABSENT' }
+        ExcludedTables = 'ABSENT'
         CandidateReferences = 'PRESENT'
-        CandidateStatusChoice = if ($script:CandidateStatusChoiceAbsent) { 'ABSENT' } else { 'UNKNOWN' }
+        CandidateStatusChoice = if ($script:CandidateStatusChoiceAbsent) { 'ABSENT' } else { 'PRESENT_AND_RECONCILED' }
+        CandidateStatusOptions = @($script:CandidateStatusChoiceOptions | ForEach-Object {
+            [ordered]@{ Label = $_.Label; Value = $_.Value }
+        })
+        CandidateKeys = if ($ContinueAfterTable) { 'NOT_PRESENT' } else { 'NOT_APPLICABLE' }
+        CandidateReferenceRelationships = if ($ContinueAfterTable) { 'NOT_PRESENT' } else { 'NOT_APPLICABLE' }
         OrganizationAuditing = if ($organization.isauditenabled) { 'ENABLED' } else { 'DISABLED; NO CANDIDATE DATA MAY BE CREATED' }
         UserAccessAuditing = [bool]$organization.isuseraccessauditenabled
         OptionValuePrefix = [int]$script:Publisher.customizationoptionvalueprefix
@@ -517,19 +580,33 @@ function Assert-LiveReadiness {
 }
 
 function Assert-SolutionMembership {
-    param([Parameter(Mandatory = $true)][Guid]$ObjectId)
+    param(
+        [Parameter(Mandatory = $true)][Guid]$ObjectId,
+        [int]$ExpectedComponentType = -1,
+        [int]$ExpectedRootComponentBehavior = -1
+    )
     $solutionId = [string]$script:Solution.solutionid
-    $filter = [Uri]::EscapeDataString("_solutionid_value eq $solutionId and objectid eq $ObjectId")
-    $matches = @(Get-ODataRows -Path "solutioncomponents?`$select=componenttype,objectid&`$filter=$filter")
+    $filter = [Uri]::EscapeDataString("_solutionid_value eq $solutionId")
+    $components = @(Get-ODataRows -Path "solutioncomponents?`$select=componenttype,objectid,rootcomponentbehavior&`$filter=$filter")
+    $matches = @($components | Where-Object { [string]$_.objectid -ieq [string]$ObjectId })
+    $script:LastSolutionMembershipCount = $matches.Count
     if ($matches.Count -ne 1 -or [string]$matches[0].objectid -ine [string]$ObjectId) {
+        $script:SafeBlockReason = if ($matches.Count -eq 0) { 'SOLUTION_COMPONENT_NOT_FOUND' } else { 'SOLUTION_COMPONENT_COUNT_MISMATCH' }
         throw 'A newly created Candidate component is not present exactly once in the approved Solution.'
+    }
+    if (($ExpectedComponentType -ge 0 -and [int]$matches[0].componenttype -ne $ExpectedComponentType) -or
+        ($ExpectedRootComponentBehavior -ge 0 -and [int]$matches[0].rootcomponentbehavior -ne $ExpectedRootComponentBehavior)) {
+        $script:SafeBlockReason = 'SOLUTION_COMPONENT_TYPE_OR_ROOT_BEHAVIOR_MISMATCH'
+        throw 'The Solution component type or root inclusion behavior differed from the approved Candidate scope.'
     }
 }
 
 function Assert-ChoiceReadback {
-    $choice = Get-OptionalMetadata -Path "GlobalOptionSetDefinitions(Name='$($script:ChoiceName)')?`$select=MetadataId,Name,IsGlobal,OptionSetType,Options"
+    $choice = Get-OptionalMetadata -Path "GlobalOptionSetDefinitions(Name='$($script:ChoiceName)')"
     if ($null -eq $choice -or [string]$choice.Name -cne $script:ChoiceName -or
+        $choice.IsGlobal -ne $true -or [string]$choice.OptionSetType -cne 'Picklist' -or
         $choice.Options.Count -ne $script:StatusLabels.Count) {
+        $script:SafeBlockReason = 'CHOICE_METADATA_NAME_TYPE_OR_OPTION_COUNT_MISMATCH'
         throw 'Candidate Status Choice read-back failed; stop and reconcile without retry.'
     }
     $actual = @($choice.Options | ForEach-Object {
@@ -538,9 +615,11 @@ function Assert-ChoiceReadback {
     if ((Compare-Object $script:StatusLabels @($actual | ForEach-Object Label)).Count -ne 0 -or
         @($actual | Select-Object -ExpandProperty Value -Unique).Count -ne $script:StatusLabels.Count -or
         @($actual | Where-Object { $_.Value -le 0 }).Count -ne 0) {
+        $script:SafeBlockReason = 'CHOICE_LABEL_OR_ALLOCATED_VALUE_MISMATCH'
         throw 'Candidate Status Choice values or labels failed exact reconciliation.'
     }
-    Assert-SolutionMembership -ObjectId ([Guid]$choice.MetadataId)
+    $script:CurrentStage = 'LIVE_CANDIDATE_STATUS_SOLUTION_MEMBERSHIP'
+    Assert-SolutionMembership -ObjectId ([Guid]$choice.MetadataId) -ExpectedComponentType 9
     [pscustomobject]@{ Metadata = $choice; Options = $actual }
 }
 
@@ -548,11 +627,69 @@ function Assert-CandidateReadback {
     param([Parameter(Mandatory = $true)][object]$ChoiceState)
     $table = Get-OptionalMetadata -Path "EntityDefinitions(LogicalName='$($script:CandidateName)')?`$select=LogicalName,MetadataId,OwnershipType,PrimaryIdAttribute,PrimaryNameAttribute,IsAuditEnabled"
     if ($null -eq $table -or $table.OwnershipType -cne 'UserOwned' -or
-        $table.IsAuditEnabled.Value -ne $true) {
+        $table.IsAuditEnabled.Value -ne $true -or
+        $table.PrimaryNameAttribute -cne 'os_sr_cand_cnum' -or
+        [string]::IsNullOrWhiteSpace([string]$table.PrimaryIdAttribute)) {
+        $script:SafeBlockReason = 'CANDIDATE_TABLE_OWNERSHIP_OR_AUDIT_MISMATCH'
         throw 'Candidate table read-back failed ownership or auditing verification.'
     }
-    Assert-SolutionMembership -ObjectId ([Guid]$table.MetadataId)
-    $attrs = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$($script:CandidateName)')/Attributes")
+    Assert-SolutionMembership -ObjectId ([Guid]$table.MetadataId) -ExpectedComponentType 1 -ExpectedRootComponentBehavior 0
+    $allAttributes = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$($script:CandidateName)')/Attributes")
+    $virtualAttributes = @($allAttributes | Where-Object {
+        [string]$_.LogicalName -like 'os_sr_cand_*' -and [string]$_.AttributeType -ceq 'Virtual'
+    })
+    if ($virtualAttributes.Count -ne 1 -or $virtualAttributes[0].LogicalName -cne 'os_sr_cand_statname') {
+        $script:SafeBlockReason = 'CANDIDATE_GENERATED_VIRTUAL_ATTRIBUTE_MISMATCH'
+        throw 'Candidate table generated virtual attribute set differed from the expected Choice name column.'
+    }
+    $expectedLookupNameAttributes = @{
+        os_sr_cand_posname = 'os_sr_cand_pos'
+        os_sr_cand_csrcname = 'os_sr_cand_csrc'
+        os_sr_cand_taname = 'os_sr_cand_ta'
+    }
+    $lookupNameAttributes = @($allAttributes | Where-Object {
+        [string]$_.LogicalName -in $expectedLookupNameAttributes.Keys
+    })
+    if ($lookupNameAttributes.Count -ne $expectedLookupNameAttributes.Count) {
+        $script:SafeBlockReason = 'CANDIDATE_GENERATED_LOOKUP_NAME_ATTRIBUTE_MISMATCH'
+        throw 'Candidate lookup companion attribute set differed from the approved lookups.'
+    }
+    foreach ($expectedName in $expectedLookupNameAttributes.Keys) {
+        $generatedName = @($lookupNameAttributes | Where-Object LogicalName -CEQ $expectedName)
+        if ($generatedName.Count -ne 1 -or $generatedName[0].AttributeType -cne 'String' -or
+            [string]$generatedName[0].AttributeOf -cne $expectedLookupNameAttributes[$expectedName]) {
+            $script:SafeBlockReason = 'CANDIDATE_GENERATED_LOOKUP_NAME_ATTRIBUTE_MISMATCH'
+            throw 'Candidate lookup companion attribute did not map to its approved lookup.'
+        }
+    }
+    $generatedAttributeNames = @($virtualAttributes.LogicalName) + @($lookupNameAttributes.LogicalName)
+    $attrs = @($allAttributes | Where-Object {
+        [string]$_.LogicalName -like 'os_sr_cand_*' -and
+        [string]$_.LogicalName -notin $generatedAttributeNames
+    })
+    $statusAttributeFilter = [Uri]::EscapeDataString("LogicalName eq 'os_sr_cand_stat'")
+    $statusAttributeRows = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$($script:CandidateName)')/Attributes/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?`$select=LogicalName,AttributeType,DefaultFormValue&`$filter=$statusAttributeFilter&`$expand=GlobalOptionSet")
+    $statusAttributeMatches = @($statusAttributeRows | Where-Object {
+        [string]$_.LogicalName -ceq 'os_sr_cand_stat'
+    })
+    if ($statusAttributeMatches.Count -ne 1) {
+        $script:SafeBlockReason = 'CANDIDATE_STATUS_ATTRIBUTE_READBACK_MISMATCH'
+        throw 'Candidate Status attribute could not be reconciled exactly.'
+    }
+    $statusAttribute = $statusAttributeMatches[0]
+    $globalOptionSet = $statusAttribute.GlobalOptionSet
+    $script:CandidateAttributeSummary = @($attrs | ForEach-Object {
+        $attributeGlobalOptionSet = if ([string]$_.LogicalName -ceq 'os_sr_cand_stat') { $globalOptionSet } else { $null }
+        [ordered]@{
+            LogicalName = [string]$_.LogicalName
+            AttributeType = [string]$_.AttributeType
+            MaxLength = $_.MaxLength
+            AutoNumberFormat = [string]$_.AutoNumberFormat
+            DefaultFormValue = $_.DefaultFormValue
+            GlobalOptionSetName = [string]$attributeGlobalOptionSet.Name
+            GlobalOptionSetMetadataIdMatches = [string]$attributeGlobalOptionSet.MetadataId -ieq [string]$ChoiceState.Metadata.MetadataId
+        }
+    })
     $expectedAttributes = @{
         os_sr_cand_cnum = @{ Type = 'String'; MaxLength = 100; AutoNumberFormat = 'CAND-{SEQNUM:8}' }
         os_sr_cand_nm = @{ Type = 'String'; MaxLength = 200 }
@@ -561,23 +698,49 @@ function Assert-CandidateReadback {
         os_sr_cand_corid = @{ Type = 'String'; MaxLength = 36 }
         os_sr_cand_cvurl = @{ Type = 'String'; MaxLength = 2000 }
         os_sr_cand_stat = @{ Type = 'Picklist'; MaxLength = $null }
+        os_sr_cand_pos = @{ Type = 'Lookup'; MaxLength = $null }
+        os_sr_cand_csrc = @{ Type = 'Lookup'; MaxLength = $null }
+        os_sr_cand_ta = @{ Type = 'Lookup'; MaxLength = $null }
     }
-    if ($attrs.Count -ne $expectedAttributes.Count) { throw 'Candidate table has an unexpected attribute count.' }
+    if ($attrs.Count -ne $expectedAttributes.Count) {
+        $script:SafeBlockReason = 'CANDIDATE_CUSTOM_ATTRIBUTE_COUNT_MISMATCH'
+        throw 'Candidate table has an unexpected custom attribute count.'
+    }
     foreach ($name in $expectedAttributes.Keys) {
         $matches = @($attrs | Where-Object LogicalName -CEQ $name)
         if ($matches.Count -ne 1 -or $matches[0].AttributeType -cne $expectedAttributes[$name].Type) {
+            $script:SafeBlockReason = "CANDIDATE_ATTRIBUTE_TYPE_OR_NAME_MISMATCH_$name"
             throw "Candidate attribute read-back failed for $name."
         }
         if ($null -ne $expectedAttributes[$name].MaxLength -and
             [int]$matches[0].MaxLength -ne $expectedAttributes[$name].MaxLength) {
+            $script:SafeBlockReason = "CANDIDATE_ATTRIBUTE_LENGTH_MISMATCH_$name"
             throw "Candidate attribute length read-back failed for $name."
         }
         if ($name -ceq 'os_sr_cand_cnum' -and $matches[0].AutoNumberFormat -cne 'CAND-{SEQNUM:8}') {
+            $script:SafeBlockReason = 'CANDIDATE_AUTONUMBER_FORMAT_MISMATCH'
             throw 'Candidate Number AutoNumber format read-back failed.'
+        }
+        if ($name -in @('os_sr_cand_nm', 'os_sr_cand_eml', 'os_sr_cand_stat') -and
+            $matches[0].RequiredLevel.Value -cne 'ApplicationRequired') {
+            $script:SafeBlockReason = "CANDIDATE_REQUIREDNESS_MISMATCH_$name"
+            throw 'Candidate requiredness read-back failed.'
+        }
+        if ($name -ceq 'os_sr_cand_phn' -and $matches[0].RequiredLevel.Value -cne 'None') {
+            $script:SafeBlockReason = 'CANDIDATE_PHONE_REQUIREDNESS_MISMATCH'
+            throw 'Candidate phone optionality read-back failed.'
         }
         if ($name -ceq 'os_sr_cand_stat' -and
             [int]$matches[0].DefaultFormValue -ne [int]($ChoiceState.Options | Where-Object Label -CEQ $script:StatusLabels[0]).Value) {
+            $script:SafeBlockReason = 'CANDIDATE_STATUS_DEFAULT_MISMATCH'
             throw 'Candidate Status default does not match the allocated Need Call Candidate value.'
+        }
+        if ($name -ceq 'os_sr_cand_stat' -and
+            ([string]$globalOptionSet.Name -cne $script:ChoiceName -or
+                [string]$globalOptionSet.MetadataId -ine [string]$ChoiceState.Metadata.MetadataId -or
+                $statusAttribute.AttributeType -cne 'Picklist')) {
+            $script:SafeBlockReason = 'CANDIDATE_STATUS_CHOICE_BINDING_MISMATCH'
+            throw 'Candidate Status column does not reference the reconciled global Choice.'
         }
     }
     [pscustomobject]@{ Metadata = $table; Attributes = $attrs }
@@ -595,9 +758,8 @@ function Assert-KeyAndRelationshipReadback {
             $key[0].KeyAttributes[0] -cne $expected.Attribute) {
             throw 'Candidate alternate-key read-back did not match the approved proposal.'
         }
-        Assert-SolutionMembership -ObjectId ([Guid]$key[0].MetadataId)
     }
-    $relationships = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$($script:CandidateName)')/ManyToOneRelationships?`$select=MetadataId,SchemaName,ReferencedEntity,ReferencingEntity,ReferencedAttribute,ReferencingAttribute")
+    $relationships = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$($script:CandidateName)')/ManyToOneRelationships?`$select=MetadataId,SchemaName,ReferencedEntity,ReferencingEntity,ReferencedAttribute,ReferencingAttribute,CascadeConfiguration")
     foreach ($expected in @(
         @{ Name = 'os_sr_pos_cand'; Parent = 'os_sr_pos'; Attribute = 'os_sr_cand_pos' },
         @{ Name = 'os_sr_csrc_cand'; Parent = 'os_sr_csrc'; Attribute = 'os_sr_cand_csrc' },
@@ -606,21 +768,36 @@ function Assert-KeyAndRelationshipReadback {
         $relationship = @($relationships | Where-Object SchemaName -CEQ $expected.Name)
         if ($relationship.Count -ne 1 -or $relationship[0].ReferencedEntity -cne $expected.Parent -or
             $relationship[0].ReferencingEntity -cne $script:CandidateName -or
-            $relationship[0].ReferencingAttribute -cne $expected.Attribute) {
+            $relationship[0].ReferencingAttribute -cne $expected.Attribute -or
+            $relationship[0].CascadeConfiguration.Delete -cne 'Restrict' -or
+            $relationship[0].CascadeConfiguration.Assign -cne 'NoCascade' -or
+            $relationship[0].CascadeConfiguration.Reparent -cne 'NoCascade' -or
+            $relationship[0].CascadeConfiguration.Share -cne 'NoCascade') {
             throw 'Candidate lookup relationship read-back did not match the approved proposal.'
         }
-        Assert-SolutionMembership -ObjectId ([Guid]$relationship[0].MetadataId)
     }
+    Assert-SolutionMembership -ObjectId ([Guid]$Candidate.Metadata.MetadataId) -ExpectedComponentType 1 -ExpectedRootComponentBehavior 0
     $keys
 }
 
 function Reconcile-AfterFailure {
-    $result = [ordered]@{ Completed = $false; Outcome = 'UNKNOWN'; Tables = @(); Choice = 'UNKNOWN' }
+    $result = [ordered]@{
+        Completed = $false
+        Outcome = 'UNKNOWN'
+        Tables = @()
+        Choice = 'UNKNOWN'
+        Keys = @()
+        Relationships = @()
+    }
     try {
-        $result.Choice = if ($null -ne (Get-OptionalMetadata -Path "GlobalOptionSetDefinitions(Name='$($script:ChoiceName)')?`$select=MetadataId,Name,Options")) { 'PRESENT_REQUIRES_REVIEW' } else { 'ABSENT' }
+        $result.Choice = if ($null -ne (Get-OptionalMetadata -Path "GlobalOptionSetDefinitions(Name='$($script:ChoiceName)')")) { 'PRESENT_REQUIRES_REVIEW' } else { 'ABSENT' }
         foreach ($name in @($script:CandidateName) + $script:ExcludedTables) {
             $item = Get-OptionalMetadata -Path "EntityDefinitions(LogicalName='$name')?`$select=LogicalName,MetadataId"
             if ($null -ne $item) { $result.Tables += [string]$item.LogicalName }
+        }
+        if ($result.Tables -contains $script:CandidateName) {
+            $result.Keys = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$($script:CandidateName)')/Keys")
+            $result.Relationships = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$($script:CandidateName)')/ManyToOneRelationships")
         }
         $result.Completed = $true
         $result.Outcome = if ($result.Choice -eq 'ABSENT' -and $result.Tables.Count -eq 0) { 'NO_COMPONENTS_FOUND' } else { 'PARTIAL_OR_UNCERTAIN_STATE' }
@@ -632,8 +809,8 @@ function Reconcile-AfterFailure {
 $script:ManifestPath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\docs\PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json'))
 $manifest = Get-Content -LiteralPath $script:ManifestPath -Raw | ConvertFrom-Json
 $proposal = Assert-Manifest -Manifest $manifest
-if (-not $Apply -and -not $PreflightOnly) {
-    $previewPayload = New-CandidateTablePayload -Manifest $manifest -StatusDefault 1
+if (-not $Apply -and -not $PreflightOnly -and -not $ReconcileOnly) {
+    $previewPayload = New-CandidateTablePayload -Manifest $manifest -StatusDefault ([int]$manifest.globalChoice.defaultValue)
     if ($previewPayload.SchemaName -cne $script:CandidateName -or
         $previewPayload.Attributes.Count -ne 7 -or
         $previewPayload.Attributes[0].MaxLength -ne 100 -or
@@ -643,7 +820,7 @@ if (-not $Apply -and -not $PreflightOnly) {
     [ordered]@{
         Mode = 'PLAN_ONLY'
         Proposal = $proposal
-        CandidateTablePayload = 'STRUCTURE_VALIDATED; live Choice binding and default require allocated values.'
+        CandidateTablePayload = 'STRUCTURE_VALIDATED; live Choice binding requires the verified metadata ID.'
         CandidateAttributes = @($previewPayload.Attributes | ForEach-Object SchemaName)
         DataverseRequests = 0
         Writes = 0
@@ -654,7 +831,13 @@ if (-not $Apply -and -not $PreflightOnly) {
 $failure = $null
 $reconciliation = $null
 try {
-    if ($Apply -and $PreflightOnly) { throw 'Apply and PreflightOnly are mutually exclusive.' }
+    $modeCount = 0
+    if ($Apply) { $modeCount++ }
+    if ($PreflightOnly) { $modeCount++ }
+    if ($ReconcileOnly) { $modeCount++ }
+    if ($modeCount -gt 1) {
+        throw 'Apply, PreflightOnly, and ReconcileOnly are mutually exclusive.'
+    }
     if ($Apply) { Assert-ApplyAuthorization }
     $script:CurrentStage = 'PAC_IDENTITY'
     Assert-PacIdentity
@@ -663,6 +846,105 @@ try {
     $script:CurrentStage = 'AZ_TOKEN'
     Get-ValidatedToken
     $script:ApiRoot = $script:OrganizationUrl.TrimEnd('/') + '/api/data/v9.2/'
+    if ($ReconcileOnly) {
+        $script:CurrentStage = 'RECONCILE_WHOAMI'
+        $who = Invoke-DataverseRequest -Method GET -Path 'WhoAmI'
+        if ([string]$who.OrganizationId -ine $script:ExpectedOrganizationId -or
+            [string]$who.UserId -ine $script:PacUserId) {
+            throw 'PAC and Dataverse WhoAmI do not agree during read-only reconciliation.'
+        }
+        $script:CurrentStage = 'RECONCILE_SOLUTION_PUBLISHER'
+        $publishers = @(Get-ODataRows -Path "publishers?`$select=publisherid,uniquename,customizationprefix&`$filter=uniquename eq '$($script:PublisherName)'")
+        $solutions = @(Get-ODataRows -Path "solutions?`$select=solutionid,uniquename,ismanaged,_publisherid_value&`$filter=uniquename eq '$($script:SolutionName)'")
+        if ($publishers.Count -ne 1 -or $solutions.Count -ne 1 -or
+            $publishers[0].customizationprefix -cne $script:PublisherPrefix -or
+            $solutions[0].uniquename -cne $script:SolutionName -or
+            [bool]$solutions[0].ismanaged -or
+            [string]$solutions[0]._publisherid_value -ine [string]$publishers[0].publisherid) {
+            throw 'Exact Solution/Publisher could not be verified during read-only reconciliation.'
+        }
+        $script:Publisher = $publishers[0]
+        $script:Solution = $solutions[0]
+        $script:CurrentStage = 'RECONCILE_CANDIDATE_STATUS_CHOICE'
+        $choiceState = Assert-ChoiceReadback
+        $script:CurrentStage = 'RECONCILE_CANDIDATE_TABLE'
+        $candidateMetadata = Get-OptionalMetadata -Path "EntityDefinitions(LogicalName='$($script:CandidateName)')?`$select=LogicalName,MetadataId,OwnershipType,PrimaryIdAttribute,PrimaryNameAttribute,IsAuditEnabled"
+        $candidateState = if ($null -ne $candidateMetadata) {
+            Assert-CandidateReadback -ChoiceState $choiceState
+        } else { $null }
+        $keys = @()
+        $relationships = @()
+        $componentMembership = @()
+        $candidateRoot = @()
+        $candidateRelationships = @()
+        if ($null -ne $candidateMetadata) {
+            $script:CurrentStage = 'RECONCILE_KEYS_AND_RELATIONSHIPS'
+            $keys = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$($script:CandidateName)')/Keys")
+            $relationships = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$($script:CandidateName)')/ManyToOneRelationships")
+            $solutionFilter = [Uri]::EscapeDataString("_solutionid_value eq $($script:Solution.solutionid)")
+            $solutionComponents = @(Get-ODataRows -Path "solutioncomponents?`$select=componenttype,objectid,rootcomponentbehavior&`$filter=$solutionFilter")
+            $candidateRoot = @($solutionComponents | Where-Object {
+                [string]$_.objectid -ieq [string]$candidateMetadata.MetadataId -and [int]$_.componenttype -eq 1
+            })
+            $expectedKeyNames = @('os_sr_cand_ak_corid', 'os_sr_cand_ak_cnum')
+            $expectedRelationshipNames = @('os_sr_pos_cand', 'os_sr_csrc_cand', 'os_sr_ta_cand')
+            $candidateRelationships = @($relationships | Where-Object {
+                [string]$_.SchemaName -in $expectedRelationshipNames
+            })
+            foreach ($component in @($keys | Where-Object SchemaName -in $expectedKeyNames) + $candidateRelationships) {
+                $matches = @($solutionComponents | Where-Object {
+                    [string]$_.objectid -ieq [string]$component.MetadataId
+                })
+                $componentMembership += [ordered]@{
+                    SchemaName = [string]$component.SchemaName
+                    ComponentType = @($matches | ForEach-Object { [int]$_.componenttype })
+                    MembershipCount = $matches.Count
+                    Inclusion = if ($matches.Count -eq 1) {
+                        'DIRECT'
+                    } elseif ($candidateRoot.Count -eq 1 -and [int]$candidateRoot[0].rootcomponentbehavior -eq 0) {
+                        'INCLUDED_BY_CANDIDATE_ROOT'
+                    } else {
+                        'NOT_VERIFIED'
+                    }
+                }
+                $null = Assert-KeyAndRelationshipReadback -Candidate $candidateState
+            }
+        }
+        $script:CurrentStage = 'RECONCILE_EXCLUDED_TABLES'
+        $excludedPresent = @()
+        foreach ($name in $script:ExcludedTables) {
+            if ($null -ne (Get-OptionalMetadata -Path "EntityDefinitions(LogicalName='$name')?`$select=LogicalName")) {
+                $excludedPresent += $name
+            }
+        }
+        $script:CurrentStage = 'RECONCILE_ORGANIZATION_AUDIT'
+        $organization = Invoke-DataverseRequest -Method GET -Path "organizations($script:ExpectedOrganizationId)?`$select=organizationid,isauditenabled,isuseraccessauditenabled"
+        [ordered]@{
+            Result = if ($null -eq $candidateMetadata) {
+                'TABLE_WRITE_HTTP_204_BUT_TABLE_NOT_YET_VISIBLE'
+            } elseif ($candidateRoot.Count -ne 1 -or [int]$candidateRoot[0].rootcomponentbehavior -ne 0 -or
+                $keys.Count -ne 2 -or $candidateRelationships.Count -ne 3 -or
+                @($componentMembership | Where-Object Inclusion -eq 'NOT_VERIFIED').Count -gt 0) {
+                'CANDIDATE_SCHEMA_OR_SOLUTION_MEMBERSHIP_REVIEW_REQUIRED'
+            } else {
+                'CANDIDATE_TABLE_KEYS_LOOKUPS_AND_SOLUTION_MEMBERSHIP_RECONCILED'
+            }
+            CandidateStatusChoice = 'PRESENT_AND_RECONCILED'
+            CandidateStatusOptions = @($choiceState.Options | ForEach-Object { [ordered]@{ Label = $_.Label; Value = $_.Value } })
+            CandidateTable = if ($null -eq $candidateMetadata) { 'NOT_VISIBLE' } else { 'EXACT_SCHEMA_AND_AUDIT_RECONCILED' }
+            CandidateKeyNames = @($keys | ForEach-Object SchemaName)
+            CandidateKeyStates = @($keys | ForEach-Object { [string]$_.EntityKeyIndexStatus })
+            CandidateRelationshipNames = @($candidateRelationships | ForEach-Object SchemaName)
+            CandidateComponentMembership = $componentMembership
+            ExcludedTablesPresent = $excludedPresent
+            OrganizationAuditing = if ($organization.isauditenabled) { 'ENABLED' } else { 'DISABLED; NO CANDIDATE DATA MAY BE CREATED' }
+            Requests = $script:RequestCounts
+            Writes = $script:WriteStages.ToArray()
+            BusinessDataWrites = 0
+            PublicationWrites = 0
+        } | ConvertTo-Json -Depth 30
+        return
+    }
     $script:CurrentStage = 'READ_ONLY_LIVE_PREFLIGHT'
     $liveState = Assert-LiveReadiness
     $script:PreflightComplete = $true
@@ -676,36 +958,19 @@ try {
         return
     }
     if (-not $Apply) { throw 'A write requires -Apply; preflight-only cannot proceed to metadata creation.' }
-
-    $script:CurrentStage = 'CREATE_STATUS_CHOICE'
-    $choicePayload = New-ChoicePayload -Manifest $manifest
-    $choicePayloadHash = Get-PayloadSha256 -Payload $choicePayload
-    if ($choicePayload.Name -cne $script:ChoiceName -or
-        @($choicePayload.Options | Where-Object { $null -ne $_.Value }).Count -ne 0) {
-        throw 'Candidate Status Choice write payload failed its local assertion.'
+    if (-not $ContinueAfterTable -or
+        $liveState.CandidateStatusChoice -cne 'PRESENT_AND_RECONCILED' -or
+        $liveState.CandidateTable -cne 'PRESENT_AND_RECONCILED') {
+        throw 'Continuation requires the exact existing Candidate table and Choice to be reconciled.'
     }
-    $null = Invoke-DataverseRequest -Method POST -Path 'GlobalOptionSetDefinitions' -Body $choicePayload -WithSolutionHeader
     $choiceState = Assert-ChoiceReadback
-
-    $script:CurrentStage = 'CREATE_CANDIDATE_TABLE'
+    $script:CurrentStage = 'RECONCILE_EXISTING_CANDIDATE_TABLE'
     $statusValue = [int]($choiceState.Options | Where-Object Label -CEQ $script:StatusLabels[0]).Value
-    $tablePayload = New-CandidateTablePayload -Manifest $manifest -StatusDefault $statusValue
-    $tablePayload.'Attributes'[6].'GlobalOptionSet@odata.bind' = "/GlobalOptionSetDefinitions($($choiceState.Metadata.MetadataId))"
-    $tablePayloadHash = Get-PayloadSha256 -Payload $tablePayload
-    if ($tablePayload.SchemaName -cne $script:CandidateName -or
-        $tablePayload.OwnershipType -cne 'UserOwned' -or
-        $tablePayload.IsAuditEnabled.Value -ne $true -or
-        $tablePayload.Attributes.Count -ne 7 -or
-        $tablePayload.Attributes[0].MaxLength -ne 100 -or
-        $tablePayload.Attributes[6].DefaultFormValue -ne $statusValue) {
-        throw 'Candidate table write payload failed its local assertion.'
-    }
-    $null = Invoke-DataverseRequest -Method POST -Path 'EntityDefinitions' -Body $tablePayload -WithSolutionHeader
     $candidateState = Assert-CandidateReadback -ChoiceState $choiceState
 
-    $script:CurrentStage = 'CREATE_ALTERNATE_KEYS'
+    $script:CurrentStage = 'METADATA_PROPAGATION_AFTER_TABLE'
     Start-Sleep -Seconds 20
-    $script:CurrentStage = 'CREATE_LOOKUP_RELATIONSHIPS'
+    $script:CurrentStage = 'CREATE_ALTERNATE_KEYS'
     $keyPayloads = @(
         [ordered]@{
             '@odata.type' = 'Microsoft.Dynamics.CRM.EntityKeyMetadata'
@@ -725,8 +990,9 @@ try {
         Start-Sleep -Seconds 5
     }
 
-    $script:CurrentStage = 'FINAL_RECONCILIATION'
+    $script:CurrentStage = 'METADATA_PROPAGATION_AFTER_KEYS'
     Start-Sleep -Seconds 20
+    $script:CurrentStage = 'CREATE_LOOKUP_RELATIONSHIPS'
     $references = @(
         @{ SchemaName = 'os_sr_pos_cand'; Parent = 'os_sr_pos'; Attribute = 'os_sr_cand_pos'; Label = 'Position' },
         @{ SchemaName = 'os_sr_csrc_cand'; Parent = 'os_sr_csrc'; Attribute = 'os_sr_cand_csrc'; Label = 'Candidate Source' },
@@ -741,6 +1007,15 @@ try {
             ReferencedEntity = $reference.Parent
             ReferencingEntity = $script:CandidateName
             ReferencedAttribute = [string]$parent.PrimaryIdAttribute
+            CascadeConfiguration = [ordered]@{
+                Assign = 'NoCascade'
+                Delete = 'Restrict'
+                Merge = 'NoCascade'
+                Reparent = 'NoCascade'
+                Share = 'NoCascade'
+                Unshare = 'NoCascade'
+                RollupView = 'NoCascade'
+            }
             Lookup = [ordered]@{
                 '@odata.type' = 'Microsoft.Dynamics.CRM.LookupAttributeMetadata'
                 SchemaName = $reference.Attribute
@@ -752,6 +1027,9 @@ try {
         Start-Sleep -Seconds 5
     }
 
+    $script:CurrentStage = 'METADATA_PROPAGATION_AFTER_RELATIONSHIPS'
+    Start-Sleep -Seconds 15
+    $script:CurrentStage = 'FINAL_RECONCILIATION'
     $keys = Assert-KeyAndRelationshipReadback -Candidate $candidateState
     $org = Invoke-DataverseRequest -Method GET -Path "organizations($script:ExpectedOrganizationId)?`$select=organizationid,isauditenabled"
     $auditEnabled = [bool]$org.isauditenabled
@@ -765,7 +1043,7 @@ try {
         OrganizationAuditing = if ($auditEnabled) { 'ENABLED' } else { 'DISABLED; NO CANDIDATE DATA MAY BE CREATED' }
         KeyStates = @($keys | ForEach-Object { [ordered]@{ Name = $_.SchemaName; State = [string]$_.EntityKeyIndexStatus } })
         Relationships = @($references | ForEach-Object SchemaName)
-        PayloadSha256 = [ordered]@{ CandidateStatusChoice = $choicePayloadHash; CandidateTable = $tablePayloadHash }
+        PayloadSha256 = [ordered]@{ CandidateStatusChoice = 'READ_ONLY_REUSED'; CandidateTable = 'READ_ONLY_REUSED' }
         Requests = $script:RequestCounts
         Writes = $script:WriteStages.ToArray()
         AuthorizationReferenceSupplied = -not [string]::IsNullOrWhiteSpace($AuthorizationReference)
@@ -780,7 +1058,11 @@ catch {
     [ordered]@{
         Result = if ($script:RequestCounts.POST -eq 0) { 'BLOCKED_BEFORE_WRITE' } else { 'STOPPED_AFTER_WRITE_REQUIRES_REVIEW' }
         Stage = $script:CurrentStage
+        SafeBlockReason = $script:SafeBlockReason
+        SolutionMembershipMatches = $script:LastSolutionMembershipCount
+        CandidateAttributeSummary = $script:CandidateAttributeSummary
         LastWriteStage = $script:LastWriteStage
+        LastWriteHttpStatus = $script:LastWriteHttpStatus
         SafeError = if ($script:RequestCounts.POST -eq 0) { 'Preflight or payload validation failed; no write was sent.' } else { 'A write failed or was not fully reconciled; no retries or further writes were attempted.' }
         Reconciliation = $reconciliation
         Requests = $script:RequestCounts

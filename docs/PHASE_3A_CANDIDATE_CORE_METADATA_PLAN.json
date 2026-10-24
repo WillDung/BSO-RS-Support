@@ -1,6 +1,6 @@
 {
   "phase": "3A",
-  "status": "PROPOSAL_NOT_AUTHORIZED",
+  "status": "CANDIDATE_TABLE_KEYS_LOOKUPS_AND_SOLUTION_MEMBERSHIP_RECONCILED",
   "ownerDecisionBaseline": {
     "date": "2026-10-23",
     "source": "Explicit owner approval in the Phase 3A.1 follow-up conversation",
@@ -114,7 +114,7 @@
           "type": "GlobalChoice",
           "target": "os_sr_candstat",
           "required": "Required",
-          "defaultValue": null,
+          "defaultValue": 100010000,
           "directUserEditing": "Blocked; status changes use os_sr_cact."
         }
       ],
@@ -328,35 +328,35 @@
   "globalChoice": {
     "logicalName": "os_sr_candstat",
     "displayName": "Candidate Workflow Status",
-    "valuePrefix": null,
-    "defaultValue": null,
+    "valuePrefix": 10001,
+    "defaultValue": 100010000,
     "options": [
       {
-        "value": null,
+        "value": 100010000,
         "label": "Need Call Candidate"
       },
       {
-        "value": null,
+        "value": 100010001,
         "label": "Candidate Answered"
       },
       {
-        "value": null,
+        "value": 100010002,
         "label": "Waiting Manual Scheduling"
       },
       {
-        "value": null,
+        "value": 100010003,
         "label": "Round 1 Scheduled"
       },
       {
-        "value": null,
+        "value": 100010004,
         "label": "Offer Extended"
       },
       {
-        "value": null,
+        "value": 100010005,
         "label": "Candidate Failed"
       }
     ],
-    "valueStatus": "Dataverse system-assigned values; reconcile and freeze exact integers before Custom API/plugin implementation."
+    "valueStatus": "Dataverse system-assigned values; exact label/value mapping GET-reconciled and frozen during the Candidate-only provisioning run before Custom API/plugin implementation."
   },
   "callOutcomeChoice": {
     "logicalName": "os_sr_callout",
@@ -541,9 +541,30 @@
   },
   "provisioning": {
     "authorized": false,
-    "maximumTenantWrites": 0,
+    "maximumTenantWrites": 7,
+    "completedCandidateOnlyRun": {
+      "status": "CANDIDATE_TABLE_KEYS_LOOKUPS_AND_SOLUTION_MEMBERSHIP_RECONCILED",
+      "authorizationConsumed": true,
+      "writeCounts": {
+        "total": 7,
+        "candidateStatusChoice": 1,
+        "candidateTable": 1,
+        "alternateKeys": 2,
+        "lookupRelationships": 3
+      },
+      "automaticRetries": 0,
+      "businessDataWrites": 0,
+      "publicationWrites": 0,
+      "accessChanges": 0,
+      "organizationAuditing": "DISABLED; no Candidate records may be created",
+      "finalGetOnlyReconciliation": {
+        "result": "CANDIDATE_TABLE_KEYS_LOOKUPS_AND_SOLUTION_MEMBERSHIP_RECONCILED",
+        "GET": 31,
+        "POST": 0
+      }
+    },
     "sequence": [
-      "Create or verify global Choices os_sr_candstat and os_sr_callout",
+      "Verify the GET-reconciled Dataverse-allocated Candidate Status Choice; create the Call Outcome Choice only under its later bounded authorization",
       "Create Candidate table",
       "Add Candidate columns and lookups to the existing approved Position, Candidate Source, and TA Directory tables",
       "Create Call Log table and columns",
@@ -557,7 +578,7 @@
   },
   "unresolvedDecisions": [],
   "externalPrerequisites": [
-    "Verify publisher option-value allocation for both global Choices immediately before any future metadata write.",
+    "Candidate Status Choice allocation is frozen; verify Publisher option-value allocation for the later Call Outcome Choice immediately before its separately authorized metadata write.",
     "The last documented environment assessment found organization auditing disabled; verify approved organization-level audit enablement, retention, access, and capacity before relying on table audit flags.",
     "Complete least-privilege Custom API execution and effective-access design while preserving the authenticated initiating user; no role/access change is authorized here.",
     "Verify the exact authorized environment, solution/publisher, and supported AutoNumber metadata path during a separately authorized provisioning preflight.",

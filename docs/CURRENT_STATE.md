@@ -1,8 +1,21 @@
 # Current State
 
-## Phase 3A.3 — Candidate-Only Provisioning Gate (2026-10-23)
+## Phase 3A Candidate-Only Metadata Provisioning (2026-10-23)
 
-Outcome: **`BLOCKED_READINESS_UNKNOWN`**. Candidate-table-only readiness is now assessed separately from environment audit activation and later Custom API/plugin privilege validation; final API privilege validation is **`API_PRIVILEGE_VALIDATION_DEFERRED_UNTIL_TABLE_EXISTS`** and is not by itself a Candidate-table blocker.
+Outcome: **`CANDIDATE_TABLE_KEYS_LOOKUPS_AND_SOLUTION_MEMBERSHIP_RECONCILED`**. The separately authorized Candidate-table-only run is complete; its authorization is consumed. The exact implementation/readback evidence is in the [Candidate-only provisioning report](PHASE_3A_CANDIDATE_TABLE_PROVISIONING_REPORT.md).
+
+- The guarded process verified the approved target and active PAC/Dataverse identity, exact Solution and Publisher, and live schema before writing. The Candidate Status global Choice and `os_sr_cand` table were reconciled; the Candidate Status attribute’s expanded `GlobalOptionSet` name and metadata ID matched `os_sr_candstat`.
+- The Candidate table is `UserOwned`, has table auditing enabled, Candidate Number AutoNumber `CAND-{SEQNUM:8}` with String MaxLength 100, the approved Candidate fields and status default, and the three lookups to Position, Candidate Source, and TA Directory. The two alternate keys are Active. The Candidate root is in the approved Solution with `rootcomponentbehavior=0` (Include Subcomponents), which covers its key/relationship children.
+- The frozen Candidate Status values are Need Call Candidate `100010000`, Candidate Answered `100010001`, Waiting Manual Scheduling `100010002`, Round 1 Scheduled `100010003`, Offer Extended `100010004`, and Candidate Failed `100010005`.
+- The authorized total was seven metadata POSTs: one Candidate Status Choice, one Candidate table, two alternate keys, and three lookup relationships. Automatic retries: zero. Final GET-only reconciliation: 31 GET, 0 POST. No Candidate rows, Call Log/Status History table, Call Outcome Choice, Custom API, plug-in, app/navigation, publication, role/access, or organization-setting changes were made.
+- Organization auditing is disabled even though Candidate table audit metadata is enabled. **No Candidate business data may be created** until IT/Compliance governance resolves organization audit activation, retention, audit access, and capacity. Candidate Number runtime generation also remains untested because no row was created.
+- An earlier final validator stopped after all five continuation writes because it incorrectly required direct SolutionComponent rows for child keys/relationships. Microsoft defines root component behavior `0` as Include Subcomponents; subsequent read-only reconciliation verified that root behavior and the exact children. No metadata POST was retried.
+- PAC export/unpack succeeded, but the export contained the entire Solution, including `srapp` and existing reference-table source. That full export was removed to avoid retaining out-of-scope source changes; the Candidate metadata has not been pulled into a retained solution source folder. No commit or push occurred.
+- **Next:** resolve audit governance before any Candidate data and approve/test least-privilege Custom API execution before API/plugin implementation. Keep this Candidate schema intact; any Call Log/History/Call Outcome work requires separate authorization.
+
+## Phase 3A.3 — Candidate-Only Provisioning Gate (2026-10-23; historical pre-fast-track assessment)
+
+Historical outcome before the subsequent fast-track authorization: **`BLOCKED_READINESS_UNKNOWN`**. That guarded attempt stopped before Dataverse metadata or organization-settings GET. Its conclusion was superseded by the later fresh guarded preflight and Candidate-only execution above; the original report remains accurate for that earlier attempt.
 
 - The fresh PAC organization matched the approved target, but the existing Azure CLI identity did not match the PAC user, the expected-user process pin was absent, and no independent Dataverse WhoAmI was run. The guarded preflight stopped before any Dataverse metadata or organization-settings GET. Candidate table existence, Publisher option-value prefix, live Choice state, and current organization audit configuration are therefore unknown.
 - The manifest was not changed. Its two Choices contain explicit locally unique proposed numeric values; live Publisher allocation/collision checks remain unverified. Candidate Number uses `CAND-{SEQNUM:8}` but has no proposed `MaxLength`, so a complete AutoNumber metadata definition is not ready.
@@ -11,7 +24,7 @@ Outcome: **`BLOCKED_READINESS_UNKNOWN`**. Candidate-table-only readiness is now 
 - Four offline regression suites passed (40, 550, 11, and 329 assertions); PowerShell parser validation passed for 8 files. Details and exact counts are in the [Phase 3A.3 report](PHASE_3A3_CANDIDATE_TABLE_PROVISIONING_GATE.md).
 - **Next:** restore the approved identity agreement, establish the process-scoped expected-user pin after verification, and rerun the read-only target preflight. Complete the Candidate AutoNumber `MaxLength` proposal before preparing an executable schema payload.
 
-## Phase 3A.2 — Candidate Core Decision Application & Readiness (2026-10-23)
+## Phase 3A.2 — Candidate Core Decision Application & Readiness (2026-10-23; historical before Candidate-only provisioning)
 
 Outcome: **`BLOCKED_EXTERNAL_AUDIT_AND_API_PRIVILEGE_PREREQUISITES`**. The owner explicitly approved all eight Phase 3A.1 decision areas. The full decision record, updated proposal, and remaining gates are in the [Phase 3A.2 report](PHASE_3A2_CANDIDATE_CORE_DECISION_APPLICATION.md).
 

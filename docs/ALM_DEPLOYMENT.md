@@ -15,6 +15,12 @@ Phase 1D-D Apply was explicitly approved on 20 October 2026 for Position, Candid
 
 These resource records do not authorize additional schema, application, flow, security, or deployment work. Follow-on phases require their own approval and production change controls.
 
+## Candidate-Only Metadata Update
+
+The later bounded Candidate-only run created and GET-reconciled the Candidate Status Choice, Candidate table, two Active alternate keys, and three approved lookup relationships in this Solution. The table audit flag is enabled; organization-level auditing remains disabled, so no Candidate records may be created. See the [Candidate-only provisioning report](PHASE_3A_CANDIDATE_TABLE_PROVISIONING_REPORT.md).
+
+A supported PAC export/unpack was performed after provisioning. Because PAC exports the entire Solution, the result also included the existing `srapp` and reference-table components, beyond the Candidate-only source scope. The unpacked Candidate entity contained Card, Main, and Quick form files plus SavedQueries; their individual definitions were not retained for detailed review, and no independent form/view edits were made in this task. The generated export was not retained in the workspace; the `solutions/` source folder therefore still has no full Solution snapshot. No commit or push occurred. A full-solution source pull requires a separately bounded repository-scope decision.
+
 Phase 2C-R3 owner decision on 21 October 2026 officially adopted the existing BSO-RS-Support AppModule (`srapp`, ID `3709bb7c-28cd-f111-a05c-70a8a581cbfa`) in `os_sr_bso_rs_support`. The name `srapp` is the approved component-specific exception; prior expected name `os_srapp` is superseded. Phase 2C closed by adoption, not a successful Create; no AppModule was created, renamed, or recreated. Solution membership is verified by its type-80 root. The AppModule Publisher lookup remains unknown. R2 live state remains Active/Unpublished, with no app components and placeholder-only Published Site Map. Phase 2D composition planning is documented but Phase 2D is not authorized.
 
 ## Phase 1D-B Reference Table Readiness

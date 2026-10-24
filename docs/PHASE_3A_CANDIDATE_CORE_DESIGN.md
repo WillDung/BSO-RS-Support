@@ -1,16 +1,17 @@
 # Phase 3A — Candidate Core Domain Design & Provisioning Readiness Report
 
 **As of:** 23 October 2026  
-**Final classification:** `BLOCKED_EXTERNAL_AUDIT_AND_API_PRIVILEGE_PREREQUISITES`
-**Phase:** Design/readiness only. No schema write, API/plugin implementation, publication, app change, or business-record operation is authorized by this report.
+**Current Candidate-only schema status:** `CANDIDATE_TABLE_KEYS_LOOKUPS_AND_SOLUTION_MEMBERSHIP_RECONCILED`
+**Full Candidate Core classification:** `BLOCKED_EXTERNAL_AUDIT_AND_API_PRIVILEGE_PREREQUISITES`
+**Phase:** Owner-approved design plus separately authorized Candidate-only metadata provisioning. Call Log, Candidate Status History, Call Outcome Choice, Custom API/plugin, publication, app/access changes, and business records remain outside the completed slice.
 
 **Phase 3A.1 follow-up:** The first closure attempt received no owner-authored choices; its historical result remains in the [Phase 3A.1 report](PHASE_3A1_CANDIDATE_CORE_DECISION_CLOSURE.md). On 23 October 2026, the owner explicitly approved all eight decision areas. This revision applies those decisions and records remaining external gates in the [Phase 3A.2 decision application and readiness report](PHASE_3A2_CANDIDATE_CORE_DECISION_APPLICATION.md).
 
 ## 1. Executive Summary
 
-The owner-approved design now has a deterministic shape for Candidate, Call Log, Candidate Status History, the status and call-outcome Choices, and the server-enforced operation contract. Approved requirements include server-generated nonpersonal Candidate Numbers; Answered / No Answer / Call Back Requested outcomes; required Candidate Name and Email with optional Phone; Dataverse Owner as the responsible BSO; a mandatory reschedule reason; table auditing for all three tables; caller-generated GUID CorrelationId idempotency; and deferral of the LEGO Career lookup to the later scheduling/booking boundary. The synthetic proposal snapshot is in [the metadata plan](PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json).
+The owner-approved design has a deterministic shape for Candidate, Call Log, Candidate Status History, the status and call-outcome Choices, and the server-enforced operation contract. Approved requirements include server-generated nonpersonal Candidate Numbers; Answered / No Answer / Call Back Requested outcomes; required Candidate Name and Email with optional Phone; Dataverse Owner as the responsible BSO; a mandatory reschedule reason; table auditing for all three tables; caller-generated GUID CorrelationId idempotency; and deferral of the LEGO Career lookup to the later scheduling/booking boundary. The Candidate Status Choice and Candidate table-only schema (including two Active alternate keys and three approved lookups) are now provisioned and GET-reconciled under the separate bounded authorization recorded in the [Candidate-only provisioning report](PHASE_3A_CANDIDATE_TABLE_PROVISIONING_REPORT.md). No Candidate business rows were created.
 
-Provisioning readiness remains blocked by external gates, not unresolved owner product choices: the last documented environment review found organization-level auditing disabled and its retention/access/capacity governance still open; the least-privilege Custom API execution privilege model has not been approved or tested; and Choice value allocation plus the supported AutoNumber path require fresh preflight verification. These cannot be closed by this offline design task. No Candidate business rows or tenant metadata were queried or written.
+Further Candidate Core work remains blocked by external gates, not unresolved owner product choices: the fresh Candidate-only read confirmed organization-level auditing is disabled, with retention/access/capacity governance still open; the least-privilege Custom API execution privilege model has not been approved or tested. No Candidate data may be created while organization auditing remains disabled. Candidate Status Choice allocation/binding, Candidate AutoNumber metadata, table audit flag, keys, lookup targets, and Solution inclusion are verified; the Call Outcome Choice remains deferred. The synthetic proposal snapshot and current execution state are in [the metadata plan](PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json).
 
 The proposal uses global Choices `os_sr_candstat` and `os_sr_callout`, and one synchronous server operation, `os_sr_cact`, with a main-operation plug-in. Direct status editing is blocked. Candidate state, an applicable Call Log, and exactly one Status History row must commit atomically. Non-answer calls create only a Call Log. Reschedule requires a reason and captures actor, server timestamp, CorrelationId, previous/new status, and reason; actual calendar/event cancellation evidence and execution remain deferred to the scheduling phase. Booking, interview-result capture, email, and integrations remain out of this slice.
 
@@ -20,7 +21,7 @@ The proposal uses global Choices `os_sr_candstat` and `os_sr_callout`, and one s
 - Phase 3A.2 starting HEAD: `3ead7282c09911d4275f931cb905247533a9df64` on `main`; `origin/main` matched at start.
 - Phase 3A.2 starting worktree: clean; the owner-approved decision revision began from that baseline.
 - Phase 2D reference-app milestone: `PHASE_2D_COMPLETE`. Published `srapp` remains the reference-administration app only; this work does not alter it.
-- Current verified app pages remain TA Directory, Positions, Candidate Sources, and Locations. No Candidate, Call Log, or Candidate Status History table is represented as deployed.
+- Current verified app pages remain TA Directory, Positions, Candidate Sources, and Locations; the published `srapp` was not changed. Candidate is present in the Solution; Call Log and Candidate Status History remain unprovisioned.
 - The exact approved reference tables (`os_sr_ta`, `os_sr_pos`, `os_sr_csrc`, `os_sr_loc`) exist. No Candidate-to-LEGO-Career lookup is included in the Phase 3A core proposal.
 - Project table prefix contract is `os_sr_*`; solution name is `os_sr_bso_rs_support`.
 - No ATSugg source schema or live candidate data was inspected.
@@ -28,9 +29,9 @@ The Phase 3A.2 revision is local and uncommitted. No commit, push, restore, stas
 
 ## 3. Candidate Table Design
 
-**Proposed table:** `os_sr_cand` / Candidate; `UserOwned`. It is not provisioned.
+**Candidate table:** `os_sr_cand` / Candidate; `UserOwned`; table audit metadata enabled. The table and listed columns have been GET-reconciled. Candidate Number runtime generation remains untested because no Candidate row was created.
 
-| Proposed column | Type / limit | Classification | Requiredness / rule |
+| Candidate column | Type / limit | Classification | Requiredness / rule |
 |---|---|---|---|
 | `os_sr_cand_cnum` — Candidate Number | Dataverse AutoNumber, `CAND-{SEQNUM:8}`; String/Text, maximum length 100; primary name | Required | Server-generated, immutable after creation, unique, nonpersonal; protected by a unique alternate key. The length is owner-approved. Runtime generation remains unverified until a later authorized synthetic-row test. |
 | `os_sr_cand_nm` — Candidate Name | Text, 200 | Required | Personal information; required at Candidate creation. No column-level security in this initial slice; protect by table/row access and auditing. |
@@ -50,18 +51,18 @@ Do not put candidate name, email, phone, CV URL, salary, interview result, or fr
 
 ## 4. Candidate Status Design
 
-**Representation:** proposed global Dataverse Choice `os_sr_candstat`, shared by Candidate and Status History. Labels are fixed requirements; Dataverse allocates integer values in the verified Publisher context.
+**Representation:** global Dataverse Choice `os_sr_candstat`, created once and GET-reconciled against the approved labels and frozen allocated values. It is intended to be shared by Candidate and the future Status History table.
 
 | Allocated integer | Label | Default |
 |---|---|---|
-| GET-reconciled | Need Call Candidate | Yes |
-| GET-reconciled | Candidate Answered | No |
-| GET-reconciled | Waiting Manual Scheduling | No |
-| GET-reconciled | Round 1 Scheduled | No |
-| GET-reconciled | Offer Extended | No |
-| GET-reconciled | Candidate Failed | No |
+| 100010000 | Need Call Candidate | Yes |
+| 100010001 | Candidate Answered | No |
+| 100010002 | Waiting Manual Scheduling | No |
+| 100010003 | Round 1 Scheduled | No |
+| 100010004 | Offer Extended | No |
+| 100010005 | Candidate Failed | No |
 
-For a new Choice, pass null option values and let Dataverse allocate them. GET-reconcile the exact mapping and freeze it in the manifest before Custom API/plugin implementation. Never infer values from labels or recreate the Choice for preferred integers. Application code should use the frozen values, not compare localized labels. `statecode/statuscode` remain separate platform Active/Inactive fields.
+The approved Candidate-only run sent null option values; Dataverse allocated the values shown, which were GET-reconciled with all six labels and frozen in the manifest. The Publisher option-value prefix was verified as `10001`. Never infer values from labels or recreate the Choice for preferred integers. Application code should use the frozen values, not compare localized labels. `statecode/statuscode` remain separate platform Active/Inactive fields.
 
 Block direct UI, Web API, and Flow status changes. Only the approved Dataverse business operation may transition state. Initial creation at the default status is not a transition and does not create a fabricated history row.
 
@@ -270,15 +271,15 @@ Separate Candidate/Call/History schema writes from API/plugin implementation for
 
 ## 17. Metadata Payload Plan
 
-The reviewable, synthetic-only canonical proposal is [PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json](PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json). It defines the three tables, status and call-outcome Choices, lookups/relationships, proposed keys, transition matrix, Custom API contract, owner-decision record, and external prerequisites. It is **not** a Dataverse Web API payload, solution export, generated PAC artifact, or authorization to provision.
+The synthetic canonical proposal and current verified Candidate-only state are in [PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json](PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json). It defines the three-table target, status and call-outcome Choices, lookups/relationships, keys, transition matrix, Custom API contract, owner-decision record, and external prerequisites. It is **not** a Dataverse Web API payload, solution export, or generated PAC artifact.
 
-Local manifest SHA-256: **98f94a2886614afc95a6285b2335a1283d7415c91da4754e98f26d373af26f56**. This fingerprint identifies the exact JSON proposal file bytes only; it is not a request-body fingerprint. Re-check exact payload hashes immediately before any separately authorized dispatch.
+Local manifest SHA-256: **7cfe13bb7450946c17e3659e02a4b78aecfd93f50c272561b1e88c6084d566d1**. This fingerprint identifies the exact JSON file bytes only; it is not a request-body fingerprint.
 
 ## 18. Provisioning Safety Gates
 
 - Exact target/environment guard plus PAC/Az/WhoAmI and process-scoped expected-user agreement where the guarded project workflow requires them.
 - No interactive login, environment switch, token/cache inspection, or tenant connection in this design phase.
-- Separate owner approval for each bounded metadata/API/plugin operation; Phase 3A itself authorizes zero writes.
+- Separate owner approval for each bounded metadata/API/plugin operation; the Candidate-only authorization has been consumed.
 - Exact solution/publisher/prefix, live schema, and dependency preflight; stop on unexpected live state.
 - Bounded requests, zero automatic retries for uncertain writes, and GET-only reconciliation after each write before any next write.
 - No blind retry; reconcile existing metadata first after any uncertain result.
@@ -321,15 +322,17 @@ External prerequisites remain:
 
 1. Enablement and governance for organization-level Dataverse auditing. The last documented environment review found auditing disabled; retention, authorized audit readers, legal-hold/DSR, and capacity ownership remain to be settled by IT/Compliance.
 2. Least-privilege Custom API Execute privilege/effective-access design and validation; preserve the authenticated initiating BSO without System Administrator or fixed Flow-owner impersonation.
-3. In the bounded Candidate-only provisioning, create the new Candidate Status Choice with system-assigned values, GET-reconcile and freeze its integers, and use the approved AutoNumber String/Text MaxLength 100. Defer Call Outcome Choice creation to its later table slice.
-4. Verify the exact target environment, publisher, solution, and existing reference-table targets during the future guarded preflight.
+3. Candidate-only provisioning is complete: the Candidate Status Choice allocation and binding, Candidate table, AutoNumber metadata, audit flag, keys, lookup targets, and Solution inclusion are GET-reconciled. The Call Outcome Choice remains deferred to its separately authorized table slice.
+4. Before any further metadata operation, verify the exact target, publisher, Solution, and dependencies in a fresh guarded preflight.
 5. Implement cancellation-attempt evidence before enabling the reschedule action in the later scheduling phase. This is an explicitly deferred implementation dependency, not an unresolved Candidate Core product choice.
 
-These items do not change the accepted Candidate Core product requirements, but the audit and API privilege gates block readiness for Candidate Core provisioning.
+These items do not change the accepted Candidate Core product requirements. Audit governance blocks Candidate data creation and reliance on audit history; API privilege design blocks Custom API/plugin implementation. Candidate-only schema provisioning is complete.
 
 ## 22. Request / Write Counts
 
-Phase 3A tenant operations:
+The original Phase 3A design/readiness assessment made no tenant requests. A later separately authorized Candidate-only metadata run is recorded in the [provisioning report](PHASE_3A_CANDIDATE_TABLE_PROVISIONING_REPORT.md). Its final read-only reconciliation sent 31 GET and 0 POST; the bounded run's total authorized writes were seven, with zero retries and zero business-data writes.
+
+Original Phase 3A design-task tenant operations:
 
 | Operation | Count |
 |---|---:|
@@ -353,22 +356,23 @@ No solution source, environment configuration, business data, or published app c
 
 ## 24. Final Classification
 
-**`BLOCKED_EXTERNAL_AUDIT_AND_API_PRIVILEGE_PREREQUISITES`**
+**`BLOCKED_EXTERNAL_AUDIT_AND_API_PRIVILEGE_PREREQUISITES` for further Candidate Core implementation.**
 
-All owner product decisions are recorded and the manifest is deterministic as a proposal. The last documented environment evidence says organization auditing is disabled, and the least-privilege Custom API execution privilege model remains unapproved/untested. Candidate Core cannot be classified `READY_FOR_CANDIDATE_CORE_PROVISIONING` until these exact audit and security gates are resolved. Choice allocation and AutoNumber support remain mandatory fresh preflight checks before any write. No tenant write occurred.
+All owner product decisions are recorded. Candidate-only metadata provisioning is complete and reconciled. Organization auditing is disabled, so no Candidate business data may be created; the least-privilege Custom API execution privilege model remains unapproved/untested. The seven authorized metadata writes were completed without retry; no Candidate data, API/plugin, app, access, or publication change occurred.
 
 ## 25. Exact Recommended Next Task
 
-Resolve the organization-level audit governance and least-privilege Custom API execution privilege model with IT/Compliance and Security owners. Then run a separately authorized guarded preflight for the environment, publisher option allocation, and AutoNumber support. Do **not** provision until those gates pass and separate bounded write authorization is supplied.
+Resolve organization-level audit governance with IT/Compliance before Candidate data creation, and approve/test the least-privilege Custom API execution privilege model before API/plugin implementation. Keep Candidate-only schema intact; do not recreate it. Any Call Log/History or Call Outcome Choice work requires separate bounded authorization and fresh guarded preflight.
 
 ## 26. AI HANDOVER
 
 - Phase 2D remains `PHASE_2D_COMPLETE`; the published reference app/navigation was not touched.
-- Candidate, Call Log, and Candidate Status History remain design proposals; none was provisioned.
-- Use [the metadata plan](PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json) as a proposal snapshot only, not as a request or generated solution artifact.
+- Candidate Status Choice and Candidate table schema (two Active keys, three approved lookups) are provisioned and GET-reconciled. Call Log, Candidate Status History, Call Outcome Choice, Custom API, and plug-in are not provisioned.
+- Use [the metadata plan](PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json) as the synthetic design/current-state manifest, not as a request or generated solution artifact.
 - The workflow uses the six canonical statuses, defaulting to Need Call Candidate. No legacy TA approval state is allowed.
 - Proposed `os_sr_cact` must require a caller-generated GUID CorrelationId for every state-changing operation, compare expected status/version, and atomically persist Candidate status, applicable Call Log, and exactly one Status History row.
 - Answered logs and transitions atomically; No Answer and Call Back Requested log only. Reschedule requires a reason and full history evidence but stays disabled until the later cancellation-attempt boundary is implemented.
 - Candidate Number, call outcomes, contact requiredness, Owner-as-BSO, auditing, contact field-security, and LEGO Career deferral are owner-approved decisions.
-- Final classification: `BLOCKED_EXTERNAL_AUDIT_AND_API_PRIVILEGE_PREREQUISITES`; all tenant request/write counts are zero.
-- Next action: close audit governance and operation privilege design, then obtain separate bounded provisioning authorization and run guarded live preflight.
+- Organization auditing is disabled; no Candidate records were created and none may be created until audit governance is resolved.
+- Candidate-only provisioning used seven authorized writes, zero retries, and a final GET-only reconciliation (31 GET, 0 POST). The authorization is consumed; no commit or push occurred.
+- Next action: resolve audit governance and API privilege design, then plan separately authorized Call Log/History work without recreating Candidate metadata.

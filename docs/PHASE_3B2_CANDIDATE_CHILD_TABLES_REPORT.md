@@ -1,9 +1,9 @@
 # Phase 3B.2 — Candidate Core Storage Provisioning Report
 
 **Date:** 24 October 2026
-**Current classification:** `STOPPED_AFTER_REMAINING_METADATA_MISMATCH_NO_FURTHER_WRITES`
-**Latest provisioning execution:** corrected Call Log create and seven remaining metadata POSTs were dispatched once; zero retries
-**Latest read-only reconciliation:** Candidate exact; both child tables, four relationships, and two Active keys present; both Candidate Status History status columns bind to the wrong global Choice
+**Current classification:** `PARTIAL_METADATA_STATE`
+**Latest provisioning execution:** the prior corrected Call Log create and seven remaining metadata POSTs were each dispatched once; zero retries
+**Latest read-only reconciliation:** Candidate exact; both child tables, four relationships, and two Active keys present; both Candidate Status History status columns bind to the wrong global Choice. The latest resume made 17 GET and 0 POST.
 
 > The original HTTP 400 attempt is retained below as historical evidence. The latest bounded continuation and current handover are recorded in Section 30 and supersede earlier statements that the child tables were absent.
 
@@ -285,3 +285,17 @@ The current manifest SHA-256 is `4ad1f47edaea1ee23add24c8aa5e8566357c3e913bf30ac
 - Organization auditing is disabled; no Candidate business data was created.
 - The local runner now binds each Choice column using its manifest target and has a fail-closed resume path that cannot be used with the consumed authorization.
 - No commit or push occurred.
+
+## 31. Latest Resume — Primary-Name Contract and Pre-Write Stop
+
+The requested fresh reconciliation completed before any write. Candidate reconciled exact and unchanged. The Call Outcome Choice remains exact with the three frozen labels/values. Call Log and Candidate Status History are both present, so the conditional corrected table-create prerequisite (“failed table absent”) was false. The two Status History columns remain bound to `os_sr_callout` rather than `os_sr_candstat`; this is an unexpected partial metadata state. The run stopped as **`PARTIAL_METADATA_STATE`** before POST: child-scope requests were **17 GET / 0 POST**, with automatic retries **0**. No table create, metadata correction, or other write was dispatched.
+
+The owner-approved primary-name normalization is now enforced locally for every new child-table payload: `MaxLength` must be explicitly present and exactly `100`, the storage/type contract must be AutoNumber String, `FormatName` must be `Text`, requiredness must remain the manifest's `SystemGenerated` (emitted as `ApplicationRequired`), and SchemaName, DisplayName, `IsPrimaryName=true`, and the manifest AutoNumber format are preserved. The manifest already contained the approved values; the change records/enforces the technical contract and latest execution only, without changing product/schema semantics.
+
+| Fingerprint | SHA-256 |
+|---|---|
+| Previous manifest | `4ad1f47edaea1ee23add24c8aa5e8566357c3e913bf30ac198397f73b98e7bb1` |
+| Corrected manifest | `59180b226555ef44b4c41da73b902e8faa001fa87cb4dc10e1eaf661541bf72b` |
+| Corrected Call Log payload from the earlier authorized correction | `18cc58450bdcf5aa03119dc497db37b7842daf61f0f6ed8f8e0987ec0c40f7be` |
+
+The corrected payload fingerprint is historical pre-dispatch evidence for the previously authorized Call Log correction; it was not dispatched during this latest resume because Call Log already exists. The earlier HTTP 400 remains historical; the authorized corrected create later returned success and was GET-reconciled. This run's dispatch count is zero. Historical Phase 3B.2 write attempts remain one corrected Call Log create plus seven remaining-scope metadata writes; automatic retries remain zero. The remaining-scope authorization is consumed, and this reconciliation does not authorize repairing the live Choice mismatch.

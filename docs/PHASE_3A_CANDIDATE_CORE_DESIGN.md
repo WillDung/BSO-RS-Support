@@ -274,7 +274,7 @@ Separate Candidate/Call/History schema writes from API/plugin implementation for
 
 The synthetic canonical proposal and current verified Candidate-only state are in [PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json](PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json). It defines the three-table target, status and call-outcome Choices, lookups/relationships, keys, transition matrix, Custom API contract, owner-decision record, and external prerequisites. It is **not** a Dataverse Web API payload, solution export, or generated PAC artifact.
 
-Local manifest SHA-256: **4ad1f47edaea1ee23add24c8aa5e8566357c3e913bf30ac198397f73b98e7bb1**. This fingerprint identifies the exact JSON file bytes only; it is not a request-body fingerprint.
+Local manifest SHA-256: **59180b226555ef44b4c41da73b902e8faa001fa87cb4dc10e1eaf661541bf72b**. This fingerprint identifies the exact JSON file bytes only; it is not a request-body fingerprint. The Phase 3B.2 execution record and local payload contract were updated to record the latest GET-only `PARTIAL_METADATA_STATE` stop and enforce the already-approved child primary-name metadata; no Candidate or child-table product/schema semantics were changed.
 
 ## 18. Provisioning Safety Gates
 

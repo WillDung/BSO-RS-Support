@@ -17,7 +17,7 @@ $script:PublisherName = 'os_bso_rs_support'
 $script:PublisherPrefix = 'os'
 $script:ManifestPath = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\docs\PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json'))
 $script:CandidateRunner = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'Provision-BsoRsCandidateTable.ps1'))
-$script:ExpectedManifestSha256 = '4ad1f47edaea1ee23add24c8aa5e8566357c3e913bf30ac198397f73b98e7bb1'
+$script:ExpectedManifestSha256 = '59180b226555ef44b4c41da73b902e8faa001fa87cb4dc10e1eaf661541bf72b'
 $script:RequestCounts = @{ GET = 0; POST = 0 }
 $script:WriteStages = [System.Collections.Generic.List[string]]::new()
 $script:WriteHashes = [System.Collections.Generic.List[object]]::new()
@@ -194,7 +194,11 @@ function Assert-Manifest {
         if ($table.primaryName.type -cne 'AutoNumber' -or
             $table.primaryName.storageType -cne 'String' -or
             [int]$table.primaryName.maxLength -ne 100 -or
-            $table.primaryName.formatName -cne 'Text') {
+            $table.primaryName.formatName -cne 'Text' -or
+            $table.primaryName.required -cne 'SystemGenerated' -or
+            [string]::IsNullOrWhiteSpace([string]$table.primaryName.logicalName) -or
+            [string]::IsNullOrWhiteSpace([string]$table.primaryName.displayName) -or
+            [string]::IsNullOrWhiteSpace([string]$table.primaryName.format)) {
             throw "Approved String/AutoNumber primary-name metadata is incomplete for $($table.logicalName)."
         }
     }
@@ -228,6 +232,35 @@ function New-RequiredLevel {
 function Get-Required {
     param([string]$Requirement)
     $Requirement -in @('Required', 'RequiredForOperationWrites', 'RequiredForOperationTransitions')
+}
+
+function Assert-PrimaryNameDefinition {
+    param([Parameter(Mandatory = $true)][object]$Table)
+    $primaryName = $Table.primaryName
+    $maxLength = 0
+    $maxLengthIsValid = $null -ne $primaryName.maxLength -and
+        [int]::TryParse([string]$primaryName.maxLength, [ref]$maxLength)
+    if ($primaryName.type -cne 'AutoNumber' -or
+        $primaryName.storageType -cne 'String' -or
+        -not $maxLengthIsValid -or
+        $maxLength -ne 100 -or
+        $maxLength -lt 1 -or
+        $maxLength -gt 4000 -or
+        $primaryName.formatName -cne 'Text' -or
+        $primaryName.required -cne 'SystemGenerated' -or
+        [string]::IsNullOrWhiteSpace([string]$primaryName.logicalName) -or
+        [string]::IsNullOrWhiteSpace([string]$primaryName.displayName) -or
+        [string]::IsNullOrWhiteSpace([string]$primaryName.format)) {
+        throw "Primary-name String/AutoNumber definition is incomplete or outside the owner-approved contract for $($Table.logicalName)."
+    }
+    [pscustomobject]@{
+        SchemaName = [string]$primaryName.logicalName
+        DisplayName = [string]$primaryName.displayName
+        RequiredLevel = 'ApplicationRequired'
+        MaxLength = $maxLength
+        FormatName = 'Text'
+        AutoNumberFormat = [string]$primaryName.format
+    }
 }
 
 function New-AttributePayload {
@@ -303,28 +336,19 @@ function New-TablePayload {
         [Parameter(Mandatory = $true)][object]$Manifest,
         [Parameter(Mandatory = $true)][hashtable]$ChoiceMetadataByName
     )
-    $primaryMaxLength = 0
-    if ($null -ne $Table.primaryName.maxLength) {
-        $primaryMaxLength = [int]$Table.primaryName.maxLength
-    }
-    if ($primaryMaxLength -lt 1 -or $primaryMaxLength -gt 4000) {
-        throw "Primary-name MaxLength is missing or invalid for $($Table.logicalName); no table payload can be created safely."
-    }
-    if ([string]$Table.primaryName.formatName -cne 'Text') {
-        throw "Primary-name FormatName must be Text for $($Table.logicalName)."
-    }
+    $primaryName = Assert-PrimaryNameDefinition -Table $Table
     $attributes = [System.Collections.Generic.List[object]]::new()
     $attributes.Add([ordered]@{
         '@odata.type' = 'Microsoft.Dynamics.CRM.StringAttributeMetadata'
         AttributeType = 'String'
         AttributeTypeName = [ordered]@{ Value = 'StringType' }
-        SchemaName = [string]$Table.primaryName.logicalName
-        DisplayName = New-Label -Text ([string]$Table.primaryName.displayName)
-        RequiredLevel = New-RequiredLevel -Required $true
-        FormatName = [ordered]@{ Value = [string]$Table.primaryName.formatName }
-        MaxLength = $primaryMaxLength
+        SchemaName = $primaryName.SchemaName
+        DisplayName = New-Label -Text $primaryName.DisplayName
+        RequiredLevel = New-RequiredLevel -Required ($primaryName.RequiredLevel -ceq 'ApplicationRequired')
+        FormatName = [ordered]@{ Value = $primaryName.FormatName }
+        MaxLength = $primaryName.MaxLength
         IsPrimaryName = $true
-        AutoNumberFormat = [string]$Table.primaryName.format
+        AutoNumberFormat = $primaryName.AutoNumberFormat
     })
     foreach ($column in @($Table.columns | Where-Object type -ne 'Lookup')) {
         $attributes.Add((New-AttributePayload -Column $column -ChoiceMetadataByName $ChoiceMetadataByName))

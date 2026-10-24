@@ -612,6 +612,29 @@
       "remainingMetadataDispatchLimit": 7,
       "remainingMetadataWritesDispatched": 7,
       "remainingMetadataAuthorizationConsumed": true,
+      "primaryNameTechnicalNormalization": {
+        "status": "OWNER_APPROVED_AND_ENFORCED_LOCALLY",
+        "ownerApprovedMaxLength": 100,
+        "formatName": "Text",
+        "autoNumberFormatsPreserved": {
+          "os_sr_call": "CALL-{SEQNUM:8}",
+          "os_sr_csh": "HIST-{SEQNUM:8}"
+        },
+        "schemaDisplayRequirednessAndProductSemanticsChanged": false
+      },
+      "latestResumeClassification": "PARTIAL_METADATA_STATE",
+      "latestResumeAttempt": {
+        "result": "STOPPED_BEFORE_WRITE_EXISTING_CHILD_METADATA_MISMATCH",
+        "previousManifestSha256": "4ad1f47edaea1ee23add24c8aa5e8566357c3e913bf30ac198397f73b98e7bb1",
+        "correctedCallLogPayloadSha256": "18cc58450bdcf5aa03119dc497db37b7842daf61f0f6ed8f8e0987ec0c40f7be",
+        "correctedPayloadDispatchedThisAttempt": false,
+        "preWriteState": "Candidate exact and unchanged; Call Outcome Choice exact; Call Log and Candidate Status History present; both Candidate Status History status attributes bind to os_sr_callout instead of approved os_sr_candstat",
+        "childScopeRequests": {
+          "GET": 17,
+          "POST": 0
+        },
+        "automaticRetries": 0
+      },
       "remainingMetadataScope": [
         "os_sr_csh",
         "os_sr_cand_call",

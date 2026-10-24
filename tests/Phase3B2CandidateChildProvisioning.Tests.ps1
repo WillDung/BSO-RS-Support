@@ -37,8 +37,16 @@ Assert-Test ($runner -match "Assert-ChildTableAbsent" -and
     $runner -match "Assert-TableReadback" -and
     $runner -match "Assert-RelationshipsAndKeys") 'Preflight and exact post-write reconciliation paths are required'
 Assert-Test ($runner -match 'primaryName\.maxLength' -and
-    $runner -match 'MaxLength = \$primaryMaxLength' -and
-    $runner -match 'Primary-name MaxLength is missing or invalid') 'Table payload creation fails closed unless primary-name MaxLength is specified'
+    $runner -match 'MaxLength = \$primaryName\.MaxLength' -and
+    $runner -match 'Primary-name String/AutoNumber definition is incomplete or outside the owner-approved contract' -and
+    $runner -match '\$maxLength -ne 100' -and
+    $runner -match "FormatName -cne 'Text'") 'Table payload creation requires the exact owner-approved primary-name contract'
+Assert-Test ($runner -match 'Assert-PrimaryNameDefinition -Table \$Table' -and
+    $runner -match 'SchemaName = \$primaryName\.SchemaName' -and
+    $runner -match 'DisplayName = New-Label -Text \$primaryName\.DisplayName' -and
+    $runner -match 'RequiredLevel = New-RequiredLevel' -and
+    $runner -match 'IsPrimaryName = \$true' -and
+    $runner -match 'AutoNumberFormat = \$primaryName\.AutoNumberFormat') 'Payload preserves primary-name schema, display, requiredness, primary-name flag, and AutoNumber format'
 Assert-Test ($runner -match 'GlobalOptionSetDefinitions\(Name=' -and
     $runner -match "Update-ManifestChoiceValues" -and
     $runner.Contains('"relationships"\s*:')) 'Call Outcome Choice existence check and value freeze are wired'
@@ -76,7 +84,18 @@ Assert-Test ($manifest.provisioning.phase3B2AuthorizedContinuation.status -ceq '
 Assert-Test (@($manifest.tables | Where-Object logicalName -in @('os_sr_call', 'os_sr_csh') | Where-Object {
         $_.primaryName.type -ceq 'AutoNumber' -and $_.primaryName.storageType -ceq 'String' -and
         $_.primaryName.maxLength -eq 100 -and $_.primaryName.formatName -ceq 'Text' -and
+        $_.primaryName.required -ceq 'SystemGenerated' -and
+        $_.primaryName.logicalName -ceq "$($_.logicalName)_ref" -and
+        $_.primaryName.displayName -in @('Call Reference', 'Transition Reference') -and
         $_.primaryName.format -in @('CALL-{SEQNUM:8}', 'HIST-{SEQNUM:8}')
-    }).Count -eq 2) 'Both child primary-name String/AutoNumber metadata definitions are exact'
+    }).Count -eq 2) 'Both child primary-name definitions retain exact approved schema, display, requiredness, and AutoNumber semantics'
+Assert-Test ($manifest.provisioning.phase3B2AuthorizedContinuation.latestResumeClassification -ceq 'PARTIAL_METADATA_STATE' -and
+    $manifest.provisioning.phase3B2AuthorizedContinuation.latestResumeAttempt.childScopeRequests.GET -eq 17 -and
+    $manifest.provisioning.phase3B2AuthorizedContinuation.latestResumeAttempt.childScopeRequests.POST -eq 0 -and
+    $manifest.provisioning.phase3B2AuthorizedContinuation.latestResumeAttempt.automaticRetries -eq 0 -and
+    -not $manifest.provisioning.phase3B2AuthorizedContinuation.latestResumeAttempt.correctedPayloadDispatchedThisAttempt) 'Latest resume is recorded as GET-only partial-state stop'
+Assert-Test ($manifest.provisioning.phase3B2AuthorizedContinuation.primaryNameTechnicalNormalization.ownerApprovedMaxLength -eq 100 -and
+    $manifest.provisioning.phase3B2AuthorizedContinuation.primaryNameTechnicalNormalization.formatName -ceq 'Text' -and
+    -not $manifest.provisioning.phase3B2AuthorizedContinuation.primaryNameTechnicalNormalization.schemaDisplayRequirednessAndProductSemanticsChanged) 'Primary-name normalization is technical-only and does not change product or schema semantics'
 
 Write-Output "PASS: $script:Passed synthetic Phase 3B.2 provisioning assertions; no authentication, network, PAC, or tenant calls."

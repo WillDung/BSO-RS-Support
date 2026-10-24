@@ -2,9 +2,9 @@
 
 ## Phase 3B.2 Candidate Child-Table Provisioning (2026-10-24)
 
-Outcome: **`PRE_WRITE_GATE_BLOCKED`**. The owner confirmed the target, and a fresh guarded read-only run verified PAC/Az/Dataverse identity agreement, established the process user pin, and reconciled Candidate exactly against the current manifest. Both child tables were absent; organization-level auditing was disabled. No write was dispatched because the manifest lacks stable relationship schema names for the Contacted By and Actor lookups to `systemuser`, and the existing runner is Candidate-only. The full reconciliation evidence and request/write counts are in the [Phase 3B.2 report](PHASE_3B2_CANDIDATE_CHILD_TABLES_REPORT.md).
+Outcome: **`PRE_WRITE_GATE_BLOCKED`**. After the owner reconfirmed the target and asked to resume Phase 3B.2, a fresh guarded read-only run verified PAC/Az/Dataverse identity agreement, established the process user pin, and reconciled Candidate exactly against the unchanged manifest. Both child tables were absent; organization-level auditing was disabled. The 31-GET run made no writes or retries. Provisioning remains blocked because the manifest lacks stable relationship schema names for the Contacted By and Actor lookups to `systemuser`, and the existing runner is Candidate-only. The Call Outcome Choice was not checked. See the [Phase 3B.2 report](PHASE_3B2_CANDIDATE_CHILD_TABLES_REPORT.md) for reconciliation evidence and request/write counts.
 
-The existing Candidate-only runner excludes Call Log and Status History and is not suitable for the new scope. No runner, manifest, or tenant schema was changed. All four offline regression suites passed; no commit or push occurred.
+The existing Candidate-only runner excludes Call Log, Status History, and Call Outcome Choice and is not suitable for the authorized child scope. No runner, manifest, or tenant schema was changed. No commit or push occurred.
 
 ## Phase 3B.1 Candidate Fast-Track Request Disposition (2026-10-24)
 

@@ -2,30 +2,28 @@
 
 **Date:** 24 October 2026
 **Final classification:** `PRE_WRITE_GATE_BLOCKED`
-**Tenant requests / writes:** 31 GET / 0 writes
+**Resumed guarded run:** 31 GET / 0 writes / 0 retries
 
 ## 1. Executive Summary
 
-The owner authorized a fresh Candidate reconciliation and, only after an exact match, bounded provisioning of Call Log and Candidate Status History. The confirmed VN LMV IT target was verified against PAC, the Az credential context, and Dataverse `WhoAmI`; a process-scoped expected-user guard was established. Fresh read-only reconciliation found Candidate exact against the current manifest and both child tables absent.
+The owner reconfirmed the target and directed resumption under the existing Phase 3B.2 authorization. In the resumed guarded process, PAC, Az credential context, and Dataverse `WhoAmI` agreed; the process-scoped expected-user guard was established; the Solution/Publisher linkage passed; Candidate reconciled exactly against the unchanged current manifest; and both child tables were absent. This run made 31 GETs and 0 POSTs.
 
-Provisioning stopped before any write because the current manifest does not provide relationship schema names for the required `systemuser` lookups (Contacted By and Actor), and the existing runner is Candidate-only. No technical names were invented and no child-table payload was dispatched.
+Provisioning remains blocked before any write: the current manifest does not provide relationship schema names for the required `systemuser` lookups (Contacted By and Actor), and the existing runner is Candidate-only. The Call Outcome Choice was not inspected by this guarded run. No technical names were invented, no child-table payload was dispatched, and the manifest fingerprint remains unchanged.
 
 ## 2. Git / Manifest Baseline
 
-| Item | At run start |
+| Item | At resumed run start |
 |---|---|
 | Branch | `main` |
-| HEAD | `07c03abeeae8fb897f39bd8d2482c148d51f4d8d` |
-| `origin/main` | `07c03abeeae8fb897f39bd8d2482c148d51f4d8d` |
-| Ahead / behind | 0 / 0 |
-| Worktree | Clean at run start; previous disposition documentation was committed before this run |
+| HEAD | `ab5502aba7188c1477f31a956e5f02335759041e` |
+| Worktree | Clean at resumed run start |
 | Manifest path | `docs/PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json` |
 
 No reset, restore, stash, pull, rebase, branch switch, commit, or push was performed for this run.
 
 ## 3. Current Manifest SHA
 
-The current manifest was parsed locally and its SHA-256 recorded before disposition:
+The current manifest was parsed locally and its SHA-256 verified before and after the resumed guarded run:
 
 `7cfe13bb7450946c17e3659e02a4b78aecfd93f50c272561b1e88c6084d566d1`
 
@@ -33,19 +31,19 @@ Manifest identity: solution `os_sr_bso_rs_support`, Publisher prefix `os`, proje
 
 ## 4. Authentication Path
 
-The guarded reconciliation process acquired a Dataverse bearer token through `Az.Accounts\Get-AzAccessToken`, after PAC identity checks. It validated the actual token context against PAC, including Dataverse audience/scope/tenant/expiry, and confirmed identity agreement with Dataverse `WhoAmI`. The runner's credential path is therefore `AZURE_IDENTITY_CREDENTIAL_PATH`; the current-request credential was used only for the authorized read-only reconciliation.
+The resumed guarded process acquired a Dataverse bearer token through `Az.Accounts\Get-AzAccessToken`, after PAC identity checks. It validated the actual token context against PAC, including Dataverse audience/scope/tenant/expiry, and confirmed identity agreement with Dataverse `WhoAmI`. The runner's credential path is therefore `AZURE_IDENTITY_CREDENTIAL_PATH`; the current-request credential was used only for the authorized read-only reconciliation.
 
-The runner itself is scoped to the prior Candidate-only operation and was not run in `-Apply`, `-PreflightOnly`, or `-ReconcileOnly` mode.
+The runner was invoked in `-ReconcileOnly` mode. It remains scoped to Candidate reconciliation and excludes Call Log, Candidate Status History, and Call Outcome Choice provisioning.
 
 ## 5. Target / Identity Guards
 
-The owner supplied and confirmed the organization URL in the current request. PAC `org who` reported the approved VN LMV IT environment and an Org URL matching the supplied URL exactly. The request did not display or persist user/environment/organization identifiers in this report.
+The owner reconfirmed the organization URL in the current request. PAC `env who` reported the approved VN LMV IT environment and an Org URL matching the supplied URL exactly. The request did not persist user/environment/organization identifiers in this report.
 
 The guarded Candidate reconciliation re-ran PAC identity checks, validated the actual Az token credential context against PAC and its Dataverse audience/scope/tenant/expiry, called `WhoAmI`, and confirmed PAC/WhoAmI identity agreement. The process-scoped expected-user pin was established from the verified request identity. The same read-only run verified the manifest Solution and Publisher linkage and prefix. No login or environment switch occurred.
 
 ## 6. Fresh Candidate Live State
 
-Fresh live metadata reads were made in the guarded run. Candidate was present. The two remaining manifest tables were reported absent. The Call Outcome Choice `os_sr_callout` was not read in this reconciliation and remains unknown for this run.
+Fresh live metadata reads were made in the resumed guarded run. Candidate was present. The two remaining manifest tables were reported absent. The Call Outcome Choice `os_sr_callout` was not read by the Candidate-only reconciliation and remains unknown for this run.
 
 ## 7. Candidate Reconciliation
 
@@ -94,7 +92,7 @@ The manifest does not define the relationship schema name for lookup `os_sr_csh_
 
 Candidate reconciliation passed, but the missing `systemuser` lookup relationship names prevented a complete approved payload plan. There is no executable ordered write plan or payload hash. The current manifest SHA in Section 3 is the design fingerprint retained for this run.
 
-The permitted child scope, if re-authorized after the target gate, is limited to the two manifest tables, their approved Candidate relationships, required `os_sr_callout` Choice metadata, and approved keys/audit flags. Candidate create/replacement, Custom API, plug-in, roles, app/Site Map, publishing, and business records remain excluded.
+The existing child scope remains limited to the two manifest tables, their approved Candidate relationships, required `os_sr_callout` Choice metadata, and approved keys/audit flags. Candidate create/replacement, Custom API, plug-in, roles, app/Site Map, publishing, and business records remain excluded.
 
 ## 14. Call Log Provisioning
 
@@ -189,17 +187,17 @@ This disposition updates this report and [Current State](CURRENT_STATE.md) only.
 
 ## 27. Final Classification
 
-**`PRE_WRITE_GATE_BLOCKED`**. Target and identity guards passed, and Candidate reconciled exactly. The current manifest lacks stable relationship schema names for the required `systemuser` lookups; the existing Candidate-only runner cannot provision these child tables. The Call Outcome Choice was not freshly preflighted. No write was dispatched.
+**`PRE_WRITE_GATE_BLOCKED`**. The resumed target and identity guards passed, and Candidate reconciled exactly. The current manifest lacks stable relationship schema names for the required `systemuser` lookups; the existing Candidate-only runner cannot provision these child tables. The Call Outcome Choice was not freshly preflighted. No write was dispatched.
 
 ## 28. Exact Recommended Next Task
 
-Add and approve stable relationship schema names for the `systemuser` lookups (`os_sr_call_ctby` and `os_sr_csh_actr`) in the current manifest, or explicitly confirm a supported Dataverse-generated relationship naming approach. Then prepare a child-table-only guarded runner with a fixed write allowlist, zero retries, and immediate readback. Re-read the Call Outcome Choice and full existing schema immediately before any write. Do not reuse the Candidate-only runner by weakening its exclusions.
+Resolve stable relationship schema names for the required `systemuser` lookups in the manifest, or document a supported Dataverse-generated naming method and its exact readback acceptance criteria. Then use a child-table-only guarded runner with a fixed write allowlist, zero retries, and immediate readback. Freshly inspect `os_sr_callout` and the full existing schema in the same guarded process immediately before any write. Do not weaken or repurpose the Candidate-only runner.
 
 ## 29. AI HANDOVER
 
 - Current manifest SHA-256: `7cfe13bb7450946c17e3659e02a4b78aecfd93f50c272561b1e88c6084d566d1`.
-- Fresh target/credential/WhoAmI guards passed; expected-user process pin was established in the guarded process.
-- Fresh Candidate reconciliation was exact (31 GET, 0 POST); both child tables were absent. `os_sr_callout` was not checked.
+- Resumed target/credential/WhoAmI guards passed; expected-user process pin was established in the guarded process.
+- Resumed Candidate reconciliation was exact (31 GET, 0 POST); both child tables were absent. `os_sr_callout` was not checked.
 - Organization audit was freshly read as disabled; no organization setting was changed.
 - Two systemuser lookup relationship schema names are missing from the current manifest, so no complete child-table write plan could be built.
 - The existing runner is Candidate-only and explicitly excludes the two child tables.

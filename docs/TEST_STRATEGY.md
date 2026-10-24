@@ -1,6 +1,6 @@
 # Test Strategy
 
-**Status:** Test approach only. No product tests have been executed because no Power Platform implementation exists.
+**Status:** Test approach plus partial implementation evidence. Candidate Core metadata and the server operation API/plugin are deployed; offline synthetic suites exist and have passed. No live business-operation acceptance is claimed. The owner-authorized Phase 3D run stopped before fixture creation because organization auditing is disabled, the approved API intentionally defers scheduler/result/reschedule transitions, and a safe exact-ID cleanup mechanism was not established. See the [Phase 3D report](PHASE_3D_CANDIDATE_CORE_RUNTIME_ACCEPTANCE_REPORT.md).
 
 ## Test layers
 

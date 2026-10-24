@@ -1,5 +1,17 @@
 # Current State
 
+## Phase 3B.2 Candidate Child-Table Provisioning (2026-10-24)
+
+Outcome: **`BLOCKED_TARGET_CONFIRMATION`**. The owner authorized fresh Candidate reconciliation followed by Call Log and Candidate Status History provisioning only on an exact Candidate match. The exact target organization URL and solution-container confirmation was not received; no PAC, authentication, Dataverse request, or tenant write was made. This is not a fresh live Candidate check. Local manifest requirements and the block are recorded in the [Phase 3B.2 disposition report](PHASE_3B2_CANDIDATE_CHILD_TABLES_REPORT.md).
+
+The existing Candidate-only runner excludes Call Log and Status History and is not suitable for the new scope. No runner or schema was changed. Existing Phase 3B.1 worktree changes were preserved; no commit or push occurred.
+
+## Phase 3B.1 Candidate Fast-Track Request Disposition (2026-10-24)
+
+Outcome: **`CANDIDATE_ALREADY_EXISTS`**, based on the last verified 23 October Candidate-only GET reconciliation. The current task's required manifest SHA-256 (`8e035cc64451817efb8342fec245df2aa5e943eb3bd81fe3d5393ee9185d2e08`) differs from the current local manifest (`7cfe13bb7450946c17e3659e02a4b78aecfd93f50c272561b1e88c6084d566d1`), and the prior Candidate-only write authorization is consumed. No authentication or live request was made for this disposition; the 23 October state was not refreshed on 24 October. See the [Phase 3B.1 disposition report](PHASE_3B1_CANDIDATE_TABLE_FAST_TRACK_REPORT.md).
+
+Local offline validation passed: Phase 3A (43 assertions), reference provisioning (550), readiness (11), and app composition (329); parser validation passed for the provisioning runner and four test scripts. The runner's default plan-only mode reported zero Dataverse requests and writes. No tenant operation, commit, or push occurred. The external organization-audit prerequisite remains unresolved; no Candidate records may be created.
+
 ## Phase 3A Candidate-Only Metadata Provisioning (2026-10-23)
 
 Outcome: **`CANDIDATE_TABLE_KEYS_LOOKUPS_AND_SOLUTION_MEMBERSHIP_RECONCILED`**. The separately authorized Candidate-table-only run is complete; its authorization is consumed. The exact implementation/readback evidence is in the [Candidate-only provisioning report](PHASE_3A_CANDIDATE_TABLE_PROVISIONING_REPORT.md).

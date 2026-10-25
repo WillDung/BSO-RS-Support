@@ -1,6 +1,52 @@
 # Phase 3D - Candidate Core Synthetic Runtime Acceptance
 
-Date: 25 October 2026. This report retains historical assessments and records the latest Phase 3D-R2 continuation first. Source: owner authorization, current repository contract/source, previous guarded reconciliation and runtime journal, protected-key ACL inspection without reading key contents, and offline regression suites.
+Date: 25 October 2026. This report retains historical assessments and records the latest Phase 3D-R3 continuation first. Source: owner authorization, current repository contract/source, previous guarded reconciliation and runtime journal, protected-key ACL and local identity resolution without reading key contents, and offline regression suites.
+
+## Latest Phase 3D-R3 Disposition
+
+**`SIGNING_KEY_ACL_NOT_APPROVED` — stop before build, fresh live pre-deployment reads, assembly deployment, or runtime acceptance.** The extra inherited `FullControl` principal resolves to a disabled local account, but its organizational/build trust cannot be established. It is classified `UNRESOLVED_PRINCIPAL`; disabled status and local-account resolution do not establish trust.
+
+### Repository and source baseline
+
+The read-only baseline was branch `main`, HEAD and `origin/main` `4858c77b05ae38e14266ec5685dabd8f460115d7` (2026-10-25 12:01:09 +07), with a clean worktree before this documentation update. The committed source already contains the approved optional/null/empty-Guid `CandidateId` CreateCandidate handling and its regressions. No source or test code changed in this continuation.
+
+The signing-key reference is the retained session artifact `phase3c-plugin-signing.snk`; the tracked-safe reference is `session-state/files/phase3c-plugin-signing.snk`. Reference-string SHA-256: `b1d05fbb1b87ad61` (this is a hash of the normalized reference string, not of the key). Key bytes were not read, copied, exported, or hashed.
+
+### Sanitized ACL and provenance
+
+The key owner resolved to the current authorized user. ACL inspection found inherited `Allow / FullControl` entries for SYSTEM, local Administrators, the current authorized user, and one additional disabled local account. The additional account's SID is withheld; its non-reversible reference is `828623bbe96d3f20`. Its ACE is inherited from an explicit ACL on a common profile-root ancestor; the exact path is suppressed. No ACL, account, group, membership, or ownership change was made.
+
+| Principal | ACE | Provenance / disposition |
+|---|---|---|
+| SYSTEM (`S-1-5-18`) | Allow / FullControl; inherited | Built-in system principal; exact inheritance source not retained |
+| Local Administrators (`S-1-5-32-544`) | Allow / FullControl; inherited | Local administration group; exact inheritance source not retained |
+| Current authorized user (SID suppressed) | Allow / FullControl; inherited; owner | Resolved to the current operator; exact inheritance source not retained |
+| Additional disabled local account (SID reference `828623bbe96d3f20`) | Allow / FullControl; inherited | ACE is explicit at a common profile-root ancestor; trust unresolved |
+
+No Deny ACE was observed in the inspected key ACL.
+
+Because the additional principal cannot be conclusively classified as trusted, the existing key is not approved for use. No attempt was made to change ACLs, disable inheritance, take ownership, or create/use a replacement key.
+
+### Strong-name identity and stop boundary
+
+The existing local `os_sr_cact.dll` was inspected read-only: assembly name `os_sr_cact`, version `1.0.0.0`, public-key token `d73b02688ba7f9aa`, SHA-256 `089deb40816e7fd6d80d117ba3894b5d5dadbcf65ac8111e25bb0520ff6feb85`. This matches the previously reconciled deployed binary's public identity and hash; it does not authorize use of the private key. No signed build was attempted, so corrected-binary signing, test results against a signed build, and corrected DLL hash remain unavailable.
+
+| R3 activity | Result |
+|---|---|
+| Signing-key ACL / identity resolution | Read-only; additional account trust unresolved; key use not approved |
+| Candidate Core source / expected identity | Existing optional `CandidateId` correction retained; expected token matches inspected local assembly |
+| PowerShell suites | 8 suites; 1,058 assertions passed |
+| Candidate Core operation tests | 79 assertions passed |
+| Parser / `git diff --check` before documentation edits | Passed |
+| Fresh live pre-deployment GETs / tenant operations | 0 / 0 |
+| Signed build / corrected DLL hash | 0 / unavailable |
+| Assembly update | 0 |
+| API/schema/app/security/audit/publication writes | 0 |
+| Business API invocations / business-row writes | 0 / 0 |
+| Automatic retries | 0 |
+| Commit / push | 0 / 0 |
+
+The next architectural option, `MIGRATE_INDIVIDUAL_ASSEMBLY_TO_PLUGIN_PACKAGE`, is recorded only as a future proposal; no migration or deployment-model change was made. Resume only under a separately authorized and approved protected signing mechanism. Do not alter this key's ACL or use it based on the unresolved account.
 
 ## Latest Phase 3D-R2 Disposition
 

@@ -1,8 +1,64 @@
 # Phase 3D - Candidate Core Synthetic Runtime Acceptance
 
-Date: 25 October 2026. This report retains historical assessments and records the latest Phase 3D-R3 continuation first. Source: owner authorization, current repository contract/source, previous guarded reconciliation and runtime journal, protected-key ACL and local identity resolution without reading key contents, and offline regression suites.
+Date: 25 October 2026. This report records the latest Phase 3D-R4 package migration continuation first and retains earlier assessments as history. Source: owner authorization, current repository contract/source, local package builds and inspection, PAC CLI help, and Microsoft's documented package-registration workflow.
 
-## Latest Phase 3D-R3 Disposition
+## Latest Phase 3D-R4 Disposition
+
+**`PLUGIN_PACKAGE_CREATE_BLOCKED_AUTH` — stop before package registration, Custom API handler cutover, or runtime acceptance.** The unsigned package artifact is locally built and verified. Fresh Candidate Core and zero-row gates passed; the approved package is absent by exact-name query. PRT was installed, but its single current-user login attempt failed before organization selection. No tenant mutation or API invocation was dispatched.
+
+### Local package artifact
+
+| Item | Result |
+|---|---|
+| Package project | [CandidateCore.Package.csproj](../solutions/CandidateCorePackage/CandidateCore.Package.csproj), SDK-style .NET Framework 4.6.2 |
+| Package identity | `os_sr_cact_pkg`, version `1.0.0` |
+| Contained assembly identity | `os_sr_cact`, version `1.0.0.0`, unsigned / no public-key token |
+| Included plug-in types | `os_sr_cact.ApplyCandidateAction`; `os_sr_cact.ProtectCandidateCore` |
+| Package contents | One `lib/net462/os_sr_cact.dll` plus NuGet metadata; no PDB, key, or additional assembly |
+| Package SHA-256 | `41a18a66aabf0c75356209e6814d93f60aa6d4dc2eebd3a965d9291b3bb8b59b` |
+| Contained DLL SHA-256 | `ba332f58c55c8c13b8eb44df619b8236022f78261b7a02099890b3281a88aaf1` |
+| Repeatability | Clean Release build and subsequent build both succeeded with 0 warnings / 0 errors and identical package SHA-256 |
+| Legacy signed local assembly | Remains `os_sr_cact` v1.0.0.0, token `d73b02688ba7f9aa`, SHA-256 `089deb40816e7fd6d80d117ba3894b5d5dadbcf65ac8111e25bb0520ff6feb85`; unchanged for rollback |
+
+The package test is [Phase3DR4PluginPackage.Tests.ps1](../tests/Phase3DR4PluginPackage.Tests.ps1): it verifies project/package identities, exact package entries, no signing material, unsigned assembly identity, and both contract types using local reflection. It passed 12 assertions. All nine PowerShell suites passed 1,070 assertions; the Candidate Core operation-engine suite passed 79 assertions. The package links the current Candidate Core source without modifying it.
+
+### Registration stop and exact boundary
+
+PAC CLI is version 2.13.1. The [PAC plug-in command reference](https://learn.microsoft.com/en-us/power-platform/developer/cli/reference/plugin) shows that `pac plugin push` requires `--pluginId` (an assembly or package ID), but does not establish that an arbitrary new ID creates a first-time package. Microsoft's [PAC CLI package guide](https://learn.microsoft.com/en-us/power-platform/developer/howto/cli-create-package) documents first-time registration through the Plug-in Registration Tool and selection of an existing Solution. PRT 9.1.0.235 was installed locally and opened. Two current-user sign-in attempts (standard Office 365 followed by OAuth) returned a generic login error before organization selection. No credentials were entered, no error log was inspected, and no further authentication retry was made. PAC's existing profile remained unchanged and PAC `org who` continued to verify the expected VN LMV IT organization and user. Because no authenticated PRT session was available and first-time PAC push semantics were not verified, no package ID was guessed and no upload was attempted.
+
+### Fresh deployment and runtime gates
+
+Immediately before the PRT registration attempt, the existing strict reconciler returned `CANDIDATE_CORE_ASSEMBLY_RECONCILED`: 508 GETs (77 storage-gate GETs), 0 POST, 0 PATCH, 0 retries. Storage, Solution/Publisher, API/privilege, assembly, and registration inventory matched the retained exact plan and dispatch evidence. The separate runtime preflight returned `PHASE_3D_RUNTIME_PREFLIGHT_READY`: 9 count-only GETs; Candidate, Call Log, History, and Receipt rows were each 0; API invocations, business writes, audit-setting writes, and retries were all 0. A targeted live FetchXML query filtered the `pluginpackage` table to the exact approved name `os_sr_cact_pkg` and returned no row. PRT authentication failed before selecting an organization, so it did not alter or register a Dataverse component.
+
+| R4 action | Count / disposition |
+|---|---|
+| Local package builds | 2 successful Release builds; 0 warnings / 0 errors |
+| Package assertions | 12 passed |
+| All PowerShell suites | 9 suites; 1,070 assertions passed |
+| Candidate Core operation-engine suite | 79 assertions passed |
+| Fresh registration/storage reconciliation | 508 GETs, including 77 storage-gate GETs; 0 POST/PATCH; exact match |
+| Fresh runtime count preflight | 9 GETs; all four business/evidence counts 0 |
+| Exact-name package query | 1 targeted FetchXML operation; no matching row |
+| PAC / PRT operations | PAC 2.13.1 profile/WhoAmI verified; PRT 9.1.0.235 installed; 2 login failures before organization selection |
+| Package create/upload dispatches | 0 |
+| Package Solution-membership writes | 0 |
+| Custom API handler patches | 0 |
+| Plug-in type/step or legacy assembly changes | 0 |
+| Runtime API invocations / business-row writes | 0 / 0 |
+| Automatic retries | 0 |
+| Commit / push | 0 / 0 |
+
+No package component or handler mapping is treated as deployed. The package-name query establishes no matching row at query time; it does not establish that other package records are absent.
+
+The existing legacy `ProtectCandidateCore` registrations and signed assembly were not changed. Any later package cutover must freshly reconcile guard-step topology and preserve the approved direct-write protections. Only after supported first-time package registration, exact Solution membership/type reconciliation, and fresh API/step baseline should the single authorized `PluginTypeId` handler cutover be considered. No schema, Choice, API signature, security, app, organization-audit setting, or publication change is in scope.
+
+### Repository and acceptance status
+
+Starting repository baseline: branch `main`, HEAD `7ee75166a654ddafc24133fa51cc8dafdd9bebcc`. R4 work remains uncommitted; no commit or push was made. The only R4 repository changes are the package project, package assertions, and existing Phase 3D/current-state/test-guide documentation. Local package artifact output is build output only.
+
+The final R4 result is an authentication stop, **not** a failed or uncertain tenant write. The R3 signing-key classification remains `SIGNING_KEY_ACL_NOT_APPROVED` for the old individually signed build path; the key was not used. The future package registration is a separate dependency. No live runtime acceptance is claimed.
+
+## Historical Phase 3D-R3 Disposition
 
 **`SIGNING_KEY_ACL_NOT_APPROVED` — stop before build, fresh live pre-deployment reads, assembly deployment, or runtime acceptance.** The extra inherited `FullControl` principal resolves to a disabled local account, but its organizational/build trust cannot be established. It is classified `UNRESOLVED_PRINCIPAL`; disabled status and local-account resolution do not establish trust.
 

@@ -1,43 +1,51 @@
 # Phase 3D - Candidate Core Synthetic Runtime Acceptance
 
-Date: 24 October 2026. This report retains the original pre-execution assessment and adds the current follow-up disposition below. Source: owner authorization, current Phase 3C contract and implementation, prior guarded reconciliation, current read-only CLI identity/count checks, local one-shot-lock inspection, and offline regression suites.
+Date: 24 October 2026. This report retains historical assessments and records the latest Phase 3D-R continuation first. Source: owner authorization, current Phase 3C contract and implementation, fresh guarded reconciliation, read-only runtime preflights, the one-shot dispatch journal, and offline regression suites.
 
-## Current Follow-up Disposition
+## Latest Phase 3D-R Continuation Disposition
 
-**`UNCERTAIN_WRITE_OUTCOME` — no further runtime dispatch is authorized under the consumed one-shot guard.**
+**`PHASE_3D_RUNTIME_STOPPED` — the first live Custom API request was definitively rejected; runtime acceptance is incomplete.** No retry or further dispatch was made after the rejection.
 
-The approved assembly update removing the organization-audit runtime rejection was previously dispatched once. Its durable journal did not capture the HTTP status; immediate and subsequent GET reconciliation verified the approved replacement binary and exact registrations. No second assembly update was sent. Organization-level auditing remains disabled and unchanged; it is an external governance/release prerequisite, not a Candidate Core runtime rejection.
+Fresh GET-only reconciliation matched the current Candidate Core manifest, storage, Operation Receipt and Active alternate key, Solution/Publisher, Custom API contract and privilege, plug-in types and registrations. It returned `CANDIDATE_CORE_ASSEMBLY_RECONCILED`, with assembly SHA-256 `089deb40816e7fd6d80d117ba3894b5d5dadbcf65ac8111e25bb0520ff6feb85`; organization auditing remains disabled. The approved audit-gate-decoupled assembly was already deployed, so this continuation dispatched no assembly update. The original consumed Phase 3D lock was preserved.
 
-Before this follow-up, a fresh runtime preflight had passed with all four business/evidence tables empty and no API invocation. On resumption, the local one-shot runtime lock already existed and stated that the authorization had been consumed. Its creation time was 2026-10-24T13:29:36Z. No corresponding runtime dispatch journal was present among the retained session artifacts inspected. The lock was not removed or bypassed, and Apply was not rerun.
+The repository baseline was `main`, HEAD and `origin/main` both `ef5b512e33e38f08fece1db439558afd029e8baf` (2026-10-24 20:50:38 +07), with manifest SHA-256 `63f56173f61265f539d23d6ceffb5631e23f438e4e254755c1e24c7d17eb1915`. The worktree was clean at the start; the six current changes are limited to the Phase 3D report/current state, guarded deployment error reporting, the runtime runner, and its offline assertions. No commit or push occurred. The local plug-in source already lacks the organization-audit runtime rejection; no source rebuild or assembly update was needed for this continuation.
 
-A fresh read-only CLI profile check and count queries targeted VN LMV IT; the authenticated identity is omitted. Four sequential count-only FetchXML queries then returned **0 Candidate, 0 Call Log, 0 Candidate Status History, and 0 Operation Receipt rows**. These counts establish that no business rows are currently present; without the runtime dispatch journal they do not establish whether a Custom API request was attempted and rejected before creating data.
+Immediately before Apply, a fresh guarded preflight returned **9 GETs**, zero Candidate, Call Log, Candidate Status History, and Operation Receipt rows, zero API invocations, and zero retries. The new authorization-specific lock/evidence identity was unused; a distinct lock was created without changing the historical lock.
 
-| Evidence | Current result |
+The runner dispatched **one** `CreateCandidate` Custom API request. Dataverse returned HTTP 400, error code `0x80040265`, `UNEXPECTED_INPUT`. The request was rejected; no further action in the matrix was sent. A subsequent guarded count-only preflight returned **9 GETs** and zero rows in all four tables. No Candidate ID or other business-record identifier was created or retained. Organization auditing was not changed.
+
+| Evidence | Phase 3D-R result |
 |---|---|
-| Assembly update | 1 PATCH; HTTP status was not captured; replacement binary and registrations were GET-reconciled |
-| Assembly reconciliation | 508 instrumented GETs; 0 retries |
-| Earlier runtime preflight | 9 GETs; 0 Custom API invocations; all four row counts 0 |
-| Runtime one-shot lock | Already present; authorization marked consumed |
-| Runtime dispatch journal | Not found among retained session artifacts inspected |
-| Apply/API dispatches by this follow-up | 0 |
-| API dispatch count attributable to the pre-existing lock | Unknown; do not infer zero |
-| Fresh follow-up data reads | 4 count-only FetchXML queries; all four row counts 0 |
-| Fresh business/evidence row counts | Candidate 0; Call Log 0; History 0; Receipt 0 |
-| Business/metadata/app/role/audit-setting/publication writes | 0 in this follow-up |
-| Automatic retries | 0 |
-| Organization audit setting, roles, app, schema, Choices, publication | Not changed |
+| Current assembly reconciliation | `CANDIDATE_CORE_ASSEMBLY_RECONCILED`; 508 GETs, including 77 storage-gate GETs; 0 POST/PATCH |
+| Earlier read-only reconciliation diagnostic | 257 GETs; stopped locally on an omitted expected plan fingerprint; 0 writes |
+| Organization auditing | Disabled; unchanged; external governance/release prerequisite, not a runtime gate |
+| Pre-Apply zero-row gate | 9 GETs; all four row counts 0 |
+| Custom API dispatch | 1 `CreateCandidate`; HTTP 400; `0x80040265`; `UNEXPECTED_INPUT` |
+| Other Custom API dispatches | 0; the rest of the matrix was not reached |
+| Post-rejection zero-row gate | 9 GETs; all four row counts 0 |
+| Successful business-data writes / resulting rows | 0 / 0 |
+| New authorization-specific one-shot guard | Consumed; preserved |
+| Prior Phase 3D one-shot guard | Preserved; not reused |
+| Automatic retries / resends | 0 / 0 |
+| Metadata, app, role, audit-setting, publication writes in this continuation | 0 |
 
-The runner remains bounded at 21 Custom API dispatches, uses zero retries, and is covered by the offline Phase 3D runner-contract assertions. The authorized call/update/replay/conflict/stale-state checks were not confirmed live. `MarkRound1Scheduled`, `RecordPass`, `RecordFail`, and `RequestReschedule` remain expected to fail closed until trusted evidence exists; their runtime acceptance was not performed. Non-admin user/role acceptance remains deferred to the Candidate UI + Security phase.
+The runtime dispatch journal records the request as `REJECTED` with HTTP 400, but its `ResultCode` is null because the runner's allowlist did not yet include `UNEXPECTED_INPUT`. The sanitized command result captured that Dataverse code. The local allowlist was updated afterward; the retained journal was not rewritten. The GET figures above are per captured operation result; diagnostic preflight invocations whose wrapper output was not preserved are not included in an aggregate total.
 
-Do not remove the lock, recreate its evidence file to bypass the guard, or rerun Apply. Any further live acceptance requires a new owner-approved recovery authorization after the prior dispatch outcome has been reconciled. No business-data cleanup or speculative request was attempted.
+The local runner and contract assertions now reflect the authorized **eight-dispatch** matrix and expected maximum effects of one Candidate, two Call Logs, two History rows, and four Receipts (nine total rows). This describes the bounded test plan, not live acceptance: execution stopped at the first rejected request. `MarkRound1Scheduled` and the remaining scheduled/result/reschedule checks were not invoked. Offline operation tests verify the scheduler evidence rejection and the result/reschedule evidence guards; the latter actions are `NOT_APPLICABLE_CURRENT_STATE` live because no Candidate was created. Non-admin user/role acceptance remains deferred to the Candidate UI + Security phase.
 
-### Local Validation in This Follow-up
+Do not remove either lock, recreate or reuse the evidence file, or rerun Apply. The rejected request was not resent. Further live acceptance requires a separately bounded authorization after the `UNEXPECTED_INPUT` request-contract/runtime boundary is diagnosed. No cleanup or speculative request was attempted.
 
-All eight PowerShell assertion suites passed (**1,054 assertions**), including the 13 Phase 3D runner-contract assertions. The Candidate operation engine passed **67 assertions** and the SDK adapter/guard harness passed **56 assertions**. Total: **1,177 offline assertions**. The signed Candidate Core Release build succeeded with 0 warnings and 0 errors. These local checks do not resolve the unknown live API dispatch count or establish live operation acceptance.
+### Local Validation in This Continuation
 
-The sections below preserve the earlier pre-execution assessment and its evidence. Their then-current `TRANSITION_CONTRACT_FAILURE` classification is historical and superseded by this follow-up's `UNCERTAIN_WRITE_OUTCOME`.
+After the rejection, local inspection found a plausible contract-boundary defect: `CandidateId` is an optional Custom API input, but `ActionRequest` rejected CreateCandidate whenever the input dictionary contained the key, including when Dataverse supplied it as null. The local implementation now rejects only a non-null CandidateId on CreateCandidate, with offline tests for both null acceptance and non-null rejection. This is a narrowly scoped local correction, not deployed; the live 400 does not identify which individual input caused `UNEXPECTED_INPUT`, so the diagnosis remains to be confirmed by a separately authorized deployment/runtime attempt.
 
-## 1. Executive Summary
+All eight PowerShell suites passed **1,057 assertions** before the local root-cause correction; after correction, the focused Phase 3D suite passed **17 assertions** and the Candidate operation engine passed **72 assertions**. `git diff --check` and PowerShell parsing passed. The Candidate Core SDK adapter test could not build in this session because no protected `CandidateSigningKey` was configured; no signing material was searched for or exposed. The full PowerShell suites were not rerun after the last targeted correction. These local checks do not establish live operation acceptance.
+
+The local correction does not authorize another assembly update or runtime dispatch. The prior assembly update and authorization-specific one-shot runtime request have already been used; preserve both locks/journals and do not retry or deploy without fresh bounded owner authorization.
+
+The sections below preserve earlier assessments. The former `UNCERTAIN_WRITE_OUTCOME` disposition is superseded by this definitive HTTP 400 rejection; the original `TRANSITION_CONTRACT_FAILURE` is also historical.
+
+## 1. Executive Summary (Historical pre-runtime assessment)
 
 **`TRANSITION_CONTRACT_FAILURE`**
 
@@ -45,7 +53,7 @@ No Candidate fixture or business API invocation was made. Fresh metadata reconci
 
 The user authorized synthetic data despite pending organization-level audit activation. That authorization does not authorize bypassing the deployed audit gate, changing plug-in behavior, weakening write guards, or leaving synthetic history behind. The approved API and deployment remain unchanged.
 
-## 2. Repository / Manifest Baseline
+## 2. Repository / Manifest Baseline (Historical)
 
 | Item | Observed |
 |---|---|
@@ -66,17 +74,17 @@ The fresh guarded reconciliation matched the owner-authorized VN LMV IT target, 
 
 The Power Platform CLI read-only authentication/profile, environment table inventory, Solution inventory, and security-role inventory commands were also used. The profile output contained personal/tenant identifiers and is not reproduced here.
 
-## 4. Live API / Plug-in Baseline
+## 4. Live API / Plug-in Baseline (Historical Phase 3C baseline)
 
 Fresh GET-only reconciliation confirmed the existing Candidate Core tables, Operation Receipt and Active alternate key, assembly and types, 50 registration steps, Custom API, all request/response metadata, `ExecutePrivilegeName=prvWriteos_sr_cand`, and Solution membership. The final result remained `CANDIDATE_CORE_API_DEPLOYED_AUDIT_ACTIVATION_PENDING`; no drift was found and nothing was redeployed.
 
-Deployed assembly SHA-256 remains `f11d6db0db3a190806ef48daa46a3f3b6befbf7070f236bac5a44b6e40598f0f`. The API is the private unbound `os_sr_cact` Action implemented by `os_sr_cact.ApplyCandidateAction`.
+The Phase 3C baseline assembly SHA-256 was `f11d6db0db3a190806ef48daa46a3f3b6befbf7070f236bac5a44b6e40598f0f`; it was superseded by the Phase 3D-R assembly recorded above. The API is the private unbound `os_sr_cact` Action implemented by `os_sr_cact.ApplyCandidateAction`.
 
-## 5. Organization Audit State
+## 5. Organization Audit State (Historical pre-correction assessment)
 
-Organization-level auditing remains disabled; the live deployment reconciliation returned the retained audit-pending classification. Table audit metadata is not a substitute for organization-level audit activation.
+At the time of the historical pre-correction assessment, organization-level auditing was disabled and the earlier assembly enforced an audit runtime gate. The current assembly no longer rejects solely for this setting. Table audit metadata is not a substitute for organization-level audit activation, which remains externally pending.
 
-The attachment authorizes synthetic tests while this condition remains pending, but the deployed operation itself checks organization auditing and rejects before business mutations with `AUDIT_ACTIVATION_PENDING`. No audit setting was changed or bypassed.
+The owner authorized the bounded synthetic test while this condition remains pending. No audit setting was changed. The later `UNEXPECTED_INPUT` rejection is separate from organization audit state.
 
 ## 6. Synthetic Reference Fixtures
 

@@ -40,7 +40,8 @@ namespace os_sr_cact
             if (Correlation == Guid.Empty) throw new OperationError("INVALID_CORRELATION");
             CandidateId = input.TryGetValue("CandidateId", out var target) && target is Guid id && id != Guid.Empty ? id : (Guid?)null;
             if (Action != "CreateCandidate" && !CandidateId.HasValue) throw new OperationError("INVALID_CANDIDATE");
-            if (Action == "CreateCandidate" && input.ContainsKey("CandidateId")) throw new OperationError("UNEXPECTED_INPUT");
+            if (Action == "CreateCandidate" && input.TryGetValue("CandidateId", out var createTarget) && createTarget != null)
+                throw new OperationError("UNEXPECTED_INPUT");
             ExpectedStatus = input.TryGetValue("ExpectedStatus", out var status) && status is int state ? state : (int?)null;
             if (Action != "CreateCandidate" && Action != "UpdateCandidate" && !ExpectedStatus.HasValue)
                 throw new OperationError("EXPECTED_STATUS_REQUIRED");

@@ -586,13 +586,14 @@ try {
         APIInvocations = 0; BusinessDataWrites = 0; AppWrites = 0; PublishXml = 0; AutomaticRetries = 0
     } | ConvertTo-Json -Depth 20
 } catch {
+    $safeError = Get-SanitizedFailureMessage -Message $_.Exception.Message
     [ordered]@{ Result = if ($script:deploymentCounts.PATCH) { 'UNCERTAIN_ASSEMBLY_UPDATE_OUTCOME' }
         elseif ($script:deploymentCounts.POST) { 'PARTIAL_API_METADATA_STATE' } else { 'PRE_DEPLOYMENT_GATE_BLOCKED' }
-        Error = Get-SanitizedFailureMessage -Message $_.Exception.Message
+        Error = $safeError
         GET = $script:deploymentCounts.GET; StorageGateGET = $deploymentStorageGets; POST = $script:deploymentCounts.POST
         PATCH = $script:deploymentCounts.PATCH
         AutomaticRetries = 0; BusinessDataWrites = 0 } | ConvertTo-Json
-    throw 'Candidate operation deployment stopped; no automatic retry.'
+    throw "Candidate operation deployment stopped; no automatic retry. $safeError"
 } finally {
     $script:AccessToken = $null
     [Environment]::SetEnvironmentVariable('BSO_RS_EXPECTED_USER_ID', $null, 'Process')

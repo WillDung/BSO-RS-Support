@@ -54,7 +54,10 @@ static class Program
             Check(CandidateOperation.Transition(item.Item1, item.Item2, null, true) == item.Item3, "Future transition contract");
         Reject(() => CandidateOperation.Transition("MarkRound1Scheduled", ActionRequest.Waiting, null), "SCHEDULER_DEPENDENCY_UNAVAILABLE");
         foreach (var action in new[] { "RecordPass", "RecordFail", "RequestReschedule" })
+        {
+            Reject(() => CandidateOperation.Transition(action, ActionRequest.Waiting, null), "INVALID_TRANSITION");
             Reject(() => CandidateOperation.Transition(action, ActionRequest.Scheduled, null), "RESULT_OR_CANCELLATION_DEPENDENCY_UNAVAILABLE");
+        }
         foreach (var status in new[] { ActionRequest.Passed, ActionRequest.Failed, ActionRequest.Waiting })
             Reject(() => CandidateOperation.Transition("RecordCall", status, 100010000), "INVALID_TRANSITION");
         var invalid = Input(); invalid["ExpectedStatus"] = ActionRequest.Answered;
@@ -65,6 +68,11 @@ static class Program
         Reject(() => Request(invalid), "INVALID_CORRELATION");
         invalid["CorrelationId"] = "not-a-guid";
         Reject(() => Request(invalid), "INVALID_CORRELATIONID");
+        var createWithNullCandidateId = Input("CreateCandidate");
+        createWithNullCandidateId["CandidateId"] = null;
+        Check(Request(createWithNullCandidateId).CandidateId == null, "Optional null CandidateId accepted on create");
+        createWithNullCandidateId["CandidateId"] = Candidate;
+        Reject(() => Request(createWithNullCandidateId), "UNEXPECTED_INPUT");
         invalid = Input(); invalid.Remove("CandidateId");
         Reject(() => Request(invalid), "INVALID_CANDIDATE");
         invalid = Input("RequestReschedule"); invalid["ExpectedStatus"] = ActionRequest.Scheduled;

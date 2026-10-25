@@ -2,6 +2,31 @@
 
 Date: 25 October 2026. This report records the latest Phase 3D-R4B package migration continuation first and retains earlier assessments as history. Source: owner authorization, current repository contract/source, local package builds and inspection, live guarded metadata reconciliation, and Microsoft's published Dataverse metadata documentation.
 
+## Latest Phase 3D-R4C Disposition
+
+**`PAC_AUTH_CONTEXT_UNAVAILABLE` — stop before fresh environment reconciliation or package push.** The active local PAC profile is labeled `O-SR-port` and names VN LMV IT as its environment. Its reported token expiry is 24 October 2026, before this continuation on 25 October. The mandatory fresh `pac org who` verification was not run after the expired-token indication. No interactive login, PRT launch, PAC profile selection, or environment switch was attempted.
+
+The frozen local package remains at the approved path and its SHA-256 (`41a18a66aabf0c75356209e6814d93f60aa6d4dc2eebd3a965d9291b3bb8b59b`) and contained DLL SHA-256 (`ba332f58c55c8c13b8eb44df619b8236022f78261b7a02099890b3281a88aaf1`) match the retained R4 artifact. This local check does not establish live package state. The R4B section below records one package row and generated assembly/types; the R4C authorization text says those generated components were not produced by raw package-row creation. Because the authentication gate failed, this discrepancy was not rechecked live. Do not repeat package creation or push until a valid PAC context allows fresh read-only reconciliation.
+
+| R4C action | Count / disposition |
+|---|---|
+| Local artifact check | Frozen package and DLL hashes exact; artifact not rebuilt |
+| Fresh `pac org who` / live metadata reconciliation | Not performed after expired-token indication |
+| PAC auth-who profile inspection | Target profile identified; tool does not expose a reliable GET count |
+| Fresh package / assembly / type / API / Solution reads | Not performed |
+| Raw PluginPackage POST | 0 |
+| `pac plugin push` | 0 |
+| Custom API handler PATCH / rollback PATCH | 0 / 0 |
+| Business API invocations / business-data writes | 0 / 0 |
+| Legacy assembly / schema / app writes | 0 / 0 / 0 |
+| Automatic retries | 0 |
+| Package-backed assemblies / plug-in types observed in R4C | Not queried |
+| Commit / push | 0 / 0 |
+
+The auth-who tool's underlying GET count is unknown; no deployment or runtime runner GET was dispatched. Primary result is `PAC_AUTH_CONTEXT_UNAVAILABLE`. Resume only with an already-approved, non-interactive PAC context and fresh target/identity confirmation. See [Current State](CURRENT_STATE.md).
+
+Offline validation: all 10 existing PowerShell suites passed (1,094 assertions); the Candidate Core engine harness passed 79 assertions; the SDK adapter/guard harness passed 56 assertions; the package artifact suite passed 12 assertions; and the R4B deployment-contract suite passed 23 assertions. All 20 PowerShell files parsed, the added-line privacy scan passed, 58 relative links in the modified documents resolved, and `git diff --check` passed. No dedicated PAC NuGet push command-plan test exists in the current test tree; the R4B deployment-contract suite covers the prior direct Web API upload path, not `pac plugin push`. No package rebuild or tenant operation was performed during validation.
+
 ## Latest Phase 3D-R4B Disposition
 
 **`PLUGIN_PACKAGE_PROCESSING_FAILED` — stop before Custom API handler cutover or runtime acceptance.** After the fresh read-only gates passed, the guarded direct Web API runner dispatched one authorized package POST. Immediate GET reconciliation found exactly one package record and verified its name, unique name, version, and approved Solution membership. Both the collection GET and a later strong-consistency direct GET returned no nonempty `content`, so the frozen package SHA-256 could not be verified. Live metadata reports the Content column as valid for read; the missing GET value is an unresolved content-reconciliation gap, not proof that the content was absent or incorrect. Microsoft's [Plugin Package table reference](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/reference/entities/pluginpackage) also lists Content as a readable column.

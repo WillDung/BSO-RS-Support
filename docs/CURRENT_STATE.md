@@ -1,5 +1,11 @@
 # Current State
 
+## Phase 3D-R4H INVALID_LOOKUP Diagnosis (2026-10-25)
+
+**`INVALID_LOOKUP_UNRESOLVED` — read-only diagnosis complete; no package update, fixture, or runtime retry.** Fresh guarded identity matched VN LMV IT. The package-aware runtime preflight confirmed `os_sr_cact.ApplyCandidateAction` remains package-backed and Candidate, Call Log, Candidate Status History, and Operation Receipt counts are 0/0/0/0. Fresh live request-parameter records show `PositionId` and `CandidateSourceId` are optional Guid parameters with no `LogicalEntityName`; current Candidate schema marks their lookups optional. Assigned TA is not a CreateCandidate input. The private API is not exposed as an Action/ActionImport in `$metadata`, and no matching `INVALID_LOOKUP` trace was found.
+
+The known local `INVALID_LOOKUP` throw branch rejects a present profile lookup value when it is not a non-empty .NET Guid. R4G's recorded request builder omitted all lookup parameters, but raw plug-in `InputParameters` were not captured, so the matching branch cannot be established as the live failure source. No local code correction, package update, synthetic lookup fixture, or R4H business API invocation was made. The remaining runtime matrix stays stopped. Full contract and handover evidence are in the [Phase 3D report](PHASE_3D_CANDIDATE_CORE_RUNTIME_ACCEPTANCE_REPORT.md).
+
 ## Phase 3D-R4G Active Package Update and CreateCandidate Acceptance (2026-10-25)
 
 **`CREATECANDIDATE_RUNTIME_FAILURE` — one in-place package update and one rejected CreateCandidate invocation; stop without retry.** PAC identity and guarded WhoAmI matched VN LMV IT and the expected user. Fresh GET reconciliation confirmed the existing unsigned `os_sr_cact_pkg` v1.0.0, package-backed assembly/types, unchanged API contract, Candidate Core schema, Active receipt key, and package-backed handler. The package was updated exactly once with PAC CLI `pac plugin push`; the ambiguous PRT Update form was closed without saving. Package identity and handler topology reconciled after the update, and no handler PATCH or legacy assembly update occurred.

@@ -2,6 +2,96 @@
 
 Date: 25 October 2026. This report records the Phase 3D-R4E ExpectedStatus correction and PRT update, the later R4G PAC package update and CreateCandidate failure, and earlier assessments as history. Source: owner authorization, current repository contract/source, live guarded metadata reconciliation, local offline validation, and Microsoft's published Dataverse metadata documentation.
 
+## Phase 3D-R4H INVALID_LOOKUP Diagnosis
+
+**`INVALID_LOOKUP_UNRESOLVED` — do not update the package, create reference fixtures, or invoke CreateCandidate again in this run.** The R4G failure remains one rejected request; R4H performed read-only diagnosis only. PAC and guarded Dataverse identity matched the confirmed VN LMV IT target and expected user. The package-aware runtime preflight confirmed package-backed `os_sr_cact.ApplyCandidateAction` routing and fresh Candidate/Call Log/Status History/Operation Receipt counts of 0/0/0/0.
+
+### Exact local error branch
+
+In [Operation.cs](../solutions/CandidateCore/Operation.cs#L84), while processing the allowed Candidate profile fields, any non-null `PositionId` or `CandidateSourceId` value that is not a non-empty .NET `Guid` throws `OperationError("INVALID_LOOKUP")`:
+
+```csharp
+if (value != null && (!(value is Guid lookup) || lookup == Guid.Empty))
+    throw new OperationError("INVALID_LOOKUP");
+```
+
+This branch checks CLR type and empty-GUID status; it does not query whether a row exists, is active, or belongs to a target table. CandidateId is handled in a separate operation-specific branch. The live API parameters below are `Guid`, not `EntityReference`, and have no logical-entity-name metadata.
+
+### Fresh live Custom API request contract
+
+Fresh reads returned exactly one `os_sr_cact` Custom API and 13 request-parameter records. Type codes are the live Custom API metadata values: 1=DateTime, 7=Integer, 10=String, 12=Guid. `LogicalEntityName` was null for every parameter. The live metadata entity exposes no `position` property; parameter order is not material to named JSON request properties.
+
+| UniqueName | Type | IsOptional | LogicalEntityName |
+|---|---|---:|---|
+| ActionType | String (10) | No | null |
+| CallOutcome | Integer (7) | Yes | null |
+| CandidateEmail | String (10) | Yes | null |
+| CandidateId | Guid (12) | Yes | null |
+| CandidateName | String (10) | Yes | null |
+| CandidatePhone | String (10) | Yes | null |
+| CandidateSourceId | Guid (12) | Yes | null |
+| ContactedAt | DateTime (1) | Yes | null |
+| CorrelationId | Guid (12) | No | null |
+| ExpectedStatus | Integer (7) | Yes | null |
+| Notes | String (10) | Yes | null |
+| PositionId | Guid (12) | Yes | null |
+| Reason | String (10) | Yes | null |
+
+The downloaded live `$metadata` document returned HTTP 200 but contained no `Action` definition or `ActionImport` for this private Custom API. It therefore does not publish a usable CSDL operation signature for `os_sr_cact`; the request-parameter records are the available live parameter-contract source. The records agree with the approved [Phase 3C API contract](PHASE_3C_API_CONTRACT.json) for the relevant GUID types and optionality. No API metadata was changed.
+
+### R4G sanitized request shape and parser evidence
+
+The failed R4G runner constructed these JSON members: `ActionType` (String, `CreateCandidate`), `CorrelationId` (JSON String containing a fresh GUID), `CandidateName` (String, fixed synthetic label), and `CandidateEmail` (String, generated reserved `.invalid` address). The correlation GUID and generated email value are not reproduced here. The request fingerprint is `4ce30f4126dc4ba6b7539f636aba30c071298ee4cc6ee987d07ce5fd0129d2e8`.
+
+| Parameter | R4G request | Caller representation | Live / parser meaning |
+|---|---|---|---|
+| ActionType | Present | JSON String | String |
+| CallOutcome | Omitted | — | Optional Integer |
+| CandidateEmail | Present | JSON String | String; operation-required |
+| CandidateId | Omitted | — | Optional Guid; valid create semantics |
+| CandidateName | Present | JSON String | String; operation-required |
+| CandidatePhone | Omitted | — | Optional String |
+| CandidateSourceId | Omitted | — | Optional Guid; target when supplied: `os_sr_csrc` |
+| ContactedAt | Omitted | — | Optional DateTime |
+| CorrelationId | Present | JSON String with GUID syntax | Required Guid; actual plug-in InputParameters CLR value not captured |
+| ExpectedStatus | Omitted | — | Optional Integer; ignored for CreateCandidate |
+| Notes | Omitted | — | Optional String |
+| PositionId | Omitted | — | Optional Guid; target when supplied: `os_sr_pos` |
+| Reason | Omitted | — | Optional String |
+
+Thus the R4G HTTP body contained no lookup value, EntityReference-like object, Entity payload, or empty lookup GUID. The actual plug-in `InputParameters` collection was not captured; the R4G failure journal stores only the payload hash and sanitized error. It cannot establish whether Dataverse supplied an omitted optional Guid as absent, null, or `Guid.Empty` to the plug-in. The R4G local request builder is therefore not proven to have serialized a lookup incorrectly, and the local `INVALID_LOOKUP` branch is a possible emitter, not a proven source of that live response.
+
+### Lookup dependencies, reference availability, and trace
+
+| CreateCandidate lookup | Live type | Current Candidate schema | CreateCandidate requirement | Safe-reference read |
+|---|---|---|---|---|
+| PositionId → `os_sr_pos` | Optional Guid; no LogicalEntityName | Optional Position lookup | Optional | Not required; request omitted it |
+| CandidateSourceId → `os_sr_csrc` | Optional Guid; no LogicalEntityName | Optional Candidate Source lookup | Optional | Not required; request omitted it |
+| Assigned TA → `os_sr_ta` | No CreateCandidate API parameter | Conditional before booking | Not part of CreateCandidate | Not required |
+
+There are no required CreateCandidate lookup references under the current approved design, so R4H did not query reference-row contents, create synthetic prerequisite rows, or select a real-person TA record. The API and Candidate Core schema reconciliation found no requiredness or logical-table metadata drift. No Candidate, Call Log, History, or Receipt rows were present at the fresh preflight.
+
+A read-only Plugin Trace Log query for `INVALID_LOOKUP` in the bounded R4G execution window returned zero matching entries. No trace settings were enabled or changed. This leaves the exact runtime parameter values and originating throw site unverified.
+
+### Classification and R4H boundaries
+
+The single primary classification is **`INVALID_LOOKUP_UNRESOLVED`**. The local branch condition is known, but neither trace data nor captured plug-in inputs prove that it emitted the R4G error. The R4G request omitted all lookup parameters, and current API metadata marks the lookup GUIDs optional. Therefore:
+
+- local source correction: none;
+- package update: 0;
+- synthetic prerequisite rows: 0;
+- CreateCandidate invocations: 0 in R4H (the single R4G invocation remains failed);
+- remaining runtime-matrix operations: 0;
+- handler PATCHes, schema/security/app writes, PublishXml/PublishAllXml, and automatic retries: 0.
+
+R4H's package-aware runtime preflight performed 14 GETs and confirmed 0/0/0/0 rows, package-backed routing, zero Custom API invocations, zero business-data writes, and zero retries. A separate legacy-cutover-only preflight performed 121 GETs, including 46 storage reads, then stopped because it requires the API to point to the retained legacy handler. That runner's assumption is not the current R4H baseline; it made no write and is not evidence of live drift. The successful live API/parameter/CSDL/trace read set used four GETs. Read-only discovery did not touch the environment's data or metadata.
+
+No package content hash is claimed for the deployed binary. The local unsigned R4G DLL and package hashes remain as recorded in the [R4G section](#phase-3d-r4g-active-package-update-and-createcandidate-acceptance); they were not rebuilt or redeployed during R4H.
+
+### AI handover
+
+Resume only after obtaining evidence that distinguishes the local parser branch from any platform-side lookup rejection—preferably the original invocation's safe trace/InputParameters evidence if retained, otherwise a separately approved way to observe the runtime representation without a business write. Preserve the live Guid/optional contract and package-backed handler. Do not infer that an omitted optional Guid becomes `Guid.Empty`; do not add fixtures, alter code/package/API metadata, or repeat CreateCandidate based only on the current error symbol. Once the source is established, apply only the matching authorized branch and re-run the zero-row and exact contract gates before any separately authorized runtime call.
+
 ## Phase 3D-R4G Active Package Update and CreateCandidate Acceptance
 
 **`CREATECANDIDATE_RUNTIME_FAILURE` — the existing package was updated once and reconciled; one approved CreateCandidate invocation was rejected with `INVALID_LOOKUP`.** The owner explicitly confirmed VN LMV IT as the target. PAC identity and guarded WhoAmI matched the expected environment and user. No retry, payload variation, or subsequent runtime-matrix operation was performed.

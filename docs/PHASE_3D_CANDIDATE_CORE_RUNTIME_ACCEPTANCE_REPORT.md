@@ -1,8 +1,62 @@
 # Phase 3D - Candidate Core Synthetic Runtime Acceptance
 
-Date: 25 October 2026. This report records the latest Phase 3D-R4 package migration continuation first and retains earlier assessments as history. Source: owner authorization, current repository contract/source, local package builds and inspection, PAC CLI help, and Microsoft's documented package-registration workflow.
+Date: 25 October 2026. This report records the latest Phase 3D-R4B package migration continuation first and retains earlier assessments as history. Source: owner authorization, current repository contract/source, local package builds and inspection, live guarded metadata reconciliation, and Microsoft's published Dataverse metadata documentation.
 
-## Latest Phase 3D-R4 Disposition
+## Latest Phase 3D-R4B Disposition
+
+**`PLUGIN_PACKAGE_PROCESSING_FAILED` — stop before Custom API handler cutover or runtime acceptance.** After the fresh read-only gates passed, the guarded direct Web API runner dispatched one authorized package POST. Immediate GET reconciliation found exactly one package record and verified its name, unique name, version, and approved Solution membership. Both the collection GET and a later strong-consistency direct GET returned no nonempty `content`, so the frozen package SHA-256 could not be verified. Live metadata reports the Content column as valid for read; the missing GET value is an unresolved content-reconciliation gap, not proof that the content was absent or incorrect. Microsoft's [Plugin Package table reference](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/reference/entities/pluginpackage) also lists Content as a readable column.
+
+### Package processing evidence
+
+The read-only post-stop inspection confirmed:
+
+| Check | Live result |
+|---|---|
+| Package record count | 1 |
+| Package name / unique name / version | Exact: `os_sr_cact_pkg` / `os_sr_cact_pkg` / `1.0.0` |
+| Approved Solution membership | Exact |
+| PluginPackage entity set / primary ID | `pluginpackages` / `pluginpackageid` |
+| Content field readback | No nonempty value from collection or direct GET; expected package hash not verified |
+| Package-to-assembly relationship | One relationship; lookup attribute `packageid` |
+| Generated assembly | One `os_sr_cact`, version `1.0.0.0` |
+| Assembly SourceType | `File Store` |
+| Generated plug-in types | Exactly `os_sr_cact.ApplyCandidateAction` and `os_sr_cact.ProtectCandidateCore` |
+
+The expected package SHA-256 remains `41a18a66aabf0c75356209e6814d93f60aa6d4dc2eebd3a965d9291b3bb8b59b`; the contained DLL SHA-256 is `ba332f58c55c8c13b8eb44df619b8236022f78261b7a02099890b3281a88aaf1`. The live record did not expose a content value to hash, so neither exact package-content identity nor full package reconciliation is claimed. Generated assembly/type evidence confirms package processing, but does not satisfy the missing content fingerprint gate.
+
+### Fresh gates, writes, and acceptance boundary
+
+The new read-only R4B preflight returned `PLUGIN_PACKAGE_PREFLIGHT_READY`. Its initial JSON total was 626 GETs, but that aggregate omitted the strict legacy runner's separately reported 77 storage-gate GETs. Corrected accounting is 703 GETs: 63 package-runner, 508 strict legacy/API/guard, 77 strict storage-gate, 46 separate storage, and 9 fresh zero-row runtime-gate GETs. It verified the exact package was absent before Apply and all four business/evidence table counts were 0. It made 0 POST/PATCH calls and 0 retries. The deployment runner's aggregate count was corrected locally to include the nested storage gate.
+
+The Apply run made 705 GETs in aggregate: 65 package-runner, 508 strict legacy/API/guard, 77 strict storage-gate, 46 separate storage, and 9 zero-row-gate GETs. The package-runner failure JSON reported only its own 65 GETs; the aggregate includes the separately counted sub-runner GETs. It dispatched exactly one `POST pluginpackages`, then stopped on the absent content readback.
+
+| R4B action | Count / disposition |
+|---|---|
+| Fresh package preflight | 703 corrected GETs; package absent; 4 business/evidence counts 0 |
+| Apply read-only gates | 705 aggregate GETs; strict legacy baseline exact before create |
+| Package create | 1 POST; one package record and generated assembly/types found |
+| Content fingerprint reconciliation | Not proven; no nonempty content returned |
+| Custom API handler PATCH | 0 |
+| Rollback PATCH / package delete | 0 / 0 |
+| Post-stop GET-only reads | Package inspection: 11 GETs; generic strict reconciler: 255 direct + 77 storage-gate GETs, stopped because its global inventory expects one assembly; expanded targeted inspection: 66 GETs; follow-up including direct package GET: 67 GETs |
+| Post-stop exact handler check | API contract exact; API still points to legacy handler; legacy assembly hash and all 50 guard steps exact |
+| Total post-stop GETs | 476; 0 POST/PATCH |
+| Final fresh preflight + Apply + post-stop GET total | 1,884 |
+| Runtime Custom API invocations | 0 |
+| Candidate / Call Log / History / Receipt business writes | 0 |
+| Automatic retries | 0 |
+| Organization auditing, schema, Choices, security, app, publication | No changes |
+| Commit / push | 0 / 0 |
+
+The package remains in the approved Solution. The one-shot deployment journal records the package POST dispatch; do not retry or delete the package. The API-handler cutover was not attempted, and runtime acceptance was not started. No synthetic Candidate was created. The older generic reconciler stopped because it expects one total assembly and now sees the legacy plus package-generated assembly. A separate targeted GET-only inspection confirmed the API contract, legacy handler mapping, legacy assembly hash, and guard-step topology after the package POST.
+
+Local validation after these code changes: all 10 PowerShell suites passed 1,094 assertions; the Candidate Core operation-engine harness passed 79 assertions; an existing offline Candidate Core SDK adapter/guard executable passed 56 assertions and was not rebuilt because the strong-name key remains unapproved. All 20 PowerShell files under `scripts/` and `tests/` parsed with zero errors; the added-line privacy scan passed; 76 relative Markdown links resolved; and `git diff --check` passed. The new [R4B deployment assertions](../tests/Phase3DR4BPluginPackageDeployment.Tests.ps1) include 23 checks; the runtime contract suite passed 18 checks. The package artifact itself was not rebuilt in this continuation; the frozen package and DLL hashes remain the previously verified local artifact values.
+
+The repository remains on branch `main` at HEAD `cff0033`; the R4B runner, tests, and documentation changes are uncommitted. No commit or push was made.
+
+Next work is read-only investigation of a supported way to reconcile `pluginpackage.content`. Preserve the created package and all existing mappings. No second package POST, delete, handler PATCH, runtime API call, or other tenant write follows from this stop result. See [Current State](CURRENT_STATE.md) and [test guide](../tests/README.md).
+
+## Historical Phase 3D-R4 PRT Authentication Stop (2026-10-25; superseded by R4B)
 
 **`PLUGIN_PACKAGE_CREATE_BLOCKED_AUTH` — stop before package registration, Custom API handler cutover, or runtime acceptance.** The unsigned package artifact is locally built and verified. Fresh Candidate Core and zero-row gates passed; the approved package is absent by exact-name query. PRT was installed, but its single current-user login attempt failed before organization selection. No tenant mutation or API invocation was dispatched.
 

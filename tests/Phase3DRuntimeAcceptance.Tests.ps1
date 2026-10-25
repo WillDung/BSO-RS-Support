@@ -22,9 +22,10 @@ Assert-Test ($runtime -match "ValidateSet\('GET', 'POST'\)" -and
     $runtime -match "Path -cne 'os_sr_cact'" -and $runtime -match 'MaximumRetryCount = 0' -and
     $runtime -match 'MaximumRedirection = 0' -and $runtime -match 'expectedActionCalls = 8') 'Only bounded Custom API calls with zero retries'
 Assert-Test ($runtime -match 'FileMode\]::CreateNew' -and $runtime -match 'phase3d-r-runtime-' -and
-    $runtime -match 'phase3d-r-owner-authorized-audit-gate-runtime' -and
+    $runtime -match 'phase3d-r4b-owner-authorized-package-runtime' -and
     $runtime -match 'one-shot runtime authorization consumed') 'Authorization-specific one-shot lock preserves prior consumed lock'
 Assert-Test ($runtime -match "\`$name = '\[SYNTHETIC-E2E\]" -and
+    $runtime -match '\[SYNTHETIC-E2E\] Candidate Core Acceptance' -and
     $runtime -match '@example\.invalid' -and $runtime -notmatch '@example\.com') 'Fixture identity is unmistakably synthetic and reserved'
 Assert-Test ($runtime -match 'Get-Count -EntitySet' -and
     $runtime -match 'Zero-row safety gate failed' -and
@@ -47,6 +48,9 @@ Assert-Test ($runtime -match 'CandidateWrites = 1; CallLogWrites = 2; StatusHist
     $runtime -match 'MaximumApiDispatches = \$expectedActionCalls') 'Runtime result matches the nine-row effect budget'
 Assert-Test ($runtime -match 'AuditSettingWrites = 0' -and $runtime -match 'PublishXml = 0' -and
     $runtime -notmatch 'Invoke-RuntimeRequest -Method (PUT|PATCH|DELETE)') 'No audit, app, or metadata mutation path exists'
+Assert-Test ($runtime -match 'ExpectedHandlerPackageUniqueName' -and
+    $runtime -match 'Assert-PackageBackedHandler' -and
+    $runtime -match 'Runtime Apply requires the reconciled package-backed handler identity') 'Runtime apply requires the package-backed handler chain'
 Assert-Test ($runtime -match 'CandidateIdSha256' -and $runtime -match 'ActorIdSha256' -and
     $runtime -match 'PayloadSha256' -and $runtime -notmatch 'CandidateEmail = .*journal') 'Evidence stores hashes, not raw identifiers or candidate fields'
 Assert-Test ($plugin -match 'if \(!context\.IsInTransaction \|\| context\.UserId != context\.InitiatingUserId\)' -and

@@ -6,6 +6,7 @@ param(
     [Parameter(Mandatory)][string]$OrganizationUrl,
     [Parameter(Mandatory)][string]$ExpectedEnvironmentId,
     [Parameter(Mandatory)][string]$ExpectedOrganizationId,
+    [string]$ExpectedHandlerPackageUniqueName,
     [string]$RuntimeEvidencePath
 )
 
@@ -14,7 +15,7 @@ $root = Split-Path $PSScriptRoot
 $manifestPath = Join-Path $root 'docs\PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json'
 $contractPath = Join-Path $root 'docs\PHASE_3C_API_CONTRACT.json'
 $expectedManifestHash = '63f56173f61265f539d23d6ceffb5631e23f438e4e254755c1e24c7d17eb1915'
-$runtimeAuthorizationId = 'phase3d-r-owner-authorized-audit-gate-runtime'
+$runtimeAuthorizationId = 'phase3d-r4b-owner-authorized-package-runtime'
 $expectedActionCalls = 8
 $deferredLiveChecks = @(
     [ordered]@{
@@ -159,6 +160,42 @@ function Get-Rows {
     if ($null -eq $page -or $null -eq $page.value) { throw 'Expected row collection was not returned.' }
     if ($page.'@odata.nextLink') { throw 'Unexpected result paging; stop rather than broaden the read.' }
     @($page.value)
+}
+
+function Assert-PackageBackedHandler {
+    param([Parameter(Mandatory)][string]$PackageUniqueName)
+    $api = @(Get-Rows -Path "customapis?%24select=customapiid,uniquename,_plugintypeid_value&%24filter=uniquename eq 'os_sr_cact'")
+    if ($api.Count -ne 1 -or $api[0].uniquename -cne 'os_sr_cact') {
+        throw 'Runtime Custom API inventory is missing or duplicated.'
+    }
+    $typeId = [string]$api[0]._plugintypeid_value
+    $type = Invoke-RuntimeRequest -Method GET -Path "plugintypes($typeId)?%24select=plugintypeid,typename,_pluginassemblyid_value"
+    if ([string]$type.typename -cne 'os_sr_cact.ApplyCandidateAction' -or
+        -not [string]$type._pluginassemblyid_value) {
+        throw 'Runtime Custom API handler type is not the approved package assembly handler.'
+    }
+    $assemblyId = [string]$type._pluginassemblyid_value
+    $relationships = @(Get-Rows -Path "EntityDefinitions(LogicalName='pluginassembly')/ManyToOneRelationships?%24select=ReferencingAttribute,ReferencedEntity" |
+        Where-Object ReferencedEntity -CEQ 'pluginpackage')
+    if ($relationships.Count -ne 1 -or -not $relationships[0].ReferencingAttribute) {
+        throw 'Runtime package-to-assembly relationship is missing or ambiguous.'
+    }
+    $packageLookup = "_$($relationships[0].ReferencingAttribute)_value"
+    $assembly = Invoke-RuntimeRequest -Method GET -Path "pluginassemblies($assemblyId)?%24select=pluginassemblyid,name,version,$packageLookup"
+    if ([string]$assembly.name -cne 'os_sr_cact' -or [string]$assembly.version -cne '1.0.0.0' -or
+        -not [string]$assembly.$packageLookup) {
+        throw 'Runtime handler assembly metadata is not package-backed.'
+    }
+    $packageId = [string]$assembly.$packageLookup
+    $package = Invoke-RuntimeRequest -Method GET -Path "pluginpackages($packageId)?%24select=pluginpackageid,uniquename,version"
+    if ([string]$package.uniquename -cne $PackageUniqueName -or [string]$package.version -cne '1.0.0') {
+        throw 'Runtime handler does not resolve to the approved PluginPackage.'
+    }
+    [ordered]@{
+        ApiUniqueName = [string]$api[0].uniquename
+        HandlerType = [string]$type.typename
+        PackageUniqueName = [string]$package.uniquename
+    }
 }
 
 function Get-Count {
@@ -336,6 +373,12 @@ try {
         }
         $script:sets[$key] = [string]$metadata.EntitySetName
     }
+    if ($RuntimeMode -ceq 'Apply' -and -not $ExpectedHandlerPackageUniqueName) {
+        throw 'Runtime Apply requires the reconciled package-backed handler identity.'
+    }
+    $packageHandler = if ($ExpectedHandlerPackageUniqueName) {
+        Assert-PackageBackedHandler -PackageUniqueName $ExpectedHandlerPackageUniqueName
+    } else { $null }
     $script:expectedCounts = Get-ScopedCounts
     if (@($script:expectedCounts.Values | Where-Object { $_ -ne 0 }).Count -ne 0) {
         throw 'Zero-row safety gate failed; no business API invocation was sent.'
@@ -349,6 +392,7 @@ try {
             BusinessDataWrites = 0
             OrganizationAuditSettingWrites = 0
             AutomaticRetries = 0
+            PackageHandler = $packageHandler
         } | ConvertTo-Json -Depth 10
         return
     }
@@ -368,6 +412,7 @@ try {
         CandidateLabel = '[SYNTHETIC-E2E]'
         ManifestSha256 = $expectedManifestHash
         ApiUniqueName = 'os_sr_cact'
+        ExpectedHandlerPackageUniqueName = $ExpectedHandlerPackageUniqueName
         MaximumApiDispatches = $expectedActionCalls
         AutomaticRetries = 0
         Dispatches = @()
@@ -377,7 +422,7 @@ try {
     Save-RuntimeJournal
 
     $creationCorrelation = New-Correlation
-    $name = '[SYNTHETIC-E2E] Candidate Core Runtime'
+    $name = '[SYNTHETIC-E2E] Candidate Core Acceptance'
     $email = 'bso-rs-candidatecore-' + [Guid]::NewGuid().ToString('N') + '@example.invalid'
     $create = [ordered]@{
         ActionType = 'CreateCandidate'

@@ -24,8 +24,7 @@ namespace os_sr_cact
                     throw new OperationError("UNSUPPORTED_EXECUTION_CONTEXT");
                 var factory = (IOrganizationServiceFactory)serviceProvider.GetService(typeof(IOrganizationServiceFactory));
                 var service = factory.CreateOrganizationService(context.InitiatingUserId);
-                var input = context.InputParameters.ToDictionary(pair => pair.Key, pair => (object?)pair.Value, StringComparer.Ordinal);
-                var request = new ActionRequest(context.InitiatingUserId, input, DateTime.UtcNow);
+                var request = CandidateActionInputAdapter.Create(context.InitiatingUserId, context.InputParameters, DateTime.UtcNow);
                 var result = CandidateOperation.Execute(request, new DataverseStore(service, context));
                 context.OutputParameters["ResultCode"] = result.Replay ? "DuplicateReplay" : "Applied";
                 if (result.Previous.HasValue) context.OutputParameters["PreviousStatus"] = result.Previous.Value;
@@ -47,6 +46,39 @@ namespace os_sr_cact
                     error.Detail.ErrorCode == unchecked((int)0x80060882) ? "ROW_VERSION_CONFLICT" : "DATAVERSE_OPERATION_REJECTED";
                 throw new InvalidPluginExecutionException(code);
             }
+        }
+    }
+
+    internal static class CandidateActionInputAdapter
+    {
+        public static ActionRequest Create(Guid actor, ParameterCollection parameters, DateTime utcNow)
+        {
+            var input = new Dictionary<string, object?>(StringComparer.Ordinal);
+            var hasAction = parameters.TryGetValue("ActionType", out var actionValue);
+            if (hasAction) input["ActionType"] = actionValue;
+            if (parameters.TryGetValue("CorrelationId", out var correlationValue))
+                input["CorrelationId"] = correlationValue;
+
+            var action = actionValue as string;
+            if (action == null || !ActionRequest.IsSupportedAction(action))
+                return new ActionRequest(actor, input, utcNow);
+
+            foreach (var parameter in parameters)
+            {
+                if (!ActionRequest.IsDeclaredInputName(parameter.Key))
+                    throw new OperationError("UNEXPECTED_INPUT:SDK_ADAPTER:OTHER");
+            }
+
+            if (action != null)
+            {
+                foreach (var name in ActionRequest.ApplicableInputNames(action))
+                {
+                    if (name == "ActionType" || name == "CorrelationId") continue;
+                    if (parameters.TryGetValue(name, out var value)) input[name] = value;
+                }
+            }
+
+            return new ActionRequest(actor, input, utcNow);
         }
     }
 

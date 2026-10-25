@@ -49,6 +49,32 @@ internal static class Program
             createWithoutOptionalGuids.Calls == 0 && createWithoutOptionalGuids.Histories == 0 &&
             createWithoutOptionalGuids.Receipt != null,
             "SDK CreateCandidate omits optional GUIDs and uses server-controlled initial status");
+        var minimalCreate = CreateCandidateHost();
+        minimalCreate.Input.Remove("ExpectedStatus");
+        minimalCreate.Input["CandidatePhone"] = "5550100";
+        var saturatedCreate = CreateCandidateHost();
+        saturatedCreate.Input["CorrelationId"] = minimalCreate.Input["CorrelationId"];
+        saturatedCreate.Input["CandidateId"] = Guid.NewGuid();
+        saturatedCreate.Input["ExpectedStatus"] = new OptionSetValue(0);
+        saturatedCreate.Input["CandidatePhone"] = "5550100";
+        saturatedCreate.Input["PositionId"] = Guid.Empty;
+        saturatedCreate.Input["CandidateSourceId"] = Guid.Empty;
+        saturatedCreate.Input["CallOutcome"] = new OptionSetValue(0);
+        saturatedCreate.Input["ContactedAt"] = DateTime.MinValue;
+        saturatedCreate.Input["Notes"] = null;
+        saturatedCreate.Input["Reason"] = string.Empty;
+        Check(minimalCreate.Input.Count == 5 && saturatedCreate.Input.Count == 13,
+            "SDK CreateCandidate minimal and saturated parameter sets have expected shapes");
+        new ApplyCandidateAction().Execute(minimalCreate);
+        new ApplyCandidateAction().Execute(saturatedCreate);
+        Check(minimalCreate.CreatedCandidates == 1 && saturatedCreate.CreatedCandidates == 1 &&
+            saturatedCreate.CreatedCandidate!.GetAttributeValue<string>("os_sr_cand_phn") == "5550100" &&
+            !saturatedCreate.CreatedCandidate.Contains("os_sr_cand_pos") &&
+            !saturatedCreate.CreatedCandidate.Contains("os_sr_cand_csrc"),
+            "SDK CreateCandidate projects applicable profile inputs and ignores non-applicable defaults");
+        Check(minimalCreate.Receipt!.GetAttributeValue<string>("os_sr_oprc_hash") ==
+            saturatedCreate.Receipt!.GetAttributeValue<string>("os_sr_oprc_hash"),
+            "SDK saturated CreateCandidate fingerprint equals its minimal applicable-input fingerprint");
         foreach (string parameter in new[] { "PositionId", "CandidateSourceId" })
         {
             foreach (object? absentEquivalent in new object?[] { null, Guid.Empty })
@@ -86,9 +112,9 @@ internal static class Program
         Check(createWithEmptyCandidateId.CreatedCandidates == 1, "SDK CreateCandidate accepts empty CandidateId");
         var malformedCandidateId = CreateCandidateHost();
         malformedCandidateId.Input["CandidateId"] = "not-a-guid";
-        Reject(() => new ApplyCandidateAction().Execute(malformedCandidateId), "INVALID_CANDIDATEID");
-        Check(malformedCandidateId.CreatedCandidates == 0 && malformedCandidateId.Receipt == null,
-            "SDK malformed CandidateId rejected before any create");
+        new ApplyCandidateAction().Execute(malformedCandidateId);
+        Check(malformedCandidateId.CreatedCandidates == 1,
+            "SDK CreateCandidate does not parse its non-applicable CandidateId input");
 
         var createInput = new Dictionary<string, object?>
         {
@@ -146,7 +172,11 @@ internal static class Program
         }
         var malicious = new Host(100010000);
         malicious.Input["Actor"] = Guid.NewGuid();
-        Reject(() => new ApplyCandidateAction().Execute(malicious), "UNEXPECTED_INPUT");
+        Reject(() => new ApplyCandidateAction().Execute(malicious), "UNEXPECTED_INPUT:SDK_ADAPTER:OTHER");
+        var unknownAction = new Host(100010000);
+        unknownAction.Input["ActionType"] = "UnsupportedOperation";
+        unknownAction.Input["Actor"] = Guid.NewGuid();
+        Reject(() => new ApplyCandidateAction().Execute(unknownAction), "INVALID_ACTION");
         var direct = new Host(100010000);
         Reject(() => direct.Guard("Create", new Entity("os_sr_csh", Guid.NewGuid()), null), "DIRECT_CANDIDATE_CORE_WRITE_BLOCKED");
         foreach (string table in new[] { "os_sr_cand", "os_sr_call", "os_sr_csh", "os_sr_oprc" })

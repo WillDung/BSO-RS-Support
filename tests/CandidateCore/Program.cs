@@ -126,7 +126,7 @@ static class Program
             }).Fingerprint == createWithoutCandidateId.Fingerprint,
             "CreateCandidate absent, null, and empty CandidateId normalize identically");
         createWithNullCandidateId["CandidateId"] = Candidate;
-        Reject(() => Request(createWithNullCandidateId), "UNEXPECTED_INPUT");
+        Reject(() => Request(createWithNullCandidateId), "UNEXPECTED_INPUT:ACTION_REQUEST:CandidateId");
         createWithNullCandidateId["CandidateId"] = "not-a-guid";
         Reject(() => Request(createWithNullCandidateId), "INVALID_CANDIDATEID");
         var createLookupCorrelation = Guid.NewGuid();
@@ -180,7 +180,7 @@ static class Program
         invalid = Input("RequestReschedule"); invalid["ExpectedStatus"] = ActionRequest.Scheduled;
         Reject(() => Request(invalid), "REASON_REQUIRED");
         invalid = Input(); invalid["Actor"] = Guid.NewGuid();
-        Reject(() => Request(invalid), "UNEXPECTED_INPUT");
+        Reject(() => Request(invalid), "UNEXPECTED_INPUT:ACTION_REQUEST:OTHER");
         invalid = Input(); invalid["ContactedAt"] = Now.AddSeconds(1);
         Reject(() => Request(invalid), "INVALID_CONTACT_TIME");
         var updateStore = new MemoryStore();

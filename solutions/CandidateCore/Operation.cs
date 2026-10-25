@@ -28,13 +28,46 @@ namespace os_sr_cact
         public IReadOnlyDictionary<string, object?> Values { get; }
         public string Fingerprint { get; }
 
+        private static readonly string[] DeclaredInputNames =
+        {
+            "ActionType", "CorrelationId", "CandidateId", "ExpectedStatus", "CandidateName",
+            "CandidateEmail", "CandidatePhone", "PositionId", "CandidateSourceId", "CallOutcome",
+            "ContactedAt", "Notes", "Reason"
+        };
+
+        private static readonly HashSet<string> DeclaredInputNameSet =
+            new HashSet<string>(DeclaredInputNames, StringComparer.Ordinal);
+
+        public static bool IsSupportedAction(string action) =>
+            new[] { "CreateCandidate", "UpdateCandidate", "RecordCall", "ProceedToScheduling",
+                "MarkRound1Scheduled", "RecordPass", "RecordFail", "RequestReschedule" }.Contains(action);
+
+        public static IEnumerable<string> ApplicableInputNames(string action)
+        {
+            var common = new[] { "ActionType", "CorrelationId" };
+            if (action == "CreateCandidate")
+                return common.Concat(new[] { "CandidateName", "CandidateEmail", "CandidatePhone", "PositionId", "CandidateSourceId" });
+            if (action == "UpdateCandidate")
+                return common.Concat(new[] { "CandidateId", "ExpectedStatus", "CandidateName", "CandidateEmail",
+                    "CandidatePhone", "PositionId", "CandidateSourceId" });
+            if (action == "RecordCall")
+                return common.Concat(new[] { "CandidateId", "ExpectedStatus", "CallOutcome", "ContactedAt", "Notes" });
+            if (action == "RequestReschedule")
+                return common.Concat(new[] { "CandidateId", "ExpectedStatus", "Reason" });
+            if (action == "ProceedToScheduling" || action == "MarkRound1Scheduled" ||
+                action == "RecordPass" || action == "RecordFail")
+                return common.Concat(new[] { "CandidateId", "ExpectedStatus" });
+            return common;
+        }
+
+        public static bool IsDeclaredInputName(string name) => DeclaredInputNameSet.Contains(name);
+
         public ActionRequest(Guid actor, IDictionary<string, object?> input, DateTime utcNow)
         {
             Actor = actor;
             if (actor == Guid.Empty) throw new OperationError("INVALID_ACTOR");
             Action = Required<string>(input, "ActionType");
-            if (!new[] { "CreateCandidate", "UpdateCandidate", "RecordCall", "ProceedToScheduling",
-                "MarkRound1Scheduled", "RecordPass", "RecordFail", "RequestReschedule" }.Contains(Action))
+            if (!IsSupportedAction(Action))
                 throw new OperationError("INVALID_ACTION");
             Correlation = Required<Guid>(input, "CorrelationId");
             if (Correlation == Guid.Empty) throw new OperationError("INVALID_CORRELATION");
@@ -44,7 +77,7 @@ namespace os_sr_cact
             {
                 if (createTarget is Guid createId)
                 {
-                    if (createId != Guid.Empty) throw new OperationError("UNEXPECTED_INPUT");
+                    if (createId != Guid.Empty) throw new OperationError("UNEXPECTED_INPUT:ACTION_REQUEST:CandidateId");
                 }
                 else if (createTarget != null)
                 {
@@ -62,20 +95,16 @@ namespace os_sr_cact
                     throw new OperationError("INVALID_EXPECTED_STATUS");
             }
             var values = new SortedDictionary<string, object?>(StringComparer.Ordinal);
-            var common = new[] { "ActionType", "CorrelationId", "CandidateId", "ExpectedStatus" };
             var profile = new[] { "CandidateName", "CandidateEmail", "CandidatePhone", "PositionId", "CandidateSourceId" };
             var optionalGuidProfile = new[] { "PositionId", "CandidateSourceId" };
-            var allowed = new HashSet<string>(common, StringComparer.Ordinal);
-            if (Action == "CreateCandidate" || Action == "UpdateCandidate") allowed.UnionWith(profile);
-            if (Action == "RecordCall") allowed.UnionWith(new[] { "CallOutcome", "ContactedAt", "Notes" });
-            if (Action == "RequestReschedule") allowed.Add("Reason");
+            var allowed = new HashSet<string>(ApplicableInputNames(Action), StringComparer.Ordinal);
             foreach (var pair in input)
             {
-                if (!allowed.Contains(pair.Key)) throw new OperationError("UNEXPECTED_INPUT");
-                if (Action == "CreateCandidate" && pair.Key == "ExpectedStatus")
+                if (Action == "CreateCandidate" && (pair.Key == "ExpectedStatus" || pair.Key == "CandidateId"))
                     continue;
-                if (Action == "CreateCandidate" && pair.Key == "CandidateId")
-                    continue;
+                if (!allowed.Contains(pair.Key))
+                    throw new OperationError("UNEXPECTED_INPUT:ACTION_REQUEST:" +
+                        (IsDeclaredInputName(pair.Key) ? pair.Key : "OTHER"));
                 object? value = pair.Value;
                 if (profile.Contains(pair.Key) || pair.Key == "Notes" || pair.Key == "Reason")
                 {

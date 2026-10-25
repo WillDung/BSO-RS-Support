@@ -1,6 +1,45 @@
 # Phase 3D - Candidate Core Synthetic Runtime Acceptance
 
-Date: 25 October 2026. This report records the Phase 3D-R4E ExpectedStatus correction and PRT update, the later R4G PAC package update and CreateCandidate failure, and earlier assessments as history. Source: owner authorization, current repository contract/source, live guarded metadata reconciliation, local offline validation, and Microsoft's published Dataverse metadata documentation.
+Date: 25 October 2026. This report records the current Phase 3D-R4J adapter correction, existing-package update, and unresolved CreateCandidate runtime failure, with earlier assessments retained as history. Source: owner authorization, current repository contract/source, guarded live reconciliation, local offline validation, and Microsoft's published Dataverse metadata documentation.
+
+## Phase 3D-R4J Operation-First Input Projection and Runtime Stop
+
+**`CREATECANDIDATE_RUNTIME_FAILURE_UNRESOLVED` — the operation-first adapter correction passed local validation and the existing unsigned package was updated once. The single authorized CreateCandidate call returned HTTP 400 / `0x80040265` / `DATAVERSE_OPERATION_REJECTED`. The sanitized result did not identify a stage or parameter, so no deterministic local defect is proven. Stop without another invocation or a remaining runtime-matrix operation.**
+
+### Diagnosis and correction
+
+Before R4J, `ApplyCandidateAction` copied every SDK `InputParameters` entry into `ActionRequest`. The request constructor applies operation-specific allowlists; therefore a known Custom API parameter that is not applicable to CreateCandidate could reach the generic unexpected-input rejection even when the Web API payload omitted it. This explains a reachable local `UNEXPECTED_INPUT` path, but raw R4I SDK inputs were not captured, so it does not prove which input caused the earlier live error.
+
+The plug-in now reads ActionType and CorrelationId first, validates the operation, checks only SDK parameter names against the declared API contract, and projects only that operation's applicable fields before constructing `ActionRequest`. For CreateCandidate, CandidateId, ExpectedStatus, CallOutcome, ContactedAt, Notes, and Reason are not projected or parsed; their SDK defaults/wrappers cannot enter normalized Values or the fingerprint. CandidateName, CandidateEmail, CandidatePhone, PositionId, and CandidateSourceId remain applicable and strictly validated. Initial status remains server-controlled as `Need Call Candidate`; existing-record ExpectedStatus validation and fail-closed workflow transitions are unchanged.
+
+| Stage | Operation/condition | Safe diagnostic |
+|---|---|---|
+| SDK adapter | Supported operation identified; an InputParameters key is not one of the 13 declared Custom API parameters | `UNEXPECTED_INPUT:SDK_ADAPTER:OTHER` |
+| ActionRequest construction | CreateCandidate direct/canonical request contains a non-empty valid CandidateId | `UNEXPECTED_INPUT:ACTION_REQUEST:CandidateId` |
+| ActionRequest construction | The operation-specific allowlist rejects another declared parameter | `UNEXPECTED_INPUT:ACTION_REQUEST:<parameter>` |
+| ActionRequest construction | A disallowed key is not a declared parameter | `UNEXPECTED_INPUT:ACTION_REQUEST:OTHER` |
+| Engine/repository | No `UNEXPECTED_INPUT` emitter | No `UNEXPECTED_INPUT` diagnostic |
+| Dataverse exception translation | Organization-service fault is neither the recognized correlation/key conflict nor row-version conflict | `DATAVERSE_OPERATION_REJECTED` |
+
+The parameter values and arbitrary key text are not included in diagnostics. The runtime error parser preserves the structured stage/parameter code. R4J's live error was only `DATAVERSE_OPERATION_REJECTED`, which is insufficient to attribute it to the adapter or another local branch; do not infer a second fix from that response.
+
+### Local validation and submitted package
+
+The unsigned Release package rebuild succeeded with 0 warnings and 0 errors. The Candidate Core engine harness passed 109 assertions; the real SDK adapter harness passed 92 assertions. The SDK harness saturated all 13 API parameters with CreateCandidate, including non-applicable wrapper/default values, and proved successful creation plus equality of the persisted request fingerprint with a minimal request containing the same applicable values. It also retained UpdateCandidate status validation and covers unknown-operation ordering. All 10 PowerShell suites passed (1,107 assertions); all 20 repository PowerShell scripts parsed; package identity/content assertions passed; the added-line privacy scan, changed-document relative-link validation, and `git diff --check` passed.
+
+The submitted local artifact remains unsigned `os_sr_cact_pkg` v1.0.0 with the unchanged five NuGet entry paths. DLL SHA-256: `7b819af8ad625c4543a355b5f3106ae63e1298f9e9226e7e45d7f800c70e1b48`. Package SHA-256: `f0694ea17ec0ddf1c08bd6aa34dbc35a16cae060c92ca334b6d20286fad65b06`. Inventory fingerprint (SHA-256 of sorted `entry-path|uncompressed-length` lines joined with LF): `92e1661c906e77947280d76e39be7e17265facb80d6e3fae2ec21fc5931a53d8`. The embedded DLL hash matches the local DLL. These are submitted local artifact hashes, not a readback hash of deployed package bytes. No signing key was accessed.
+
+### Guarded live update and reconciliation
+
+Fresh PAC identity and Dataverse WhoAmI/expected-user checks matched the owner-confirmed VN LMV IT target. Before update, the guarded preflight found exactly one existing package, the package-backed `os_sr_cact.ApplyCandidateAction` and `os_sr_cact.ProtectCandidateCore` types, the unchanged 13-parameter API contract and package-backed CreateCandidate handler. Separate read-only reconciliation verified the Candidate Core schema exact and the Operation Receipt alternate key Active. Candidate, Call Log, Candidate Status History, and Operation Receipt counts were 0/0/0/0.
+
+PAC CLI 2.13.1 updated the existing PluginPackage once using its current ID and the validated `.nupkg`; the command exited successfully. Immediate GET reconciliation confirmed the same package ID, name/unique name and version, with package modification metadata advanced. Post-update guarded preflight retained the package-backed handler, exact two types, all 13 request parameters, and 0/0/0/0 rows. No handler PATCH was needed. Deployed package bytes were not independently hashed. Package updates: 1; automatic retries: 0.
+
+### Single runtime invocation and stop
+
+The one synthetic request contained exactly `ActionType`, `CorrelationId`, `CandidateName`, and `CandidateEmail` (reserved `.invalid` domain); CandidateId, ExpectedStatus, PositionId, CandidateSourceId, and other non-applicable parameters were omitted. The runner journal records one CreateCandidate dispatch, payload SHA-256 `c6e7bb97710dc76e142dc76698020ae186d55cb00b7af50622eeac09e88f5c91`, HTTP 400, and zero retries. The sanitized response was `HTTP 400; Dataverse code 0x80040265; DATAVERSE_OPERATION_REJECTED`; no safe stage/parameter diagnostic was returned.
+
+A fresh post-failure count-only preflight again found 0 Candidates, 0 Call Logs, 0 Candidate Status History rows, and 0 Operation Receipts. The Candidate Number was not generated. The post-CreateCandidate RecordCall, replay/conflict, Candidate Answered-to-Waiting transition, stale-status, and scheduling-guard checks were not run. No schema, Choice, Custom API, privilege/security, app, publication, legacy assembly, or signing-key change occurred. The package update and one runtime dispatch are the only live writes in R4J. Any further runtime attempt requires a new owner authorization because this failure did not prove a deterministic local repair.
 
 ## Phase 3D-R4I Optional Guid Normalization and SDK Adapter Acceptance
 

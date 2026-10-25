@@ -26,12 +26,13 @@ Assert-Test ($runtime -match "ValidateSet\('GET', 'POST'\)" -and
     $runtime -match "Path -cne 'os_sr_cact'" -and $runtime -match 'MaximumRetryCount = 0' -and
     $runtime -match 'MaximumRedirection = 0' -and $runtime -match 'expectedActionCalls = 8') 'Only bounded Custom API calls with zero retries'
 Assert-Test ($runtime -match 'FileMode\]::CreateNew' -and $runtime -match 'phase3d-r-runtime-' -and
-    $runtime -match 'phase3d-r4i-owner-authorized-package-runtime' -and
+    $runtime -match 'phase3d-r4j-owner-authorized-package-runtime' -and
+    $runtime -notmatch 'phase3d-r4i-owner-authorized-package-runtime' -and
     $runtime -notmatch 'phase3d-r4g-owner-authorized-package-runtime' -and
     $runtime -notmatch 'phase3d-r4f-owner-authorized-package-runtime' -and
     $runtime -notmatch 'phase3d-r4e-owner-authorized-package-runtime' -and
     $runtime -notmatch 'phase3d-r4d-owner-authorized-package-runtime' -and
-    $runtime -match 'one-shot runtime authorization consumed') 'R4I has a distinct one-shot lock from all prior consumed authorizations'
+    $runtime -match 'one-shot runtime authorization consumed') 'R4J has a distinct one-shot lock from all prior consumed authorizations'
 Assert-Test ($runtime -match "\`$name = '\[SYNTHETIC-E2E\]" -and
     $runtime -match '\[SYNTHETIC-E2E\] Candidate Core Acceptance' -and
     $runtime -match '@example\.invalid' -and $runtime -notmatch '@example\.com') 'Fixture identity is unmistakably synthetic and reserved'
@@ -51,13 +52,17 @@ Assert-Test ($sdkTests -match 'normalizes .* absent-equivalent to no lookup' -an
     $sdkTests -match 'rejected before any create' -and
     $sdkTests -match 'accepts null CandidateId' -and
     $sdkTests -match 'accepts empty CandidateId' -and
-    $sdkTests -match 'malformed CandidateId rejected before any create' -and
+    $sdkTests -match 'does not parse its non-applicable CandidateId input' -and
+    $sdkTests -match 'minimalCreate\.Input\.Count == 5 && saturatedCreate\.Input\.Count == 13' -and
+    $sdkTests -match 'saturated CreateCandidate fingerprint equals its minimal applicable-input fingerprint' -and
     $sdkTests -match 'UpdateCandidate accepts matching ExpectedStatus' -and
     $sdkTests -match 'UpdateCandidate rejects stale ExpectedStatus') `
-    'SDK adapter tests cover optional GUID normalization and existing-record validation'
+    'SDK adapter tests cover operation projection, saturated CreateCandidate inputs, optional GUIDs, and existing-record validation'
 Assert-Test ($runtime -match 'Get-Count -EntitySet' -and
     $runtime -match 'Zero-row safety gate failed' -and
     $runtime.IndexOf('Zero-row safety gate failed') -lt $runtime.IndexOf('Invoke-Action -Body $create')) 'Zero-row check precedes first business API invocation'
+Assert-Test ($runtime -match 'UNEXPECTED_INPUT:\(SDK_ADAPTER\|ACTION_REQUEST\)' -and
+    $runtime -match 'return \$unexpectedInput\.Value') 'Runtime parser preserves sanitized unexpected-input origin and parameter category'
 Assert-Test ($runtime -match 'CreateCandidate' -and $runtime -match 'STALE_EXPECTED_STATUS' -and
     $runtime -match 'RecordCall no-answer replay' -and
     $runtime -match 'RecordCall no-answer conflict' -and
@@ -66,7 +71,7 @@ Assert-Test ($runtime -match 'CreateCandidate' -and $runtime -match 'STALE_EXPEC
 Assert-Test ($runtime -notmatch 'EXPECTED_STATUS_NOT_APPLICABLE' -and
     $runtime -match "'CreateCandidate' \{ 'CREATECANDIDATE_RUNTIME_FAILURE' \}" -and
     $operation -match 'if \(Action != "CreateCandidate"\)' -and
-    $operation -match 'Action == "CreateCandidate" && pair.Key == "ExpectedStatus"') 'CreateCandidate ignores ExpectedStatus while retaining operation-specific runtime classification'
+    $operation -match 'Action == "CreateCandidate" && \(pair.Key == "ExpectedStatus" \|\| pair.Key == "CandidateId"\)') 'CreateCandidate ignores non-applicable state inputs while retaining existing-record runtime validation'
 Assert-Test ($operationTests -match 'ignores ExpectedStatus value and excludes it from the fingerprint' -and
     $operationTests -match 'arbitrary ExpectedStatus representations' -and
     $operationTests -match 'non-integer ExpectedStatus wrapper values') 'Offline tests cover default, valid, arbitrary, and wrapped CreateCandidate ExpectedStatus values'
@@ -109,7 +114,7 @@ Assert-Test ($engineTests -match 'SCHEDULER_DEPENDENCY_UNAVAILABLE' -and
 Assert-Test ($operation -match 'Action == "CreateCandidate" && input\.TryGetValue\("CandidateId", out var createTarget\)' -and
     $operationTests -match 'Optional null CandidateId accepted on create' -and
     $operationTests -match 'Optional empty CandidateId accepted on create' -and
-    $operationTests -match 'Request\(createWithNullCandidateId\), "UNEXPECTED_INPUT"' -and
+    $operationTests -match 'Request\(createWithNullCandidateId\), "UNEXPECTED_INPUT:ACTION_REQUEST:CandidateId"' -and
     $operationTests -match 'INVALID_CANDIDATEID' -and
     $operationTests -match 'Invalid CreateCandidate input has no business mutation' -and
     $operationTests -match 'Organization audit inactive permits valid Candidate creation') 'CreateCandidate optional target handling and safety regressions are covered'

@@ -1,5 +1,17 @@
 # Current State
 
+## Phase 3D-R4J Operation-First Input Projection and Runtime Stop (2026-10-25)
+
+**`CREATECANDIDATE_RUNTIME_FAILURE_UNRESOLVED` — the operation-first SDK adapter correction passed local validation, and the existing unsigned `os_sr_cact_pkg` was updated exactly once. Its single CreateCandidate invocation returned HTTP 400 / `0x80040265` / `DATAVERSE_OPERATION_REJECTED`. That sanitized diagnostic does not prove a deterministic local defect; no second invocation or later runtime-matrix operation occurred.**
+
+`ApplyCandidateAction` previously copied the complete SDK `InputParameters` collection into `ActionRequest`, whose operation allowlist could reject non-applicable defaults. The adapter now identifies the action first and projects only applicable Custom API parameters. The 13-parameter SDK-boundary test proves saturated CreateCandidate defaults/wrappers are ignored and its persisted fingerprint equals the minimal applicable-input request. CreateCandidate's applicable inputs remain strictly validated; existing-record ExpectedStatus rules and workflow behavior remain unchanged. R4I raw SDK inputs were not captured, so this resolves a reachable local `UNEXPECTED_INPUT` path but does not prove the precise cause of the earlier live error. R4J's new generic service-fault diagnostic does not justify another local correction.
+
+PAC identity and guarded Dataverse WhoAmI matched the owner-confirmed VN LMV IT target. Fresh reconciliation retained the same existing package identity/version and package-backed handler/guard types; the exact 13-parameter API contract and Candidate Core schema reconciled, and the Operation Receipt alternate key was Active. The package's metadata modification time advanced after the one PAC CLI update. No handler patch, schema, Choice, API, security, app, publication, legacy assembly, or signing-key change occurred.
+
+Submitted local unsigned artifact hashes: DLL `7b819af8ad625c4543a355b5f3106ae63e1298f9e9226e7e45d7f800c70e1b48`; package `f0694ea17ec0ddf1c08bd6aa34dbc35a16cae060c92ca334b6d20286fad65b06`; five-entry inventory fingerprint `92e1661c906e77947280d76e39be7e17265facb80d6e3fae2ec21fc5931a53d8`. Embedded DLL hash matches; deployed package bytes were not independently hashed.
+
+The single synthetic request used only ActionType, fresh CorrelationId, synthetic CandidateName, and a reserved `.invalid` CandidateEmail. Its payload SHA-256 is `c6e7bb97710dc76e142dc76698020ae186d55cb00b7af50622eeac09e88f5c91`. The response was `DATAVERSE_OPERATION_REJECTED`, without a stage/parameter diagnostic. Fresh post-failure count-only reads found 0 Candidates / 0 Call Logs / 0 Status History / 0 Receipts. CreateCandidate calls: 1; package updates: 1; automatic retries: 0. The rest of the runtime matrix was not run. Further runtime work requires a new owner authorization. Full evidence is in the [Phase 3D report](PHASE_3D_CANDIDATE_CORE_RUNTIME_ACCEPTANCE_REPORT.md).
+
 ## Phase 3D-R4I Optional Guid Normalization and SDK Adapter Acceptance (2026-10-25)
 
 **`CREATECANDIDATE_RUNTIME_FAILURE` — one in-place update of the existing unsigned `os_sr_cact_pkg` completed; the single authorized CreateCandidate call returned HTTP 400 / `0x80040265` / `UNEXPECTED_INPUT`. No retry or later runtime-matrix operation occurred.**

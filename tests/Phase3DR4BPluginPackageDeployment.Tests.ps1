@@ -80,6 +80,12 @@ Assert-Test ($deployment -match 'Invoke-StrictLegacyGate' -and
 Assert-Test ($deployment -match 'ApiNonHandlerSha256' -and
     $deployment -match 'Custom API properties other than PluginTypeId changed during cutover' -and
     $deployment -match 'MaximumHandlerPatches = 1') 'Only PluginTypeId may change, with a bounded PATCH'
+Assert-Test ($deployment -match 'RequestParameters = @\(\$inputs \| Sort-Object uniquename' -and
+    $deployment -match 'UniqueName = \[string\]\$_.uniquename' -and
+    $deployment -match 'Type = \[int\]\$_.type' -and
+    $deployment -match 'IsOptional = \[bool\]\$_.isoptional' -and
+    $deployment -match 'LogicalEntityName = if \(\$_.logicalentityname\)' -and
+    $deployment -match 'ApiRequestParameters = \$state\.API\.RequestParameters') 'Read-only preflight exposes exact live request parameter metadata'
 Assert-Test ($deployment -match 'Component Solution membership mismatch for \$EntityLogicalName \(rows=') 'Solution membership gate reports bounded type/count diagnostics on drift'
 Assert-Test ($deployment -match 'ComponentType -ne 91' -and
     $deployment -match '-ExpectedComponentType \(\[int\]\$legacyAssemblyPlan\[0\]\.ComponentType\)' -and
@@ -122,7 +128,8 @@ Assert-Test ($contract.handler -ceq 'os_sr_cact.ApplyCandidateAction' -and
 Assert-Test ($runtime -match 'ExpectedHandlerPackageUniqueName' -and
     $runtime -match 'Assert-PackageBackedHandler' -and
     $runtime -match 'Runtime Apply requires the reconciled package-backed handler identity') 'Runtime execution is gated on the package-backed API chain'
-Assert-Test ($runtime -match 'phase3d-r4d-owner-authorized-package-runtime' -and
+Assert-Test ($runtime -match 'phase3d-r4e-owner-authorized-package-runtime' -and
+    $runtime -notmatch 'phase3d-r4d-owner-authorized-package-runtime' -and
     $runtime -match '\[SYNTHETIC-E2E\] Candidate Core Acceptance' -and
     $runtime -match '@example\.invalid') 'Runtime uses a distinct one-shot authorization and approved synthetic identity'
 Assert-Test ($runtime -match 'MaximumRetryCount = 0' -and

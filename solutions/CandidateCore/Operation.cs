@@ -51,11 +51,20 @@ namespace os_sr_cact
                     throw new OperationError("INVALID_CANDIDATEID");
                 }
             }
-            ExpectedStatus = input.TryGetValue("ExpectedStatus", out var status) && status is int state ? state : (int?)null;
-            if (Action != "CreateCandidate" && Action != "UpdateCandidate" && !ExpectedStatus.HasValue)
-                throw new OperationError("EXPECTED_STATUS_REQUIRED");
-            if (input.ContainsKey("ExpectedStatus") && (!ExpectedStatus.HasValue || ExpectedStatus < NeedCall || ExpectedStatus > Failed))
-                throw new OperationError("INVALID_EXPECTED_STATUS");
+            var hasExpectedStatus = input.TryGetValue("ExpectedStatus", out var status);
+            ExpectedStatus = hasExpectedStatus && status is int state ? state : (int?)null;
+            if (Action == "CreateCandidate")
+            {
+                if (hasExpectedStatus && status != null)
+                    throw new OperationError(status is int ? "EXPECTED_STATUS_NOT_APPLICABLE" : "INVALID_EXPECTED_STATUS");
+            }
+            else
+            {
+                if (Action != "UpdateCandidate" && !ExpectedStatus.HasValue)
+                    throw new OperationError("EXPECTED_STATUS_REQUIRED");
+                if (hasExpectedStatus && (!ExpectedStatus.HasValue || ExpectedStatus < NeedCall || ExpectedStatus > Failed))
+                    throw new OperationError("INVALID_EXPECTED_STATUS");
+            }
             var values = new SortedDictionary<string, object?>(StringComparer.Ordinal);
             var common = new[] { "ActionType", "CorrelationId", "CandidateId", "ExpectedStatus" };
             var profile = new[] { "CandidateName", "CandidateEmail", "CandidatePhone", "PositionId", "CandidateSourceId" };
@@ -66,6 +75,8 @@ namespace os_sr_cact
             foreach (var pair in input)
             {
                 if (!allowed.Contains(pair.Key)) throw new OperationError("UNEXPECTED_INPUT");
+                if (Action == "CreateCandidate" && pair.Key == "ExpectedStatus" && pair.Value == null)
+                    continue;
                 object? value = pair.Value;
                 if (Action == "CreateCandidate" && pair.Key == "CandidateId" &&
                     value is Guid emptyCandidateId && emptyCandidateId == Guid.Empty)

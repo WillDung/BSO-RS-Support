@@ -69,6 +69,25 @@ static class Program
         invalid["CorrelationId"] = "not-a-guid";
         Reject(() => Request(invalid), "INVALID_CORRELATIONID");
         var createWithNullCandidateId = Input("CreateCandidate");
+        var createWithoutExpectedStatus = Request(createWithNullCandidateId);
+        Check(!createWithoutExpectedStatus.ExpectedStatus.HasValue &&
+            !createWithoutExpectedStatus.Values.ContainsKey("ExpectedStatus"),
+            "CreateCandidate absent ExpectedStatus is omitted from normalized request");
+        var createWithNullExpectedStatus = new Dictionary<string, object?>(createWithNullCandidateId)
+        {
+            ["ExpectedStatus"] = null
+        };
+        var nullExpectedCreate = Request(createWithNullExpectedStatus);
+        Check(!nullExpectedCreate.ExpectedStatus.HasValue &&
+            !nullExpectedCreate.Values.ContainsKey("ExpectedStatus") &&
+            nullExpectedCreate.Fingerprint == createWithoutExpectedStatus.Fingerprint,
+            "CreateCandidate null ExpectedStatus is accepted and canonicalized as absent");
+        createWithNullExpectedStatus["ExpectedStatus"] = ActionRequest.NeedCall;
+        Reject(() => Request(createWithNullExpectedStatus), "EXPECTED_STATUS_NOT_APPLICABLE");
+        createWithNullExpectedStatus["ExpectedStatus"] = 999;
+        Reject(() => Request(createWithNullExpectedStatus), "EXPECTED_STATUS_NOT_APPLICABLE");
+        createWithNullExpectedStatus["ExpectedStatus"] = "100010000";
+        Reject(() => Request(createWithNullExpectedStatus), "INVALID_EXPECTED_STATUS");
         createWithNullCandidateId["CandidateId"] = null;
         Check(Request(createWithNullCandidateId).CandidateId == null, "Optional null CandidateId accepted on create");
         createWithNullCandidateId["CandidateId"] = Guid.Empty;
@@ -89,6 +108,8 @@ static class Program
             "Invalid CreateCandidate input has no business mutation");
         invalid = Input(); invalid.Remove("CandidateId");
         Reject(() => Request(invalid), "INVALID_CANDIDATE");
+        invalid = Input(); invalid.Remove("ExpectedStatus");
+        Reject(() => Request(invalid), "EXPECTED_STATUS_REQUIRED");
         invalid = Input("RequestReschedule"); invalid["ExpectedStatus"] = ActionRequest.Scheduled;
         Reject(() => Request(invalid), "REASON_REQUIRED");
         invalid = Input(); invalid["Actor"] = Guid.NewGuid();
@@ -103,6 +124,18 @@ static class Program
         var updatedReplay = updateStore.Atomic(update);
         Check(updatedReplay.Replay && updatedReplay.Current == original.Current && updateStore.Updates == 1, "Replay after later edit returns original outcome");
         Check(updateStore.Calls == 0 && updateStore.Histories == 0, "Update never fabricates logs/history");
+        var expectedUpdateInput = Input("UpdateCandidate");
+        expectedUpdateInput["ExpectedStatus"] = ActionRequest.NeedCall;
+        var expectedUpdateStore = new MemoryStore();
+        var expectedUpdate = expectedUpdateStore.Atomic(Request(expectedUpdateInput));
+        Check(expectedUpdate.Current == ActionRequest.NeedCall && expectedUpdateStore.Updates == 1,
+            "UpdateCandidate accepts matching ExpectedStatus");
+        var staleUpdateInput = Input("UpdateCandidate");
+        staleUpdateInput["ExpectedStatus"] = ActionRequest.NeedCall;
+        var staleUpdateStore = new MemoryStore { Status = ActionRequest.Answered };
+        Reject(() => staleUpdateStore.Atomic(Request(staleUpdateInput)), "STALE_EXPECTED_STATUS");
+        Check(staleUpdateStore.Updates == 0 && staleUpdateStore.Receipts.Count == 0,
+            "Stale UpdateCandidate ExpectedStatus has no mutation");
         var sameIdDifferentAction = Input("RecordCall", update.Correlation);
         Reject(() => updateStore.Atomic(Request(sameIdDifferentAction)), "CORRELATION_CONFLICT");
         foreach (int fail in new[] { 1, 2, 3, 4 })
@@ -120,6 +153,8 @@ static class Program
         Check(auditPendingCreate.Current == ActionRequest.NeedCall && auditPendingCreateStore.Creates == 1 &&
             auditPendingCreateStore.Receipts.Count == 1 && auditPendingCreateStore.Histories == 0,
             "Organization audit inactive permits valid Candidate creation with receipt and no fabricated history");
+        Check(auditPendingCreateStore.Status == ActionRequest.NeedCall,
+            "CreateCandidate initial status is server-controlled Need Call Candidate");
         var raceStore = new MemoryStore { StaleVersion = true };
         Reject(() => raceStore.Atomic(Request(Input())), "ROW_VERSION_CONFLICT");
         Check(raceStore.Calls == 0 && raceStore.Histories == 0, "Race no partial writes");

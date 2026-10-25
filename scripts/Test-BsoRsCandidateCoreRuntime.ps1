@@ -15,7 +15,7 @@ $root = Split-Path $PSScriptRoot
 $manifestPath = Join-Path $root 'docs\PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json'
 $contractPath = Join-Path $root 'docs\PHASE_3C_API_CONTRACT.json'
 $expectedManifestHash = '63f56173f61265f539d23d6ceffb5631e23f438e4e254755c1e24c7d17eb1915'
-$runtimeAuthorizationId = 'phase3d-r4d-owner-authorized-package-runtime'
+$runtimeAuthorizationId = 'phase3d-r4e-owner-authorized-package-runtime'
 $expectedActionCalls = 8
 $schedulingEvidenceChecks = @(
     [ordered]@{
@@ -64,7 +64,8 @@ function Get-RuntimeErrorCode {
     $allowed = @(
         'INVALID_EMAIL', 'REQUIRED_TEXT', 'CORRELATION_CONFLICT', 'STALE_EXPECTED_STATUS',
         'SCHEDULER_DEPENDENCY_UNAVAILABLE', 'RESULT_OR_CANCELLATION_DEPENDENCY_UNAVAILABLE',
-        'INVALID_TRANSITION', 'UNEXPECTED_INPUT', 'DATAVERSE_OPERATION_REJECTED', 'UNSUPPORTED_EXECUTION_CONTEXT'
+        'INVALID_TRANSITION', 'UNEXPECTED_INPUT', 'EXPECTED_STATUS_NOT_APPLICABLE',
+        'DATAVERSE_OPERATION_REJECTED', 'UNSUPPORTED_EXECUTION_CONTEXT'
     )
     foreach ($code in $allowed) {
         if ($Message -match "(?<![A-Z0-9_])$([regex]::Escape($code))(?![A-Z0-9_])") { return $code }
@@ -256,7 +257,13 @@ function Invoke-Action {
     $result = Invoke-RuntimeRequest -Method POST -Path 'os_sr_cact' -Body $Body
     if ($null -ne $result -and $result.PSObject.Properties.Name -contains 'Success') {
         if (-not $ExpectedFailure -or $result.ErrorCode -cne $ExpectedFailure) {
-            if ($ExpectedFailure -and $result.ErrorCode -and
+            if (-not $ExpectedFailure) {
+                $script:runtimeFailureClassification = switch ([string]$Body.ActionType) {
+                    'CreateCandidate' { 'CREATECANDIDATE_RUNTIME_FAILURE' }
+                    'RecordCall' { 'RUNTIME_RECORDCALL_FAILURE' }
+                    'ProceedToScheduling' { 'RUNTIME_UPDATECANDIDATE_FAILURE' }
+                }
+            } elseif ($result.ErrorCode -and
                 $result.ErrorCode -notin @('UNSUPPORTED_EXECUTION_CONTEXT', 'DATAVERSE_OPERATION_REJECTED')) {
                 $script:runtimeFailureClassification = switch ($ExpectedFailure) {
                     'CORRELATION_CONFLICT' { 'IDEMPOTENCY_FAILURE' }

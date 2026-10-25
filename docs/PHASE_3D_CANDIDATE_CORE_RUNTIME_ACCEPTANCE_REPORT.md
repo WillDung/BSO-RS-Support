@@ -1,8 +1,52 @@
 # Phase 3D - Candidate Core Synthetic Runtime Acceptance
 
-Date: 25 October 2026. This report records the latest Phase 3D-R4D existing-package cutover/runtime result and retains earlier assessments as history. Source: owner authorization, current repository contract/source, live guarded metadata reconciliation, local offline validation, and Microsoft's published Dataverse metadata documentation.
+Date: 25 October 2026. This report records the Phase 3D-R4E ExpectedStatus correction, PRT package update, handler cutover, and one-shot runtime result, retaining earlier assessments as history. Source: owner authorization, current repository contract/source, live guarded metadata reconciliation, local offline validation, and Microsoft's published Dataverse metadata documentation.
 
-## Latest Phase 3D-R4D Existing-Package Cutover and Runtime Result
+## Latest Phase 3D-R4E ExpectedStatus Contract Correction
+
+**`CREATECANDIDATE_RUNTIME_FAILURE` — PRT update and handler cutover reconciled; one CreateCandidate invocation rejected; stop without retry.** The R4D package-backed handler test had a single determinate CreateCandidate rejection (`HTTP 400`, Dataverse `0x80040265`, `INVALID_EXPECTED_STATUS`) while the caller omitted ExpectedStatus. The one-shot sequence stopped, all four business/evidence counts were verified zero, and the authorized single PATCH restored the exact legacy handler. R4E does not revisit signing-key diagnosis.
+
+### Fresh live Custom API request contract
+
+The guarded read-only existing-package preflight returned `PLUGIN_PACKAGE_PROCESSED_CUTOVER_PREFLIGHT_READY`, performed 130 GETs, confirmed the retained legacy handler, and verified all four business/evidence row counts were zero. The preflight reconciler compared the exact live input inventory (UniqueName, Type, IsOptional) against the approved contract. Its R4E output additionally records LogicalEntityName:
+
+| UniqueName | Type | IsOptional | LogicalEntityName |
+|---|---:|---:|---|
+| ActionType | 10 (String) | false | null |
+| CallOutcome | 7 (Integer) | true | null |
+| CandidateEmail | 10 (String) | true | null |
+| CandidateId | 12 (GUID) | true | null |
+| CandidateName | 10 (String) | true | null |
+| CandidatePhone | 10 (String) | true | null |
+| CandidateSourceId | 12 (GUID) | true | null |
+| ContactedAt | 1 (DateTime) | true | null |
+| CorrelationId | 12 (GUID) | false | null |
+| ExpectedStatus | 7 (Integer) | true | null |
+| Notes | 10 (String) | true | null |
+| PositionId | 12 (GUID) | true | null |
+| Reason | 10 (String) | true | null |
+
+The current live metadata matches the repository contract. CandidateName and CandidateEmail are optional at the Custom API metadata layer but required by CreateCandidate operation validation. No metadata was modified.
+
+### Source correction and local validation
+
+The source defect was the shared ExpectedStatus check: if the input dictionary contained ExpectedStatus, the code rejected a nullable/non-Integer value before considering whether the action creates a new Candidate. The live request omitted the optional parameter and received that exact source error code. The executed code did not capture raw `InputParameters`, so the specific Web API-to-SDK representation (absent versus present-null) is not independently logged; the corrected path safely accepts either absent or null for CreateCandidate. It removes null ExpectedStatus from normalized `Values` so absent and null produce the same request fingerprint. Any explicit non-null CreateCandidate ExpectedStatus is rejected with `EXPECTED_STATUS_NOT_APPLICABLE` (wrongly typed non-null input is `INVALID_EXPECTED_STATUS`). Other operations retain their existing validation, including required ExpectedStatus for guarded transitions and stale-state rejection. CandidateId absent/null remains valid for create; malformed values fail, and valid supplied IDs remain unsupported.
+
+The server continues to choose `Need Call Candidate` as initial state. The operation harness verifies absent/null ExpectedStatus, explicit unsupported values, null/absent fingerprint equivalence, CandidateId absent/null/malformed handling, operation-specific validation, matching and stale UpdateCandidate state, status-required transition behavior, audit-inactive creation, receipt creation, and no fabricated initial history.
+
+Validation: all 10 PowerShell suites passed (1,100 assertions); Candidate Core operation harness passed (89 assertions); unsigned Release build succeeded with 0 warnings and 0 errors; package identity/content tests passed (12 assertions). DLL SHA-256: `ac4071d5d31d592d177df5472a9305c5c3279da6a3d37d4b524bc09b17de002a`. Package SHA-256: `3f4ee708e4d6239d5541882dd41f2787dbaa1ac9b2f349d8be5cb81a0b6ea824`. Package identity remains `os_sr_cact_pkg` version `1.0.0`; assembly remains `os_sr_cact` version `1.0.0.0`, unsigned; approved PlugInType full names remain unchanged. The same five entry paths remain and the newly built DLL is embedded; archive metadata may also differ due to repacking. The CandidateCoreSdk harness build was blocked by the pre-existing `CandidateSigningKey` build guard. No signing key was accessed or changed.
+
+### PRT package update, handler cutover, and runtime result
+
+The existing `os_sr_cact_pkg` package was updated exactly once in the already-authenticated PRT session; no new package was registered. Fresh Dataverse GET reconciliation returned the same PluginPackage ID `43765041-4fd0-f111-a05a-002248a1ba20`, name/unique name `os_sr_cact_pkg`, and version `1.0.0`. The post-update package row reported ModifiedOn `10/25/2026 5:57 PM`. Package content is not exposed by the read path, so no deployed-content hash comparison is claimed. The PackageId-linked assembly remains `os_sr_cact` v1.0.0.0, File Store, ID `d71c6048-4fd0-f111-a05a-002248a1ba20`; its exact package-backed types are `ApplyCandidateAction` (`d81c6048-4fd0-f111-a05a-002248a1ba20`) and `ProtectCandidateCore` (`d91c6048-4fd0-f111-a05a-002248a1ba20`). The assembly row's ModifiedOn remained `10/25/2026 3:37 PM`; the API returned the R4E-specific `EXPECTED_STATUS_NOT_APPLICABLE` code through this package-backed handler, which is runtime evidence the corrected handler code executed, although the deployed package bytes could not be directly hashed. The existing legacy assembly and types remain present and unchanged. The updated package SHA-256 is `3f4ee708e4d6239d5541882dd41f2787dbaa1ac9b2f349d8be5cb81a0b6ea824`; embedded DLL SHA-256 is `ac4071d5d31d592d177df5472a9305c5c3279da6a3d37d4b524bc09b17de002a`.
+
+Fresh guarded cutover preflight passed with 130 GETs: exact package identity and type mapping, unchanged API contract/storage/privilege/Solution topology, exact retained legacy handler, and Candidate/Call Log/Status History/Receipt counts all zero. The one API handler PATCH changed only `PluginTypeId`, from legacy `os_sr_cact.ApplyCandidateAction` (`b3ec49b1-be4c-4fb6-af10-3bac7a30e407`) to the package-backed type `os_sr_cact.ApplyCandidateAction` (`d81c6048-4fd0-f111-a05a-002248a1ba20`). Immediate and full reconciliation returned `PLUGIN_PACKAGE_CUTOVER_RECONCILED_RUNTIME_PENDING`. Totals to this point: package updates 1; registrations 0; handler PATCHes 1; rollback PATCHes 0; API invocations 0; retries 0.
+
+The package-backed runtime preflight then verified `os_sr_cact` → `os_sr_cact.ApplyCandidateAction` → `os_sr_cact_pkg` and fresh zero counts (14 GETs). The one-shot runtime runner dispatched exactly one `CreateCandidate` call. The request contained `ActionType`, a fresh `CorrelationId`, the approved synthetic Candidate name, and a reserved `.invalid` email; it omitted `CandidateId`, `ExpectedStatus`, CandidatePhone, and all other optional inputs. It returned HTTP 400, Dataverse `0x80040265`, `EXPECTED_STATUS_NOT_APPLICABLE`. Request-shape fingerprint: `dfd657e5e21b27d0937c009980f005c01fb0e8705e5fc5056ce7a48edf0bec4e`. Package/DLL hashes are recorded above. The API error is the code introduced by R4E for a non-null ExpectedStatus during creation, even though the outgoing request omitted that parameter. Raw plug-in InputParameters were not captured; whether the server synthesized a non-null parameter/default remains unresolved. The runtime journal records one rejected call, no retries, and no raw request values. Its `RuntimeFailureClassification` field is null due a local reporting gap; this report classifies the observed CreateCandidate failure as `CREATECANDIDATE_RUNTIME_FAILURE`. A local runner/test change now records the deterministic error and action-specific classification for future runs; it did not change the already-deployed plug-in or trigger another call.
+
+**Stop boundary:** no second CreateCandidate payload or invocation was attempted. No remaining runtime-matrix calls were made. Post-failure row counts were not queried, so only the pre-invocation zero-row state is verified. No rollback was performed because the failure did not establish a package regression; no automatic repair is authorized. Tenant-write totals for R4E: one existing package update through PRT; one Custom API `PluginTypeId` PATCH; one approved synthetic CreateCandidate invocation; zero new registrations, schema/Choice/API-contract/privilege/security/app/publication/legacy-assembly writes, and zero retries. The primary result is `CREATECANDIDATE_RUNTIME_FAILURE`; stop and await a separately authorized decision before any further runtime call or plug-in/package behavior change. The local runtime-runner classification/logging improvement does not change deployed plug-in behavior.
+
+## Prior Phase 3D-R4D Existing-Package Cutover and Runtime Result
 
 **`PLUGIN_PACKAGE_CUTOVER_ROLLED_BACK` — cutover reconciled; CreateCandidate failed at runtime; the exact legacy handler was restored.** Owner authorization permitted the handler-only cutover and at most one synthetic Candidate after exact reconciliation. Fresh R4D read-only evidence found the existing package, its File Store assembly, and both exact package-backed types. This supersedes the R4B `PLUGIN_PACKAGE_PROCESSING_FAILED` disposition for package-processing status: the package `content` field still returns no fingerprintable value, but PRT processing evidence plus the PackageId-linked assembly and exact types establish processing. No package upload, update, or deletion was performed.
 

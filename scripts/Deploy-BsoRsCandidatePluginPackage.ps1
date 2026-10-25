@@ -318,6 +318,14 @@ function Get-ApiSnapshot {
         Api = $api
         HandlerId = [string]$api._plugintypeid_value
         NonHandlerSha256 = Get-Sha256 -Bytes ([Text.Encoding]::UTF8.GetBytes($json))
+        RequestParameters = @($inputs | Sort-Object uniquename | ForEach-Object {
+            [ordered]@{
+                UniqueName = [string]$_.uniquename
+                Type = [int]$_.type
+                IsOptional = [bool]$_.isoptional
+                LogicalEntityName = if ($_.logicalentityname) { [string]$_.logicalentityname } else { $null }
+            }
+        })
     }
 }
 
@@ -941,6 +949,7 @@ try {
                 ApiUniqueName = [string]$state.API.Api.uniquename
                 ApiLegacyHandlerTypeId = [string]$state.API.HandlerId
                 ApiNonHandlerSha256 = [string]$state.API.NonHandlerSha256
+                ApiRequestParameters = $state.API.RequestParameters
                 HandlerNavigation = [string]$state.HandlerNavigation
                 Storage = $storage.Result
                 FreshZeroRowCounts = $zeroRows.FreshZeroRowCounts

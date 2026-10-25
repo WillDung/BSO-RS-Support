@@ -1,6 +1,45 @@
 # Phase 3D - Candidate Core Synthetic Runtime Acceptance
 
-Date: 25 October 2026. This report records the latest Phase 3D-R4B package migration continuation first and retains earlier assessments as history. Source: owner authorization, current repository contract/source, local package builds and inspection, live guarded metadata reconciliation, and Microsoft's published Dataverse metadata documentation.
+Date: 25 October 2026. This report records the latest Phase 3D-R4D existing-package cutover/runtime result and retains earlier assessments as history. Source: owner authorization, current repository contract/source, live guarded metadata reconciliation, local offline validation, and Microsoft's published Dataverse metadata documentation.
+
+## Latest Phase 3D-R4D Existing-Package Cutover and Runtime Result
+
+**`PLUGIN_PACKAGE_CUTOVER_ROLLED_BACK` — cutover reconciled; CreateCandidate failed at runtime; the exact legacy handler was restored.** Owner authorization permitted the handler-only cutover and at most one synthetic Candidate after exact reconciliation. Fresh R4D read-only evidence found the existing package, its File Store assembly, and both exact package-backed types. This supersedes the R4B `PLUGIN_PACKAGE_PROCESSING_FAILED` disposition for package-processing status: the package `content` field still returns no fingerprintable value, but PRT processing evidence plus the PackageId-linked assembly and exact types establish processing. No package upload, update, or deletion was performed.
+
+### Fresh package/API/storage reconciliation
+
+| Check | Fresh pre-cutover R4D read-only result |
+|---|---|
+| PluginPackage `os_sr_cact_pkg` | One exact row; ID `43765041-4fd0-f111-a05a-002248a1ba20` |
+| Package-backed assembly `os_sr_cact` | ID `d71c6048-4fd0-f111-a05a-002248a1ba20`; linked by PackageId; SourceType `File Store` |
+| Package handler type | `os_sr_cact.ApplyCandidateAction`; ID `d81c6048-4fd0-f111-a05a-002248a1ba20` |
+| Package guard type | `os_sr_cact.ProtectCandidateCore`; ID `d91c6048-4fd0-f111-a05a-002248a1ba20` |
+| Retained legacy assembly | ID `ebabddad-3635-471b-9e97-88dbb0396df0`; unchanged |
+| Legacy handler / guard types | `ApplyCandidateAction` ID `b3ec49b1-be4c-4fb6-af10-3bac7a30e407`; `ProtectCandidateCore` ID `7a31c1da-5a8e-4488-b91e-cb5ae01cb77e` |
+| Candidate Core Custom API `os_sr_cact` | ID `0745a0bf-4c77-4e64-8125-12bfbf439229`; bound to the legacy handler before cutover |
+| API contract / privilege / Solution | Exact and unchanged; package and assemblies remain in the approved Solution |
+| Candidate Core storage / receipt key | Exact; Operation Receipt alternate key Active |
+| Business/evidence row counts | Candidate 0; Call Log 0; Status History 0; Operation Receipt 0 |
+
+The live-derived one-to-one handler map and final disposition are:
+
+| Custom API | Current legacy handler | Package-backed replacement |
+|---|---|---|
+| `os_sr_cact` (`0745a0bf-4c77-4e64-8125-12bfbf439229`) | `os_sr_cact.ApplyCandidateAction` (`b3ec49b1-be4c-4fb6-af10-3bac7a30e407`) | `os_sr_cact.ApplyCandidateAction` (`d81c6048-4fd0-f111-a05a-002248a1ba20`); now restored to the legacy handler |
+
+The retained legacy guard `os_sr_cact.ProtectCandidateCore` remains `7a31c1da-5a8e-4488-b91e-cb5ae01cb77e`; its package-backed exact-typename counterpart is `d91c6048-4fd0-f111-a05a-002248a1ba20`. The exact rollback mapping is retained in the short-lived R4D execution journal as well as recorded here. No type-to-API mapping was inferred from naming; the live API and PlugInType reads establish the relationship. Plug-in types are included with their containing assembly Solution component; no standalone type Solution-component rows are claimed.
+
+### Local continuation path and stop boundary
+
+The deployment runner now has separate `CutoverExistingPreflight`, `CutoverExistingApply`, and `RollbackExistingCutover` paths. Apply repeats identity, Solution, Candidate Core/receipt-key, API contract, package/type/legacy topology, and zero-row gates; writes a new one-shot rollback journal before dispatch; PATCHes only the existing Custom API `PluginTypeId` relationship; uses automatic retries `0`; and immediately GET-reconciles. It does not POST or update the package. Rollback requires a determinately classified R4D runtime defect, uses only the retained legacy handler ID, is limited to one PATCH, and preserves the package and both assemblies.
+
+The one authorized cutover PATCH returned HTTP 204 and immediately reconciled to the package handler. The R4D runtime-specific preflight then returned ready with zero Candidate, Call Log, Status History, and Receipt rows. The runtime runner dispatched CreateCandidate exactly once using the synthetic `[SYNTHETIC-E2E] Candidate Core Acceptance` name and a reserved `.invalid` email, omitting optional `CandidateId` and `ExpectedStatus`. Dataverse rejected the request with HTTP 400, code `0x80040265`, `INVALID_EXPECTED_STATUS`. The call was a determinate rejection (`REJECTED`), not an uncertain write; no automatic retry or second API invocation occurred. A fresh count-only check after rejection again found all four business/evidence counts at zero. No synthetic Candidate or evidence rows were retained.
+
+Primary runtime failure classification: `CREATECANDIDATE_RUNTIME_FAILURE`. The rest of the runtime matrix was not run. The approved one-PATCH rollback returned HTTP 204 and immediately/full-reconciled the Custom API to legacy `os_sr_cact.ApplyCandidateAction` (`b3ec49b1-be4c-4fb6-af10-3bac7a30e407`). The package-backed assembly/types and legacy assembly/types remain present. The final status is `PLUGIN_PACKAGE_CUTOVER_ROLLED_BACK`, with runtime failure classification `CREATECANDIDATE_RUNTIME_FAILURE`; the implementation cause is not yet established. The optional `ExpectedStatus` rejection is an open contract/runtime discrepancy, not a verified root cause. Do not retry the API, re-cut over, update the package, or repair the operation without new authorization and a bounded diagnosis.
+
+R4D action counts: existing package upload/update 0; handler cutover PATCH 1; rollback PATCH 1; Candidate Core Custom API dispatch 1 (rejected); business/evidence rows 0; automatic retries 0; schema, Choice, security, app, organization-audit, or publication writes 0; commit/push 0. The cutover preflight used 130 GETs; cutover apply 203 GETs; runtime preflight 14 GETs; runtime apply 14 GETs; post-failure count/preflight 14 GETs; rollback 194 GETs.
+
+Final offline validation: all 10 PowerShell suites passed (1,099 assertions); the Candidate Core operation harness passed (79 assertions); all 20 PowerShell files parsed; 84 relative links in the modified documents resolved; the added-line privacy scan and `git diff --check` passed. These checks do not constitute live runtime acceptance. See [Current State](CURRENT_STATE.md).
 
 ## Latest Phase 3D-R4C Disposition
 

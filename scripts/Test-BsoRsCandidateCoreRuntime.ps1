@@ -15,9 +15,13 @@ $root = Split-Path $PSScriptRoot
 $manifestPath = Join-Path $root 'docs\PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json'
 $contractPath = Join-Path $root 'docs\PHASE_3C_API_CONTRACT.json'
 $expectedManifestHash = '63f56173f61265f539d23d6ceffb5631e23f438e4e254755c1e24c7d17eb1915'
-$runtimeAuthorizationId = 'phase3d-r4b-owner-authorized-package-runtime'
+$runtimeAuthorizationId = 'phase3d-r4d-owner-authorized-package-runtime'
 $expectedActionCalls = 8
-$deferredLiveChecks = @(
+$schedulingEvidenceChecks = @(
+    [ordered]@{
+        Action = 'MarkRound1Scheduled'; LiveResult = 'VERIFIED_FAIL_CLOSED_LIVE'
+        CurrentStatus = 'Waiting Manual Scheduling'; ExpectedError = 'SCHEDULER_DEPENDENCY_UNAVAILABLE'
+    }
     [ordered]@{
         Action = 'RecordPass'; LiveResult = 'NOT_APPLICABLE_CURRENT_STATE'
         CurrentStatus = 'Waiting Manual Scheduling'; OfflineMissingEvidenceResult = 'RESULT_OR_CANCELLATION_DEPENDENCY_UNAVAILABLE'
@@ -33,6 +37,7 @@ $deferredLiveChecks = @(
 )
 $script:runtimeRequestCounts = @{ GET = 0; POST = 0 }
 $script:apiCalls = 0
+$script:runtimeFailureClassification = $null
 $script:journal = $null
 $script:apiRoot = $OrganizationUrl.TrimEnd('/') + '/api/data/v9.2/'
 $script:accessToken = $null
@@ -251,11 +256,26 @@ function Invoke-Action {
     $result = Invoke-RuntimeRequest -Method POST -Path 'os_sr_cact' -Body $Body
     if ($null -ne $result -and $result.PSObject.Properties.Name -contains 'Success') {
         if (-not $ExpectedFailure -or $result.ErrorCode -cne $ExpectedFailure) {
+            if ($ExpectedFailure -and $result.ErrorCode -and
+                $result.ErrorCode -notin @('UNSUPPORTED_EXECUTION_CONTEXT', 'DATAVERSE_OPERATION_REJECTED')) {
+                $script:runtimeFailureClassification = switch ($ExpectedFailure) {
+                    'CORRELATION_CONFLICT' { 'IDEMPOTENCY_FAILURE' }
+                    'STALE_EXPECTED_STATUS' { 'RUNTIME_RECORDCALL_FAILURE' }
+                    'SCHEDULER_DEPENDENCY_UNAVAILABLE' { 'SCHEDULING_GUARD_FAILURE' }
+                }
+            }
             throw (Get-SanitizedFailureMessage -Message $result.SafeError)
         }
         return $result
     }
-    if ($ExpectedFailure) { throw "Expected rejection did not occur: $ExpectedFailure" }
+    if ($ExpectedFailure) {
+        $script:runtimeFailureClassification = switch ($ExpectedFailure) {
+            'CORRELATION_CONFLICT' { 'IDEMPOTENCY_FAILURE' }
+            'STALE_EXPECTED_STATUS' { 'RUNTIME_RECORDCALL_FAILURE' }
+            'SCHEDULER_DEPENDENCY_UNAVAILABLE' { 'SCHEDULING_GUARD_FAILURE' }
+        }
+        throw "Expected rejection did not occur: $ExpectedFailure"
+    }
     if ([string]$result.ResultCode -notin @('Applied', 'DuplicateReplay')) {
         throw 'Custom API returned an unexpected result code; response details suppressed.'
     }
@@ -273,16 +293,21 @@ function Assert-Status {
 }
 
 function Assert-OperationResult {
-    param([object]$Result, [string]$ResultCode, [int]$CurrentStatus)
+    param([object]$Result, [string]$ResultCode, [int]$CurrentStatus, [string]$ActionType)
     if ([string]$Result.ResultCode -cne $ResultCode -or [int]$Result.CurrentStatus -ne $CurrentStatus) {
+        $script:runtimeFailureClassification = switch ($ActionType) {
+            'CreateCandidate' { 'CREATECANDIDATE_RUNTIME_FAILURE' }
+            'RecordCall' { if ($ResultCode -ceq 'DuplicateReplay') { 'IDEMPOTENCY_FAILURE' } else { 'RUNTIME_RECORDCALL_FAILURE' } }
+            'ProceedToScheduling' { 'RUNTIME_UPDATECANDIDATE_FAILURE' }
+        }
         throw 'Custom API result did not match the expected status/replay contract.'
     }
 }
 
 function Assert-NoEffect {
-    param([string]$Checkpoint)
+    param([string]$Checkpoint, [int]$ExpectedStatus)
     Assert-Counts -Checkpoint $Checkpoint
-    Assert-Status -Expected $script:expectedStatus
+    Assert-Status -Expected $ExpectedStatus
 }
 
 function Assert-LiveEvidence {
@@ -322,7 +347,7 @@ function Assert-LiveEvidence {
     if (($actions -join ',') -cne 'CreateCandidate,ProceedToScheduling,RecordCall,RecordCall') {
         throw 'Operation Receipt action inventory mismatch.'
     }
-    if (@($receiptRows | ForEach-Object { [string]$_.os_sr_oprc_corid } | Sort-Object -Unique).Count -ne 5) {
+    if (@($receiptRows | ForEach-Object { [string]$_.os_sr_oprc_corid } | Sort-Object -Unique).Count -ne 4) {
         throw 'Operation Receipt correlation identities are not unique.'
     }
     foreach ($correlation in $script:expectedReceiptEvidence.Keys) {
@@ -431,7 +456,7 @@ try {
         CandidateEmail = $email
     }
     $result = Invoke-Action -Body $create
-    Assert-OperationResult $result 'Applied' 100010000
+    Assert-OperationResult $result 'Applied' 100010000 'CreateCandidate'
     $script:expectedReceiptEvidence[$creationCorrelation] = @{ Action = 'CreateCandidate'; CallId = ''; HistoryId = '' }
     $script:expectedCounts.Candidates = 1
     $script:expectedCounts.Receipts = 1
@@ -443,20 +468,12 @@ try {
     Assert-Counts 'CreateCandidate'
     Assert-Status 100010000
 
-    $stale = [ordered]@{
-        ActionType = 'RecordCall'; CorrelationId = (New-Correlation); CandidateId = $script:candidateId
-        ExpectedStatus = 100010001; CallOutcome = 100010001; ContactedAt = [DateTime]::UtcNow.ToString('o')
-    }
-    $null = Invoke-Action -Body $stale -ExpectedFailure 'STALE_EXPECTED_STATUS'
-    Assert-NoEffect 'Stale-state rejection'
-    Assert-Status 100010000
-
     $noAnswer = [ordered]@{
         ActionType = 'RecordCall'; CorrelationId = (New-Correlation); CandidateId = $script:candidateId
         ExpectedStatus = 100010000; CallOutcome = 100010001; ContactedAt = [DateTime]::UtcNow.ToString('o')
     }
     $result = Invoke-Action -Body $noAnswer
-    Assert-OperationResult $result 'Applied' 100010000
+    Assert-OperationResult $result 'Applied' 100010000 'RecordCall'
     $noAnswerCorrelation = [string]$noAnswer.CorrelationId
     $script:expectedCounts.Calls = 1
     $script:expectedCounts.Receipts = 2
@@ -467,8 +484,11 @@ try {
     Assert-Counts 'RecordCall no answer'
     Assert-Status 100010000
     $result = Invoke-Action -Body $noAnswer
-    Assert-OperationResult $result 'DuplicateReplay' 100010000
-    if ([string]$result.CallLogId -cne $firstNoAnswerCall) { throw 'No-answer replay did not return original Call Log evidence.' }
+    Assert-OperationResult $result 'DuplicateReplay' 100010000 'RecordCall'
+    if ([string]$result.CallLogId -cne $firstNoAnswerCall) {
+        $script:runtimeFailureClassification = 'IDEMPOTENCY_FAILURE'
+        throw 'No-answer replay did not return original Call Log evidence.'
+    }
     Assert-Counts 'RecordCall no-answer replay'
     $noAnswerConflict = $noAnswer.Clone()
     $noAnswerConflict.CallOutcome = 100010002
@@ -480,7 +500,7 @@ try {
         ExpectedStatus = 100010000; CallOutcome = 100010000; ContactedAt = [DateTime]::UtcNow.ToString('o')
     }
     $result = Invoke-Action -Body $answered
-    Assert-OperationResult $result 'Applied' 100010001
+    Assert-OperationResult $result 'Applied' 100010001 'RecordCall'
     $answeredCorrelation = [string]$answered.CorrelationId
     $script:expectedCounts.Calls = 2
     $script:expectedCounts.History = 1
@@ -498,7 +518,7 @@ try {
         ExpectedStatus = 100010001
     }
     $result = Invoke-Action -Body $proceed
-    Assert-OperationResult $result 'Applied' 100010002
+    Assert-OperationResult $result 'Applied' 100010002 'ProceedToScheduling'
     $proceedCorrelation = [string]$proceed.CorrelationId
     $script:expectedCounts.History = 2
     $script:expectedCounts.Receipts = 4
@@ -508,12 +528,20 @@ try {
     }
     Assert-Counts 'ProceedToScheduling'
     Assert-Status 100010002
+
+    $stale = [ordered]@{
+        ActionType = 'RecordCall'; CorrelationId = (New-Correlation); CandidateId = $script:candidateId
+        ExpectedStatus = 100010001; CallOutcome = 100010001; ContactedAt = [DateTime]::UtcNow.ToString('o')
+    }
+    $null = Invoke-Action -Body $stale -ExpectedFailure 'STALE_EXPECTED_STATUS'
+    Assert-NoEffect 'Stale-state rejection' 100010002
+
     $markScheduled = [ordered]@{
         ActionType = 'MarkRound1Scheduled'; CorrelationId = (New-Correlation)
         CandidateId = $script:candidateId; ExpectedStatus = 100010002
     }
     $null = Invoke-Action -Body $markScheduled -ExpectedFailure 'SCHEDULER_DEPENDENCY_UNAVAILABLE'
-    Assert-NoEffect 'MarkRound1Scheduled without trusted scheduler evidence'
+    Assert-NoEffect 'MarkRound1Scheduled without trusted scheduler evidence' 100010002
 
     Assert-LiveEvidence
     Assert-Counts 'Final reconciliation'
@@ -541,7 +569,7 @@ try {
         CandidateWrites = 1; CallLogWrites = 2; StatusHistoryWrites = 2; ReceiptWrites = 4
         TotalBusinessRecordWrites = 9
         Replays = 1; Conflicts = 1; ExpectedRejections = 2
-        DeferredLiveChecks = $deferredLiveChecks
+        SchedulingEvidenceChecks = $schedulingEvidenceChecks
         FinalCounts = $script:journal.FinalCounts
         CandidateIdReferenceSha256 = $script:journal.CandidateIdSha256
         ActorIdReferenceSha256 = $script:journal.ActorIdSha256
@@ -551,16 +579,18 @@ try {
 } catch {
     $safe = Get-SanitizedFailureMessage -Message $_.Exception.Message
     if ($script:journal) {
-        $script:journal.Result = 'PHASE_3D_RUNTIME_STOPPED'
+        $uncertain = @($script:journal.Dispatches | Where-Object State -CEQ 'UNCERTAIN_WRITE_OUTCOME').Count -gt 0
+        $script:journal.Result = if ($uncertain) { 'UNCERTAIN_WRITE_OUTCOME' }
+            elseif ($script:runtimeFailureClassification) { $script:runtimeFailureClassification }
+            else { 'PHASE_3D_RUNTIME_STOPPED' }
+        $script:journal.RuntimeFailureClassification = $script:runtimeFailureClassification
         $script:journal.Error = $safe
         $script:journal.CandidateIdSha256 = if ($script:candidateId) { Get-Sha256 -Bytes ([Text.Encoding]::UTF8.GetBytes($script:candidateId)) } else { $null }
         Save-RuntimeJournal
     }
     [ordered]@{
-        Result = if ($script:apiCalls -gt 0 -and $script:journal -and
-            @($script:journal.Dispatches | Where-Object State -CEQ 'UNCERTAIN_WRITE_OUTCOME').Count) {
-            'UNCERTAIN_WRITE_OUTCOME'
-        } else { 'PHASE_3D_RUNTIME_STOPPED' }
+        Result = if ($script:journal -and $script:journal.Result) { [string]$script:journal.Result }
+            else { 'PHASE_3D_RUNTIME_STOPPED' }
         Error = $safe
         RequestGET = $script:runtimeRequestCounts.GET
         CustomAPIInvocations = $script:apiCalls

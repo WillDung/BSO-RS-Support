@@ -21,7 +21,8 @@ foreach ($path in @($deploymentPath, $runtimePath)) {
     Assert-Test ($errors.Count -eq 0) "PowerShell parses: $(Split-Path $path -Leaf)"
 }
 
-Assert-Test ($deployment -match "ValidateSet\('Preflight', 'Apply', 'InspectPackage', 'Reconcile', 'Rollback'\)" -and
+Assert-Test ($deployment -match "ValidateSet\('Preflight', 'Apply', 'InspectPackage', 'Reconcile', 'Rollback'," -and
+    $deployment -match "'CutoverExistingPreflight', 'CutoverExistingApply', 'RollbackExistingCutover'\)" -and
     $deployment -match "Name = 'os_sr_cact_pkg'" -and $deployment -match "Version = '1\.0\.0'") 'Package deployment modes and identity are pinned'
 Assert-Test ($deployment -match [regex]::Escape('41a18a66aabf0c75356209e6814d93f60aa6d4dc2eebd3a965d9291b3bb8b59b') -and
     $deployment -match [regex]::Escape('ba332f58c55c8c13b8eb44df619b8236022f78261b7a02099890b3281a88aaf1') -and
@@ -79,6 +80,35 @@ Assert-Test ($deployment -match 'Invoke-StrictLegacyGate' -and
 Assert-Test ($deployment -match 'ApiNonHandlerSha256' -and
     $deployment -match 'Custom API properties other than PluginTypeId changed during cutover' -and
     $deployment -match 'MaximumHandlerPatches = 1') 'Only PluginTypeId may change, with a bounded PATCH'
+Assert-Test ($deployment -match 'Component Solution membership mismatch for \$EntityLogicalName \(rows=') 'Solution membership gate reports bounded type/count diagnostics on drift'
+Assert-Test ($deployment -match 'ComponentType -ne 91' -and
+    $deployment -match '-ExpectedComponentType \(\[int\]\$legacyAssemblyPlan\[0\]\.ComponentType\)' -and
+    $deployment -match 'if \(\$ExpectedComponentType -lt 0\)') 'Plug-in Assembly membership uses the pinned Solution component code, not entity ObjectTypeCode'
+ $cutoverStart = $deployment.IndexOf("if (`$Mode -in @('CutoverExistingPreflight', 'CutoverExistingApply', 'RollbackExistingCutover'))")
+ $cutoverEnd = $deployment.IndexOf("if (`$Mode -in @('Preflight', 'Apply'))", $cutoverStart)
+ $existingCutover = if ($cutoverStart -ge 0 -and $cutoverEnd -gt $cutoverStart) {
+    $deployment.Substring($cutoverStart, $cutoverEnd - $cutoverStart)
+ } else { '' }
+Assert-Test ($existingCutover -match 'Get-ExistingPackageCutoverState' -and
+    $existingCutover -match 'FreshZeroRowCounts' -and
+    $existingCutover -match 'OPERATION_RECEIPT_STORAGE_RECONCILED' -and
+    $existingCutover -match 'New-ExistingCutoverJournal' -and
+    $existingCutover.IndexOf('Save-PackageJournal') -lt $existingCutover.IndexOf('Invoke-PackageRequest -Method PATCH') -and
+    $existingCutover -match 'Get-ExistingPackageCutoverState -ExpectedHandlerTypeId' -and
+    $existingCutover -match 'MaximumRollbackPatches -ne 1' -and
+    $existingCutover -match 'RuntimeFailureClassification' -and
+    $existingCutover -match 'ManifestSha256' -and
+    $existingCutover -match 'PLUGIN_PACKAGE_CUTOVER_RECONCILED_RUNTIME_PENDING' -and
+    $existingCutover -match 'AutomaticRetries -ne 0' -and
+    $existingCutover -notmatch "Invoke-PackageRequest -Method POST -Path 'pluginpackages'") 'R4D existing-package handler-only cutover is gated, journaled before dispatch, and bounded'
+Assert-Test ($deployment -match 'LegacyPluginTypeId' -and
+    $deployment -match 'PackagePluginTypeId' -and
+    $existingCutover -match 'LegacyHandlerTypeId' -and
+    $existingCutover -match 'PackageHandlerTypeId' -and
+    $existingCutover -match 'PackageAssemblySourceTypeLabels' -and
+    $existingCutover -match 'PackageTypeSolutionMembership' -and
+    $existingCutover -match 'Get-ExistingPackageCutoverState -ExpectedHandlerTypeId \(\[string\]\$script:Journal.LegacyHandlerTypeId\)' -and
+    $existingCutover -match 'PLUGIN_PACKAGE_CUTOVER_ROLLED_BACK') 'R4D retains exact handler map and rollback reconciles only to the legacy handler'
 Assert-Test ($deployment -match 'PLUGIN_PACKAGE_HANDLER_CUTOVER_FAILED' -and
     $deployment -match 'UNCERTAIN_WRITE_OUTCOME' -and $deployment -match 'no retry') 'Uncertain writes reconcile once and stop without resend'
 Assert-Test ($deployment -match "Mode -ceq 'Rollback'" -and
@@ -92,7 +122,7 @@ Assert-Test ($contract.handler -ceq 'os_sr_cact.ApplyCandidateAction' -and
 Assert-Test ($runtime -match 'ExpectedHandlerPackageUniqueName' -and
     $runtime -match 'Assert-PackageBackedHandler' -and
     $runtime -match 'Runtime Apply requires the reconciled package-backed handler identity') 'Runtime execution is gated on the package-backed API chain'
-Assert-Test ($runtime -match 'phase3d-r4b-owner-authorized-package-runtime' -and
+Assert-Test ($runtime -match 'phase3d-r4d-owner-authorized-package-runtime' -and
     $runtime -match '\[SYNTHETIC-E2E\] Candidate Core Acceptance' -and
     $runtime -match '@example\.invalid') 'Runtime uses a distinct one-shot authorization and approved synthetic identity'
 Assert-Test ($runtime -match 'MaximumRetryCount = 0' -and

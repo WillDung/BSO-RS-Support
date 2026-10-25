@@ -22,7 +22,7 @@ Assert-Test ($runtime -match "ValidateSet\('GET', 'POST'\)" -and
     $runtime -match "Path -cne 'os_sr_cact'" -and $runtime -match 'MaximumRetryCount = 0' -and
     $runtime -match 'MaximumRedirection = 0' -and $runtime -match 'expectedActionCalls = 8') 'Only bounded Custom API calls with zero retries'
 Assert-Test ($runtime -match 'FileMode\]::CreateNew' -and $runtime -match 'phase3d-r-runtime-' -and
-    $runtime -match 'phase3d-r4b-owner-authorized-package-runtime' -and
+    $runtime -match 'phase3d-r4d-owner-authorized-package-runtime' -and
     $runtime -match 'one-shot runtime authorization consumed') 'Authorization-specific one-shot lock preserves prior consumed lock'
 Assert-Test ($runtime -match "\`$name = '\[SYNTHETIC-E2E\]" -and
     $runtime -match '\[SYNTHETIC-E2E\] Candidate Core Acceptance' -and
@@ -32,16 +32,21 @@ Assert-Test ($runtime -match 'Get-Count -EntitySet' -and
     $runtime.IndexOf('Zero-row safety gate failed') -lt $runtime.IndexOf('Invoke-Action -Body $create')) 'Zero-row check precedes first business API invocation'
 Assert-Test ($runtime -match 'CreateCandidate' -and $runtime -match 'STALE_EXPECTED_STATUS' -and
     $runtime -match 'RecordCall no-answer replay' -and
-    $runtime -match 'RecordCall no-answer conflict') 'Replay, conflict, and stale-state checks are wired'
+    $runtime -match 'RecordCall no-answer conflict' -and
+    $runtime.IndexOf('$stale = [ordered]@{') -gt $runtime.IndexOf("ActionType = 'ProceedToScheduling'") -and
+    $runtime -match 'Assert-NoEffect \x27Stale-state rejection\x27 100010002') 'Replay, conflict, and post-transition stale-state checks are wired'
 Assert-Test ($runtime -match 'os_sr_cand_cnum' -and $runtime.Contains('CAND-[0-9]{8}')) 'Candidate AutoNumber is checked against the approved format'
 Assert-Test ($runtime -match 'SCHEDULER_DEPENDENCY_UNAVAILABLE' -and
+    $runtime -match "Action = 'MarkRound1Scheduled'; LiveResult = 'VERIFIED_FAIL_CLOSED_LIVE'" -and
     $runtime -match "Action = 'RecordPass'; LiveResult = 'NOT_APPLICABLE_CURRENT_STATE'" -and
     $runtime -match "Action = 'RecordFail'; LiveResult = 'NOT_APPLICABLE_CURRENT_STATE'" -and
     $runtime -match "Action = 'RequestReschedule'; LiveResult = 'NOT_APPLICABLE_CURRENT_STATE'" -and
-    $runtime -notmatch 'Invoke-Action -Body \$body -ExpectedFailure \$deferred') 'Deferred evidence actions stay fail-closed without impossible-state live calls'
-Assert-Test ($runtime -notmatch 'UpdateCandidate|RecordCall answered replay|RecordCall answered conflict' -and
+    $runtime -notmatch 'Invoke-Action -Body \$body -ExpectedFailure \$deferred') 'Scheduling guard is verified live and impossible-state actions remain explicitly deferred'
+Assert-Test ($runtime -notmatch "ActionType = 'UpdateCandidate'|RecordCall answered replay|RecordCall answered conflict" -and
     $runtime -match 'expectedCounts\.Receipts = 2' -and $runtime -match 'expectedCounts\.Receipts = 3' -and
-    $runtime -match 'expectedCounts\.Receipts = 4' -and $runtime -match "'UNEXPECTED_INPUT'") 'Eight-call matrix has exact receipt counts and captures unexpected-input rejection'
+    $runtime -match 'expectedCounts\.Receipts = 4' -and
+    $runtime -match 'os_sr_oprc_corid.*Count -ne 4' -and
+    $runtime -match "'UNEXPECTED_INPUT'") 'Eight-call matrix has exact receipt cardinality and captures unexpected-input rejection'
 Assert-Test ($runtime -match 'TotalBusinessRecordWrites = 9' -and
     $runtime -match 'RetainedCandidate = \$true' -and $runtime -match 'RecordIdsPersisted = \$false') 'Expected effects are bounded and record IDs are not persisted'
 Assert-Test ($runtime -match 'CandidateWrites = 1; CallLogWrites = 2; StatusHistoryWrites = 2; ReceiptWrites = 4' -and
@@ -68,5 +73,8 @@ Assert-Test ($operation -match 'Action == "CreateCandidate" && input\.TryGetValu
     $operationTests -match 'INVALID_CANDIDATEID' -and
     $operationTests -match 'Invalid CreateCandidate input has no business mutation' -and
     $operationTests -match 'Organization audit inactive permits valid Candidate creation') 'CreateCandidate optional target handling and safety regressions are covered'
+Assert-Test ($runtime -match 'function Assert-NoEffect \{\s*param\(\[string\]\$Checkpoint, \[int\]\$ExpectedStatus\)' -and
+    $runtime -notmatch 'script:expectedStatus' -and
+    $runtime -match 'SchedulingEvidenceChecks = \$schedulingEvidenceChecks') 'No-effect checks receive explicit state and scheduling evidence is reported'
 
 "PASS: $script:Passed synthetic Phase 3D runtime-runner contract assertions; no authentication/network."

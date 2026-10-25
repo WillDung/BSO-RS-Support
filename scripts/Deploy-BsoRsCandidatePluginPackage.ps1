@@ -1,7 +1,8 @@
 #requires -Version 7.4
 [CmdletBinding()]
 param(
-    [ValidateSet('Preflight', 'Apply', 'InspectPackage', 'Reconcile', 'Rollback')][string]$Mode = 'Preflight',
+    [ValidateSet('Preflight', 'Apply', 'InspectPackage', 'Reconcile', 'Rollback',
+        'CutoverExistingPreflight', 'CutoverExistingApply', 'RollbackExistingCutover')][string]$Mode = 'Preflight',
     [Parameter(Mandatory)][string]$EnvironmentName,
     [Parameter(Mandatory)][string]$OrganizationUrl,
     [Parameter(Mandatory)][string]$ExpectedEnvironmentId,
@@ -10,7 +11,8 @@ param(
     [Parameter(Mandatory)][string]$LegacyDispatchEvidencePath,
     [Parameter(Mandatory)][string]$AssemblyUpdatePlanPath,
     [Parameter(Mandatory)][string]$AssemblyUpdateEvidencePath,
-    [string]$EvidencePath
+    [string]$EvidencePath,
+    [string]$RuntimeEvidencePath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -105,7 +107,8 @@ function Invoke-PackageRequest {
             throw 'Package write differs from its exact one-shot journal entry.'
         }
         if (($Method -ceq 'POST' -and ($Mode -cne 'Apply' -or $Path -cne 'pluginpackages')) -or
-            ($Method -ceq 'PATCH' -and ($Mode -notin @('Apply', 'Rollback') -or $Path -notmatch '^customapis\([0-9a-fA-F-]{36}\)$'))) {
+            ($Method -ceq 'PATCH' -and ($Mode -notin @('Apply', 'Rollback', 'CutoverExistingApply', 'RollbackExistingCutover') -or
+                $Path -notmatch '^customapis\([0-9a-fA-F-]{36}\)$'))) {
             throw 'Package migration write path or mode is not authorized.'
         }
         $entry.State = 'DISPATCH_RESERVED'
@@ -418,6 +421,25 @@ function Assert-PackageSolutionMembership {
     }
 }
 
+function Assert-SolutionComponentMembership {
+    param(
+        [Parameter(Mandatory)][string]$EntityLogicalName,
+        [Parameter(Mandatory)][string]$ComponentId,
+        [int]$ExpectedComponentType = -1
+    )
+    $metadata = Invoke-PackageRequest -Method GET -Path "EntityDefinitions(LogicalName='$EntityLogicalName')?`$select=ObjectTypeCode,EntitySetName,PrimaryIdAttribute"
+    if ([int]$metadata.ObjectTypeCode -le 0 -or -not $metadata.EntitySetName -or -not $metadata.PrimaryIdAttribute) {
+        throw "Solution component metadata is incomplete: $EntityLogicalName."
+    }
+    if ($ExpectedComponentType -lt 0) { $ExpectedComponentType = [int]$metadata.ObjectTypeCode }
+    $rows = @(Get-PackageRows -Path "solutioncomponents?`$select=objectid,componenttype&`$filter=_solutionid_value eq $($script:Solution.solutionid) and objectid eq $ComponentId")
+    if ($rows.Count -ne 1 -or [string]$rows[0].objectid -ine $ComponentId -or
+        [int]$rows[0].componenttype -ne $ExpectedComponentType) {
+        $actualTypes = @($rows | ForEach-Object { [string]$_.componenttype }) -join ','
+        throw "Component Solution membership mismatch for $EntityLogicalName (rows=$($rows.Count), expectedType=$ExpectedComponentType, actualTypes=$actualTypes)."
+    }
+}
+
 function Get-LegacyHandlers {
     param([object]$Plan)
     $assemblyWrite = @($Plan.Writes | Where-Object Path -CEQ 'pluginassemblies')
@@ -550,6 +572,118 @@ function New-HandlerPatchEntry {
     }
 }
 
+function Get-ExistingPackageCutoverState {
+    param([string]$ExpectedHandlerTypeId)
+    $packages = @(Get-PackageRowsByName)
+    if ($packages.Count -ne 1) { throw 'Existing package identity is missing or duplicated; never create or replace it.' }
+    $package = $packages[0]
+    if ($package.name -cne $script:PackageIdentity.Name -or
+        $package.uniquename -cne $script:PackageIdentity.UniqueName -or
+        [string]$package.version -cne $script:PackageIdentity.Version) {
+        throw 'Existing PluginPackage identity differs from the approved artifact identity.'
+    }
+    $packageDetail = Invoke-PackageRequest -Method GET -Path "pluginpackages($($package.pluginpackageid))?`$select=pluginpackageid,name,uniquename,version"
+    if ([string]$packageDetail.pluginpackageid -ine [string]$package.pluginpackageid -or
+        $packageDetail.name -cne $script:PackageIdentity.Name -or
+        $packageDetail.uniquename -cne $script:PackageIdentity.UniqueName -or
+        [string]$packageDetail.version -cne $script:PackageIdentity.Version) {
+        throw 'Direct PluginPackage read did not reconcile to the existing package identity.'
+    }
+    Assert-PackageSolutionMembership -PackageId ([string]$package.pluginpackageid)
+    $derived = Get-PackageAssemblyAndTypes -PackageId ([string]$package.pluginpackageid)
+    if (@($derived.SourceTypeLabels | Where-Object { $_ -match '(?i)^file\s*store$' }).Count -ne 1) {
+        throw 'Package-backed assembly SourceType is not the reconciled File Store value.'
+    }
+    $legacyPlan = Get-Content -LiteralPath $LegacyDeploymentPlanPath -Raw | ConvertFrom-Json
+    $legacyAssemblyPlan = @($legacyPlan.Writes | Where-Object Path -CEQ 'pluginassemblies')
+    if ($legacyAssemblyPlan.Count -ne 1 -or [int]$legacyAssemblyPlan[0].ComponentType -ne 91) {
+        throw 'Retained legacy plan does not pin the Dataverse Plug-in Assembly Solution component type.'
+    }
+    Assert-SolutionComponentMembership -EntityLogicalName 'pluginassembly' `
+        -ComponentId ([string]$derived.Assembly.pluginassemblyid) `
+        -ExpectedComponentType ([int]$legacyAssemblyPlan[0].ComponentType)
+    $expectedTypeNames = @($script:PackageIdentity.Handler, $script:PackageIdentity.Guard) | Sort-Object
+    $packageTypeNames = @($derived.Types | ForEach-Object { [string]$_.typename } | Sort-Object)
+    if ($derived.Types.Count -ne 2 -or
+        [string]::Join('|', $packageTypeNames) -cne [string]::Join('|', $expectedTypeNames) -or
+        @($derived.Types | Where-Object { [string]$_._pluginassemblyid_value -ine [string]$derived.Assembly.pluginassemblyid }).Count -ne 0) {
+        throw 'Package-backed PlugInType inventory or assembly membership differs from the approved types.'
+    }
+    $legacy = Get-LegacyHandlers -Plan $legacyPlan
+    Assert-SolutionComponentMembership -EntityLogicalName 'pluginassembly' -ComponentId $legacy.AssemblyId `
+        -ExpectedComponentType ([int]$legacyAssemblyPlan[0].ComponentType)
+    $api = Get-ApiSnapshot
+    Assert-SolutionComponentMembership -EntityLogicalName 'customapi' -ComponentId ([string]$api.Api.customapiid)
+    $legacyHandler = @($legacy.Types | Where-Object typename -CEQ $script:PackageIdentity.Handler)
+    $packageHandler = @($derived.Types | Where-Object typename -CEQ $script:PackageIdentity.Handler)
+    if ($legacyHandler.Count -ne 1 -or $packageHandler.Count -ne 1) {
+        throw 'Handler typename mapping is missing or ambiguous across legacy and package assemblies.'
+    }
+    $handlerNavigation = Assert-PackageProcessingMetadata
+    $knownHandlerTypeIds = @([string]$legacyHandler[0].plugintypeid, [string]$packageHandler[0].plugintypeid)
+    if ($ExpectedHandlerTypeId) {
+        if ([string]$ExpectedHandlerTypeId -notin $knownHandlerTypeIds -or
+            [string]$api.HandlerId -ine $ExpectedHandlerTypeId) {
+            throw 'Custom API handler differs from the expected retained legacy/package mapping.'
+        }
+    } elseif ([string]$api.HandlerId -ine [string]$legacyHandler[0].plugintypeid) {
+        throw 'Custom API no longer points to the exact retained legacy handler.'
+    }
+    [pscustomobject]@{
+        Package = $package
+        Assembly = $derived.Assembly
+        AssemblySourceTypeLabels = $derived.SourceTypeLabels
+        PackageTypes = $derived.Types
+        PackageHandler = $packageHandler[0]
+        PackageGuard = @($derived.Types | Where-Object typename -CEQ $script:PackageIdentity.Guard)[0]
+        Legacy = $legacy
+        LegacyHandler = $legacyHandler[0]
+        API = $api
+        HandlerNavigation = $handlerNavigation.HandlerNavigationProperty
+        PackageTypeSolutionMembership = 'INCLUDED_WITH_PLUGIN_ASSEMBLY_COMPONENT'
+    }
+}
+
+function New-ExistingCutoverJournal {
+    param([object]$State)
+    $entry = New-HandlerPatchEntry -ApiId ([string]$State.API.Api.customapiid) `
+        -TypeId ([string]$State.PackageHandler.plugintypeid) `
+        -NavigationProperty ([string]$State.HandlerNavigation)
+    [ordered]@{
+        Authorization = 'phase3d-r4d-owner-authorized-existing-package-handler-cutover'
+        Result = 'PLUGIN_PACKAGE_PROCESSED_CUTOVER_PENDING'
+        PackageId = [string]$State.Package.pluginpackageid
+        PackageUniqueName = [string]$State.Package.uniquename
+        PackageAssemblyId = [string]$State.Assembly.pluginassemblyid
+        PackageAssemblyName = [string]$State.Assembly.name
+        PackageAssemblySourceType = [string]::Join('|', [string[]]$State.AssemblySourceTypeLabels)
+        PackageHandlerTypeId = [string]$State.PackageHandler.plugintypeid
+        PackageGuardTypeId = [string]$State.PackageGuard.plugintypeid
+        LegacyAssemblyId = [string]$State.Legacy.AssemblyId
+        LegacyAssemblySha256 = $expectedLegacyAssemblySha256
+        LegacyHandlerTypeId = [string]$State.LegacyHandler.plugintypeid
+        LegacyHandlerTypeName = [string]$State.LegacyHandler.typename
+        LegacyGuardTypeId = [string]$State.Legacy.GuardType.plugintypeid
+        LegacyGuardStepCount = [int]$State.Legacy.Steps.Count
+        ApiId = [string]$State.API.Api.customapiid
+        ApiUniqueName = [string]$State.API.Api.uniquename
+        ApiNonHandlerSha256 = [string]$State.API.NonHandlerSha256
+        HandlerNavigation = [string]$State.HandlerNavigation
+        CutoverMappings = @([ordered]@{
+            UniqueName = [string]$State.API.Api.uniquename
+            LegacyPluginTypeId = [string]$State.LegacyHandler.plugintypeid
+            LegacyTypeName = [string]$State.LegacyHandler.typename
+            PackagePluginTypeId = [string]$State.PackageHandler.plugintypeid
+            PackageTypeName = [string]$State.PackageHandler.typename
+        })
+        Writes = @($entry)
+        RollbackWrites = @()
+        MaximumHandlerPatches = 1
+        MaximumRollbackPatches = 1
+        AutomaticRetries = 0
+    }
+}
+
 try {
     if ($Mode -ceq 'InspectPackage') {
         Assert-IdentityAndSolution
@@ -644,6 +778,258 @@ try {
             GET = [int]$script:RequestCounts.GET
             POST = 0; PATCH = 0; AutomaticRetries = 0
         } | ConvertTo-Json -Depth 10
+        return
+    }
+    if ($Mode -in @('CutoverExistingPreflight', 'CutoverExistingApply', 'RollbackExistingCutover')) {
+        Assert-IdentityAndSolution
+        $storage = Get-StorageReconciliation
+        $script:NestedGETCounts.Storage = [int]$storage.Requests.GET
+        if ($storage.Result -cne 'OPERATION_RECEIPT_STORAGE_RECONCILED' -or
+            $storage.CandidateCore -cne 'EXACT' -or
+            $storage.Requests.POST -ne 0 -or $storage.Requests.PUT -ne 0) {
+            throw 'Candidate Core storage or active Operation Receipt key failed exact reconciliation.'
+        }
+
+        if ($Mode -ceq 'RollbackExistingCutover') {
+            if (-not $EvidencePath -or -not (Test-Path -LiteralPath $EvidencePath -PathType Leaf)) {
+                throw 'R4D rollback requires the retained cutover journal.'
+            }
+            if (-not $RuntimeEvidencePath -or -not (Test-Path -LiteralPath $RuntimeEvidencePath -PathType Leaf)) {
+                throw 'R4D rollback requires the retained runtime failure evidence.'
+            }
+            $runtimeEvidence = Get-Content -LiteralPath $RuntimeEvidencePath -Raw | ConvertFrom-Json
+            $allowedRuntimeDefects = @(
+                'CREATECANDIDATE_RUNTIME_FAILURE', 'RUNTIME_RECORDCALL_FAILURE',
+                'RUNTIME_UPDATECANDIDATE_FAILURE', 'IDEMPOTENCY_FAILURE', 'SCHEDULING_GUARD_FAILURE'
+            )
+            if ($runtimeEvidence.AuthorizationId -cne 'phase3d-r4d-owner-authorized-package-runtime' -or
+                $runtimeEvidence.ManifestSha256 -cne '63f56173f61265f539d23d6ceffb5631e23f438e4e254755c1e24c7d17eb1915' -or
+                $runtimeEvidence.ApiUniqueName -cne 'os_sr_cact' -or
+                $runtimeEvidence.ExpectedHandlerPackageUniqueName -cne $script:PackageIdentity.UniqueName -or
+                $runtimeEvidence.MaximumApiDispatches -ne 8 -or $runtimeEvidence.AutomaticRetries -ne 0 -or
+                $runtimeEvidence.Result -notin $allowedRuntimeDefects -or
+                $runtimeEvidence.RuntimeFailureClassification -cne $runtimeEvidence.Result -or
+                @($runtimeEvidence.Dispatches | Where-Object State -CEQ 'UNCERTAIN_WRITE_OUTCOME').Count -ne 0 -or
+                @($runtimeEvidence.Dispatches).Count -eq 0 -or @($runtimeEvidence.Dispatches).Count -gt 8 -or
+                @($runtimeEvidence.Dispatches | Where-Object {
+                    $_.State -notin @('GET_RECONCILED', 'ACKNOWLEDGED', 'GET_RECONCILE_PENDING', 'REJECTED')
+                }).Count -ne 0) {
+                throw 'R4D rollback is permitted only for a classified, determinate package runtime defect.'
+            }
+            $script:Journal = Get-Content -LiteralPath $EvidencePath -Raw | ConvertFrom-Json
+            if ($script:Journal.Authorization -cne 'phase3d-r4d-owner-authorized-existing-package-handler-cutover' -or
+                $script:Journal.Result -cne 'PLUGIN_PACKAGE_CUTOVER_RECONCILED_RUNTIME_PENDING' -or
+                $script:Journal.AutomaticRetries -ne 0 -or
+                $script:Journal.MaximumRollbackPatches -ne 1 -or
+                $script:Journal.RollbackWrites.Count -ne 0 -or
+                $script:Journal.Writes.Count -ne 1 -or
+                $script:Journal.Writes[0].Method -cne 'PATCH' -or
+                $script:Journal.Writes[0].Path -cne "customapis($($script:Journal.ApiId))" -or
+                $script:Journal.Writes[0].State -cne 'GET_RECONCILED' -or
+                $script:Journal.CutoverMappings.Count -ne 1 -or
+                $script:Journal.CutoverMappings[0].UniqueName -cne $script:Contract.uniqueName -or
+                $script:Journal.CutoverMappings[0].LegacyPluginTypeId -cne $script:Journal.LegacyHandlerTypeId -or
+                $script:Journal.CutoverMappings[0].PackagePluginTypeId -cne $script:Journal.PackageHandlerTypeId) {
+                throw 'R4D rollback journal is inconsistent, consumed, or outside its one-patch limit.'
+            }
+            $state = Get-ExistingPackageCutoverState -ExpectedHandlerTypeId ([string]$script:Journal.PackageHandlerTypeId)
+            if ([string]$state.Package.pluginpackageid -ine [string]$script:Journal.PackageId -or
+                [string]$state.Assembly.pluginassemblyid -ine [string]$script:Journal.PackageAssemblyId -or
+                [string]$state.Legacy.AssemblyId -ine [string]$script:Journal.LegacyAssemblyId -or
+                [string]$state.API.Api.customapiid -ine [string]$script:Journal.ApiId -or
+                [string]$state.API.NonHandlerSha256 -cne [string]$script:Journal.ApiNonHandlerSha256 -or
+                [string]$state.LegacyHandler.plugintypeid -ine [string]$script:Journal.LegacyHandlerTypeId) {
+                throw 'Current package/legacy/API state differs from the retained rollback mapping.'
+            }
+            $rollbackEntry = New-HandlerPatchEntry -ApiId ([string]$script:Journal.ApiId) `
+                -TypeId ([string]$script:Journal.LegacyHandlerTypeId) `
+                -NavigationProperty ([string]$script:Journal.HandlerNavigation)
+            $script:Journal.Writes += $rollbackEntry
+            $script:Journal.RollbackWrites += $rollbackEntry
+            $script:Journal.Result = 'PACKAGE_RUNTIME_DEFECT_ROLLBACK_PENDING'
+            Save-PackageJournal
+            $script:WriteIndex = 1
+            $rollbackBody = [ordered]@{
+                "$($script:Journal.HandlerNavigation)@odata.bind" = "/plugintypes($($script:Journal.LegacyHandlerTypeId))"
+            }
+            $rollbackError = $null
+            try { $null = Invoke-PackageRequest -Method PATCH -Path ([string]$rollbackEntry.Path) -Body $rollbackBody }
+            catch { $rollbackError = $_.Exception.Message }
+            $rollbackReadback = $null
+            $rollbackReadbackError = $null
+            try {
+                $rollbackReadback = Invoke-PackageRequest -Method GET -Path "customapis($($script:Journal.ApiId))?`$select=customapiid,uniquename,_plugintypeid_value"
+            } catch { $rollbackReadbackError = $_.Exception.Message }
+            if ($rollbackReadbackError) {
+                $script:Journal.Writes[1].State = 'UNCERTAIN_WRITE_OUTCOME'
+                $script:Journal.Result = 'UNCERTAIN_WRITE_OUTCOME'
+                Save-PackageJournal
+                throw 'R4D rollback readback failed after dispatch; stop without retry.'
+            }
+            if ([string]$rollbackReadback.customapiid -ine [string]$script:Journal.ApiId -or
+                [string]$rollbackReadback._plugintypeid_value -ine [string]$script:Journal.LegacyHandlerTypeId) {
+                $script:Journal.Writes[1].State = if ($rollbackError) { 'UNCERTAIN_WRITE_OUTCOME' } else { 'REJECTED_UNRECONCILED' }
+                $script:Journal.Result = if ($rollbackError) { 'UNCERTAIN_WRITE_OUTCOME' } else { 'PLUGIN_PACKAGE_HANDLER_CUTOVER_FAILED' }
+                Save-PackageJournal
+                throw 'R4D handler rollback did not reconcile; no retry.'
+            }
+            if ($rollbackError) {
+                $script:Journal.Writes[1].State = 'GET_RECONCILED_AFTER_UNCERTAIN_RESPONSE'
+                $script:Journal.Result = 'UNCERTAIN_WRITE_OUTCOME'
+                Save-PackageJournal
+                throw 'R4D rollback response was uncertain despite matching readback; stop without retry.'
+            }
+            $script:Journal.Writes[1].State = 'GET_RECONCILED'
+            $script:Journal.Result = 'PLUGIN_PACKAGE_CUTOVER_ROLLED_BACK'
+            Save-PackageJournal
+            $finalRollback = $null
+            try {
+                $finalRollback = Get-ExistingPackageCutoverState -ExpectedHandlerTypeId ([string]$script:Journal.LegacyHandlerTypeId)
+                if ([string]$finalRollback.Package.pluginpackageid -ine [string]$script:Journal.PackageId -or
+                    [string]$finalRollback.Assembly.pluginassemblyid -ine [string]$script:Journal.PackageAssemblyId -or
+                    [string]$finalRollback.API.NonHandlerSha256 -cne [string]$script:Journal.ApiNonHandlerSha256 -or
+                    [string]$finalRollback.Legacy.AssemblyId -ine [string]$script:Journal.LegacyAssemblyId -or
+                    [string]$finalRollback.LegacyHandler.plugintypeid -ine [string]$script:Journal.LegacyHandlerTypeId -or
+                    [int]$finalRollback.Legacy.Steps.Count -ne [int]$script:Journal.LegacyGuardStepCount) {
+                    throw 'API contract or package/legacy topology changed during rollback reconciliation.'
+                }
+            } catch {
+                $script:Journal.Result = 'UNCERTAIN_WRITE_OUTCOME'
+                Save-PackageJournal
+                throw 'R4D rollback handler matched immediately, but full reconciliation failed; stop without retry.'
+            }
+            $script:Journal.Result = 'PLUGIN_PACKAGE_CUTOVER_ROLLED_BACK'
+            Save-PackageJournal
+            [ordered]@{
+                Result = 'PLUGIN_PACKAGE_CUTOVER_ROLLED_BACK'
+                PackageId = [string]$finalRollback.Package.pluginpackageid
+                PackageAssemblyId = [string]$finalRollback.Assembly.pluginassemblyid
+                LegacyAssemblyRetained = $true
+                PackageRetained = $true
+                GET = [int]$script:RequestCounts.GET + [int]$storage.Requests.GET
+                PackagePosts = 0; HandlerPatches = 0; RollbackPatches = [int]$script:RequestCounts.PATCH
+                BusinessApiInvocations = 0; BusinessDataWrites = 0; AutomaticRetries = 0
+                EvidencePath = $EvidencePath
+            } | ConvertTo-Json -Depth 10
+            return
+        }
+
+        $state = Get-ExistingPackageCutoverState
+        if ($Mode -ceq 'CutoverExistingPreflight') {
+            $zeroRows = Get-RuntimeZeroRowGate
+            [ordered]@{
+                Result = 'PLUGIN_PACKAGE_PROCESSED_CUTOVER_PREFLIGHT_READY'
+                PackageId = [string]$state.Package.pluginpackageid
+                PackageUniqueName = [string]$state.Package.uniquename
+                PackageVersion = [string]$state.Package.version
+                PackageContentHashVerified = $false
+                PackageAssemblyId = [string]$state.Assembly.pluginassemblyid
+                PackageAssemblyName = [string]$state.Assembly.name
+                PackageAssemblySourceTypeLabels = $state.AssemblySourceTypeLabels
+                PackageHandlerTypeId = [string]$state.PackageHandler.plugintypeid
+                PackageHandlerTypeName = [string]$state.PackageHandler.typename
+                PackageGuardTypeId = [string]$state.PackageGuard.plugintypeid
+                PackageGuardTypeName = [string]$state.PackageGuard.typename
+                PackageTypesSolutionMembership = $state.PackageTypeSolutionMembership
+                LegacyAssemblyId = [string]$state.Legacy.AssemblyId
+                LegacyAssemblyHashMatches = $true
+                LegacyHandlerTypeId = [string]$state.LegacyHandler.plugintypeid
+                LegacyHandlerTypeName = [string]$state.LegacyHandler.typename
+                LegacyGuardTypeId = [string]$state.Legacy.GuardType.plugintypeid
+                LegacyGuardStepCount = [int]$state.Legacy.Steps.Count
+                ApiId = [string]$state.API.Api.customapiid
+                ApiUniqueName = [string]$state.API.Api.uniquename
+                ApiLegacyHandlerTypeId = [string]$state.API.HandlerId
+                ApiNonHandlerSha256 = [string]$state.API.NonHandlerSha256
+                HandlerNavigation = [string]$state.HandlerNavigation
+                Storage = $storage.Result
+                FreshZeroRowCounts = $zeroRows.FreshZeroRowCounts
+                PackagePosts = 0; HandlerPatches = 0; RollbackPatches = 0
+                BusinessApiInvocations = 0; BusinessDataWrites = 0; AutomaticRetries = 0
+                GET = [int]$script:RequestCounts.GET + [int]$storage.Requests.GET + [int]$script:RuntimePreflightGET
+                EvidencePath = $null
+            } | ConvertTo-Json -Depth 15
+            return
+        }
+
+        if (-not $EvidencePath -or (Test-Path -LiteralPath $EvidencePath)) {
+            throw 'R4D apply requires a new, absent one-shot rollback evidence path.'
+        }
+        $zeroRows = Get-RuntimeZeroRowGate
+        $script:Journal = New-ExistingCutoverJournal -State $state
+        $stream = [IO.File]::Open($EvidencePath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        $stream.Dispose()
+        Save-PackageJournal
+        $patchBody = [ordered]@{
+            "$($script:Journal.HandlerNavigation)@odata.bind" = "/plugintypes($($script:Journal.PackageHandlerTypeId))"
+        }
+        $patchError = $null
+        $script:WriteIndex = 0
+        try {
+            $null = Invoke-PackageRequest -Method PATCH -Path ([string]$script:Journal.Writes[0].Path) -Body $patchBody
+        } catch { $patchError = $_.Exception.Message }
+        $readback = $null
+        $readbackError = $null
+        try {
+            $readback = Invoke-PackageRequest -Method GET -Path "customapis($($script:Journal.ApiId))?`$select=customapiid,uniquename,_plugintypeid_value"
+        } catch { $readbackError = $_.Exception.Message }
+        if ($readbackError) {
+            $script:Journal.Writes[0].State = 'UNCERTAIN_WRITE_OUTCOME'
+            $script:Journal.Result = 'UNCERTAIN_WRITE_OUTCOME'
+            Save-PackageJournal
+            throw 'R4D handler readback failed after dispatch; stop without retry.'
+        }
+        if ([string]$readback.customapiid -ine [string]$script:Journal.ApiId -or
+            [string]$readback.uniquename -cne [string]$script:Journal.ApiUniqueName -or
+            [string]$readback._plugintypeid_value -ine [string]$script:Journal.PackageHandlerTypeId) {
+            $script:Journal.Writes[0].State = if ($patchError) { 'UNCERTAIN_WRITE_OUTCOME' } else { 'REJECTED_UNRECONCILED' }
+            $script:Journal.Result = if ($patchError) { 'UNCERTAIN_WRITE_OUTCOME' } else { 'PLUGIN_PACKAGE_HANDLER_CUTOVER_FAILED' }
+            Save-PackageJournal
+            throw 'R4D handler cutover did not reconcile; no retry.'
+        }
+        if ($patchError) {
+            $script:Journal.Writes[0].State = 'GET_RECONCILED_AFTER_UNCERTAIN_RESPONSE'
+            $script:Journal.Result = 'UNCERTAIN_WRITE_OUTCOME'
+            Save-PackageJournal
+            throw 'R4D PATCH response was uncertain despite matching readback; stop without retry.'
+        }
+        $script:Journal.Writes[0].State = 'GET_RECONCILED'
+        Save-PackageJournal
+        $final = $null
+        try {
+            $final = Get-ExistingPackageCutoverState -ExpectedHandlerTypeId ([string]$script:Journal.PackageHandlerTypeId)
+            if ([string]$final.Package.pluginpackageid -ine [string]$script:Journal.PackageId -or
+                [string]$final.Assembly.pluginassemblyid -ine [string]$script:Journal.PackageAssemblyId -or
+                [string]$final.API.NonHandlerSha256 -cne [string]$script:Journal.ApiNonHandlerSha256 -or
+                [string]$final.Legacy.AssemblyId -ine [string]$script:Journal.LegacyAssemblyId -or
+                [string]$final.LegacyHandler.plugintypeid -ine [string]$script:Journal.LegacyHandlerTypeId -or
+                [int]$final.Legacy.Steps.Count -ne [int]$script:Journal.LegacyGuardStepCount) {
+                throw 'Full package handler cutover differs from retained package/API/legacy evidence.'
+            }
+        } catch {
+            $script:Journal.Result = 'PLUGIN_PACKAGE_HANDLER_CUTOVER_FAILED'
+            Save-PackageJournal
+            throw 'Full package handler cutover reconciliation failed after the single PATCH; no retry.'
+        }
+        $script:Journal.Result = 'PLUGIN_PACKAGE_CUTOVER_RECONCILED_RUNTIME_PENDING'
+        Save-PackageJournal
+        [ordered]@{
+            Result = [string]$script:Journal.Result
+            PackageId = [string]$final.Package.pluginpackageid
+            PackageAssemblyId = [string]$final.Assembly.pluginassemblyid
+            PackageHandlerTypeId = [string]$final.PackageHandler.plugintypeid
+            PackageGuardTypeId = [string]$final.PackageGuard.plugintypeid
+            LegacyAssemblyId = [string]$final.Legacy.AssemblyId
+            LegacyHandlerTypeId = [string]$final.LegacyHandler.plugintypeid
+            ApiUniqueName = [string]$final.API.Api.uniquename
+            ApiId = [string]$final.API.Api.customapiid
+            ApiHandlerTypeId = [string]$final.API.HandlerId
+            CutoverMap = $script:Journal.CutoverMappings
+            GET = [int]$script:RequestCounts.GET + [int]$storage.Requests.GET + [int]$script:RuntimePreflightGET
+            PackagePosts = 0; HandlerPatches = [int]$script:RequestCounts.PATCH; RollbackPatches = 0
+            BusinessApiInvocations = 0; BusinessDataWrites = 0; AutomaticRetries = 0
+            EvidencePath = $EvidencePath
+        } | ConvertTo-Json -Depth 15
         return
     }
     if ($Mode -in @('Preflight', 'Apply')) {

@@ -1,5 +1,28 @@
 # Current State
 
+## Phase 3D-R4D Existing Package Cutover and Runtime Acceptance (2026-10-25)
+
+**`PLUGIN_PACKAGE_CUTOVER_ROLLED_BACK` — the approved package handler cutover reconciled, but the first CreateCandidate runtime invocation was rejected; the API handler was then restored and GET-reconciled to the exact retained legacy type.** The runtime failure is classified `CREATECANDIDATE_RUNTIME_FAILURE`: HTTP 400, Dataverse `0x80040265`, `INVALID_EXPECTED_STATUS`. The request omitted optional `ExpectedStatus` as specified by the contract. No automatic retry or second invocation occurred. A subsequent count-only read confirmed Candidate, Call Log, Status History, and Operation Receipt counts all remained zero.
+
+Fresh R4D reconciliation established the existing `os_sr_cact_pkg` package, its PackageId-linked File Store `os_sr_cact` assembly, and exactly the approved package-backed handler and guard types. The package `content` value remains unreadable, so its byte fingerprint is not verified; package processing was established by PRT evidence and live assembly/type linkage. The package was not uploaded, updated, or deleted.
+
+| R4D component | Freshly reconciled identity |
+|---|---|
+| PluginPackage `os_sr_cact_pkg` | `43765041-4fd0-f111-a05a-002248a1ba20` |
+| Package-backed File Store assembly `os_sr_cact` | `d71c6048-4fd0-f111-a05a-002248a1ba20` |
+| Package `ApplyCandidateAction` | `d81c6048-4fd0-f111-a05a-002248a1ba20` |
+| Package `ProtectCandidateCore` | `d91c6048-4fd0-f111-a05a-002248a1ba20` |
+| Retained legacy signed assembly | `ebabddad-3635-471b-9e97-88dbb0396df0` |
+| Legacy `ApplyCandidateAction` | `b3ec49b1-be4c-4fb6-af10-3bac7a30e407` |
+| Legacy `ProtectCandidateCore` | `7a31c1da-5a8e-4488-b91e-cb5ae01cb77e` |
+| Candidate Core Custom API `os_sr_cact` | `0745a0bf-4c77-4e64-8125-12bfbf439229` |
+
+The live-derived cutover map was `os_sr_cact` API (`0745a0bf-4c77-4e64-8125-12bfbf439229`) → legacy `os_sr_cact.ApplyCandidateAction` (`b3ec49b1-be4c-4fb6-af10-3bac7a30e407`) → package-backed `os_sr_cact.ApplyCandidateAction` (`d81c6048-4fd0-f111-a05a-002248a1ba20`). The single API `PluginTypeId` PATCH returned HTTP 204 and immediately reconciled; after the runtime rejection, the single authorized rollback PATCH also returned HTTP 204 and fully reconciled the API back to the legacy handler. Current handler: legacy `b3ec49b1-be4c-4fb6-af10-3bac7a30e407`. The package guard maps by exact typename to `d91c6048-4fd0-f111-a05a-002248a1ba20`. The API contract, parameters/responses, execution privilege, and Solution membership remained unchanged; the package and both assemblies remain in the approved Solution. Candidate Core storage and the active Operation Receipt alternate key reconciled exactly.
+
+The existing-package cutover runner performed one handler PATCH, zero package POSTs, and zero retries. The runtime runner performed one CreateCandidate dispatch, which the service rejected before creating any business/evidence rows; the remaining acceptance matrix was not run. A fresh post-failure preflight confirmed all four row counts were zero. The rollback runner performed one PATCH to the retained legacy handler and reconciled the package, package-backed assembly/types, legacy assembly, API contract, and restored handler. The legacy signed assembly and package-backed assembly remain available; no rollback of package artifacts was attempted.
+
+R4D activity totals: handler cutover PATCH 1; rollback PATCH 1; business API dispatches 1 (rejected); confirmed business/evidence rows 0; package POST/update 0; schema/Choice/security/app/audit/publication writes 0; automatic retries 0; commit/push 0. The only live test was the rejected CreateCandidate invocation; runtime acceptance is not achieved. The `INVALID_EXPECTED_STATUS` contract/runtime discrepancy remains an open issue and was not repaired under this authorization. Offline validation and repository checks for the final documentation changes are recorded in the [Phase 3D report](PHASE_3D_CANDIDATE_CORE_RUNTIME_ACCEPTANCE_REPORT.md).
+
 ## Phase 3D-R4C PAC NuGet Push Continuation (2026-10-25)
 
 **`PAC_AUTH_CONTEXT_UNAVAILABLE` — stopped before fresh environment reconciliation or package push.** The active local PAC profile is labeled `O-SR-port` and names VN LMV IT at the authorized organization URL. Its reported token expiry is 24 October 2026, before this continuation on 25 October. No interactive login, PRT launch, profile selection, or environment switch was attempted. The required fresh `pac org who` validation was therefore not performed.

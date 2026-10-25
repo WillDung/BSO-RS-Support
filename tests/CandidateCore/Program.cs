@@ -71,8 +71,22 @@ static class Program
         var createWithNullCandidateId = Input("CreateCandidate");
         createWithNullCandidateId["CandidateId"] = null;
         Check(Request(createWithNullCandidateId).CandidateId == null, "Optional null CandidateId accepted on create");
+        createWithNullCandidateId["CandidateId"] = Guid.Empty;
+        Check(Request(createWithNullCandidateId).CandidateId == null, "Optional empty CandidateId accepted on create");
         createWithNullCandidateId["CandidateId"] = Candidate;
         Reject(() => Request(createWithNullCandidateId), "UNEXPECTED_INPUT");
+        createWithNullCandidateId["CandidateId"] = "not-a-guid";
+        Reject(() => Request(createWithNullCandidateId), "INVALID_CANDIDATEID");
+        var missingCreateName = Input("CreateCandidate");
+        missingCreateName.Remove("CandidateName");
+        Reject(() => Request(missingCreateName), "CONTACT_REQUIRED");
+        var missingCreateEmail = Input("CreateCandidate");
+        missingCreateEmail.Remove("CandidateEmail");
+        Reject(() => Request(missingCreateEmail), "CONTACT_REQUIRED");
+        var invalidCreateStore = new MemoryStore();
+        Reject(() => invalidCreateStore.Atomic(Request(missingCreateName)), "CONTACT_REQUIRED");
+        Check(invalidCreateStore.Mutation == 0 && invalidCreateStore.Creates == 0 && invalidCreateStore.Receipts.Count == 0,
+            "Invalid CreateCandidate input has no business mutation");
         invalid = Input(); invalid.Remove("CandidateId");
         Reject(() => Request(invalid), "INVALID_CANDIDATE");
         invalid = Input("RequestReschedule"); invalid["ExpectedStatus"] = ActionRequest.Scheduled;
@@ -101,6 +115,11 @@ static class Program
         var auditPendingResult = auditPendingStore.Atomic(Request(Input()));
         Check(!auditPendingResult.Replay && auditPendingStore.Calls == 1 && auditPendingStore.Receipts.Count == 1,
             "Organization audit state is not a business runtime gate");
+        var auditPendingCreateStore = new MemoryStore { Audit = false };
+        var auditPendingCreate = auditPendingCreateStore.Atomic(Request(Input("CreateCandidate")));
+        Check(auditPendingCreate.Current == ActionRequest.NeedCall && auditPendingCreateStore.Creates == 1 &&
+            auditPendingCreateStore.Receipts.Count == 1 && auditPendingCreateStore.Histories == 0,
+            "Organization audit inactive permits valid Candidate creation with receipt and no fabricated history");
         var raceStore = new MemoryStore { StaleVersion = true };
         Reject(() => raceStore.Atomic(Request(Input())), "ROW_VERSION_CONFLICT");
         Check(raceStore.Calls == 0 && raceStore.Histories == 0, "Race no partial writes");

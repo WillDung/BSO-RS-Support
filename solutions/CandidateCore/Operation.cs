@@ -40,8 +40,17 @@ namespace os_sr_cact
             if (Correlation == Guid.Empty) throw new OperationError("INVALID_CORRELATION");
             CandidateId = input.TryGetValue("CandidateId", out var target) && target is Guid id && id != Guid.Empty ? id : (Guid?)null;
             if (Action != "CreateCandidate" && !CandidateId.HasValue) throw new OperationError("INVALID_CANDIDATE");
-            if (Action == "CreateCandidate" && input.TryGetValue("CandidateId", out var createTarget) && createTarget != null)
-                throw new OperationError("UNEXPECTED_INPUT");
+            if (Action == "CreateCandidate" && input.TryGetValue("CandidateId", out var createTarget))
+            {
+                if (createTarget is Guid createId)
+                {
+                    if (createId != Guid.Empty) throw new OperationError("UNEXPECTED_INPUT");
+                }
+                else if (createTarget != null)
+                {
+                    throw new OperationError("INVALID_CANDIDATEID");
+                }
+            }
             ExpectedStatus = input.TryGetValue("ExpectedStatus", out var status) && status is int state ? state : (int?)null;
             if (Action != "CreateCandidate" && Action != "UpdateCandidate" && !ExpectedStatus.HasValue)
                 throw new OperationError("EXPECTED_STATUS_REQUIRED");
@@ -58,6 +67,9 @@ namespace os_sr_cact
             {
                 if (!allowed.Contains(pair.Key)) throw new OperationError("UNEXPECTED_INPUT");
                 object? value = pair.Value;
+                if (Action == "CreateCandidate" && pair.Key == "CandidateId" &&
+                    value is Guid emptyCandidateId && emptyCandidateId == Guid.Empty)
+                    value = null;
                 if (profile.Contains(pair.Key) || pair.Key == "Notes" || pair.Key == "Reason")
                 {
                     if (pair.Key.EndsWith("Id", StringComparison.Ordinal))

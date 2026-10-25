@@ -1,6 +1,51 @@
 # Phase 3D - Candidate Core Synthetic Runtime Acceptance
 
-Date: 24 October 2026. This report retains historical assessments and records the latest Phase 3D-R continuation first. Source: owner authorization, current Phase 3C contract and implementation, fresh guarded reconciliation, read-only runtime preflights, the one-shot dispatch journal, and offline regression suites.
+Date: 25 October 2026. This report retains historical assessments and records the latest Phase 3D-R2 continuation first. Source: owner authorization, current repository contract/source, previous guarded reconciliation and runtime journal, protected-key ACL inspection without reading key contents, and offline regression suites.
+
+## Latest Phase 3D-R2 Disposition
+
+**`SIGNING_KEY_UNAVAILABLE` — no build, tenant read, assembly update, or runtime request was made in this continuation.**
+
+### Baseline and defect assessment
+
+At R2 start the repository was `main`, clean, and at HEAD/origin/main `b90d25bc29ffb1a75e5be7bc8f07c91b5315a526` (2026-10-25 07:43:18 +07). The Candidate Core manifest remained `63f56173f61265f539d23d6ceffb5631e23f438e4e254755c1e24c7d17eb1915`. The deployed assembly remained the previously reconciled `os_sr_cact`, version `1.0.0.0`, hash `089deb40816e7fd6d80d117ba3894b5d5dadbcf65ac8111e25bb0520ff6feb85`. Expected public-key token: `d73b02688ba7f9aa`.
+
+The approved API contract file marks `CandidateId` optional (`optional: true`); the prior Phase 3C deployment report records that only `ActionType` and `CorrelationId` were metadata-required. R2 did not perform a fresh live metadata read because the mandatory signing-key safety gate failed first. The previous runtime request failed with HTTP 400 / `0x80040265` / `UNEXPECTED_INPUT`. The former handler rejected CreateCandidate if the optional `CandidateId` key was present, even with a null value. That source path is a strong, plausible root cause for the observed error, but the live response alone does not identify the offending input with certainty.
+
+The local handler now applies these CreateCandidate rules:
+
+| Input | Local behavior |
+|---|---|
+| CandidateId omitted | Accepted |
+| CandidateId null | Accepted |
+| CandidateId empty Guid | Treated as the empty optional representation |
+| CandidateId non-empty valid Guid | Rejected as `UNEXPECTED_INPUT`, preserving the approved Create semantics |
+| CandidateId wrong type | Rejected deterministically as `INVALID_CANDIDATEID` |
+| Unknown parameter / missing required name or email | Rejected; invalid requests do not mutate the store |
+
+The regression tests also verify audit-inactive synthetic CreateCandidate behavior and preserve existing operation, replay, transaction, actor, and fail-closed transition tests. This local source is not built or deployed.
+
+### Signing boundary and stop
+
+The previously retained signing artifact was found by its session-artifact name, but its inherited ACL granted FullControl not only to the current user, SYSTEM, and local Administrators, but also to an additional principal that could not be verified as part of the approved signing boundary. The key owner also did not resolve to an approved category. No key bytes were read, no permissions were changed, and no alternate or replacement key was generated. The key therefore was not used. Per the owner instructions, stop classification is `SIGNING_KEY_UNAVAILABLE`.
+
+The source fingerprint for `solutions/CandidateCore/Operation.cs` after the local correction is `772e2d443a240d377f5a568b357f60e3e907cb7da33c362f78f3d7c7c2936dd4`; Candidate Core test source fingerprint is `b5648cc1111b2d9552474af6caf608bf3bdf61d52864009291841299880f0d1b`. The corrected DLL hash is unavailable because it was not built. Strong-name identity continuity, current live API optionality, and deployment reconciliations were therefore not tested in R2.
+
+| R2 activity | Result |
+|---|---|
+| PowerShell suites before deployment | 8 suites, 1,058 assertions passed |
+| Candidate Core operation tests | 79 assertions passed |
+| Parser / `git diff --check` | Passed |
+| Fresh live pre-deployment reads | 0 |
+| Plug-in build / corrected DLL hash | Not attempted / unavailable |
+| Assembly update | 0 |
+| API metadata / schema / app / role / audit-setting / publication writes | 0 |
+| CreateCandidate / other business API invocations | 0 / 0 |
+| Business-row creates / cleanup deletes | 0 / 0 |
+| Automatic retries | 0 |
+| Commit / push | 0 / 0 |
+
+The changes now in the worktree are limited to the CreateCandidate optional-input correction, its tests, and this report/Current State update. HEAD remains unchanged; no commit or push was made. Do not alter the key ACL, use this key, deploy the local binary, or consume another runtime attempt without an approved protected signing mechanism and the applicable bounded authorization.
 
 ## Latest Phase 3D-R Continuation Disposition
 

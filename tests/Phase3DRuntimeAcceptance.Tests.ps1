@@ -57,8 +57,12 @@ $engineTests = Get-Content -Raw (Join-Path $root 'tests\CandidateCore\Program.cs
 Assert-Test ($engineTests -match 'SCHEDULER_DEPENDENCY_UNAVAILABLE' -and
     $engineTests -match 'RESULT_OR_CANCELLATION_DEPENDENCY_UNAVAILABLE' -and
     $engineTests -match 'Transition\(action, ActionRequest.Waiting, null\), "INVALID_TRANSITION"') 'Offline suite verifies evidence fail-closed behavior at scheduled and current states'
-Assert-Test ($operation -match 'Action == "CreateCandidate" && input\.TryGetValue\("CandidateId", out var createTarget\) && createTarget != null' -and
+Assert-Test ($operation -match 'Action == "CreateCandidate" && input\.TryGetValue\("CandidateId", out var createTarget\)' -and
     $operationTests -match 'Optional null CandidateId accepted on create' -and
-    $operationTests -match 'Request\(createWithNullCandidateId\), "UNEXPECTED_INPUT"') 'Optional CandidateId null accepted while non-null create identity remains rejected'
+    $operationTests -match 'Optional empty CandidateId accepted on create' -and
+    $operationTests -match 'Request\(createWithNullCandidateId\), "UNEXPECTED_INPUT"' -and
+    $operationTests -match 'INVALID_CANDIDATEID' -and
+    $operationTests -match 'Invalid CreateCandidate input has no business mutation' -and
+    $operationTests -match 'Organization audit inactive permits valid Candidate creation') 'CreateCandidate optional target handling and safety regressions are covered'
 
 "PASS: $script:Passed synthetic Phase 3D runtime-runner contract assertions; no authentication/network."

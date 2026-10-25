@@ -46,6 +46,12 @@ Assert-Test ($deployment -match 'Assert-PackageReadback' -and
     $deployment -match 'Assert-PackageSolutionMembership') 'Package metadata, bytes, and Solution membership are GET-reconciled'
 Assert-Test ($deployment -match 'if \(\$Mode -ceq ''InspectPackage''\)' -and
     $deployment -match 'PLUGIN_PACKAGE_POST_INSPECTION_COMPLETE' -and
+    $deployment -match 'PackageHandlerTypeId = \[string\]\$packageHandler\[0\]\.plugintypeid' -and
+    $deployment -match 'PackageGuardTypeId = \[string\]\$packageGuard\[0\]\.plugintypeid' -and
+    $deployment -match 'ApiHandlerMatchesPackage' -and
+    $deployment -match 'PackageModifiedOn = \[string\]\$package\.modifiedon' -and
+    $deployment -match 'PackageAssemblyModifiedOn = \[string\]\$assemblies\[0\]\.modifiedon' -and
+    $deployment -match 'LegacyHandlerTypeId = \[string\]\$legacyHandler\[0\]\.plugintypeid' -and
     $deployment -match 'ExpectedContentSha256Matches' -and
     $deployment -match 'DirectReadContentSha256Matches' -and
     $deployment -match 'SolutionMembershipMatches' -and
@@ -131,11 +137,12 @@ Assert-Test ($contract.handler -ceq 'os_sr_cact.ApplyCandidateAction' -and
 Assert-Test ($runtime -match 'ExpectedHandlerPackageUniqueName' -and
     $runtime -match 'Assert-PackageBackedHandler' -and
     $runtime -match 'Runtime Apply requires the reconciled package-backed handler identity') 'Runtime execution is gated on the package-backed API chain'
-Assert-Test ($runtime -match 'phase3d-r4f-owner-authorized-package-runtime' -and
+Assert-Test ($runtime -match 'phase3d-r4g-owner-authorized-package-runtime' -and
+    $runtime -notmatch 'phase3d-r4f-owner-authorized-package-runtime' -and
     $runtime -notmatch 'phase3d-r4e-owner-authorized-package-runtime' -and
     $runtime -notmatch 'phase3d-r4d-owner-authorized-package-runtime' -and
     $runtime -match '\[SYNTHETIC-E2E\] Candidate Core Acceptance' -and
-    $runtime -match '@example\.invalid') 'Runtime uses a distinct one-shot authorization and approved synthetic identity'
+    $runtime -match '@example\.invalid') 'R4G runtime uses a fresh one-shot authorization and approved synthetic identity'
 Assert-Test ($runtime -match 'MaximumRetryCount = 0' -and
     $runtime -match 'MaximumApiDispatches = \$expectedActionCalls' -and
     $runtime -match 'AutomaticRetries = 0') 'Runtime dispatch remains bounded with zero retries'

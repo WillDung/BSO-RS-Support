@@ -330,7 +330,7 @@ function Get-ApiSnapshot {
 }
 
 function Get-PackageRowsByName {
-    $rows = @(Get-PackageRows -Path "pluginpackages?`$select=pluginpackageid,name,uniquename,version,content&`$filter=uniquename eq '$($script:PackageIdentity.UniqueName)'")
+    $rows = @(Get-PackageRows -Path "pluginpackages?`$select=pluginpackageid,name,uniquename,version,modifiedon,content&`$filter=uniquename eq '$($script:PackageIdentity.UniqueName)'")
     $rows
 }
 
@@ -706,7 +706,7 @@ try {
             return
         }
         $package = $packages[0]
-        $packageDetail = Invoke-PackageRequest -Method GET -Path "pluginpackages($($package.pluginpackageid))?`$select=pluginpackageid,name,uniquename,version,content"
+        $packageDetail = Invoke-PackageRequest -Method GET -Path "pluginpackages($($package.pluginpackageid))?`$select=pluginpackageid,name,uniquename,version,modifiedon,content"
         $contentHash = if ([string]::IsNullOrWhiteSpace([string]$package.content)) {
             $null
         } else {
@@ -728,9 +728,9 @@ try {
         $sourceTypeLabels = @()
         if ($assemblyRelationships.Count -eq 1 -and $assemblyRelationships[0].ReferencingAttribute) {
             $packageLookup = "_$($assemblyRelationships[0].ReferencingAttribute)_value"
-            $assemblies = @(Get-PackageRows -Path "pluginassemblies?`$select=pluginassemblyid,name,version,sourcetype,$packageLookup&`$filter=$packageLookup eq $($package.pluginpackageid)")
+            $assemblies = @(Get-PackageRows -Path "pluginassemblies?`$select=pluginassemblyid,name,version,modifiedon,sourcetype,$packageLookup&`$filter=$packageLookup eq $($package.pluginpackageid)")
             if ($assemblies.Count -eq 1) {
-                $types = @(Get-PackageRows -Path "plugintypes?`$select=typename,_pluginassemblyid_value&`$filter=_pluginassemblyid_value eq $($assemblies[0].pluginassemblyid)")
+                $types = @(Get-PackageRows -Path "plugintypes?`$select=plugintypeid,typename,_pluginassemblyid_value&`$filter=_pluginassemblyid_value eq $($assemblies[0].pluginassemblyid)")
                 $sourceMetadata = Invoke-PackageRequest -Method GET -Path "EntityDefinitions(LogicalName='pluginassembly')/Attributes(LogicalName='sourcetype')/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?`$select=LogicalName&`$expand=OptionSet"
                 $sourceOptions = @($sourceMetadata.OptionSet.Options | Where-Object { [int]$_.Value -eq [int]$assemblies[0].sourcetype })
                 $sourceTypeLabels = @($sourceOptions | ForEach-Object {
@@ -742,9 +742,13 @@ try {
         $legacy = Get-LegacyHandlers -Plan $legacyPlan
         $api = Get-ApiSnapshot
         $legacyHandler = @($legacy.Types | Where-Object typename -CEQ $script:PackageIdentity.Handler)
+        $packageHandler = @($types | Where-Object typename -CEQ $script:PackageIdentity.Handler)
+        $packageGuard = @($types | Where-Object typename -CEQ $script:PackageIdentity.Guard)
         [ordered]@{
             Result = 'PLUGIN_PACKAGE_POST_INSPECTION_COMPLETE'
             PackageMatches = $packages.Count
+            PackageId = [string]$package.pluginpackageid
+            PackageModifiedOn = [string]$package.modifiedon
             NameMatches = $package.name -ceq $script:PackageIdentity.Name
             UniqueNameMatches = $package.uniquename -ceq $script:PackageIdentity.UniqueName
             Version = [string]$package.version
@@ -759,6 +763,7 @@ try {
                 $packageDetail.name -ceq $script:PackageIdentity.Name -and
                 $packageDetail.uniquename -ceq $script:PackageIdentity.UniqueName -and
                 [string]$packageDetail.version -ceq $script:PackageIdentity.Version)
+            DirectReadModifiedOn = [string]$packageDetail.modifiedon
             SolutionMembershipMatches = ($solutionComponents.Count -eq 1 -and
                 [string]$solutionComponents[0].objectid -ieq [string]$package.pluginpackageid -and
                 [int]$solutionComponents[0].componenttype -eq [int]$packageMetadata.ObjectTypeCode)
@@ -774,10 +779,25 @@ try {
             })
             PackageAssemblyRelationshipCount = $assemblyRelationships.Count
             PackageAssemblyCount = $assemblies.Count
+            PackageAssemblyId = [string]$assemblies[0].pluginassemblyid
+            PackageAssemblyModifiedOn = [string]$assemblies[0].modifiedon
             PackageAssemblyNames = @($assemblies | ForEach-Object { [string]$_.name })
             PackageAssemblyVersions = @($assemblies | ForEach-Object { [string]$_.version })
             PackageAssemblySourceTypeLabels = $sourceTypeLabels
             PackagePluginTypes = @($types | ForEach-Object { [string]$_.typename } | Sort-Object)
+            PackageHandlerTypeId = [string]$packageHandler[0].plugintypeid
+            PackageHandlerTypeName = [string]$packageHandler[0].typename
+            PackageGuardTypeId = [string]$packageGuard[0].plugintypeid
+            PackageGuardTypeName = [string]$packageGuard[0].typename
+            ApiId = [string]$api.Api.customapiid
+            ApiUniqueName = [string]$api.Api.uniquename
+            ApiHandlerTypeId = [string]$api.HandlerId
+            ApiHandlerMatchesPackage = ($packageHandler.Count -eq 1 -and
+                [string]$api.HandlerId -ieq [string]$packageHandler[0].plugintypeid)
+            LegacyAssemblyId = [string]$legacy.AssemblyId
+            LegacyHandlerTypeId = [string]$legacyHandler[0].plugintypeid
+            LegacyHandlerTypeName = [string]$legacyHandler[0].typename
+            LegacyGuardTypeId = [string]$legacy.GuardType.plugintypeid
             LegacyAssemblyHashMatches = $true
             LegacyGuardStepCount = $legacy.Steps.Count
             ApiContractMatches = $true

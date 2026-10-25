@@ -1,10 +1,10 @@
 # Phase 3D - Candidate Core Synthetic Runtime Acceptance
 
-Date: 25 October 2026. This report records the Phase 3D-R4E ExpectedStatus correction, PRT package update, handler cutover, and one-shot runtime result, retaining earlier assessments as history. Source: owner authorization, current repository contract/source, live guarded metadata reconciliation, local offline validation, and Microsoft's published Dataverse metadata documentation.
+Date: 25 October 2026. This report records the Phase 3D-R4E ExpectedStatus correction and PRT update, the later R4G PAC package update and CreateCandidate failure, and earlier assessments as history. Source: owner authorization, current repository contract/source, live guarded metadata reconciliation, local offline validation, and Microsoft's published Dataverse metadata documentation.
 
 ## Phase 3D-R4G Active Package Update and CreateCandidate Acceptance
 
-**R4G local artifact gate passed; no R4G live operation was performed.** The target environment confirmation request was unanswered. Dataverse environment operations are therefore pending explicit confirmation; no PAC identity call, live reconciliation, package update, handler write, business API call, or retry occurred in R4G. The local unsigned R4F package has not been updated in Dataverse under R4G, and no R4G runtime result is assigned.
+**`CREATECANDIDATE_RUNTIME_FAILURE` — the existing package was updated once and reconciled; one approved CreateCandidate invocation was rejected with `INVALID_LOOKUP`.** The owner explicitly confirmed VN LMV IT as the target. PAC identity and guarded WhoAmI matched the expected environment and user. No retry, payload variation, or subsequent runtime-matrix operation was performed.
 
 ### Local package gate
 
@@ -12,13 +12,21 @@ Without rebuilding or modifying the artifact, the existing package was revalidat
 
 Current local DLL SHA-256: `c1ff0d21d72b2d10f92bf12d02fd381df2b5c16eb3e7b549fb2bcd4ce783f5c9`. Package SHA-256: `4729700e36fa384ae7909c14a2bfee2cf1da8592503292511597121668eebd79`. The embedded DLL hash matches the current DLL. The package inventory contains five paths: `_rels/.rels`, `[Content_Types].xml`, `lib/net462/os_sr_cact.dll`, `os_sr_cact_pkg.nuspec`, and `package/services/metadata/core-properties/nuget.psmdcp`. Fingerprint (SHA-256 of sorted `entry-path|uncompressed-length` lines joined with LF): `f0a38e99466fe5d8ea66a2709495970f04da53a09c747f02a19e6b635168fc97`.
 
-The local Candidate Core harness and applicable offline tests are recorded below in the R4F section. The SDK adapter harness was not run: its legacy signing guard requires protected signing material, which was not accessed. That harness covers SDK-layer input adaptation not covered by the engine-only harness, so its behavior remains unverified; under the R4G signing-key boundary it is not a prerequisite for deploying the unsigned package.
+The local Candidate Core harness and applicable offline tests are recorded below in the R4F section. The SDK adapter harness was not run: its legacy signing guard requires protected signing material, which was not accessed. Its status is `LEGACY_SIGNED_HARNESS_NOT_APPLICABLE_TO_PACKAGE_DEPLOYMENT`; it remains outside the unsigned package deployment prerequisite.
 
 ### R4G live-operation disposition
 
-The last read-only Dataverse evidence, collected during R4F, established the package-backed CreateCandidate handler as active. The owner’s R4G correction confirms this is the authoritative current baseline and supersedes R4F’s stale assumption that the handler should be legacy. It does not establish that the R4F package bytes are deployed. No R4G fresh package/API/schema/receipt-key reconciliation or row counts were performed because environment confirmation was not received. Consequently package update count, pre/post deployment hashes, handler-before/after in R4G, CreateCandidate outcome, and runtime matrix are all **not executed / unknown**; no previous count is reused as a current count.
+Fresh GET reconciliation confirmed the existing `os_sr_cact_pkg` v1.0.0, its package-backed assembly and both expected types, unchanged Custom API contract, exact Candidate Core schema, Active receipt key, and package-backed `ApplyCandidateAction` routing. Candidate Core handlers were package-backed before and after the update; no Custom API handler PATCH was made. The pre-update count-only gate was Candidate/Call Log/Status History/Receipt = 0/0/0/0.
 
-Once the target URL is explicitly confirmed in-session, resume with fresh identity and metadata/storage reconciliation, count-only verification of Candidate/Call Log/Status History/Receipt all at zero, then update the existing package once through the approved PRT path and reconcile it without a redundant handler PATCH. Invoke CreateCandidate once only after those gates pass. No broad cleanup, signing-key action, legacy assembly update, or automatic retry is authorized.
+The PRT Update form was opened but not saved because its displayed name/prefix did not unambiguously establish the live package UniqueName. Exactly one in-place update of the existing package was then performed successfully with PAC CLI `pac plugin push`; no package was created and no legacy assembly was changed. Immediate GET reconciliation retained the same package identity, UniqueName, version, assembly/type identities, Solution membership, API contract, and handler route. The package row's `ModifiedOn` advanced; the assembly's `ModifiedOn` did not. Dataverse GET did not expose package content, so neither the pre- nor post-update deployed binary hash is known. The verified local package and DLL SHA-256 values remain those recorded above; they are not evidence of deployed bytes.
+
+The post-update zero-row gate passed. The single synthetic request contained `ActionType`, `CorrelationId`, `CandidateName`, and `CandidateEmail`; it omitted `CandidateId` and `ExpectedStatus`. Its journal fingerprint is `4ce30f4126dc4ba6b7539f636aba30c071298ee4cc6ee987d07ce5fd0129d2e8`. The API returned HTTP 400 / Dataverse `0x80040265` / `INVALID_LOOKUP`; the dispatch journal records one rejected CreateCandidate, zero retries, and classification `CREATECANDIDATE_RUNTIME_FAILURE`. The cause of `INVALID_LOOKUP` is not established by this response and no diagnosis is inferred. The runtime runner stopped before all remaining matrix actions.
+
+A fresh count-only preflight after the rejection again found Candidate/Call Log/Status History/Receipt = 0/0/0/0 and confirmed the package-backed handler remained active. It made 14 GETs, zero Custom API invocations, and zero business-data writes. Package update count: 1; handler PATCHes: 0; CreateCandidate dispatches: 1; automatic retries: 0. Do not retry or resume the matrix without new explicit authorization.
+
+### R4G offline validation
+
+After the R4G documentation and runtime-runner changes, all 10 PowerShell suites passed (1,103 assertions), including the 12-assertion package identity/content suite; the Candidate Core operation harness passed 97 assertions; all 20 project PowerShell scripts parsed; relative Markdown links in the three updated documents resolved; the added-line privacy scan passed; and `git diff --check` passed. No package rebuild, signing-key access, or additional live business API call was performed.
 
 ## Phase 3D-R4F CreateCandidate ExpectedStatus Ignore Contract
 

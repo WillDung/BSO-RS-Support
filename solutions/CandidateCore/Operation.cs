@@ -64,6 +64,7 @@ namespace os_sr_cact
             var values = new SortedDictionary<string, object?>(StringComparer.Ordinal);
             var common = new[] { "ActionType", "CorrelationId", "CandidateId", "ExpectedStatus" };
             var profile = new[] { "CandidateName", "CandidateEmail", "CandidatePhone", "PositionId", "CandidateSourceId" };
+            var optionalGuidProfile = new[] { "PositionId", "CandidateSourceId" };
             var allowed = new HashSet<string>(common, StringComparer.Ordinal);
             if (Action == "CreateCandidate" || Action == "UpdateCandidate") allowed.UnionWith(profile);
             if (Action == "RecordCall") allowed.UnionWith(new[] { "CallOutcome", "ContactedAt", "Notes" });
@@ -73,15 +74,14 @@ namespace os_sr_cact
                 if (!allowed.Contains(pair.Key)) throw new OperationError("UNEXPECTED_INPUT");
                 if (Action == "CreateCandidate" && pair.Key == "ExpectedStatus")
                     continue;
+                if (Action == "CreateCandidate" && pair.Key == "CandidateId")
+                    continue;
                 object? value = pair.Value;
-                if (Action == "CreateCandidate" && pair.Key == "CandidateId" &&
-                    value is Guid emptyCandidateId && emptyCandidateId == Guid.Empty)
-                    value = null;
                 if (profile.Contains(pair.Key) || pair.Key == "Notes" || pair.Key == "Reason")
                 {
-                    if (pair.Key.EndsWith("Id", StringComparison.Ordinal))
+                    if (optionalGuidProfile.Contains(pair.Key))
                     {
-                        if (value != null && (!(value is Guid lookup) || lookup == Guid.Empty)) throw new OperationError("INVALID_LOOKUP");
+                        if (!NormalizeOptionalGuid(Action, pair.Key, value, out value)) continue;
                     }
                     else
                     {
@@ -142,6 +142,26 @@ namespace os_sr_cact
         {
             if (!input.TryGetValue(name, out var value) || !(value is T typed)) throw new OperationError("INVALID_" + name.ToUpperInvariant());
             return typed;
+        }
+
+        private static bool NormalizeOptionalGuid(string action, string name, object? value, out object? normalized)
+        {
+            normalized = value;
+            if (value == null)
+                return action != "CreateCandidate";
+            if (!(value is Guid id))
+                throw new OperationError("INVALID_GUID_PARAMETER:" + name);
+            if (id != Guid.Empty)
+            {
+                normalized = id;
+                return true;
+            }
+            if (action == "CreateCandidate")
+            {
+                normalized = null;
+                return false;
+            }
+            throw new OperationError("INVALID_GUID_PARAMETER:" + name);
         }
     }
 

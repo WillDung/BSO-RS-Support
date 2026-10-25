@@ -137,12 +137,13 @@ Assert-Test ($contract.handler -ceq 'os_sr_cact.ApplyCandidateAction' -and
 Assert-Test ($runtime -match 'ExpectedHandlerPackageUniqueName' -and
     $runtime -match 'Assert-PackageBackedHandler' -and
     $runtime -match 'Runtime Apply requires the reconciled package-backed handler identity') 'Runtime execution is gated on the package-backed API chain'
-Assert-Test ($runtime -match 'phase3d-r4g-owner-authorized-package-runtime' -and
+Assert-Test ($runtime -match 'phase3d-r4i-owner-authorized-package-runtime' -and
+    $runtime -notmatch 'phase3d-r4g-owner-authorized-package-runtime' -and
     $runtime -notmatch 'phase3d-r4f-owner-authorized-package-runtime' -and
     $runtime -notmatch 'phase3d-r4e-owner-authorized-package-runtime' -and
     $runtime -notmatch 'phase3d-r4d-owner-authorized-package-runtime' -and
     $runtime -match '\[SYNTHETIC-E2E\] Candidate Core Acceptance' -and
-    $runtime -match '@example\.invalid') 'R4G runtime uses a fresh one-shot authorization and approved synthetic identity'
+    $runtime -match '@example\.invalid') 'R4I runtime uses a fresh one-shot authorization and approved synthetic identity'
 Assert-Test ($runtime -match 'MaximumRetryCount = 0' -and
     $runtime -match 'MaximumApiDispatches = \$expectedActionCalls' -and
     $runtime -match 'AutomaticRetries = 0') 'Runtime dispatch remains bounded with zero retries'

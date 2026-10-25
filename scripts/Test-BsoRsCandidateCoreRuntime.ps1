@@ -14,8 +14,9 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot
 $manifestPath = Join-Path $root 'docs\PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json'
 $contractPath = Join-Path $root 'docs\PHASE_3C_API_CONTRACT.json'
+$script:apiContract = Get-Content -LiteralPath $contractPath -Raw | ConvertFrom-Json
 $expectedManifestHash = '63f56173f61265f539d23d6ceffb5631e23f438e4e254755c1e24c7d17eb1915'
-$runtimeAuthorizationId = 'phase3d-r4g-owner-authorized-package-runtime'
+$runtimeAuthorizationId = 'phase3d-r4i-owner-authorized-package-runtime'
 $expectedActionCalls = 8
 $schedulingEvidenceChecks = @(
     [ordered]@{
@@ -170,13 +171,42 @@ function Get-Rows {
 
 function Assert-PackageBackedHandler {
     param([Parameter(Mandatory)][string]$PackageUniqueName)
-    $api = @(Get-Rows -Path "customapis?%24select=customapiid,uniquename,_plugintypeid_value&%24filter=uniquename eq 'os_sr_cact'")
+    $api = @(Get-Rows -Path "customapis?%24select=customapiid,uniquename,executeprivilegename,bindingtype,isfunction,isprivate,allowedcustomprocessingsteptype,_plugintypeid_value&%24filter=uniquename eq '$($script:apiContract.uniqueName)'")
     if ($api.Count -ne 1 -or $api[0].uniquename -cne 'os_sr_cact') {
         throw 'Runtime Custom API inventory is missing or duplicated.'
     }
+    $inputs = @(Get-Rows -Path "customapirequestparameters?%24filter=_customapiid_value eq $($api[0].customapiid)")
+    $outputs = @(Get-Rows -Path "customapiresponseproperties?%24filter=_customapiid_value eq $($api[0].customapiid)")
+    $expectedInputs = @($script:apiContract.inputs | ForEach-Object {
+        '{0}|{1}|{2}' -f $_.name, [int]$_.type, [bool]$_.optional
+    } | Sort-Object)
+    $actualInputs = @($inputs | ForEach-Object {
+        '{0}|{1}|{2}' -f $_.uniquename, [int]$_.type, [bool]$_.isoptional
+    } | Sort-Object)
+    $expectedOutputs = @($script:apiContract.outputs | ForEach-Object {
+        '{0}|{1}' -f $_.name, [int]$_.type
+    } | Sort-Object)
+    $actualOutputs = @($outputs | ForEach-Object {
+        '{0}|{1}' -f $_.uniquename, [int]$_.type
+    } | Sort-Object)
+    $guidInputsWithEntity = @($inputs | Where-Object {
+        [int]$_.type -eq 12 -and -not [string]::IsNullOrWhiteSpace([string]$_.logicalentityname)
+    })
+    if ($api[0].executeprivilegename -cne $script:apiContract.executePrivilegeName -or
+        [int]$api[0].bindingtype -ne [int]$script:apiContract.bindingType -or
+        [bool]$api[0].isfunction -ne [bool]$script:apiContract.isFunction -or
+        [bool]$api[0].isprivate -ne [bool]$script:apiContract.isPrivate -or
+        [int]$api[0].allowedcustomprocessingsteptype -ne [int]$script:apiContract.allowedCustomProcessingStepType -or
+        $inputs.Count -ne $script:apiContract.inputs.Count -or
+        [string]::Join(';', $actualInputs) -cne [string]::Join(';', $expectedInputs) -or
+        $outputs.Count -ne $script:apiContract.outputs.Count -or
+        [string]::Join(';', $actualOutputs) -cne [string]::Join(';', $expectedOutputs) -or
+        $guidInputsWithEntity.Count -ne 0) {
+        throw 'Runtime Custom API contract or GUID logical-entity metadata differs from the approved contract.'
+    }
     $typeId = [string]$api[0]._plugintypeid_value
     $type = Invoke-RuntimeRequest -Method GET -Path "plugintypes($typeId)?%24select=plugintypeid,typename,_pluginassemblyid_value"
-    if ([string]$type.typename -cne 'os_sr_cact.ApplyCandidateAction' -or
+    if ([string]$type.typename -cne $script:apiContract.handler -or
         -not [string]$type._pluginassemblyid_value) {
         throw 'Runtime Custom API handler type is not the approved package assembly handler.'
     }
@@ -194,13 +224,36 @@ function Assert-PackageBackedHandler {
     }
     $packageId = [string]$assembly.$packageLookup
     $package = Invoke-RuntimeRequest -Method GET -Path "pluginpackages($packageId)?%24select=pluginpackageid,uniquename,version"
-    if ([string]$package.uniquename -cne $PackageUniqueName -or [string]$package.version -cne '1.0.0') {
+    $packagesByName = @(Get-Rows -Path "pluginpackages?%24select=pluginpackageid,name,uniquename,version&%24filter=uniquename eq '$PackageUniqueName'")
+    if ($packagesByName.Count -ne 1 -or
+        [string]$packagesByName[0].pluginpackageid -ine $packageId -or
+        $packagesByName[0].name -cne $PackageUniqueName -or
+        [string]$package.uniquename -cne $PackageUniqueName -or
+        [string]$package.version -cne '1.0.0' -or
+        [string]$packagesByName[0].version -cne '1.0.0') {
         throw 'Runtime handler does not resolve to the approved PluginPackage.'
+    }
+    $packageTypes = @(Get-Rows -Path "plugintypes?%24select=typename,_pluginassemblyid_value&%24filter=_pluginassemblyid_value eq $assemblyId")
+    $expectedPackageTypes = @($script:apiContract.handler, $script:apiContract.guard) | Sort-Object
+    $actualPackageTypes = @($packageTypes | ForEach-Object { [string]$_.typename } | Sort-Object)
+    if ($packageTypes.Count -ne 2 -or
+        [string]::Join('|', $actualPackageTypes) -cne [string]::Join('|', $expectedPackageTypes)) {
+        throw 'Runtime package assembly does not contain exactly the approved handler and guard types.'
     }
     [ordered]@{
         ApiUniqueName = [string]$api[0].uniquename
         HandlerType = [string]$type.typename
         PackageUniqueName = [string]$package.uniquename
+        PackageCount = $packagesByName.Count
+        PackageTypes = $actualPackageTypes
+        RequestParameters = @($inputs | Sort-Object uniquename | ForEach-Object {
+            [ordered]@{
+                UniqueName = [string]$_.uniquename
+                Type = [int]$_.type
+                IsOptional = [bool]$_.isoptional
+                LogicalEntityName = if ($_.logicalentityname) { [string]$_.logicalentityname } else { $null }
+            }
+        })
     }
 }
 
@@ -376,7 +429,7 @@ try {
     if ((Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expectedManifestHash) {
         throw 'Current Candidate Core manifest fingerprint differs from the authorized baseline.'
     }
-    if ((Get-Content -Raw $contractPath | ConvertFrom-Json).uniqueName -cne 'os_sr_cact') {
+    if ($script:apiContract.uniqueName -cne 'os_sr_cact') {
         throw 'Approved Custom API contract identity mismatch.'
     }
     if ($RuntimeMode -ceq 'Apply' -and

@@ -40,6 +40,56 @@ internal static class Program
 
     private static void Main()
     {
+        var createWithoutOptionalGuids = CreateCandidateHost();
+        new ApplyCandidateAction().Execute(createWithoutOptionalGuids);
+        Check(createWithoutOptionalGuids.CreatedCandidates == 1 &&
+            !createWithoutOptionalGuids.CreatedCandidate!.Contains("os_sr_cand_pos") &&
+            !createWithoutOptionalGuids.CreatedCandidate.Contains("os_sr_cand_csrc") &&
+            (int)createWithoutOptionalGuids.Output["CurrentStatus"] == ActionRequest.NeedCall &&
+            createWithoutOptionalGuids.Calls == 0 && createWithoutOptionalGuids.Histories == 0 &&
+            createWithoutOptionalGuids.Receipt != null,
+            "SDK CreateCandidate omits optional GUIDs and uses server-controlled initial status");
+        foreach (string parameter in new[] { "PositionId", "CandidateSourceId" })
+        {
+            foreach (object? absentEquivalent in new object?[] { null, Guid.Empty })
+            {
+                var host = CreateCandidateHost();
+                host.Input[parameter] = absentEquivalent;
+                new ApplyCandidateAction().Execute(host);
+                string attribute = parameter == "PositionId" ? "os_sr_cand_pos" : "os_sr_cand_csrc";
+                Check(host.CreatedCandidates == 1 && !host.CreatedCandidate!.Contains(attribute),
+                    "SDK CreateCandidate normalizes " + parameter + " absent-equivalent to no lookup");
+            }
+            var validHost = CreateCandidateHost();
+            var lookupId = Guid.NewGuid();
+            validHost.Input[parameter] = lookupId;
+            new ApplyCandidateAction().Execute(validHost);
+            string validAttribute = parameter == "PositionId" ? "os_sr_cand_pos" : "os_sr_cand_csrc";
+            var reference = validHost.CreatedCandidate!.GetAttributeValue<EntityReference>(validAttribute);
+            Check(reference != null && reference.Id == lookupId &&
+                reference.LogicalName == (parameter == "PositionId" ? "os_sr_pos" : "os_sr_csrc"),
+                "SDK CreateCandidate preserves valid " + parameter + " reference");
+
+            var invalidHost = CreateCandidateHost();
+            invalidHost.Input[parameter] = "not-a-guid";
+            Reject(() => new ApplyCandidateAction().Execute(invalidHost), "INVALID_GUID_PARAMETER:" + parameter);
+            Check(invalidHost.CreatedCandidates == 0 && invalidHost.Receipt == null,
+                "SDK invalid " + parameter + " rejected before any create");
+        }
+        var createWithNullCandidateId = CreateCandidateHost();
+        createWithNullCandidateId.Input["CandidateId"] = null;
+        new ApplyCandidateAction().Execute(createWithNullCandidateId);
+        Check(createWithNullCandidateId.CreatedCandidates == 1, "SDK CreateCandidate accepts null CandidateId");
+        var createWithEmptyCandidateId = CreateCandidateHost();
+        createWithEmptyCandidateId.Input["CandidateId"] = Guid.Empty;
+        new ApplyCandidateAction().Execute(createWithEmptyCandidateId);
+        Check(createWithEmptyCandidateId.CreatedCandidates == 1, "SDK CreateCandidate accepts empty CandidateId");
+        var malformedCandidateId = CreateCandidateHost();
+        malformedCandidateId.Input["CandidateId"] = "not-a-guid";
+        Reject(() => new ApplyCandidateAction().Execute(malformedCandidateId), "INVALID_CANDIDATEID");
+        Check(malformedCandidateId.CreatedCandidates == 0 && malformedCandidateId.Receipt == null,
+            "SDK malformed CandidateId rejected before any create");
+
         var createInput = new Dictionary<string, object?>
         {
             ["ActionType"] = "CreateCandidate",
@@ -70,6 +120,24 @@ internal static class Program
         Check(auditPending.Calls == 1 && auditPending.Updates == 1 && auditPending.Receipt != null,
             "SDK organization audit state does not block operation evidence");
         Check(auditPending.OrganizationReads == 0, "SDK does not query organization audit state");
+        var validUpdate = new Host(100010000);
+        validUpdate.Input["ActionType"] = "UpdateCandidate";
+        validUpdate.Input["CandidateName"] = "Synthetic Replacement";
+        validUpdate.Input.Remove("CallOutcome");
+        validUpdate.Input.Remove("ContactedAt");
+        validUpdate.Input.Remove("ExpectedStatus");
+        validUpdate.Input["ExpectedStatus"] = ActionRequest.NeedCall;
+        new ApplyCandidateAction().Execute(validUpdate);
+        Check(validUpdate.Updates == 1 && validUpdate.CandidateRequests.Count == 1,
+            "SDK UpdateCandidate accepts matching ExpectedStatus");
+        var staleUpdate = new Host(100010000) { Status = ActionRequest.Answered };
+        staleUpdate.Input["ActionType"] = "UpdateCandidate";
+        staleUpdate.Input["CandidateName"] = "Synthetic Replacement";
+        staleUpdate.Input.Remove("CallOutcome");
+        staleUpdate.Input.Remove("ContactedAt");
+        Reject(() => new ApplyCandidateAction().Execute(staleUpdate), "STALE_EXPECTED_STATUS");
+        Check(staleUpdate.Updates == 0 && staleUpdate.Receipt == null,
+            "SDK UpdateCandidate rejects stale ExpectedStatus without mutation");
         foreach (string property in new[] { "IsInTransaction", "Depth", "UserId" })
         {
             var host = new Host(100010000);
@@ -110,20 +178,39 @@ internal static class Program
         Console.WriteLine("PASS: " + passed + " offline SDK adapter/guard assertions; dynamic synthetic SDK contexts and service, no authentication/network.");
     }
 
+    private static Host CreateCandidateHost()
+    {
+        var host = new Host(100010000, true);
+        host.Input["ExpectedStatus"] = new OptionSetValue(ActionRequest.NeedCall);
+        return host;
+    }
+
     private sealed class Host : IServiceProvider
     {
         public ParameterCollection Input = new ParameterCollection(), Output = new ParameterCollection(), Shared = new ParameterCollection();
         public Dictionary<string, object?> MainValues;
         public IPluginExecutionContext MainContext;
-        public Entity? Receipt;
-        public int Calls, Histories, Updates, OrganizationReads, Status = 100010000;
+        public Entity? Receipt, CreatedCandidate;
+        public int Calls, Histories, Updates, CreatedCandidates, OrganizationReads, Status = 100010000;
         public bool OrganizationAuditEnabled = true, TamperTarget;
         public List<Guid?> CallerFactorySelections = new List<Guid?>();
         public List<UpdateRequest> CandidateRequests = new List<UpdateRequest>();
-        public Host(int outcome)
+        public Host(int outcome, bool createCandidate = false)
         {
-            Input["ActionType"] = "RecordCall"; Input["CorrelationId"] = Guid.NewGuid(); Input["CandidateId"] = Candidate;
-            Input["ExpectedStatus"] = 100010000; Input["CallOutcome"] = outcome; Input["ContactedAt"] = DateTime.UtcNow.AddMinutes(-1);
+            Input["ActionType"] = createCandidate ? "CreateCandidate" : "RecordCall";
+            Input["CorrelationId"] = Guid.NewGuid();
+            if (createCandidate)
+            {
+                Input["CandidateName"] = "Synthetic Candidate";
+                Input["CandidateEmail"] = "synthetic@example.invalid";
+            }
+            else
+            {
+                Input["CandidateId"] = Candidate;
+                Input["ExpectedStatus"] = 100010000;
+                Input["CallOutcome"] = outcome;
+                Input["ContactedAt"] = DateTime.UtcNow.AddMinutes(-1);
+            }
             MainValues = Context(Input, Shared, Output);
             MainContext = Execution(MainValues);
         }
@@ -172,6 +259,7 @@ internal static class Program
                 Guard("Create", row, MainContext);
                 if (row.LogicalName == "os_sr_call") { Calls++; Check(row.GetAttributeValue<EntityReference>("os_sr_call_ctby").Id == Actor, "SDK Contacted By"); }
                 else if (row.LogicalName == "os_sr_csh") { Histories++; Check(row.GetAttributeValue<EntityReference>("os_sr_csh_actr").Id == Actor, "SDK History Actor"); }
+                else if (row.LogicalName == "os_sr_cand") { CreatedCandidates++; CreatedCandidate = row; }
                 else if (row.LogicalName == "os_sr_oprc") { Receipt = row; Receipt["createdby"] = new EntityReference("systemuser", Actor); }
                 else throw new Exception("Unexpected Create");
                 return row.Id;

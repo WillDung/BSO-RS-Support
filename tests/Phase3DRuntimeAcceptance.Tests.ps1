@@ -2,7 +2,11 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot
 $runtimePath = Join-Path $root 'scripts\Test-BsoRsCandidateCoreRuntime.ps1'
+$sdkTestPath = Join-Path $root 'tests\CandidateCoreSdk\Program.cs'
+$sdkProjectPath = Join-Path $root 'tests\CandidateCoreSdk\CandidateCoreSdk.Tests.csproj'
 $runtime = Get-Content -Raw $runtimePath
+$sdkTests = Get-Content -Raw $sdkTestPath
+$sdkProject = Get-Content -Raw $sdkProjectPath
 $pluginPath = Join-Path $root 'solutions\CandidateCore\DataversePlugin.cs'
 $plugin = Get-Content -Raw $pluginPath
 $operation = Get-Content -Raw (Join-Path $root 'solutions\CandidateCore\Operation.cs')
@@ -22,14 +26,35 @@ Assert-Test ($runtime -match "ValidateSet\('GET', 'POST'\)" -and
     $runtime -match "Path -cne 'os_sr_cact'" -and $runtime -match 'MaximumRetryCount = 0' -and
     $runtime -match 'MaximumRedirection = 0' -and $runtime -match 'expectedActionCalls = 8') 'Only bounded Custom API calls with zero retries'
 Assert-Test ($runtime -match 'FileMode\]::CreateNew' -and $runtime -match 'phase3d-r-runtime-' -and
-    $runtime -match 'phase3d-r4g-owner-authorized-package-runtime' -and
+    $runtime -match 'phase3d-r4i-owner-authorized-package-runtime' -and
+    $runtime -notmatch 'phase3d-r4g-owner-authorized-package-runtime' -and
     $runtime -notmatch 'phase3d-r4f-owner-authorized-package-runtime' -and
     $runtime -notmatch 'phase3d-r4e-owner-authorized-package-runtime' -and
     $runtime -notmatch 'phase3d-r4d-owner-authorized-package-runtime' -and
-    $runtime -match 'one-shot runtime authorization consumed') 'Authorization-specific one-shot lock preserves prior consumed lock'
+    $runtime -match 'one-shot runtime authorization consumed') 'R4I has a distinct one-shot lock from all prior consumed authorizations'
 Assert-Test ($runtime -match "\`$name = '\[SYNTHETIC-E2E\]" -and
     $runtime -match '\[SYNTHETIC-E2E\] Candidate Core Acceptance' -and
     $runtime -match '@example\.invalid' -and $runtime -notmatch '@example\.com') 'Fixture identity is unmistakably synthetic and reserved'
+$createRequest = [regex]::Match($runtime, '(?s)\$create = \[ordered\]@\{(?<body>.*?)\n\s*\}')
+Assert-Test ($createRequest.Success -and
+    $createRequest.Groups['body'].Value -match 'ActionType = ''CreateCandidate''' -and
+    $createRequest.Groups['body'].Value -match 'CorrelationId' -and
+    $createRequest.Groups['body'].Value -match 'CandidateName' -and
+    $createRequest.Groups['body'].Value -match 'CandidateEmail' -and
+    $createRequest.Groups['body'].Value -notmatch 'CandidateId|ExpectedStatus|PositionId|CandidateSourceId') `
+    'CreateCandidate request builder omits optional Guid inputs'
+Assert-Test ($sdkProject -match 'CandidateCorePackage\\CandidateCore\.Package\.csproj' -and
+    $sdkProject -notmatch 'solutions\\CandidateCore\\CandidateCore\.csproj') `
+    'SDK adapter harness references the unsigned package source, not the legacy signed project'
+Assert-Test ($sdkTests -match 'normalizes .* absent-equivalent to no lookup' -and
+    $sdkTests -match 'preserves valid .* reference' -and
+    $sdkTests -match 'rejected before any create' -and
+    $sdkTests -match 'accepts null CandidateId' -and
+    $sdkTests -match 'accepts empty CandidateId' -and
+    $sdkTests -match 'malformed CandidateId rejected before any create' -and
+    $sdkTests -match 'UpdateCandidate accepts matching ExpectedStatus' -and
+    $sdkTests -match 'UpdateCandidate rejects stale ExpectedStatus') `
+    'SDK adapter tests cover optional GUID normalization and existing-record validation'
 Assert-Test ($runtime -match 'Get-Count -EntitySet' -and
     $runtime -match 'Zero-row safety gate failed' -and
     $runtime.IndexOf('Zero-row safety gate failed') -lt $runtime.IndexOf('Invoke-Action -Body $create')) 'Zero-row check precedes first business API invocation'
@@ -65,7 +90,12 @@ Assert-Test ($runtime -match 'AuditSettingWrites = 0' -and $runtime -match 'Publ
     $runtime -notmatch 'Invoke-RuntimeRequest -Method (PUT|PATCH|DELETE)') 'No audit, app, or metadata mutation path exists'
 Assert-Test ($runtime -match 'ExpectedHandlerPackageUniqueName' -and
     $runtime -match 'Assert-PackageBackedHandler' -and
-    $runtime -match 'Runtime Apply requires the reconciled package-backed handler identity') 'Runtime apply requires the package-backed handler chain'
+    $runtime -match 'Runtime Apply requires the reconciled package-backed handler identity' -and
+    $runtime -match 'Runtime package assembly does not contain exactly the approved handler and guard types' -and
+    $runtime -match 'PackageCount = \$packagesByName.Count' -and
+    $runtime -match 'Runtime Custom API contract or GUID logical-entity metadata differs from the approved contract' -and
+    $runtime -match 'customapirequestparameters' -and $runtime -match 'customapiresponseproperties' -and
+    $runtime -match 'RequestParameters = @\(\$inputs') 'Runtime preflight reconciles package types and the complete live Custom API contract'
 Assert-Test ($runtime -match 'CandidateIdSha256' -and $runtime -match 'ActorIdSha256' -and
     $runtime -match 'PayloadSha256' -and $runtime -notmatch 'CandidateEmail = .*journal') 'Evidence stores hashes, not raw identifiers or candidate fields'
 Assert-Test ($plugin -match 'if \(!context\.IsInTransaction \|\| context\.UserId != context\.InitiatingUserId\)' -and

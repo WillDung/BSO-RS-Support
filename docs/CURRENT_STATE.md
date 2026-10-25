@@ -1,5 +1,17 @@
 # Current State
 
+## Phase 3D-R4I Optional Guid Normalization and SDK Adapter Acceptance (2026-10-25)
+
+**`CREATECANDIDATE_RUNTIME_FAILURE` — one in-place update of the existing unsigned `os_sr_cact_pkg` completed; the single authorized CreateCandidate call returned HTTP 400 / `0x80040265` / `UNEXPECTED_INPUT`. No retry or later runtime-matrix operation occurred.**
+
+The optional `PositionId` and `CandidateSourceId` Guid inputs now normalize absent/null/empty values to omission for creation; malformed runtime types receive parameter-specific rejection, valid Guids remain lookup references, and UpdateCandidate's explicit-null clearing/status behavior is preserved. The SDK adapter harness now builds against the unsigned package source, without accessing the protected legacy signing key.
+
+The local unsigned package is `os_sr_cact_pkg` v1.0.0 with the approved five-entry inventory. DLL SHA-256: `ba2a12a6e99242fabff375ed7272f334477769bdaf4cc33cc665c223db242043`; package SHA-256: `f70b76dafc5f27477b782950edabcf761391d470cdaacbb9cbc2256c5a0fbfa1`; inventory fingerprint: `3a2667983f044e9b1e611d493adf991c17808af925fb406bc758e6364440fc4e`. PAC CLI updated the existing package once (exit code 0, automatic retries 0). Fresh GETs retained the same package identity/version, package-backed assembly and handler/guard types, and unchanged API contract. The package modified time advanced; assembly metadata modified time was unchanged. Package content is not exposed by GET, so a deployed binary hash is unavailable.
+
+Pre- and post-update gates verified VN LMV IT identity, exact Candidate Core schema, Active Operation Receipt key, package-backed handler, all 13 Custom API request parameters, and 0 Candidates / 0 Call Logs / 0 Status History / 0 Receipts. A fresh post-failure read again found 0/0/0/0. The CreateCandidate HTTP payload omitted CandidateId, ExpectedStatus, PositionId, and CandidateSourceId; the request fingerprint is `6dbff488be11058737c499f3b8a3766130d469c7d7fa0d7a79de30ab18ccbdfa`. Raw plug-in InputParameters were not captured, so the `UNEXPECTED_INPUT` source is unproven. No Candidate Number or business/evidence row was created. The remaining runtime matrix is stopped pending new authorization. No handler cutover, schema, security, app, audit-setting, publication, or legacy-assembly write occurred.
+
+Validation: unsigned package rebuild succeeded with 0 warnings/errors; engine harness 109 assertions; SDK adapter harness 86 assertions; 10 PowerShell suites 1,106 assertions; 20 PowerShell scripts parsed; package checks, changed-document links, privacy scan, and `git diff --check` passed. Full evidence is in the [Phase 3D report](PHASE_3D_CANDIDATE_CORE_RUNTIME_ACCEPTANCE_REPORT.md).
+
 ## Phase 3D-R4H INVALID_LOOKUP Diagnosis (2026-10-25)
 
 **`INVALID_LOOKUP_UNRESOLVED` — read-only diagnosis complete; no package update, fixture, or runtime retry.** Fresh guarded identity matched VN LMV IT. The package-aware runtime preflight confirmed `os_sr_cact.ApplyCandidateAction` remains package-backed and Candidate, Call Log, Candidate Status History, and Operation Receipt counts are 0/0/0/0. Fresh live request-parameter records show `PositionId` and `CandidateSourceId` are optional Guid parameters with no `LogicalEntityName`; current Candidate schema marks their lookups optional. Assigned TA is not a CreateCandidate input. The private API is not exposed as an Action/ActionImport in `$metadata`, and no matching `INVALID_LOOKUP` trace was found.

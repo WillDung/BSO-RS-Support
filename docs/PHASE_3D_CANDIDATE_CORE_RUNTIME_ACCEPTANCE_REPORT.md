@@ -2,6 +2,34 @@
 
 Date: 25 October 2026. This report records the Phase 3D-R4E ExpectedStatus correction and PRT update, the later R4G PAC package update and CreateCandidate failure, and earlier assessments as history. Source: owner authorization, current repository contract/source, live guarded metadata reconciliation, local offline validation, and Microsoft's published Dataverse metadata documentation.
 
+## Phase 3D-R4I Optional Guid Normalization and SDK Adapter Acceptance
+
+**`CREATECANDIDATE_RUNTIME_FAILURE` — the unsigned package was updated in place once; the single CreateCandidate request was rejected with `UNEXPECTED_INPUT`. Stop without retry.** No subsequent Candidate Core matrix operation was invoked.
+
+### Local correction and validation
+
+The shared operation engine now uses one optional-Guid normalization path for `PositionId` and `CandidateSourceId`. On CreateCandidate, absent, null, and `Guid.Empty` normalize to omission and therefore create no lookup; a non-empty Guid is preserved for the intended lookup; a malformed SDK value is rejected with a parameter-specific `INVALID_GUID_PARAMETER` code. CreateCandidate `CandidateId` absent/null/empty remains valid and is excluded from its normalized fingerprint; malformed values remain rejected. CreateCandidate still ignores `ExpectedStatus`, and the server still selects `Need Call Candidate`. UpdateCandidate retains explicit-null lookup clearing and existing-record status validation.
+
+The SDK adapter harness now references the unsigned package project instead of the legacy signed project. It exercises the real SDK adapter with synthetic contexts and verifies optional-Guid normalization, valid lookup mapping, invalid-value rejection before writes, CandidateId semantics, server-controlled status, and matching/stale UpdateCandidate ExpectedStatus behavior. No signing key was accessed or required.
+
+Validation passed before deployment: unsigned package Release rebuild (0 warnings, 0 errors); Candidate Core engine harness (109 assertions); unsigned SDK adapter harness (86 assertions); all 10 PowerShell suites (1,106 assertions); 20 PowerShell scripts parsed; package inventory/type checks; updated Markdown relative links; added-line privacy scan; and `git diff --check`.
+
+The locally built unsigned `os_sr_cact_pkg` v1.0.0 contains the five approved NuGet entries and no PDB or signing material. DLL SHA-256: `ba2a12a6e99242fabff375ed7272f334477769bdaf4cc33cc665c223db242043`. Package SHA-256: `f70b76dafc5f27477b782950edabcf761391d470cdaacbb9cbc2256c5a0fbfa1`. Package inventory fingerprint (SHA-256 of sorted `entry-path|uncompressed-length` lines joined with LF): `3a2667983f044e9b1e611d493adf991c17808af925fb406bc758e6364440fc4e`. The embedded DLL hash matches the local DLL. These are local artifact hashes, not hashes of the deployed file.
+
+### Guarded live reconciliation and package update
+
+PAC identity and guarded Dataverse WhoAmI matched the owner-confirmed VN LMV IT target and expected user. Fresh pre-update reconciliation confirmed one existing `os_sr_cact_pkg` v1.0.0, one package-backed `os_sr_cact` assembly v1.0.0.0, exactly `os_sr_cact.ApplyCandidateAction` and `os_sr_cact.ProtectCandidateCore`, the unchanged approved Custom API request/response contract, and CreateCandidate's existing package-backed handler. All four Guid request parameters were freshly read: `CandidateId` and `PositionId` are optional Guid; `CorrelationId` is required Guid; `CandidateSourceId` is optional Guid. Their `LogicalEntityName` values were null. Candidate Core schema reconciled exact and the Operation Receipt alternate key was Active. Count-only pre-update reads found 0 Candidates, 0 Call Logs, 0 Candidate Status History rows, and 0 Operation Receipts.
+
+The existing package was updated exactly once using PAC CLI `pac plugin push` with the existing PluginPackage ID and the validated unsigned `.nupkg`. The command returned success. No package was created, no API handler PATCH or cutover occurred, and the legacy signed assembly was unchanged. Fresh GET reconciliation retained the same package identity/version, package-backed assembly and two types, API contract, handler mapping, and legacy inventory. The package record's modified time advanced; the package assembly metadata timestamp did not. Dataverse GET did not expose package content, so the deployed DLL/package content SHA-256 could not be independently read back. Local artifact hashes above identify the submitted package.
+
+The post-update runtime preflight again returned 0/0/0/0 business/evidence rows, the same package-backed handler, the exact two package types, and all 13 request parameters. Automatic retries remained zero.
+
+### Single runtime invocation and stop
+
+The one approved synthetic CreateCandidate request omitted `CandidateId`, `ExpectedStatus`, `PositionId`, and `CandidateSourceId`; it contained only `ActionType`, a fresh `CorrelationId`, synthetic `CandidateName`, and the reserved `.invalid` `CandidateEmail`. The request was dispatched once and rejected with HTTP 400 / Dataverse code `0x80040265` / `UNEXPECTED_INPUT`. The sanitized payload fingerprint is `6dbff488be11058737c499f3b8a3766130d469c7d7fa0d7a79de30ab18ccbdfa`. The raw plug-in InputParameters were not captured, so the source of the unexpected parameter is not established. The earlier `INVALID_LOOKUP` failure was not repeated, but this result does not prove that its historical cause was resolved.
+
+The journal records one rejected CreateCandidate dispatch and zero retries. A fresh post-failure count-only preflight again found 0 Candidates, 0 Call Logs, 0 Candidate Status History rows, and 0 Operation Receipts. No Candidate Number was generated. RecordCall, replay/conflict, UpdateCandidate, and scheduling-guard runtime checks were not invoked. No schema, Choice, API parameter/response, privilege, security, app, audit-setting, publication, or legacy assembly write occurred. Do not retry or vary the payload in this run; further diagnosis requires a new authorization.
+
 ## Phase 3D-R4H INVALID_LOOKUP Diagnosis
 
 **`INVALID_LOOKUP_UNRESOLVED` — do not update the package, create reference fixtures, or invoke CreateCandidate again in this run.** The R4G failure remains one rejected request; R4H performed read-only diagnosis only. PAC and guarded Dataverse identity matched the confirmed VN LMV IT target and expected user. The package-aware runtime preflight confirmed package-backed `os_sr_cact.ApplyCandidateAction` routing and fresh Candidate/Call Log/Status History/Operation Receipt counts of 0/0/0/0.

@@ -115,10 +115,50 @@ static class Program
         Check(Request(createWithNullCandidateId).CandidateId == null, "Optional null CandidateId accepted on create");
         createWithNullCandidateId["CandidateId"] = Guid.Empty;
         Check(Request(createWithNullCandidateId).CandidateId == null, "Optional empty CandidateId accepted on create");
+        var createWithoutCandidateId = Request(Input("CreateCandidate", createCorrelation));
+        Check(Request(new Dictionary<string, object?>(Input("CreateCandidate", createCorrelation))
+        {
+            ["CandidateId"] = null
+        }).Fingerprint == createWithoutCandidateId.Fingerprint &&
+            Request(new Dictionary<string, object?>(Input("CreateCandidate", createCorrelation))
+            {
+                ["CandidateId"] = Guid.Empty
+            }).Fingerprint == createWithoutCandidateId.Fingerprint,
+            "CreateCandidate absent, null, and empty CandidateId normalize identically");
         createWithNullCandidateId["CandidateId"] = Candidate;
         Reject(() => Request(createWithNullCandidateId), "UNEXPECTED_INPUT");
         createWithNullCandidateId["CandidateId"] = "not-a-guid";
         Reject(() => Request(createWithNullCandidateId), "INVALID_CANDIDATEID");
+        var createLookupCorrelation = Guid.NewGuid();
+        var createWithoutLookups = Request(Input("CreateCandidate", createLookupCorrelation));
+        foreach (string parameter in new[] { "PositionId", "CandidateSourceId" })
+        {
+            foreach (object? emptyValue in new object?[] { null, Guid.Empty })
+            {
+                var inputWithEmptyLookup = Input("CreateCandidate", createLookupCorrelation);
+                inputWithEmptyLookup[parameter] = emptyValue;
+                var emptyLookup = Request(inputWithEmptyLookup);
+                Check(!emptyLookup.Values.ContainsKey(parameter) &&
+                    emptyLookup.Fingerprint == createWithoutLookups.Fingerprint,
+                    "CreateCandidate optional " + parameter + " empty forms normalize to omission");
+            }
+            var validId = Guid.NewGuid();
+            var inputWithLookup = Input("CreateCandidate", createLookupCorrelation);
+            inputWithLookup[parameter] = validId;
+            Check((Guid)Request(inputWithLookup).Values[parameter]! == validId,
+                "CreateCandidate valid " + parameter + " is preserved");
+            inputWithLookup[parameter] = "not-a-guid";
+            Reject(() => Request(inputWithLookup), "INVALID_GUID_PARAMETER:" + parameter);
+        }
+        var updateWithNullLookup = Input("UpdateCandidate");
+        updateWithNullLookup["PositionId"] = null;
+        Check(Request(updateWithNullLookup).Values.ContainsKey("PositionId") &&
+            Request(updateWithNullLookup).Values["PositionId"] == null,
+            "UpdateCandidate explicit null lookup remains a clear operation");
+        updateWithNullLookup["PositionId"] = Guid.Empty;
+        Reject(() => Request(updateWithNullLookup), "INVALID_GUID_PARAMETER:PositionId");
+        updateWithNullLookup["PositionId"] = "not-a-guid";
+        Reject(() => Request(updateWithNullLookup), "INVALID_GUID_PARAMETER:PositionId");
         var missingCreateName = Input("CreateCandidate");
         missingCreateName.Remove("CandidateName");
         Reject(() => Request(missingCreateName), "CONTACT_REQUIRED");

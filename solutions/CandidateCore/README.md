@@ -9,13 +9,13 @@ From repository root, using a protected local strong-name key:
 ```powershell
 dotnet build .\solutions\CandidateCore\CandidateCore.csproj -c Release "-p:CandidateSigningKey=C:\protected-local-path\candidate-signing.snk"
 dotnet run --project .\tests\CandidateCore\CandidateCore.Tests.csproj -c Release
-dotnet build .\tests\CandidateCoreSdk\CandidateCoreSdk.Tests.csproj -c Release "-p:CandidateSigningKey=C:\protected-local-path\candidate-signing.snk"
+dotnet run --project .\tests\CandidateCoreSdk\CandidateCoreSdk.Tests.csproj -c Release
 & .\tests\CandidateCoreSdk\bin\Release\net48\CandidateCoreSdk.Tests.exe
 & .\tests\Phase3COperationReceipt.Tests.ps1
 & .\tests\Phase3CDeployment.Tests.ps1
 ```
 
-Do not commit private signing material. `bin`/`obj` are ignored. Preserve the same signing identity for compatible updates; assembly hash also depends on the signing key. No signing key, tenant identifiers, secrets, or real Candidate values are compiled into source.
+The legacy assembly build requires the protected local key and must not be used to build or validate the unsigned package. The SDK adapter harness references the unsigned package project directly, so it does not require that key. Do not commit private signing material. `bin`/`obj` are ignored. Preserve the same signing identity for compatible legacy assembly updates; assembly hash also depends on the signing key. No signing key, tenant identifiers, secrets, or real Candidate values are compiled into source.
 
 ## Runtime boundaries
 

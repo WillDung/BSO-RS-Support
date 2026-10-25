@@ -2,6 +2,52 @@
 
 Date: 25 October 2026. This report records the Phase 3D-R4E ExpectedStatus correction, PRT package update, handler cutover, and one-shot runtime result, retaining earlier assessments as history. Source: owner authorization, current repository contract/source, live guarded metadata reconciliation, local offline validation, and Microsoft's published Dataverse metadata documentation.
 
+## Phase 3D-R4G Active Package Update and CreateCandidate Acceptance
+
+**R4G local artifact gate passed; no R4G live operation was performed.** The target environment confirmation request was unanswered. Dataverse environment operations are therefore pending explicit confirmation; no PAC identity call, live reconciliation, package update, handler write, business API call, or retry occurred in R4G. The local unsigned R4F package has not been updated in Dataverse under R4G, and no R4G runtime result is assigned.
+
+### Local package gate
+
+Without rebuilding or modifying the artifact, the existing package was revalidated against the approved source and package contract. `ActionRequest` identifies CreateCandidate before status handling; CreateCandidate ignores `ExpectedStatus` representations and excludes that input from normalized values/fingerprints. Optional CandidateId handling remains in place. The package is unsigned, uniquely named `os_sr_cact_pkg`, version `1.0.0`, and contains the expected assembly `os_sr_cact` version `1.0.0.0` and approved handler/guard type names.
+
+Current local DLL SHA-256: `c1ff0d21d72b2d10f92bf12d02fd381df2b5c16eb3e7b549fb2bcd4ce783f5c9`. Package SHA-256: `4729700e36fa384ae7909c14a2bfee2cf1da8592503292511597121668eebd79`. The embedded DLL hash matches the current DLL. The package inventory contains five paths: `_rels/.rels`, `[Content_Types].xml`, `lib/net462/os_sr_cact.dll`, `os_sr_cact_pkg.nuspec`, and `package/services/metadata/core-properties/nuget.psmdcp`. Fingerprint (SHA-256 of sorted `entry-path|uncompressed-length` lines joined with LF): `f0a38e99466fe5d8ea66a2709495970f04da53a09c747f02a19e6b635168fc97`.
+
+The local Candidate Core harness and applicable offline tests are recorded below in the R4F section. The SDK adapter harness was not run: its legacy signing guard requires protected signing material, which was not accessed. That harness covers SDK-layer input adaptation not covered by the engine-only harness, so its behavior remains unverified; under the R4G signing-key boundary it is not a prerequisite for deploying the unsigned package.
+
+### R4G live-operation disposition
+
+The last read-only Dataverse evidence, collected during R4F, established the package-backed CreateCandidate handler as active. The owner’s R4G correction confirms this is the authoritative current baseline and supersedes R4F’s stale assumption that the handler should be legacy. It does not establish that the R4F package bytes are deployed. No R4G fresh package/API/schema/receipt-key reconciliation or row counts were performed because environment confirmation was not received. Consequently package update count, pre/post deployment hashes, handler-before/after in R4G, CreateCandidate outcome, and runtime matrix are all **not executed / unknown**; no previous count is reused as a current count.
+
+Once the target URL is explicitly confirmed in-session, resume with fresh identity and metadata/storage reconciliation, count-only verification of Candidate/Call Log/Status History/Receipt all at zero, then update the existing package once through the approved PRT path and reconcile it without a redundant handler PATCH. Invoke CreateCandidate once only after those gates pass. No broad cleanup, signing-key action, legacy assembly update, or automatic retry is authorized.
+
+## Phase 3D-R4F CreateCandidate ExpectedStatus Ignore Contract
+
+**Local correction and package preparation complete. The R4F `LIVE_RUNTIME_BASELINE_DRIFT` classification is superseded: it resulted from a stale prompt assumption that the API had been restored to the legacy handler.**
+
+### Bounded local correction
+
+R4E rejected a CreateCandidate request with `EXPECTED_STATUS_NOT_APPLICABLE` even though its Web API payload omitted `ExpectedStatus`. The raw plug-in `InputParameters` were not captured, so the value's exact SDK representation and origin remain unresolved. R4F adopts the owner-approved create semantics: ExpectedStatus is inapplicable because there is no existing Candidate to compare. The server sets the initial status to `Need Call Candidate`.
+
+`ActionRequest` now identifies the action before ExpectedStatus processing. CreateCandidate assigns no ExpectedStatus, does not parse or validate any supplied representation, and omits the parameter from normalized `Values` and the request fingerprint. This covers absent/null, default integer, valid and unsupported integers, strings, and wrapped/non-integer values. UpdateCandidate and existing-record actions retain their existing validation, including malformed-value rejection, required status for operations that require it, and stale-state rejection. CandidateId handling is unchanged.
+
+The dependency-free Candidate Core harness passes 97 assertions. Its new regression cases verify ExpectedStatus-independence of fingerprints and receipt replay, server-controlled create status, wrapper-value ignoring, and continued malformed/stale checks for UpdateCandidate/existing-record actions. The SDK adapter harness source also includes a real `OptionSetValue` CreateCandidate test, but its build is blocked by the existing `CandidateSigningKey` guard. No key was accessed, changed, or supplied.
+
+The runtime runner and existing-package cutover journal now use fresh R4F authorization identifiers. The rollback verifier supports the matching R4F evidence pair and retains support for the historical R4D evidence pair. Existing R4E one-shot locks are not reused.
+
+### Local package and validation
+
+The unsigned package identity remains `os_sr_cact_pkg` version `1.0.0`; assembly identity remains `os_sr_cact` version `1.0.0.0`; package entry inventory remains the same five entries, with only the intended DLL content changed. A normal incremental build and `dotnet pack` left the old `.nupkg` untouched, so the artifact was regenerated with `dotnet build .\solutions\CandidateCorePackage\CandidateCore.Package.csproj -c Release -t:Rebuild --no-restore`. The resulting Release build had 0 warnings and 0 errors. DLL SHA-256: `c1ff0d21d72b2d10f92bf12d02fd381df2b5c16eb3e7b549fb2bcd4ce783f5c9`. Package SHA-256: `4729700e36fa384ae7909c14a2bfee2cf1da8592503292511597121668eebd79`. The embedded DLL hash matches the built DLL hash. The package-content test confirms the exact entry list and unsigned assembly identity.
+
+All 10 PowerShell suites passed (1,103 assertions); the Candidate Core operation harness passed (97 assertions); all 20 project PowerShell scripts parsed successfully; the unsigned package build and package identity/content checks passed; and `git diff --check` is included in the final local validation. No live Dataverse calls were made during these checks.
+
+### Fresh read-only live preflight (historical evidence, status corrected by R4G)
+
+The active PAC organization was freshly verified as VN LMV IT. The guarded existing-package preflight performed 121 GETs and stopped because the current API handler was package-backed rather than the then-expected legacy type. The R4G owner correction establishes that the prompt expectation was stale: package-backed routing was the intended current baseline and was not a package defect or a genuine live drift. The runner's own strict-legacy preflight was therefore inapplicable to the corrected R4G scope. It performed zero POSTs, PATCHes, package updates, handler rollbacks, retries, or business API calls. Its row-count gate was not reached; current business/evidence counts were not established by that attempt.
+
+The exact read-only evidence showed the existing package `os_sr_cact_pkg` (`43765041-4fd0-f111-a05a-002248a1ba20`) and its package-backed File Store assembly `os_sr_cact` (`d71c6048-4fd0-f111-a05a-002248a1ba20`) with types `ApplyCandidateAction` (`d81c6048-4fd0-f111-a05a-002248a1ba20`) and `ProtectCandidateCore` (`d91c6048-4fd0-f111-a05a-002248a1ba20`). The retained legacy assembly/types were also present. The current `os_sr_cact` API (`0745a0bf-4c77-4e64-8125-12bfbf439229`) resolves to package-backed `os_sr_cact.ApplyCandidateAction` (`d81c6048-4fd0-f111-a05a-002248a1ba20`), not legacy type `b3ec49b1-be4c-4fb6-af10-3bac7a30e407`. This confirms the R4E report's package-backed-handler evidence and contradicts the R4F attachment's claimed restored legacy handler. Fresh reads also confirmed the approved API parameter inventory still has `ExpectedStatus` as optional Integer and `CandidateId` as optional GUID; metadata was not changed.
+
+No R4F PRT package update, handler cutover/rollback, CreateCandidate call, or runtime-matrix operation followed. The local package hashes do not establish deployed content, and no live content hash is claimed. R4G supersedes the R4F drift classification and directs package-backed acceptance without redundant handler cutover. The R4E failed CreateCandidate call remains the last runtime invocation.
+
 ## Latest Phase 3D-R4E ExpectedStatus Contract Correction
 
 **`CREATECANDIDATE_RUNTIME_FAILURE` — PRT update and handler cutover reconciled; one CreateCandidate invocation rejected; stop without retry.** The R4D package-backed handler test had a single determinate CreateCandidate rejection (`HTTP 400`, Dataverse `0x80040265`, `INVALID_EXPECTED_STATUS`) while the caller omitted ExpectedStatus. The one-shot sequence stopped, all four business/evidence counts were verified zero, and the authorized single PATCH restored the exact legacy handler. R4E does not revisit signing-key diagnosis.

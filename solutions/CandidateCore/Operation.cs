@@ -51,15 +51,11 @@ namespace os_sr_cact
                     throw new OperationError("INVALID_CANDIDATEID");
                 }
             }
-            var hasExpectedStatus = input.TryGetValue("ExpectedStatus", out var status);
-            ExpectedStatus = hasExpectedStatus && status is int state ? state : (int?)null;
-            if (Action == "CreateCandidate")
+            ExpectedStatus = null;
+            if (Action != "CreateCandidate")
             {
-                if (hasExpectedStatus && status != null)
-                    throw new OperationError(status is int ? "EXPECTED_STATUS_NOT_APPLICABLE" : "INVALID_EXPECTED_STATUS");
-            }
-            else
-            {
+                var hasExpectedStatus = input.TryGetValue("ExpectedStatus", out var status);
+                ExpectedStatus = hasExpectedStatus && status is int state ? state : (int?)null;
                 if (Action != "UpdateCandidate" && !ExpectedStatus.HasValue)
                     throw new OperationError("EXPECTED_STATUS_REQUIRED");
                 if (hasExpectedStatus && (!ExpectedStatus.HasValue || ExpectedStatus < NeedCall || ExpectedStatus > Failed))
@@ -75,7 +71,7 @@ namespace os_sr_cact
             foreach (var pair in input)
             {
                 if (!allowed.Contains(pair.Key)) throw new OperationError("UNEXPECTED_INPUT");
-                if (Action == "CreateCandidate" && pair.Key == "ExpectedStatus" && pair.Value == null)
+                if (Action == "CreateCandidate" && pair.Key == "ExpectedStatus")
                     continue;
                 object? value = pair.Value;
                 if (Action == "CreateCandidate" && pair.Key == "CandidateId" &&

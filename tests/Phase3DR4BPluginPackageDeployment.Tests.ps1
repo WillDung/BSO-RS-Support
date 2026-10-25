@@ -115,6 +115,9 @@ Assert-Test ($deployment -match 'LegacyPluginTypeId' -and
     $existingCutover -match 'PackageTypeSolutionMembership' -and
     $existingCutover -match 'Get-ExistingPackageCutoverState -ExpectedHandlerTypeId \(\[string\]\$script:Journal.LegacyHandlerTypeId\)' -and
     $existingCutover -match 'PLUGIN_PACKAGE_CUTOVER_ROLLED_BACK') 'R4D retains exact handler map and rollback reconciles only to the legacy handler'
+Assert-Test ($deployment -match 'phase3d-r4f-owner-authorized-existing-package-handler-cutover' -and
+    $deployment -match "'phase3d-r4d-owner-authorized-package-runtime' \{ 'phase3d-r4d-owner-authorized-existing-package-handler-cutover' \}" -and
+    $deployment -match "'phase3d-r4f-owner-authorized-package-runtime' \{ 'phase3d-r4f-owner-authorized-existing-package-handler-cutover' \}") 'R4F uses a fresh cutover journal identity while retaining prior R4D rollback evidence support'
 Assert-Test ($deployment -match 'PLUGIN_PACKAGE_HANDLER_CUTOVER_FAILED' -and
     $deployment -match 'UNCERTAIN_WRITE_OUTCOME' -and $deployment -match 'no retry') 'Uncertain writes reconcile once and stop without resend'
 Assert-Test ($deployment -match "Mode -ceq 'Rollback'" -and
@@ -128,7 +131,8 @@ Assert-Test ($contract.handler -ceq 'os_sr_cact.ApplyCandidateAction' -and
 Assert-Test ($runtime -match 'ExpectedHandlerPackageUniqueName' -and
     $runtime -match 'Assert-PackageBackedHandler' -and
     $runtime -match 'Runtime Apply requires the reconciled package-backed handler identity') 'Runtime execution is gated on the package-backed API chain'
-Assert-Test ($runtime -match 'phase3d-r4e-owner-authorized-package-runtime' -and
+Assert-Test ($runtime -match 'phase3d-r4f-owner-authorized-package-runtime' -and
+    $runtime -notmatch 'phase3d-r4e-owner-authorized-package-runtime' -and
     $runtime -notmatch 'phase3d-r4d-owner-authorized-package-runtime' -and
     $runtime -match '\[SYNTHETIC-E2E\] Candidate Core Acceptance' -and
     $runtime -match '@example\.invalid') 'Runtime uses a distinct one-shot authorization and approved synthetic identity'

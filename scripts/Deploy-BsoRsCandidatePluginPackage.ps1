@@ -658,7 +658,7 @@ function New-ExistingCutoverJournal {
         -TypeId ([string]$State.PackageHandler.plugintypeid) `
         -NavigationProperty ([string]$State.HandlerNavigation)
     [ordered]@{
-        Authorization = 'phase3d-r4d-owner-authorized-existing-package-handler-cutover'
+        Authorization = 'phase3d-r4f-owner-authorized-existing-package-handler-cutover'
         Result = 'PLUGIN_PACKAGE_PROCESSED_CUTOVER_PENDING'
         PackageId = [string]$State.Package.pluginpackageid
         PackageUniqueName = [string]$State.Package.uniquename
@@ -800,17 +800,22 @@ try {
 
         if ($Mode -ceq 'RollbackExistingCutover') {
             if (-not $EvidencePath -or -not (Test-Path -LiteralPath $EvidencePath -PathType Leaf)) {
-                throw 'R4D rollback requires the retained cutover journal.'
+                throw 'Package rollback requires the retained cutover journal.'
             }
             if (-not $RuntimeEvidencePath -or -not (Test-Path -LiteralPath $RuntimeEvidencePath -PathType Leaf)) {
-                throw 'R4D rollback requires the retained runtime failure evidence.'
+                throw 'Package rollback requires the retained runtime failure evidence.'
             }
             $runtimeEvidence = Get-Content -LiteralPath $RuntimeEvidencePath -Raw | ConvertFrom-Json
             $allowedRuntimeDefects = @(
                 'CREATECANDIDATE_RUNTIME_FAILURE', 'RUNTIME_RECORDCALL_FAILURE',
                 'RUNTIME_UPDATECANDIDATE_FAILURE', 'IDEMPOTENCY_FAILURE', 'SCHEDULING_GUARD_FAILURE'
             )
-            if ($runtimeEvidence.AuthorizationId -cne 'phase3d-r4d-owner-authorized-package-runtime' -or
+            $expectedCutoverAuthorization = switch ([string]$runtimeEvidence.AuthorizationId) {
+                'phase3d-r4d-owner-authorized-package-runtime' { 'phase3d-r4d-owner-authorized-existing-package-handler-cutover' }
+                'phase3d-r4f-owner-authorized-package-runtime' { 'phase3d-r4f-owner-authorized-existing-package-handler-cutover' }
+                default { $null }
+            }
+            if (-not $expectedCutoverAuthorization -or
                 $runtimeEvidence.ManifestSha256 -cne '63f56173f61265f539d23d6ceffb5631e23f438e4e254755c1e24c7d17eb1915' -or
                 $runtimeEvidence.ApiUniqueName -cne 'os_sr_cact' -or
                 $runtimeEvidence.ExpectedHandlerPackageUniqueName -cne $script:PackageIdentity.UniqueName -or
@@ -822,10 +827,10 @@ try {
                 @($runtimeEvidence.Dispatches | Where-Object {
                     $_.State -notin @('GET_RECONCILED', 'ACKNOWLEDGED', 'GET_RECONCILE_PENDING', 'REJECTED')
                 }).Count -ne 0) {
-                throw 'R4D rollback is permitted only for a classified, determinate package runtime defect.'
+                throw 'Package rollback is permitted only for matching classified runtime and cutover evidence.'
             }
             $script:Journal = Get-Content -LiteralPath $EvidencePath -Raw | ConvertFrom-Json
-            if ($script:Journal.Authorization -cne 'phase3d-r4d-owner-authorized-existing-package-handler-cutover' -or
+            if ($script:Journal.Authorization -cne $expectedCutoverAuthorization -or
                 $script:Journal.Result -cne 'PLUGIN_PACKAGE_CUTOVER_RECONCILED_RUNTIME_PENDING' -or
                 $script:Journal.AutomaticRetries -ne 0 -or
                 $script:Journal.MaximumRollbackPatches -ne 1 -or
@@ -838,7 +843,7 @@ try {
                 $script:Journal.CutoverMappings[0].UniqueName -cne $script:Contract.uniqueName -or
                 $script:Journal.CutoverMappings[0].LegacyPluginTypeId -cne $script:Journal.LegacyHandlerTypeId -or
                 $script:Journal.CutoverMappings[0].PackagePluginTypeId -cne $script:Journal.PackageHandlerTypeId) {
-                throw 'R4D rollback journal is inconsistent, consumed, or outside its one-patch limit.'
+                throw 'Package rollback journal is inconsistent, consumed, or outside its one-patch limit.'
             }
             $state = Get-ExistingPackageCutoverState -ExpectedHandlerTypeId ([string]$script:Journal.PackageHandlerTypeId)
             if ([string]$state.Package.pluginpackageid -ine [string]$script:Journal.PackageId -or

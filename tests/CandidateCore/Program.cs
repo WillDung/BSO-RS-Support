@@ -82,12 +82,35 @@ static class Program
             !nullExpectedCreate.Values.ContainsKey("ExpectedStatus") &&
             nullExpectedCreate.Fingerprint == createWithoutExpectedStatus.Fingerprint,
             "CreateCandidate null ExpectedStatus is accepted and canonicalized as absent");
-        createWithNullExpectedStatus["ExpectedStatus"] = ActionRequest.NeedCall;
-        Reject(() => Request(createWithNullExpectedStatus), "EXPECTED_STATUS_NOT_APPLICABLE");
-        createWithNullExpectedStatus["ExpectedStatus"] = 999;
-        Reject(() => Request(createWithNullExpectedStatus), "EXPECTED_STATUS_NOT_APPLICABLE");
-        createWithNullExpectedStatus["ExpectedStatus"] = "100010000";
-        Reject(() => Request(createWithNullExpectedStatus), "INVALID_EXPECTED_STATUS");
+        var createCorrelation = Guid.NewGuid();
+        var createWithoutStatus = Request(Input("CreateCandidate", createCorrelation));
+        foreach (var ignoredStatus in new object?[]
+        {
+            null, 0, ActionRequest.NeedCall, ActionRequest.Answered, 999, "100010000", new object()
+        })
+        {
+            var inputWithIgnoredStatus = Input("CreateCandidate", createCorrelation);
+            inputWithIgnoredStatus["ExpectedStatus"] = ignoredStatus;
+            var ignoredStatusCreate = Request(inputWithIgnoredStatus);
+            Check(!ignoredStatusCreate.ExpectedStatus.HasValue &&
+                !ignoredStatusCreate.Values.ContainsKey("ExpectedStatus") &&
+                ignoredStatusCreate.Fingerprint == createWithoutStatus.Fingerprint,
+                "CreateCandidate ignores ExpectedStatus value and excludes it from the fingerprint");
+        }
+        var statusIndependentCreateStore = new MemoryStore();
+        Check(!statusIndependentCreateStore.Atomic(createWithoutStatus).Replay &&
+            statusIndependentCreateStore.Atomic(Request(new Dictionary<string, object?>(Input("CreateCandidate", createCorrelation))
+            {
+                ["ExpectedStatus"] = new object()
+            })).Replay &&
+            statusIndependentCreateStore.Creates == 1,
+            "CreateCandidate replay identity is unchanged by arbitrary ExpectedStatus representations");
+        var createOptionSetLike = new Dictionary<string, object?>(Input("CreateCandidate"));
+        createOptionSetLike["ExpectedStatus"] = new StatusValue(ActionRequest.NeedCall);
+        var ignoredWrappedStatus = Request(createOptionSetLike);
+        Check(!ignoredWrappedStatus.ExpectedStatus.HasValue &&
+            !ignoredWrappedStatus.Values.ContainsKey("ExpectedStatus"),
+            "CreateCandidate ignores non-integer ExpectedStatus wrapper values");
         createWithNullCandidateId["CandidateId"] = null;
         Check(Request(createWithNullCandidateId).CandidateId == null, "Optional null CandidateId accepted on create");
         createWithNullCandidateId["CandidateId"] = Guid.Empty;
@@ -110,6 +133,10 @@ static class Program
         Reject(() => Request(invalid), "INVALID_CANDIDATE");
         invalid = Input(); invalid.Remove("ExpectedStatus");
         Reject(() => Request(invalid), "EXPECTED_STATUS_REQUIRED");
+        invalid = Input("UpdateCandidate"); invalid["ExpectedStatus"] = "100010000";
+        Reject(() => Request(invalid), "INVALID_EXPECTED_STATUS");
+        invalid = Input("UpdateCandidate"); invalid["ExpectedStatus"] = new StatusValue(ActionRequest.NeedCall);
+        Reject(() => Request(invalid), "INVALID_EXPECTED_STATUS");
         invalid = Input("RequestReschedule"); invalid["ExpectedStatus"] = ActionRequest.Scheduled;
         Reject(() => Request(invalid), "REASON_REQUIRED");
         invalid = Input(); invalid["Actor"] = Guid.NewGuid();
@@ -253,5 +280,11 @@ static class Program
                 Fingerprint = request.Fingerprint, Version = "1", Result = result }))
                 throw new OperationError("RECEIPT_UNIQUENESS_CONFLICT");
         }
+    }
+
+    sealed class StatusValue
+    {
+        public StatusValue(int value) => Value = value;
+        public int Value { get; }
     }
 }

@@ -22,7 +22,8 @@ Assert-Test ($runtime -match "ValidateSet\('GET', 'POST'\)" -and
     $runtime -match "Path -cne 'os_sr_cact'" -and $runtime -match 'MaximumRetryCount = 0' -and
     $runtime -match 'MaximumRedirection = 0' -and $runtime -match 'expectedActionCalls = 8') 'Only bounded Custom API calls with zero retries'
 Assert-Test ($runtime -match 'FileMode\]::CreateNew' -and $runtime -match 'phase3d-r-runtime-' -and
-    $runtime -match 'phase3d-r4e-owner-authorized-package-runtime' -and
+    $runtime -match 'phase3d-r4f-owner-authorized-package-runtime' -and
+    $runtime -notmatch 'phase3d-r4e-owner-authorized-package-runtime' -and
     $runtime -notmatch 'phase3d-r4d-owner-authorized-package-runtime' -and
     $runtime -match 'one-shot runtime authorization consumed') 'Authorization-specific one-shot lock preserves prior consumed lock'
 Assert-Test ($runtime -match "\`$name = '\[SYNTHETIC-E2E\]" -and
@@ -36,8 +37,13 @@ Assert-Test ($runtime -match 'CreateCandidate' -and $runtime -match 'STALE_EXPEC
     $runtime -match 'RecordCall no-answer conflict' -and
     $runtime.IndexOf('$stale = [ordered]@{') -gt $runtime.IndexOf("ActionType = 'ProceedToScheduling'") -and
     $runtime -match 'Assert-NoEffect \x27Stale-state rejection\x27 100010002') 'Replay, conflict, and post-transition stale-state checks are wired'
-Assert-Test ($runtime -match 'EXPECTED_STATUS_NOT_APPLICABLE' -and
-    $runtime -match "'CreateCandidate' \{ 'CREATECANDIDATE_RUNTIME_FAILURE' \}") 'CreateCandidate runtime errors retain their deterministic classification'
+Assert-Test ($runtime -notmatch 'EXPECTED_STATUS_NOT_APPLICABLE' -and
+    $runtime -match "'CreateCandidate' \{ 'CREATECANDIDATE_RUNTIME_FAILURE' \}" -and
+    $operation -match 'if \(Action != "CreateCandidate"\)' -and
+    $operation -match 'Action == "CreateCandidate" && pair.Key == "ExpectedStatus"') 'CreateCandidate ignores ExpectedStatus while retaining operation-specific runtime classification'
+Assert-Test ($operationTests -match 'ignores ExpectedStatus value and excludes it from the fingerprint' -and
+    $operationTests -match 'arbitrary ExpectedStatus representations' -and
+    $operationTests -match 'non-integer ExpectedStatus wrapper values') 'Offline tests cover default, valid, arbitrary, and wrapped CreateCandidate ExpectedStatus values'
 Assert-Test ($runtime -match 'os_sr_cand_cnum' -and $runtime.Contains('CAND-[0-9]{8}')) 'Candidate AutoNumber is checked against the approved format'
 Assert-Test ($runtime -match 'SCHEDULER_DEPENDENCY_UNAVAILABLE' -and
     $runtime -match "Action = 'MarkRound1Scheduled'; LiveResult = 'VERIFIED_FAIL_CLOSED_LIVE'" -and

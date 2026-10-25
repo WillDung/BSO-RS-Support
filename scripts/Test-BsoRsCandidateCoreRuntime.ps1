@@ -15,7 +15,7 @@ $root = Split-Path $PSScriptRoot
 $manifestPath = Join-Path $root 'docs\PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json'
 $contractPath = Join-Path $root 'docs\PHASE_3C_API_CONTRACT.json'
 $expectedManifestHash = '63f56173f61265f539d23d6ceffb5631e23f438e4e254755c1e24c7d17eb1915'
-$runtimeAuthorizationId = 'phase3d-r4e-owner-authorized-package-runtime'
+$runtimeAuthorizationId = 'phase3d-r4f-owner-authorized-package-runtime'
 $expectedActionCalls = 8
 $schedulingEvidenceChecks = @(
     [ordered]@{
@@ -64,7 +64,7 @@ function Get-RuntimeErrorCode {
     $allowed = @(
         'INVALID_EMAIL', 'REQUIRED_TEXT', 'CORRELATION_CONFLICT', 'STALE_EXPECTED_STATUS',
         'SCHEDULER_DEPENDENCY_UNAVAILABLE', 'RESULT_OR_CANCELLATION_DEPENDENCY_UNAVAILABLE',
-        'INVALID_TRANSITION', 'UNEXPECTED_INPUT', 'EXPECTED_STATUS_NOT_APPLICABLE',
+        'INVALID_TRANSITION', 'UNEXPECTED_INPUT',
         'DATAVERSE_OPERATION_REJECTED', 'UNSUPPORTED_EXECUTION_CONTEXT'
     )
     foreach ($code in $allowed) {

@@ -40,6 +40,18 @@ internal static class Program
 
     private static void Main()
     {
+        var createInput = new Dictionary<string, object?>
+        {
+            ["ActionType"] = "CreateCandidate",
+            ["CorrelationId"] = Guid.NewGuid(),
+            ["CandidateName"] = "Synthetic Candidate",
+            ["CandidateEmail"] = "synthetic@example.invalid",
+            ["ExpectedStatus"] = new OptionSetValue(100010000)
+        };
+        var createRequest = new ActionRequest(Actor, createInput, DateTime.UtcNow);
+        Check(!createRequest.ExpectedStatus.HasValue &&
+            !createRequest.Values.ContainsKey("ExpectedStatus"),
+            "CreateCandidate ignores SDK OptionSetValue ExpectedStatus representation");
         foreach (int outcome in new[] { 100010000, 100010001, 100010002 })
         {
             var host = new Host(outcome);

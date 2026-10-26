@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.Remoting.Messaging;
 using System.Runtime.Remoting.Proxies;
+using System.ServiceModel;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
@@ -20,10 +21,10 @@ internal static class Program
         if (!value) throw new Exception("FAIL: " + name);
         passed++;
     }
-    private static void Reject(Action action, string code)
+    private static string Reject(Action action, string code)
     {
         try { action(); throw new Exception("Expected rejection: " + code); }
-        catch (InvalidPluginExecutionException error) { Check(error.Message == code, code); }
+        catch (InvalidPluginExecutionException error) { Check(error.Message == code, code); return error.Message; }
     }
     private static Dictionary<string, object?> Context(ParameterCollection input, ParameterCollection shared, ParameterCollection output)
     {
@@ -49,6 +50,85 @@ internal static class Program
             createWithoutOptionalGuids.Calls == 0 && createWithoutOptionalGuids.Histories == 0 &&
             createWithoutOptionalGuids.Receipt != null,
             "SDK CreateCandidate omits optional GUIDs and uses server-controlled initial status");
+        Check(createWithoutOptionalGuids.ServiceOperations.SequenceEqual(new[]
+            { "RetrieveMultiple:os_sr_oprc", "Create:os_sr_cand", "Create:os_sr_oprc" }) &&
+            createWithoutOptionalGuids.TraceMessages.Where(message => message.StartsWith("CC_STAGE:", StringComparison.Ordinal))
+                .SequenceEqual(new[] { "CC_STAGE:CC_READ_RECEIPT", "CC_STAGE:CC_CREATE_CANDIDATE", "CC_STAGE:CC_CREATE_RECEIPT" }),
+            "SDK CreateCandidate service-operation sequence and stage markers are exact");
+        Check(createWithoutOptionalGuids.TraceMessages.Contains("CC_GUARD_ALLOWED:CANDIDATE_CREATE") &&
+            createWithoutOptionalGuids.TraceMessages.Contains("CC_GUARD_ALLOWED:RECEIPT_CREATE"),
+            "Approved package-backed Custom API parent context satisfies Candidate and Receipt guard rules");
+        var packageApiParent = CreateCandidateHost();
+        packageApiParent.MainValues["OwningExtension"] =
+            new Entity("plugintype", Guid.Parse("00000000-0000-0000-0000-000000000101"));
+        new ApplyCandidateAction().Execute(packageApiParent);
+        Check(packageApiParent.CreatedCandidates == 1 && packageApiParent.Receipt != null &&
+            packageApiParent.TraceMessages.Contains("CC_GUARD_ALLOWED:CANDIDATE_CREATE"),
+            "Package-backed ApplyCandidateAction is accepted by the historical-assembly guard context");
+        var legacyApiParent = CreateCandidateHost();
+        legacyApiParent.MainValues["OwningExtension"] =
+            new Entity("plugintype", Guid.Parse("00000000-0000-0000-0000-000000000102"));
+        new ApplyCandidateAction().Execute(legacyApiParent);
+        Check(legacyApiParent.CreatedCandidates == 1 && legacyApiParent.Receipt != null &&
+            legacyApiParent.TraceMessages.Contains("CC_GUARD_ALLOWED:CANDIDATE_CREATE"),
+            "Historical ApplyCandidateAction satisfies the same guard context");
+        var candidateCreateFault = CreateCandidateHost();
+        candidateCreateFault.FaultOnCreateTable = "os_sr_cand";
+        candidateCreateFault.FaultMessage = "SENSITIVE_SENTINEL " + Actor.ToString("D");
+        var candidateFaultMessage = Reject(() => new ApplyCandidateAction().Execute(candidateCreateFault),
+            "DATAVERSE_OPERATION_REJECTED:CC_CREATE_CANDIDATE:0x80040220");
+        Check(candidateCreateFault.ServiceOperations.SequenceEqual(new[]
+            { "RetrieveMultiple:os_sr_oprc", "Create:os_sr_cand" }) &&
+            candidateCreateFault.Receipt == null,
+            "Candidate Create fault terminates before Receipt Create");
+        Check(candidateCreateFault.TraceMessages.Contains("CC_STAGE:CC_CREATE_CANDIDATE") &&
+            candidateCreateFault.TraceMessages.Contains("CC_SERVICE_FAULT:CC_CREATE_CANDIDATE:0x80040220") &&
+            !candidateCreateFault.TraceMessages.Any(message => message.Contains("SENSITIVE_SENTINEL")),
+            "Candidate Create fault diagnostics contain stage and code only");
+        var receiptCreateFault = CreateCandidateHost();
+        receiptCreateFault.FaultOnCreateTable = "os_sr_oprc";
+        receiptCreateFault.FaultErrorCode = unchecked((int)0x80040221);
+        var receiptFaultMessage = Reject(() => new ApplyCandidateAction().Execute(receiptCreateFault),
+            "DATAVERSE_OPERATION_REJECTED:CC_CREATE_RECEIPT:0x80040221");
+        Check(receiptCreateFault.ServiceOperations.SequenceEqual(new[]
+            { "RetrieveMultiple:os_sr_oprc", "Create:os_sr_cand", "Create:os_sr_oprc" }),
+            "Receipt Create fault terminates after the failing final service operation");
+        Check(receiptCreateFault.TraceMessages.Contains("CC_STAGE:CC_CREATE_RECEIPT") &&
+            receiptCreateFault.TraceMessages.Contains("CC_SERVICE_FAULT:CC_CREATE_RECEIPT:0x80040221"),
+            "Receipt Create fault reports its distinct safe stage and code");
+        var legacyGuardFault = CreateCandidateHost();
+        legacyGuardFault.FaultOnCreateTable = "os_sr_cand";
+        legacyGuardFault.FaultErrorCode = unchecked((int)0x80040265);
+        legacyGuardFault.FaultMessage = "DIRECT_CANDIDATE_CORE_WRITE_BLOCKED";
+        var legacyGuardMessage = Reject(() => new ApplyCandidateAction().Execute(legacyGuardFault),
+            "DIRECT_WRITE_GUARD_REJECTED:LEGACY_GENERIC_GUARD:CC_CREATE_CANDIDATE:0x80040265");
+        Check(legacyGuardFault.ServiceOperations.SequenceEqual(new[]
+            { "RetrieveMultiple:os_sr_oprc", "Create:os_sr_cand" }) &&
+            !legacyGuardMessage.Contains("DIRECT_CANDIDATE_CORE_WRITE_BLOCKED"),
+            "Legacy guard fault is classified by safe category without exposing its raw message");
+        var tamperedCreate = CreateCandidateHost();
+        tamperedCreate.TamperTarget = true;
+        var guardMessage = Reject(() => new ApplyCandidateAction().Execute(tamperedCreate),
+            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:CALLER_MARKER:CC_CREATE_CANDIDATE");
+        Check(tamperedCreate.ServiceOperations.SequenceEqual(new[]
+            { "RetrieveMultiple:os_sr_oprc", "Create:os_sr_cand" }) &&
+            tamperedCreate.TraceMessages.Contains("CC_GUARD_REJECTED:CANDIDATE_CREATE:CALLER_MARKER"),
+            "Guard caller-marker rejection is categorized and stops before Receipt Create");
+        Check(!candidateFaultMessage.Contains("SENSITIVE_SENTINEL") &&
+            !candidateFaultMessage.Contains(Actor.ToString("D")) &&
+            !receiptFaultMessage.Contains("SENSITIVE_SENTINEL") &&
+            !legacyGuardMessage.Contains("SENSITIVE_SENTINEL") &&
+            !guardMessage.Contains("SENSITIVE_SENTINEL") &&
+            !guardMessage.Contains(Actor.ToString("D")),
+            "Returned service-fault diagnostics exclude message content and IDs");
+        var unknownFailure = CreateCandidateHost();
+        unknownFailure.UnknownFailureOnCreateTable = "os_sr_cand";
+        var unknownFailureMessage = Reject(() => new ApplyCandidateAction().Execute(unknownFailure),
+            "CANDIDATE_CORE_FAILURE:CC_CREATE_CANDIDATE:INVALID_OPERATION");
+        Check(unknownFailure.ServiceOperations.SequenceEqual(new[]
+            { "RetrieveMultiple:os_sr_oprc", "Create:os_sr_cand" }) &&
+            !unknownFailureMessage.Contains("SENSITIVE_SENTINEL"),
+            "Unknown service exception is categorized, sanitized, and terminates immediately");
         var minimalCreate = CreateCandidateHost();
         minimalCreate.Input.Remove("ExpectedStatus");
         minimalCreate.Input["CandidatePhone"] = "5550100";
@@ -132,6 +212,16 @@ internal static class Program
         {
             var host = new Host(outcome);
             new ApplyCandidateAction().Execute(host);
+            if (outcome == 100010000)
+            {
+                var stageMarkers = host.TraceMessages.Where(message => message.StartsWith("CC_STAGE:", StringComparison.Ordinal)).ToArray();
+                Check(stageMarkers.SequenceEqual(new[]
+                    {
+                        "CC_STAGE:CC_READ_RECEIPT", "CC_STAGE:CC_READ_CANDIDATE", "CC_STAGE:CC_UPDATE_CANDIDATE",
+                        "CC_STAGE:CC_CREATE_CALL_LOG", "CC_STAGE:CC_CREATE_STATUS_HISTORY", "CC_STAGE:CC_CREATE_RECEIPT"
+                    }) && stageMarkers.Distinct(StringComparer.Ordinal).Count() == stageMarkers.Length,
+                    "Each Answered transition service operation has a distinct safe stage marker");
+            }
             Check(host.Calls == 1 && host.Histories == (outcome == 100010000 ? 1 : 0), "SDK exact call/history effects");
             Check(host.Updates == (outcome == 100010000 ? 1 : 0), "SDK non-answer log only");
             Check(host.Receipt != null && host.Receipt.GetAttributeValue<EntityReference>("ownerid").Id == Actor, "SDK receipt caller owner");
@@ -178,15 +268,19 @@ internal static class Program
         unknownAction.Input["Actor"] = Guid.NewGuid();
         Reject(() => new ApplyCandidateAction().Execute(unknownAction), "INVALID_ACTION");
         var direct = new Host(100010000);
-        Reject(() => direct.Guard("Create", new Entity("os_sr_csh", Guid.NewGuid()), null), "DIRECT_CANDIDATE_CORE_WRITE_BLOCKED");
+        Reject(() => direct.Guard("Create", new Entity("os_sr_csh", Guid.NewGuid()), null),
+            "DIRECT_WRITE_GUARD_REJECTED:STATUS_HISTORY_CREATE:PARENT_CONTEXT");
         foreach (string table in new[] { "os_sr_cand", "os_sr_call", "os_sr_csh", "os_sr_oprc" })
         {
             var host = new Host(100010000);
-            Reject(() => host.Guard("Delete", new Entity(table, Candidate), host.MainContext), "DIRECT_CANDIDATE_CORE_WRITE_BLOCKED");
-            Reject(() => host.Guard("UpdateMultiple", new Entity(table, Candidate), host.MainContext), "DIRECT_CANDIDATE_CORE_WRITE_BLOCKED");
+            Reject(() => host.Guard("Delete", new Entity(table, Candidate), host.MainContext),
+                "DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_CORE_WRITE_CONTEXT");
+            Reject(() => host.Guard("UpdateMultiple", new Entity(table, Candidate), host.MainContext),
+                "DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_CORE_WRITE_CONTEXT");
         }
         var changed = new Host(100010000) { TamperTarget = true };
-        Reject(() => new ApplyCandidateAction().Execute(changed), "DIRECT_CANDIDATE_CORE_WRITE_BLOCKED");
+        Reject(() => new ApplyCandidateAction().Execute(changed),
+            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_UPDATE:CALLER_MARKER:CC_UPDATE_CANDIDATE");
         Check(changed.Calls == 0, "SDK tampered target rejected before storage");
         foreach (string message in new[] { "Associate", "Disassociate" })
         {
@@ -196,13 +290,14 @@ internal static class Program
                 ["Relationship"] = new Relationship("OS_SR_USR_CSH_ACTR")
             }, new ParameterCollection(), new ParameterCollection());
             values["MessageName"] = message;
-            Reject(() => new ProtectCandidateCore().Execute(new ContextProvider(Execution(values))), "DIRECT_CANDIDATE_CORE_WRITE_BLOCKED");
+            Reject(() => new ProtectCandidateCore().Execute(new ContextProvider(Execution(values), Proxy<ITracingService>(call => null))),
+                "DIRECT_WRITE_GUARD_REJECTED:ASSOCIATION_PROJECT_RELATIONSHIP");
             values["InputParameters"] = new ParameterCollection
             {
                 ["Target"] = new EntityReference("account", Guid.NewGuid()),
                 ["Relationship"] = new Relationship("synthetic_unrelated_relationship")
             };
-            new ProtectCandidateCore().Execute(new ContextProvider(Execution(values)));
+            new ProtectCandidateCore().Execute(new ContextProvider(Execution(values), Proxy<ITracingService>(call => null)));
             Check(true, "Unrelated association is no-op");
         }
         Console.WriteLine("PASS: " + passed + " offline SDK adapter/guard assertions; dynamic synthetic SDK contexts and service, no authentication/network.");
@@ -225,6 +320,12 @@ internal static class Program
         public bool OrganizationAuditEnabled = true, TamperTarget;
         public List<Guid?> CallerFactorySelections = new List<Guid?>();
         public List<UpdateRequest> CandidateRequests = new List<UpdateRequest>();
+        public List<string> ServiceOperations = new List<string>();
+        public List<string> TraceMessages = new List<string>();
+        public string? FaultOnCreateTable;
+        public string? UnknownFailureOnCreateTable;
+        public string FaultMessage = "Synthetic service failure.";
+        public int FaultErrorCode = unchecked((int)0x80040220);
         public Host(int outcome, bool createCandidate = false)
         {
             Input["ActionType"] = createCandidate ? "CreateCandidate" : "RecordCall";
@@ -247,7 +348,7 @@ internal static class Program
         public object GetService(Type serviceType)
         {
             if (serviceType == typeof(IPluginExecutionContext)) return MainContext;
-            if (serviceType == typeof(ITracingService)) return Proxy<ITracingService>(call => null);
+            if (serviceType == typeof(ITracingService)) return CreateTracingService();
             if (serviceType == typeof(IOrganizationServiceFactory))
                 return Proxy<IOrganizationServiceFactory>(call =>
                 {
@@ -261,13 +362,15 @@ internal static class Program
             var child = Context(new ParameterCollection { ["Target"] = target }, new ParameterCollection(), new ParameterCollection());
             child["MessageName"] = message; child["Stage"] = 10; child["ParentContext"] = parent;
             child["PrimaryEntityName"] = target.LogicalName;
-            new ProtectCandidateCore().Execute(new ContextProvider(Execution(child)));
+            child["OwningExtension"] = new Entity("plugintype", Guid.Parse("00000000-0000-0000-0000-000000000201"));
+            new ProtectCandidateCore().Execute(new ContextProvider(Execution(child), CreateTracingService()));
         }
         private object? InvokeService(IMethodCallMessage call)
         {
             if (call.MethodName == "Retrieve")
             {
                 var table = (string)call.Args[0];
+                ServiceOperations.Add("Retrieve:" + table);
                 if (table == "organization")
                 {
                     OrganizationReads++;
@@ -278,15 +381,23 @@ internal static class Program
             }
             if (call.MethodName == "RetrieveMultiple")
             {
+                ServiceOperations.Add("RetrieveMultiple:" + ((QueryExpression)call.Args[0]).EntityName);
                 Check(((QueryExpression)call.Args[0]).EntityName == "os_sr_oprc", "SDK query receipt only");
                 return Receipt == null ? new EntityCollection() : new EntityCollection(new List<Entity> { Receipt });
             }
             if (call.MethodName == "Create")
             {
                 var row = (Entity)call.Args[0];
+                ServiceOperations.Add("Create:" + row.LogicalName);
                 row[row.LogicalName + "id"] = row.Id;
                 if (TamperTarget) row["unexpected"] = "synthetic";
                 Guard("Create", row, MainContext);
+                if (row.LogicalName == FaultOnCreateTable)
+                    throw new FaultException<OrganizationServiceFault>(
+                        new OrganizationServiceFault { ErrorCode = FaultErrorCode, Message = FaultMessage },
+                        new FaultReason("Synthetic service fault"));
+                if (row.LogicalName == UnknownFailureOnCreateTable)
+                    throw new InvalidOperationException("SENSITIVE_SENTINEL " + Actor.ToString("D"));
                 if (row.LogicalName == "os_sr_call") { Calls++; Check(row.GetAttributeValue<EntityReference>("os_sr_call_ctby").Id == Actor, "SDK Contacted By"); }
                 else if (row.LogicalName == "os_sr_csh") { Histories++; Check(row.GetAttributeValue<EntityReference>("os_sr_csh_actr").Id == Actor, "SDK History Actor"); }
                 else if (row.LogicalName == "os_sr_cand") { CreatedCandidates++; CreatedCandidate = row; }
@@ -297,6 +408,7 @@ internal static class Program
             if (call.MethodName == "Execute")
             {
                 var request = (UpdateRequest)call.Args[0];
+                ServiceOperations.Add("Execute:Update:" + request.Target.LogicalName);
                 if (TamperTarget) request.Target["unexpected"] = "synthetic";
                 Guard("Update", request.Target, MainContext);
                 CandidateRequests.Add(request); Updates++;
@@ -305,12 +417,31 @@ internal static class Program
             }
             throw new Exception("Unexpected service method " + call.MethodName);
         }
+
+        private ITracingService CreateTracingService() => Proxy<ITracingService>(call =>
+        {
+            if (call.MethodName == "Trace")
+            {
+                var format = (string)call.Args[0];
+                var arguments = call.Args.Length > 1 && call.Args[1] is object[] values
+                    ? values
+                    : call.Args.Skip(1).ToArray();
+                TraceMessages.Add(string.Format(System.Globalization.CultureInfo.InvariantCulture, format, arguments));
+            }
+            return null;
+        });
     }
     private sealed class ContextProvider : IServiceProvider
     {
         private readonly IPluginExecutionContext context;
-        public ContextProvider(IPluginExecutionContext context) { this.context = context; }
-        public object GetService(Type type) => type == typeof(IPluginExecutionContext) ? context : throw new Exception("Unexpected service");
+        private readonly ITracingService trace;
+        public ContextProvider(IPluginExecutionContext context, ITracingService trace)
+        {
+            this.context = context;
+            this.trace = trace;
+        }
+        public object GetService(Type type) => type == typeof(IPluginExecutionContext) ? context :
+            type == typeof(ITracingService) ? trace : throw new Exception("Unexpected service");
     }
     private sealed class DynamicProxy : RealProxy
     {

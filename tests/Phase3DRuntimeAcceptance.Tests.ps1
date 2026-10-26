@@ -26,13 +26,14 @@ Assert-Test ($runtime -match "ValidateSet\('GET', 'POST'\)" -and
     $runtime -match "Path -cne 'os_sr_cact'" -and $runtime -match 'MaximumRetryCount = 0' -and
     $runtime -match 'MaximumRedirection = 0' -and $runtime -match 'expectedActionCalls = 8') 'Only bounded Custom API calls with zero retries'
 Assert-Test ($runtime -match 'FileMode\]::CreateNew' -and $runtime -match 'phase3d-r-runtime-' -and
-    $runtime -match 'phase3d-r4j-owner-authorized-package-runtime' -and
+    $runtime -match 'phase3d-r4k-owner-authorized-package-runtime' -and
+    $runtime -notmatch 'phase3d-r4j-owner-authorized-package-runtime' -and
     $runtime -notmatch 'phase3d-r4i-owner-authorized-package-runtime' -and
     $runtime -notmatch 'phase3d-r4g-owner-authorized-package-runtime' -and
     $runtime -notmatch 'phase3d-r4f-owner-authorized-package-runtime' -and
     $runtime -notmatch 'phase3d-r4e-owner-authorized-package-runtime' -and
     $runtime -notmatch 'phase3d-r4d-owner-authorized-package-runtime' -and
-    $runtime -match 'one-shot runtime authorization consumed') 'R4J has a distinct one-shot lock from all prior consumed authorizations'
+    $runtime -match 'one-shot runtime authorization consumed') 'R4K has a distinct one-shot lock from all prior consumed authorizations'
 Assert-Test ($runtime -match "\`$name = '\[SYNTHETIC-E2E\]" -and
     $runtime -match '\[SYNTHETIC-E2E\] Candidate Core Acceptance' -and
     $runtime -match '@example\.invalid' -and $runtime -notmatch '@example\.com') 'Fixture identity is unmistakably synthetic and reserved'
@@ -63,6 +64,9 @@ Assert-Test ($runtime -match 'Get-Count -EntitySet' -and
     $runtime.IndexOf('Zero-row safety gate failed') -lt $runtime.IndexOf('Invoke-Action -Body $create')) 'Zero-row check precedes first business API invocation'
 Assert-Test ($runtime -match 'UNEXPECTED_INPUT:\(SDK_ADAPTER\|ACTION_REQUEST\)' -and
     $runtime -match 'return \$unexpectedInput\.Value') 'Runtime parser preserves sanitized unexpected-input origin and parameter category'
+Assert-Test ($runtime -match 'DATAVERSE_OPERATION_REJECTED:\(CC_\[A-Z_\]\+\):0x' -and
+    $runtime -match 'CANDIDATE_CORE_FAILURE:\(CC_\[A-Z_\]\+\)' -and
+    $runtime -match 'DIRECT_WRITE_GUARD_REJECTED:\(CANDIDATE_CREATE') 'Runtime parser preserves safe service stage and guard categories'
 Assert-Test ($runtime -match 'CreateCandidate' -and $runtime -match 'STALE_EXPECTED_STATUS' -and
     $runtime -match 'RecordCall no-answer replay' -and
     $runtime -match 'RecordCall no-answer conflict' -and

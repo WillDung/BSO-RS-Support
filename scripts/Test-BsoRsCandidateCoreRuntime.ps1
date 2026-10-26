@@ -16,7 +16,7 @@ $manifestPath = Join-Path $root 'docs\PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json
 $contractPath = Join-Path $root 'docs\PHASE_3C_API_CONTRACT.json'
 $script:apiContract = Get-Content -LiteralPath $contractPath -Raw | ConvertFrom-Json
 $expectedManifestHash = '63f56173f61265f539d23d6ceffb5631e23f438e4e254755c1e24c7d17eb1915'
-$runtimeAuthorizationId = 'phase3d-r4j-owner-authorized-package-runtime'
+$runtimeAuthorizationId = 'phase3d-r4k-owner-authorized-package-runtime'
 $expectedActionCalls = 8
 $schedulingEvidenceChecks = @(
     [ordered]@{
@@ -62,6 +62,18 @@ function Save-RuntimeJournal {
 
 function Get-RuntimeErrorCode {
     param([string]$Message)
+    $serviceFailure = [regex]::Match($Message,
+        '(?<![A-Z0-9_])DATAVERSE_OPERATION_REJECTED:(CC_[A-Z_]+):0x[0-9A-F]{8}(?![A-Z0-9_])')
+    if ($serviceFailure.Success) { return $serviceFailure.Value }
+    $candidateCoreFailure = [regex]::Match($Message,
+        '(?<![A-Z0-9_])CANDIDATE_CORE_FAILURE:(CC_[A-Z_]+):(TIMEOUT|PLUGIN_EXECUTION|INVALID_OPERATION|SERVICE_FAULT|OTHER)(?![A-Z0-9_])')
+    if ($candidateCoreFailure.Success) { return $candidateCoreFailure.Value }
+    $guardFailure = [regex]::Match($Message,
+        '(?<![A-Z0-9_])DIRECT_WRITE_GUARD_REJECTED:(CANDIDATE_CREATE|CANDIDATE_UPDATE|CALL_LOG_CREATE|STATUS_HISTORY_CREATE|RECEIPT_CREATE):(PARENT_CONTEXT|CALLER_CONTEXT|CALLER_MARKER)(?::(CC_[A-Z_]+))?(?::0x[0-9A-F]{8})?(?![A-Z0-9_])')
+    if ($guardFailure.Success) { return $guardFailure.Value }
+    $legacyGuardFailure = [regex]::Match($Message,
+        '(?<![A-Z0-9_])DIRECT_WRITE_GUARD_REJECTED:LEGACY_GENERIC_GUARD:(CC_[A-Z_]+):0x[0-9A-F]{8}(?![A-Z0-9_])')
+    if ($legacyGuardFailure.Success) { return $legacyGuardFailure.Value }
     $unexpectedInput = [regex]::Match($Message,
         '(?<![A-Z0-9_])UNEXPECTED_INPUT:(SDK_ADAPTER|ACTION_REQUEST):([A-Za-z][A-Za-z0-9_]*)(?![A-Z0-9_])')
     if ($unexpectedInput.Success) { return $unexpectedInput.Value }

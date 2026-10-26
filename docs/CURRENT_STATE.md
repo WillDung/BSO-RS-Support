@@ -1,5 +1,17 @@
 # Current State
 
+## Phase 3D-R4K Guard-Diagnosed CreateCandidate Stop (2026-10-26)
+
+**`CREATECANDIDATE_RUNTIME_FAILURE` — the latest unsigned diagnostic package was rebuilt and updated in place once; its one authorized CreateCandidate dispatch was rejected by the retained legacy direct-write guard. No retry or runtime-matrix operation followed.**
+
+The guarded PAC and Dataverse identity checks matched the owner-confirmed VN LMV IT target. Fresh pre-update and immediate post-update preflights reconciled the single existing `os_sr_cact_pkg` v1.0.0, package-backed `ApplyCandidateAction` and `ProtectCandidateCore` types, unchanged 13-parameter Custom API contract, active handler mapping, and 0 Candidates / 0 Call Logs / 0 Status History / 0 Receipts. The package update used PAC CLI once; package identity/version and handler topology remained unchanged. A fresh post-failure count-only reconciliation again returned 0/0/0/0.
+
+The synthetic CreateCandidate request omitted CandidateId and ExpectedStatus and used the guarded runner's reserved `.invalid` address and fresh CorrelationId. Its single dispatch returned HTTP 400 / `0x80040265` with the safe diagnostic `DIRECT_WRITE_GUARD_REJECTED:LEGACY_GENERIC_GUARD:CC_CREATE_CANDIDATE:0x80040265`. This locates the rejection at Candidate creation under the retained legacy guard, but the deployed generic guard response does not reveal which guard predicate failed. The stage diagnosis is not sufficient evidence for a deterministic package-only repair. No second package update, CreateCandidate call, or later runtime-matrix operation was made. Package updates: 1; CreateCandidate calls: 1; automatic retries: 0.
+
+The unsigned local artifact is `os_sr_cact_pkg` v1.0.0. DLL SHA-256: `fd5f46e9d2e9388c7f5fefb90dc327ef9d1d40d241b5897c7e2913a92f2113b0`; package SHA-256: `f0403d61e3cfa92595e469e1332716a609c8d597c9d047bfc8bcb9a9379941b8`; five-entry inventory SHA-256 (sorted `path|uncompressed length|compressed length` lines joined by LF): `9df64f69b291f880e4d379899729f46196c6626a1f71658f6cad3f3d0be0fe92`. These are local artifact hashes, not an independently read-back hash of deployed package bytes. The deployment script's frozen artifact pins now match this built package. Local validation: build succeeded with 0 warnings/errors; Candidate Core engine harness 109 assertions; SDK harness 117 assertions; all 10 PowerShell suites passed (1,108 assertions); 20 scripts parsed; package-content, privacy, relative-link, and `git diff --check` validations passed.
+
+No schema, Choice, API, privilege/security, app, audit setting, publication, handler registration, or legacy assembly was changed. Full evidence is in the [Phase 3D report](PHASE_3D_CANDIDATE_CORE_RUNTIME_ACCEPTANCE_REPORT.md).
+
 ## Phase 3D-R4J Operation-First Input Projection and Runtime Stop (2026-10-25)
 
 **`CREATECANDIDATE_RUNTIME_FAILURE_UNRESOLVED` — the operation-first SDK adapter correction passed local validation, and the existing unsigned `os_sr_cact_pkg` was updated exactly once. Its single CreateCandidate invocation returned HTTP 400 / `0x80040265` / `DATAVERSE_OPERATION_REJECTED`. That sanitized diagnostic does not prove a deterministic local defect; no second invocation or later runtime-matrix operation occurred.**

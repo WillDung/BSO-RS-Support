@@ -1,6 +1,36 @@
 # Phase 3D - Candidate Core Synthetic Runtime Acceptance
 
-Date: 25 October 2026. This report records the current Phase 3D-R4J adapter correction, existing-package update, and unresolved CreateCandidate runtime failure, with earlier assessments retained as history. Source: owner authorization, current repository contract/source, guarded live reconciliation, local offline validation, and Microsoft's published Dataverse metadata documentation.
+Date: 26 October 2026. This report records the current Phase 3D-R4K guard-diagnosed CreateCandidate runtime failure, with earlier assessments retained as history. Source: owner authorization, current repository contract/source, guarded live reconciliation, local offline validation, and Microsoft's published Dataverse metadata documentation.
+
+## Phase 3D-R4K Guard-Diagnosed CreateCandidate Stop
+
+**`CREATECANDIDATE_RUNTIME_FAILURE` — one update of the existing unsigned package succeeded; one CreateCandidate dispatch was rejected by the retained legacy direct-write guard. Stop without retry or runtime-matrix continuation.**
+
+### Bounded diagnostic change and local validation
+
+The R4K source adds safe stage-specific markers around each organization-service operation and wraps service failures with the operation stage and Dataverse error code. It recognizes the retained legacy guard's exact generic rejection text and emits a categorized diagnostic without returning arbitrary fault text, identifiers, or candidate data. The guard conditions, operation-first SDK input projection, CreateCandidate's optional CandidateId behavior, server-controlled initial state, and existing-record ExpectedStatus checks remain unchanged. The SDK harness covers service ordering/faults, generic legacy-guard recognition, privacy, and package-handler/legacy-guard context. It does not establish the live guard's precise rejection predicate.
+
+The final unsigned package build succeeded with 0 warnings and 0 errors. Candidate Core engine tests passed 109 assertions and SDK adapter/guard tests passed 117 assertions. All 10 PowerShell suites passed (1,108 assertions); all 20 PowerShell scripts parsed. Package identity/content, changed-document link, added-diff privacy, and `git diff --check` checks passed. The prohibited legacy signing key was not accessed.
+
+| Local artifact | SHA-256 |
+|---|---|
+| `os_sr_cact.dll` | `fd5f46e9d2e9388c7f5fefb90dc327ef9d1d40d241b5897c7e2913a92f2113b0` |
+| `os_sr_cact_pkg.1.0.0.nupkg` | `f0403d61e3cfa92595e469e1332716a609c8d597c9d047bfc8bcb9a9379941b8` |
+| Five-entry inventory (`path|uncompressed length|compressed length`, sorted and LF-joined) | `9df64f69b291f880e4d379899729f46196c6626a1f71658f6cad3f3d0be0fe92` |
+
+The package identity remains `os_sr_cact_pkg` v1.0.0; the assembly remains unsigned `os_sr_cact` v1.0.0.0 with the exact handler and guard types. The local inventory contains only the previously validated five NuGet entries. The deployment script's package/DLL/inventory pins were refreshed to these validated local artifact fingerprints. The hashes identify the local submitted artifact, not a hash independently read back from the deployed package bytes.
+
+### Live package update and reconciliation
+
+PAC identity and Dataverse WhoAmI/expected-user guards matched the owner-confirmed VN LMV IT target. A fresh pre-update runtime preflight reconciled one existing package and package-backed `os_sr_cact.ApplyCandidateAction` / `os_sr_cact.ProtectCandidateCore` types. The CreateCandidate API still pointed to the package handler; all 13 request parameters matched the current contract, including optional `CandidateId` and optional `ExpectedStatus`. The fresh count-only gate returned 0 Candidates / 0 Call Logs / 0 Status History / 0 Receipts.
+
+PAC CLI 2.13.1 updated the existing package once using its existing PluginPackage identity and the validated `.nupkg`; the command returned success. Immediate GET reconciliation confirmed the same package identity/name/version, package-backed assembly and both exact types, unchanged package-backed API handler and request contract, and 0/0/0/0 business/evidence rows. The package's `modifiedon` advanced. Package update count: 1; automatic retries: 0. No handler/API PATCH, package creation, schema, Choice, security, app, publication, audit-setting, or legacy assembly write occurred.
+
+### Single CreateCandidate dispatch and stop
+
+The guarded runtime runner sent one synthetic CreateCandidate request with a fresh CorrelationId, the approved synthetic candidate name, a reserved `.invalid` email, and no CandidateId or ExpectedStatus. The request fingerprint was `9732a1a9fb35296f511e20f8e32e215d29afcff45f0962c3da021e363a8c9698`. The response was HTTP 400 / `0x80040265` / `DIRECT_WRITE_GUARD_REJECTED:LEGACY_GENERIC_GUARD:CC_CREATE_CANDIDATE:0x80040265`. The exact guard predicate is unknown: the retained deployed guard returned a generic rejection rather than the categorized diagnostics available in the new package source. The failure is localized to the Candidate Create service operation under the legacy guard; this does not establish which parent-context, caller-context, or intent-marker check failed.
+
+A fresh post-failure count-only reconciliation again returned 0 Candidates / 0 Call Logs / 0 Status History / 0 Receipts. The one-shot journal records exactly one CreateCandidate dispatch, HTTP 400, the fingerprint above, and zero retries. No Candidate was retained, no second CreateCandidate request or package update was made, and no later runtime-matrix operation was attempted. No deterministic package-only correction was proven; further live work must first establish the failing guard predicate and authorize any required registration/assembly remediation. Final classification: **`CREATECANDIDATE_RUNTIME_FAILURE`**.
 
 ## Phase 3D-R4J Operation-First Input Projection and Runtime Stop
 

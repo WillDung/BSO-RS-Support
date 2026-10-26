@@ -10,6 +10,7 @@ namespace os_sr_cact
     public sealed class OperationError : Exception
     {
         public OperationError(string code) : base(code) { }
+        public OperationError(string code, Exception innerException) : base(code, innerException) { }
     }
 
     public sealed class ActionRequest

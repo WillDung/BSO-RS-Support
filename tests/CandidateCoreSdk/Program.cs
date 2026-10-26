@@ -80,6 +80,71 @@ internal static class Program
 
     private static void Main()
     {
+        var actionWriteMatrix = new Dictionary<string, string[]>
+        {
+            ["CreateCandidate"] = new[] { "CANDIDATE_CREATE", "RECEIPT_CREATE" },
+            ["UpdateCandidate"] = new[] { "CANDIDATE_UPDATE", "RECEIPT_CREATE" },
+            ["RecordCall"] = new[] { "CANDIDATE_UPDATE", "CALL_LOG_CREATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE" },
+            ["ProceedToScheduling"] = new[] { "CANDIDATE_UPDATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE" },
+            ["MarkRound1Scheduled"] = Array.Empty<string>(),
+            ["RecordPass"] = Array.Empty<string>(),
+            ["RecordFail"] = Array.Empty<string>(),
+            ["RequestReschedule"] = Array.Empty<string>()
+        };
+        var protectedWrites = new[]
+        {
+            (Message: "Create", Table: "os_sr_cand", Code: "CANDIDATE_CREATE"),
+            (Message: "Update", Table: "os_sr_cand", Code: "CANDIDATE_UPDATE"),
+            (Message: "Create", Table: "os_sr_call", Code: "CALL_LOG_CREATE"),
+            (Message: "Create", Table: "os_sr_csh", Code: "STATUS_HISTORY_CREATE"),
+            (Message: "Create", Table: "os_sr_oprc", Code: "RECEIPT_CREATE")
+        };
+        foreach (var pair in actionWriteMatrix)
+        {
+            foreach (var write in protectedWrites)
+            {
+                var target = new Entity(write.Table, Guid.NewGuid());
+                var parent = CreateTrustedParent(pair.Key, write.Message, target, 1, includeMarker: false);
+                if (pair.Value.Contains(write.Code))
+                {
+                    ExecuteGuard(write.Message, target, parent);
+                    Check(true, "Canonical action/write allow: " + pair.Key + ":" + write.Code);
+                }
+                else RejectDirectGuard(write.Message, target, parent,
+                    "DIRECT_WRITE_GUARD_REJECTED:" + write.Code + ":TRUSTED_PARENT:ACTIONTYPE_MISMATCH");
+                RejectDirectGuard(write.Message, target, null,
+                    "DIRECT_WRITE_GUARD_REJECTED:" + write.Code + ":PARENT_CONTEXT");
+            }
+            var actionIndex = Array.IndexOf(actionWriteMatrix.Keys.ToArray(), pair.Key);
+            var actionCode = new[] { "CREATE_CANDIDATE", "UPDATE_CANDIDATE", "RECORD_CALL",
+                "PROCEED_TO_SCHEDULING", "MARK_ROUND1_SCHEDULED", "RECORD_PASS", "RECORD_FAIL", "REQUEST_RESCHEDULE" }[actionIndex];
+            foreach (var unsupported in new[] { ("Update", "os_sr_oprc", "RECEIPT_UPDATE"),
+                ("Delete", "os_sr_cand", "OTHER_PROTECTED_WRITE"),
+                ("Upsert", "os_sr_oprc", "OTHER_PROTECTED_WRITE"),
+                ("Update", "os_sr_call", "OTHER_PROTECTED_WRITE"),
+                ("Update", "os_sr_csh", "OTHER_PROTECTED_WRITE") })
+            {
+                var target = new Entity(unsupported.Item2, Guid.NewGuid());
+                RejectDirectGuard(unsupported.Item1, target,
+                    CreateTrustedParent(pair.Key, unsupported.Item1, target, 1),
+                    "DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_CORE_WRITE_CONTEXT:" + actionCode + ":" + unsupported.Item3);
+            }
+        }
+        var unsupportedFault = CreateCandidateHost();
+        unsupportedFault.FaultOnCreateTable = "os_sr_cand";
+        unsupportedFault.FaultErrorCode = unchecked((int)0x80040265);
+        unsupportedFault.FaultMessage = "DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_CORE_WRITE_CONTEXT:CREATE_CANDIDATE:OTHER_PROTECTED_WRITE";
+        Reject(() => new ApplyCandidateAction().Execute(unsupportedFault),
+            unsupportedFault.FaultMessage + ":CC_CREATE_CANDIDATE:0x80040265");
+        var unknownWriteTarget = new Entity("os_sr_oprc", Guid.NewGuid());
+        var unknownActionParent = CreateGuardParent("os_sr_cact",
+            new ParameterCollection { ["ActionType"] = "SENSITIVE_SENTINEL " + Actor.ToString("D") },
+            new ParameterCollection());
+        RejectDirectGuard("Upsert", unknownWriteTarget, Execution(unknownActionParent),
+            "DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_CORE_WRITE_CONTEXT:UNKNOWN_ACTION:OTHER_PROTECTED_WRITE");
+        RejectDirectGuard("Update", unknownWriteTarget,
+            CreateTrustedParent("CreateCandidate", "Update", unknownWriteTarget, 9),
+            "DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_CORE_WRITE_CONTEXT:UNKNOWN_ACTION:RECEIPT_UPDATE");
         var createWithoutOptionalGuids = CreateCandidateHost();
         new ApplyCandidateAction().Execute(createWithoutOptionalGuids);
         Check(createWithoutOptionalGuids.CreatedCandidates == 1 &&
@@ -458,7 +523,7 @@ internal static class Program
         ExecuteGuard("Create", receiptTarget, CreateTrustedParent("CreateCandidate", "Create", receiptTarget, 1));
         Check(true, "Operation Receipt child write is accepted only under a trusted CreateCandidate");
         RejectDirectGuard("Update", receiptTarget, CreateTrustedParent("CreateCandidate", "Update", receiptTarget, 1),
-            "DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_CORE_WRITE_CONTEXT");
+            "DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_CORE_WRITE_CONTEXT:CREATE_CANDIDATE:RECEIPT_UPDATE");
         Check(true, "Operation Receipts remain append-only; no receipt update path is introduced");
         var callTarget = new Entity("os_sr_call", Guid.NewGuid());
         ExecuteGuard("Create", callTarget, CreateTrustedParent("RecordCall", "Create", callTarget, 1));
@@ -480,9 +545,9 @@ internal static class Program
         {
             var host = new Host(100010000);
             Reject(() => host.Guard("Delete", new Entity(table, Candidate), host.MainContext),
-                "DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_CORE_WRITE_CONTEXT");
+                "DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_CORE_WRITE_CONTEXT:RECORD_CALL:OTHER_PROTECTED_WRITE");
             Reject(() => host.Guard("UpdateMultiple", new Entity(table, Candidate), host.MainContext),
-                "DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_CORE_WRITE_CONTEXT");
+                "DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_CORE_WRITE_CONTEXT:RECORD_CALL:OTHER_PROTECTED_WRITE");
         }
         var changed = new Host(100010000) { TamperTarget = true };
         changed.MainValues["OwningExtension"] = null;

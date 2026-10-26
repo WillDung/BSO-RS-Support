@@ -2,7 +2,93 @@
 
 Date: 26 October 2026. This report records the current Phase 3D-R4M package disposition and CreateCandidate runtime failure; earlier assessments are retained as history. Source: owner authorization, current repository contract/source, guarded live reconciliation, local offline validation, and the supported Dataverse plug-in package model.
 
-## Latest Verified Server-Owned Ancestor Acceptance Attempt (2026-10-26)
+## R4O Continuation: Static Write-Context Reconciliation (2026-10-26)
+
+**Final classification: `CANDIDATE_CORE_WRITE_CONTEXT_FAILURE_UNRESOLVED`.** The single diagnostic CreateCandidate returned `UNSUPPORTED_CORE_WRITE_CONTEXT:CREATE_CANDIDATE:OTHER_PROTECTED_WRITE` during `CC_CREATE_CANDIDATE`. This does not identify an exact supported table/message pair or prove an allowlist correction. No second repair, package update, acceptance call or matrix was executed. The existing R4O work remains incomplete; no new readiness/diagnostic phase was created.
+
+**Pre-deployment finding: no unique failing CreateCandidate pair is statically proven.** The earlier R4O `UNSUPPORTED_CORE_WRITE_CONTEXT` is the baseline. This continuation uses safe action/write localization, not a new readiness phase and not a return to marker diagnosis. The attachment both describes a possible second diagnostic-branch package update and states a maximum of one; the stricter one-update ceiling is applied. No second speculative repair is authorized by this interpretation.
+
+### Canonical source-derived contract
+
+All allowed cells below still require the full verified package-backed API ancestor/OwningExtension, synchronous transaction, depth and caller contract. `RecordCall` cells describe its supported outcome-dependent union, not unconditional execution of every write.
+
+| ActionType | Candidate Create | Candidate Update | Call Log Create | History Create | Receipt Create | Receipt Update / Upsert / other protected mutation |
+|---|---|---|---|---|---|---|
+| CreateCandidate | Allow | Deny | Deny | Deny | Allow | Deny |
+| UpdateCandidate | Deny | Allow | Deny | Deny | Allow | Deny |
+| RecordCall | Deny | Allow when Answered changes status | Allow | Allow when Answered changes status | Allow | Deny |
+| ProceedToScheduling | Deny | Allow | Deny | Allow | Allow | Deny |
+| MarkRound1Scheduled | Deny | Deny | Deny | Deny | Deny | Deny |
+| RecordPass | Deny | Deny | Deny | Deny | Deny | Deny |
+| RecordFail | Deny | Deny | Deny | Deny | Deny | Deny |
+| RequestReschedule | Deny | Deny | Deny | Deny | Deny | Deny |
+
+Source locations: [CandidateOperation.Execute and Transition](../solutions/CandidateCore/Operation.cs) determine reachability; [DataverseStore](../solutions/CandidateCore/DataversePlugin.cs) maps business effects to SDK calls, and `ProtectCandidateCore.SafeOperation` / `IsActionForOperation` map exact protected mutations to allowed actions.
+
+| Action / branch | Exact successful first-execution sequence after transaction validation |
+|---|---|
+| CreateCandidate | Receipt lookup (read) -> Candidate Create -> Receipt Create |
+| UpdateCandidate | Receipt lookup -> Candidate read/version/status checks -> Candidate Update -> Receipt Create |
+| RecordCall: No Answer / Call Back Requested | Receipt lookup -> Candidate read/version/status checks -> Call Log Create -> Receipt Create |
+| RecordCall: Answered | Receipt lookup -> Candidate read/version/status checks -> Candidate Update -> Call Log Create -> History Create -> Receipt Create |
+| ProceedToScheduling | Receipt lookup -> Candidate read/version/status checks -> Candidate Update -> History Create -> Receipt Create |
+| MarkRound1Scheduled | Receipt lookup -> Candidate read/checks -> fail closed before any write: missing scheduler evidence |
+| RecordPass / RecordFail / RequestReschedule | Receipt lookup -> Candidate read/checks -> fail closed before any write: missing result/cancellation evidence (or invalid current status) |
+
+`Transition` has a future-evidence test parameter, but production `Execute` does not supply true; future transitions are not reachable production writes. Candidate updates use `IOrganizationService.Execute(UpdateRequest)` with `IfRowVersionMatches`; the protected message is Update. All four table creates use `IOrganizationService.Create`. There is no receipt Update, Upsert, Execute persistence or other receipt write path. Reads are not business-write allowlist entries.
+
+Receipt semantics: first successful execution creates one receipt after its business effects; identical replay finds the receipt, verifies actor/action/fingerprint/version/target, reads Candidate and returns stored evidence without writes. Conflicting replay rejects before mutation. Operation failure does not persist a successful receipt; failed-transaction rollback is separately simulated offline and is not inferred as live acceptance.
+
+### Static comparison and bounded changes
+
+| CreateCandidate reachable protected write | Existing R4O guard compatibility | Source |
+|---|---|---|
+| `CANDIDATE_CREATE` | Already allowed | `SafeOperation(Create, os_sr_cand)`; `IsActionForOperation` CreateCandidate branch |
+| `RECEIPT_CREATE` | Already allowed | `SafeOperation(Create, os_sr_oprc)`; existing receipt branch |
+
+`UNSUPPORTED_CORE_WRITE_CONTEXT` is emitted before ancestor trust checks when SafeOperation/message/table classification is unsupported. Neither required CreateCandidate pair is absent or misclassified in static source. Therefore **`STATIC_GUARD_WRITE_CONTEXT_DEFECT_PROVEN` is not claimed for the live CreateCandidate failure**.
+
+The full eight-action comparison did expose one overbroad cell group: Receipt Create previously accepted any supported action, including all four fail-closed future actions. That branch is narrowed to the four current write-capable actions. It does not explain or fix the CreateCandidate failure, and does not broaden any allowlist.
+
+The diagnostic build adds only closed action/write codes to unsupported-write rejection: `UNSUPPORTED_CORE_WRITE_CONTEXT:<ACTION_CODE>:<WRITE_CODE>`. The action is a bounded ancestor label for diagnosis, not proof of trusted registration; unknown values map to `UNKNOWN_ACTION`. Only the five current protected write codes, `RECEIPT_UPDATE` and `OTHER_PROTECTED_WRITE` are exposed. No arbitrary message/table strings, values, record IDs, actors, markers or payloads are returned. Safe diagnostic propagation is wired through service-stage wrapping and runtime reporting.
+
+The canonical SDK matrix tests every supported ActionType against all five valid mutation categories, both allowing exact reachable pairs and rejecting all other pairs; it also rejects direct writes, Receipt Update/Upsert, Candidate Delete and Call/History Update. The engine harness separately verifies actual read/write order, every replay/conflict path and all four fail-closed operations. Existing direct-write/registration/R4J/idempotency/service-stage tests remain.
+
+### Bounded live diagnostic result
+
+| Gate or operation | Verified result for this R4O continuation |
+|---|---|
+| Identity | VN LMV IT; fresh PAC and WhoAmI agreement |
+| Storage/API | Exact Candidate Core schema/Choices/relationships; Active Receipt key; unchanged 13 inputs/five outputs |
+| Existing package | One `os_sr_cact_pkg` v1.0.0; unchanged package/assembly/type identities; package-backed handler and guard |
+| Guard registration | 50/50 package-backed; retained protected-property fingerprints/configuration/message/filter/impersonation/secure-reference properties exact before and after update |
+| Trace setting / active Candidate Core Profiler wrappers | 0 (Off) / 0; no setting change or Profiler activity |
+| Diagnostic package updates | 1, HTTP 204; immediate topology reconciliation passed |
+| Package disposition | `PACKAGE_UPDATE_ACCEPTED_CONTENT_NOT_BYTE_RECONCILABLE`; ordinary GET is not deployed-byte evidence |
+| Diagnostic CreateCandidate / total API dispatches | 1 / 1, minimal four-input synthetic request, no optional inputs |
+| Runtime response | HTTP 400 / `0x80040265` |
+| Exact safe diagnostic | `DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_CORE_WRITE_CONTEXT:CREATE_CANDIDATE:OTHER_PROTECTED_WRITE:CC_CREATE_CANDIDATE:0x80040265` |
+| Automatic retries | 0 |
+| Pre/post/final Candidate / Call Log / History / Receipt | 0/0/0/0 -> 0/0/0/0 -> 0/0/0/0 |
+| Corrected acceptance / runtime matrix | Not reached; diagnostic did not prove a deterministic failing pair |
+| Direct-write live canary | Not executed; no existing safe runner and no successful matrix; SDK negatives retained |
+| Final read-only reconciliation | Same package-backed handler/types, unchanged API, 50 package-backed guards, trace Off, no active Candidate Core Profiler wrappers, zero counts |
+
+The action label is derived from a bounded ancestor for diagnosis, not registration trust. `OTHER_PROTECTED_WRITE` means the rejected context's message/primary-entity combination was not one of the five currently supported protected write categories or Receipt Update. It does not expose which message/entity it was. The diagnostic is thrown before ancestor verification, so this result does not prove that OwningExtension checks passed or failed. It does not support changing marker, ParentContext, identities or the exact business-write allowlist. No such change followed the diagnostic.
+
+### R4O artifact and validation evidence
+
+Local SHA-256 of the uploaded diagnostic input:
+
+- DLL: `45c15f8b825e167fc8a1e7031b34708af3ac34a3fef689dc5853cf35cd7abcdf`
+- Package: `8617f313091ba6e51398b4b0abd19566f6486023595144bb7438f9ada1db996e`
+- Inventory (`Sort-Object FullName`, `name|length|compressed-length` joined by LF): `5e19f514443bf7c03e7a67c70e3128b275ebeb263fd192db26856b74ab21532c`
+
+Local gates passed: engine 141 assertions; SDK 326 assertions; all 12 PowerShell suites / 1,140 assertions; unsigned Rebuild and package validation; all 11 repository scripts and bounded R4O runner parsed; privacy/relative-link checks and `git diff --check`. Existing R4J input projection, verified ancestor registration/direct-write negatives, idempotency/receipt rollback and service-stage regressions remain in the suites. A new durable R4O continuation journal/runtime lock enforced the single dispatch; no consumed earlier authorization was reused.
+
+No successful CreateCandidate, runtime matrix/write-context acceptance, Phase 3D completion or transition to Candidate UI/BSO Security is claimed. No second build/deployment/call, trace-setting write, Profiler activity, new package, schema/Choice/API/security/app/audit/publication change, handler/guard-step PATCH, legacy signed assembly update, signing-key access, commit or push occurred in this continuation.
+
+## Earlier Verified Server-Owned Ancestor Acceptance Attempt (2026-10-26)
 
 **`CANDIDATE_CORE_TRUST_MODEL_FAILURE:UNSUPPORTED_CORE_WRITE_CONTEXT`.** The owner explicitly approved replacing required SharedVariables marker authorization with the verified server-owned API ancestor model. The preceding R4M diagnostic proved `MARKER_MISSING`; it did not prove the transport mechanism. The owner-approved architecture decision supersedes the old marker requirement without claiming that mechanism was diagnosed.
 

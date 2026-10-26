@@ -1,7 +1,7 @@
 #requires -Version 7.4
 [CmdletBinding()]
 param(
-    [ValidateSet('Preflight', 'Apply', 'VerifiedAncestorApply')][string]$RuntimeMode = 'Preflight',
+    [ValidateSet('Preflight', 'Apply', 'VerifiedAncestorApply', 'R4OWriteContextApply')][string]$RuntimeMode = 'Preflight',
     [Parameter(Mandatory)][string]$EnvironmentName,
     [Parameter(Mandatory)][string]$OrganizationUrl,
     [Parameter(Mandatory)][string]$ExpectedEnvironmentId,
@@ -19,10 +19,14 @@ $contractPath = Join-Path $root 'docs\PHASE_3C_API_CONTRACT.json'
 $script:apiContract = Get-Content -LiteralPath $contractPath -Raw | ConvertFrom-Json
 $expectedManifestHash = '63f56173f61265f539d23d6ceffb5631e23f438e4e254755c1e24c7d17eb1915'
 $runtimeAuthorizationId = 'phase3d-r4m-owner-authorized-marker-propagation-runtime'
-$verifiedAncestorAuthorization = $RuntimeMode -ceq 'VerifiedAncestorApply'
+$writeContextAuthorization = $RuntimeMode -ceq 'R4OWriteContextApply'
+$verifiedAncestorAuthorization = $RuntimeMode -in @('VerifiedAncestorApply', 'R4OWriteContextApply')
 if ($verifiedAncestorAuthorization) {
     $runtimeAuthorizationId = 'phase3d-owner-authorized-verified-ancestor-runtime'
     $RuntimeMode = 'Apply'
+}
+if ($writeContextAuthorization) {
+    $runtimeAuthorizationId = 'phase3d-r4o-owner-authorized-write-context-runtime'
 }
 $expectedActionCalls = 8
 $schedulingEvidenceChecks = @(
@@ -69,6 +73,9 @@ function Save-RuntimeJournal {
 
 function Get-RuntimeErrorCode {
     param([string]$Message)
+    $writeContextFailure = [regex]::Match($Message,
+        '(?<![A-Z0-9_])DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_CORE_WRITE_CONTEXT:(CREATE_CANDIDATE|UPDATE_CANDIDATE|RECORD_CALL|PROCEED_TO_SCHEDULING|MARK_ROUND1_SCHEDULED|RECORD_PASS|RECORD_FAIL|REQUEST_RESCHEDULE|UNKNOWN_ACTION):(CANDIDATE_CREATE|CANDIDATE_UPDATE|CALL_LOG_CREATE|STATUS_HISTORY_CREATE|RECEIPT_CREATE|RECEIPT_UPDATE|OTHER_PROTECTED_WRITE)(?::CC_[A-Z_]+)?(?::0x[0-9A-F]{8})?(?![A-Z0-9_])')
+    if ($writeContextFailure.Success) { return $writeContextFailure.Value }
     $coreWriteFailure = [regex]::Match($Message,
         '(?<![A-Z0-9_])DIRECT_WRITE_GUARD_REJECTED:(UNSUPPORTED_CORE_WRITE_CONTEXT|ASSOCIATION_PROJECT_RELATIONSHIP|ASSOCIATION_PROJECT_TABLE|ASSOCIATION_CONTAINS_PROJECT_TABLE)(?::CC_[A-Z_]+)?(?::0x[0-9A-F]{8})?(?![A-Z0-9_])')
     if ($coreWriteFailure.Success) { return $coreWriteFailure.Value }

@@ -213,6 +213,12 @@ namespace os_sr_cact
         {
             if (message == null) return null;
             var normalized = message.Trim();
+            foreach (var action in ProtectCandidateCore.DiagnosticActionCodes)
+                foreach (var write in ProtectCandidateCore.DiagnosticWriteCodes)
+                {
+                    var diagnostic = "DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_CORE_WRITE_CONTEXT:" + action + ":" + write;
+                    if (normalized == diagnostic) return diagnostic;
+                }
             var predicates = new[] { "API_MESSAGE_MISMATCH", "STAGE_MISMATCH", "MODE_MISMATCH",
                 "TRANSACTION_MISMATCH", "DEPTH_MISMATCH", "USER_CONTEXT_MISMATCH", "INITIATING_USER_MISMATCH",
                 "ACTIONTYPE_MISSING", "ACTIONTYPE_MISMATCH", "MARKER_MISSING", "MARKER_TYPE_MISMATCH",
@@ -336,6 +342,11 @@ namespace os_sr_cact
     {
         internal const string IntentKey = "os_sr_cact.validated_intent";
         private const int MaximumParentContexts = 8;
+        internal static readonly string[] DiagnosticActionCodes = { "CREATE_CANDIDATE", "UPDATE_CANDIDATE",
+            "RECORD_CALL", "PROCEED_TO_SCHEDULING", "MARK_ROUND1_SCHEDULED", "RECORD_PASS",
+            "RECORD_FAIL", "REQUEST_RESCHEDULE", "UNKNOWN_ACTION" };
+        internal static readonly string[] DiagnosticWriteCodes = { "CANDIDATE_CREATE", "CANDIDATE_UPDATE",
+            "CALL_LOG_CREATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE", "RECEIPT_UPDATE", "OTHER_PROTECTED_WRITE" };
         private static readonly object RegistrationCacheLock = new object();
         private static readonly Dictionary<Tuple<Guid, Guid, Guid>, DateTime> RegistrationCache =
             new Dictionary<Tuple<Guid, Guid, Guid>, DateTime>();
@@ -363,7 +374,7 @@ namespace os_sr_cact
             var operation = SafeOperation(context.MessageName, context.PrimaryEntityName);
             if (operation == null || (context.MessageName != "Create" && context.MessageName != "Update") ||
                 (context.MessageName == "Update" && context.PrimaryEntityName != "os_sr_cand"))
-                throw Rejection(trace, "UNSUPPORTED_CORE_WRITE_CONTEXT");
+                throw Rejection(trace, UnsupportedWriteDiagnostic(context));
             if (context.Stage != 10 || context.Mode != 0 || !context.IsInTransaction ||
                 context.Depth <= 1 || context.ParentContext == null)
                 throw Rejection(trace, operation + ":PARENT_CONTEXT");
@@ -485,7 +496,29 @@ namespace os_sr_cact
                 return action == "UpdateCandidate" || action == "RecordCall" || action == "ProceedToScheduling";
             if (operation == "STATUS_HISTORY_CREATE")
                 return action == "RecordCall" || action == "ProceedToScheduling";
-            return operation == "RECEIPT_CREATE";
+            return operation == "RECEIPT_CREATE" &&
+                (action == "CreateCandidate" || action == "UpdateCandidate" ||
+                 action == "RecordCall" || action == "ProceedToScheduling");
+        }
+
+        private static string UnsupportedWriteDiagnostic(IPluginExecutionContext context)
+        {
+            var actionCode = "UNKNOWN_ACTION";
+            var ancestor = context.ParentContext;
+            var actions = new[] { "CreateCandidate", "UpdateCandidate", "RecordCall", "ProceedToScheduling",
+                "MarkRound1Scheduled", "RecordPass", "RecordFail", "RequestReschedule" };
+            for (var hop = 0; ancestor != null && hop < MaximumParentContexts; hop++, ancestor = ancestor.ParentContext)
+            {
+                if (ancestor.MessageName != "os_sr_cact" ||
+                    !ancestor.InputParameters.TryGetValue("ActionType", out var raw) || !(raw is string action)) continue;
+                var index = Array.IndexOf(actions, action);
+                if (index >= 0) actionCode = DiagnosticActionCodes[index];
+                break;
+            }
+            var writeCode = SafeOperation(context.MessageName, context.PrimaryEntityName) ??
+                (context.MessageName == "Update" && context.PrimaryEntityName == "os_sr_oprc"
+                    ? "RECEIPT_UPDATE" : "OTHER_PROTECTED_WRITE");
+            return "UNSUPPORTED_CORE_WRITE_CONTEXT:" + actionCode + ":" + writeCode;
         }
 
         private static string? SafeOperation(string message, string entity)

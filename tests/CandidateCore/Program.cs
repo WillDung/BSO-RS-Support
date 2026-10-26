@@ -29,6 +29,42 @@ static class Program
 
     static void Main()
     {
+        foreach (var scenario in new[]
+        {
+            ("CreateCandidate", ActionRequest.NeedCall, -1, "RECEIPT_READ,CANDIDATE_CREATE,RECEIPT_CREATE"),
+            ("UpdateCandidate", ActionRequest.NeedCall, -1, "RECEIPT_READ,CANDIDATE_READ,CANDIDATE_UPDATE,RECEIPT_CREATE"),
+            ("RecordCall", ActionRequest.NeedCall, 100010001, "RECEIPT_READ,CANDIDATE_READ,CALL_LOG_CREATE,RECEIPT_CREATE"),
+            ("RecordCall", ActionRequest.NeedCall, 100010002, "RECEIPT_READ,CANDIDATE_READ,CALL_LOG_CREATE,RECEIPT_CREATE"),
+            ("RecordCall", ActionRequest.NeedCall, 100010000, "RECEIPT_READ,CANDIDATE_READ,CANDIDATE_UPDATE,CALL_LOG_CREATE,STATUS_HISTORY_CREATE,RECEIPT_CREATE"),
+            ("ProceedToScheduling", ActionRequest.Answered, -1, "RECEIPT_READ,CANDIDATE_READ,CANDIDATE_UPDATE,STATUS_HISTORY_CREATE,RECEIPT_CREATE")
+        })
+        {
+            var input = Input(scenario.Item1);
+            if (scenario.Item1 != "CreateCandidate") input["ExpectedStatus"] = scenario.Item2;
+            if (scenario.Item3 >= 0) input["CallOutcome"] = scenario.Item3;
+            var request = Request(input);
+            var store = new MemoryStore { Status = scenario.Item2 };
+            store.Atomic(request);
+            Check(string.Join(",", store.Events) == scenario.Item4, "Canonical engine read/write order: " + scenario.Item1);
+            store.Atomic(request);
+            Check(string.Join(",", store.Events) == "RECEIPT_READ,CANDIDATE_READ" && store.Receipts.Count == 1,
+                "Canonical identical replay reads without receipt mutation");
+            Reject(() => store.Atomic(new ActionRequest(Guid.NewGuid(), input, Now)), "CORRELATION_CONFLICT");
+            Check(string.Join(",", store.Events) == "RECEIPT_READ" && store.Receipts.Count == 1,
+                "Canonical conflicting replay leaves receipt unchanged");
+        }
+        foreach (var action in new[] { "MarkRound1Scheduled", "RecordPass", "RecordFail", "RequestReschedule" })
+        {
+            var input = Input(action);
+            var status = action == "MarkRound1Scheduled" ? ActionRequest.Waiting : ActionRequest.Scheduled;
+            input["ExpectedStatus"] = status;
+            if (action == "RequestReschedule") input["Reason"] = "Synthetic reason";
+            var store = new MemoryStore { Status = status };
+            Reject(() => store.Atomic(Request(input)), action == "MarkRound1Scheduled" ?
+                "SCHEDULER_DEPENDENCY_UNAVAILABLE" : "RESULT_OR_CANCELLATION_DEPENDENCY_UNAVAILABLE");
+            Check(string.Join(",", store.Events) == "RECEIPT_READ,CANDIDATE_READ" && store.Receipts.Count == 0,
+                "Fail-closed operation has no reachable protected mutation: " + action);
+        }
         for (int outcome = 100010000; outcome <= 100010002; outcome++)
         {
             var input = Input(); input["CallOutcome"] = outcome;
@@ -282,9 +318,11 @@ static class Program
         public int Status = ActionRequest.NeedCall, Calls, Histories, Updates, Creates, Version = 1, FailMutation, Mutation;
         public bool Audit, StaleVersion, CandidateExists = true, HideReceiptOnce;
         public Dictionary<Guid, Receipt> Receipts = new();
+        public List<string> Events = new();
         void Mutate() { if (++Mutation == FailMutation) throw new OperationError("SYNTHETIC_MUTATION_FAILURE"); }
         public ActionResult Atomic(ActionRequest request)
         {
+            Events.Clear();
             var before = (Status, Calls, Histories, Updates, Creates, Version, Mutation, new Dictionary<Guid, Receipt>(Receipts));
             try { return CandidateOperation.Execute(request, this); }
             catch
@@ -296,25 +334,29 @@ static class Program
         public void RequireTransaction() { }
         public Receipt? FindReceipt(Guid correlation)
         {
+            Events.Add("RECEIPT_READ");
             // Model a losing transaction that read before the winning receipt committed.
             if (HideReceiptOnce) { HideReceiptOnce = false; return null; }
             return Receipts.GetValueOrDefault(correlation);
         }
         public CandidateState GetCandidate(Guid id)
         {
+            Events.Add("CANDIDATE_READ");
             if (!CandidateExists || id != Candidate) throw new OperationError("INVALID_CANDIDATE");
             return new CandidateState { Id = id, Status = Status, RowVersion = Version.ToString() };
         }
-        public Guid CreateCandidate(ActionRequest request) { Mutate(); Creates++; return Candidate; }
+        public Guid CreateCandidate(ActionRequest request) { Events.Add("CANDIDATE_CREATE"); Mutate(); Creates++; return Candidate; }
         public void UpdateCandidate(ActionRequest request, CandidateState candidate, int status)
         {
+            Events.Add("CANDIDATE_UPDATE");
             if (StaleVersion) throw new OperationError("ROW_VERSION_CONFLICT");
             Mutate(); Updates++; Status = status; Version++;
         }
-        public Guid CreateCall(ActionRequest request, Guid candidate) { Mutate(); Calls++; return Guid.NewGuid(); }
-        public Guid CreateHistory(ActionRequest request, Guid candidate, int previous, int current) { Mutate(); Histories++; return Guid.NewGuid(); }
+        public Guid CreateCall(ActionRequest request, Guid candidate) { Events.Add("CALL_LOG_CREATE"); Mutate(); Calls++; return Guid.NewGuid(); }
+        public Guid CreateHistory(ActionRequest request, Guid candidate, int previous, int current) { Events.Add("STATUS_HISTORY_CREATE"); Mutate(); Histories++; return Guid.NewGuid(); }
         public void CreateReceipt(ActionRequest request, ActionResult result)
         {
+            Events.Add("RECEIPT_CREATE");
             Mutate();
             if (!Receipts.TryAdd(request.Correlation, new Receipt { Actor = request.Actor, Action = request.Action,
                 Fingerprint = request.Fingerprint, Version = "1", Result = result }))

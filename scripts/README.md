@@ -24,7 +24,15 @@ Only `Apply`, `Continue`, and `Rollback` can PATCH, and only an existing `sdkmes
 
 At that historical R4L stage, the runtime runner required package-backed guard steps and zero-row preflight before its distinct R4L one-shot Apply. That authorization is not reusable. Local static checks were `& .\tests\Phase3DR4LGuardCutover.Tests.ps1`; SDK marker/context checks were `dotnet run --project .\tests\CandidateCoreSdk\CandidateCoreSdk.Tests.csproj -c Release`.
 
-## Verified-ancestor acceptance authorization
+## Existing R4O write-context continuation
+
+**Consumed outcome:** package updates 1; minimal CreateCandidate calls 1; automatic retries 0. The safe result was `UNSUPPORTED_CORE_WRITE_CONTEXT:CREATE_CANDIDATE:OTHER_PROTECTED_WRITE` during `CC_CREATE_CANDIDATE`, HTTP 400 / `0x80040265`. No deterministic exact pair was proven; `CANDIDATE_CORE_WRITE_CONTEXT_FAILURE_UNRESOLVED`. Final counts remain 0/0/0/0. Do not rerun the continuation mode or remove its lock/journal. No matrix or canary ran.
+
+`R4OWriteContextApply` in [Test-BsoRsCandidateCoreRuntime.ps1](Test-BsoRsCandidateCoreRuntime.ps1) uses its own one-shot authorization, not either consumed historical runtime lock. It preserves trace-Off/no-Profiler/package-backed/zero-row gates, one minimal CreateCandidate, zero retries and the supported matrix only if creation succeeds. R4O unsupported-write diagnostics preserve closed action/write codes through service-stage wrapping. They do not prove ancestor registration passed; see the [source-derived matrix](../docs/PHASE_3D_CANDIDATE_CORE_RUNTIME_ACCEPTANCE_REPORT.md).
+
+The diagnostic branch is conservatively capped at one existing-package update because the owner's attachment has conflicting one-/two-update wording. Do not reuse old journals, retry an unchanged build, or broaden the allowlist from a runtime label alone. No required CreateCandidate pair was statically missing.
+
+## Earlier verified-ancestor acceptance authorization
 
 **Consumed outcome:** one existing-package update, one failed CreateCandidate, zero retries, zero matrix actions; `CANDIDATE_CORE_TRUST_MODEL_FAILURE:UNSUPPORTED_CORE_WRITE_CONTEXT`. Final counts are 0/0/0/0. Do not rerun this mode or remove its lock/evidence. The reporting parser now preserves the generic unsupported-core-write category as well as trusted-parent predicates; this post-call local parser correction did not trigger a deployment or replay.
 

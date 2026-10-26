@@ -82,6 +82,12 @@ $parser = @($runtimeAst.EndBlock.Statements | Where-Object {
 $safeGuard = 'DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_CORE_WRITE_CONTEXT:CC_CREATE_CANDIDATE:0x80040265'
 Assert-Test ((Get-RuntimeErrorCode "HTTP 400; $safeGuard") -ceq $safeGuard) `
     'Exact live unsupported-core-write guard category is retained without fault text'
+$localizedWrite = 'DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_CORE_WRITE_CONTEXT:CREATE_CANDIDATE:OTHER_PROTECTED_WRITE:CC_CREATE_CANDIDATE:0x80040265'
+Assert-Test ((Get-RuntimeErrorCode "HTTP 400; $localizedWrite") -ceq $localizedWrite) `
+    'R4O action/write rejection localization survives reporting without raw values'
+Assert-Test ($runtime -match 'R4OWriteContextApply' -and
+    $runtime -match 'phase3d-r4o-owner-authorized-write-context-runtime') `
+    'R4O continuation cannot reuse consumed marker or verified-ancestor runtime locks'
 Assert-Test ($runtime -match 'CreateCandidate' -and $runtime -match 'STALE_EXPECTED_STATUS' -and
     $runtime -match 'RecordCall no-answer replay' -and
     $runtime -match 'RecordCall no-answer conflict' -and

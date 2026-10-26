@@ -1,5 +1,15 @@
 # Current State
 
+## Existing R4O Write-Context Continuation (2026-10-26)
+
+**`CANDIDATE_CORE_WRITE_CONTEXT_FAILURE_UNRESOLVED`.** Static source reconciliation proved CreateCandidate's sequence is receipt read -> Candidate Create -> Receipt Create. Both required pairs were already allowed; no unique static cause of the earlier unsupported-context rejection was proven. The exhaustive eight-action matrix narrowed an unrelated overbroad receipt cell group for the four current fail-closed actions; no allowlist was broadened and server-owned ancestor/OwningExtension trust is unchanged.
+
+One existing diagnostic package update returned HTTP 204 and exact topology reconciled. One minimal synthetic CreateCandidate returned HTTP 400 / `0x80040265` with `DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_CORE_WRITE_CONTEXT:CREATE_CANDIDATE:OTHER_PROTECTED_WRITE:CC_CREATE_CANDIDATE:0x80040265`. The broad write code still does not prove a deterministic exact pair. The R4O stop rule was applied: no second repair, update, call or matrix. The attachment's conflicting diagnostic update ceiling was handled conservatively as one update.
+
+Pre/post/final Candidate / Call Log / History / Receipt counts remained 0/0/0/0; retries 0. Final read-only checks verified unchanged API/package-backed handler/types and 50 guards, trace setting Off, and no active Candidate Core Profiler wrappers. Live direct-write canary was not executed; SDK negative coverage remains. Local engine 141, SDK 326, all 12 PowerShell suites/1,140 assertions, unsigned Rebuild/package validation, parsing and privacy/link/diff checks passed.
+
+The [runtime report](PHASE_3D_CANDIDATE_CORE_RUNTIME_ACCEPTANCE_REPORT.md) contains the exact source-derived ActionType/write matrix, receipt replay/failure semantics, diagnostic result and artifact hashes. Phase 3D-R4O remains incomplete; no new readiness phase or UI/security phase transition was created. No trace/Profiler/schema/Choice/API/security/app/audit/publication/registration/legacy/signing-key changes, commit or push occurred.
+
 ## Verified Server-Owned Ancestor Acceptance Attempt (2026-10-26)
 
 **`CANDIDATE_CORE_TRUST_MODEL_FAILURE:UNSUPPORTED_CORE_WRITE_CONTEXT`.** Following explicit owner architecture approval, the guard now uses verified server-owned API ancestor/OwningExtension registration rather than a required SharedVariables marker. Calling-user read-only step -> handler type -> assembly -> existing package validation is fail-closed, with a bounded one-minute positive cache. The marker is retained only as non-authoritative evidence. Legacy handler rollback also requires matching guard rollback; Receipts remain append-only.

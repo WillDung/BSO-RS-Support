@@ -2,6 +2,10 @@
 
 ## Candidate Core verified-ancestor trust correction
 
+**Latest R4O result:** `CANDIDATE_CORE_WRITE_CONTEXT_FAILURE_UNRESOLVED`. The bounded diagnostic returned only `CREATE_CANDIDATE:OTHER_PROTECTED_WRITE` at Candidate Create; no exact supported pair defect was established, so no second correction or runtime matrix followed. This does not prove a marker/ParentContext or registration defect and does not change the trust design. See [Current State](CURRENT_STATE.md).
+
+R4O continuation adds the exact [ActionType/protected-write contract](PHASE_3D_CANDIDATE_CORE_RUNTIME_ACCEPTANCE_REPORT.md): approved server-owned ancestry is necessary but not sufficient; the protected mutation must also be explicitly compatible with the current action. All four scheduling/result/reschedule-dependent actions remain fail-closed before writes. Receipt persistence is Create-only; replay has no mutation. Diagnostic action/write labels are not authorization inputs. No static missing CreateCandidate pair was proven; the current continuation uses bounded safe localization rather than an assumed allowlist repair.
+
 The owner-approved trust contract supersedes required cross-pipeline SharedVariables authorization following live `MARKER_MISSING` evidence. Protected child writes require the approved Custom API ancestor semantics plus read-only validation of server-owned `OwningExtension` through processing step, handler type, assembly and existing unsigned package. Markers are non-authoritative; direct callers cannot supply the execution registration. The calling-user validation, bounded positive cache, fail-closed behavior, ParentContext platform caveat and matching-guard legacy rollback requirement are specified in the [Security Model](SECURITY_MODEL.md). Deployment and runtime verification are recorded separately in the [Phase 3D runtime report](PHASE_3D_CANDIDATE_CORE_RUNTIME_ACCEPTANCE_REPORT.md); source implementation is not itself live acceptance.
 
 ## Historical target-architecture baseline

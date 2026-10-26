@@ -1,5 +1,11 @@
 # Tests
 
+## Current R4O write-context validation
+
+The current engine harness passes 141 assertions, including exact read/write ordering for CreateCandidate, UpdateCandidate, every RecordCall outcome and ProceedToScheduling; read-only identical/conflicting replay; and no protected writes for all four fail-closed actions. The SDK harness passes 326 assertions, including the exhaustive eight-ActionType/five-write compatibility matrix, direct-write negatives, Receipt Update/Upsert and other unsupported mutations, safe action/write diagnostics and preserved R4J/verified-ancestor/service-stage coverage. These counts supersede the earlier baseline counts in the descriptive bullets below.
+
+The [runtime report](../docs/PHASE_3D_CANDIDATE_CORE_RUNTIME_ACCEPTANCE_REPORT.md) contains the source-derived canonical matrix and receipt semantics. The guard now denies Receipt Create for the four deferred actions, matching production reachability; no required CreateCandidate pair was missing statically. Missing marker remains allowed only under verified server-owned ancestor trust. Runtime acceptance is separate from these offline checks.
+
 ## Phase 3C Candidate operations and receipt evidence
 
 - [Receipt assertions](Phase3COperationReceipt.Tests.ps1): `& .\tests\Phase3COperationReceipt.Tests.ps1`; 27 local plan/payload/source assertions, no authentication/network.

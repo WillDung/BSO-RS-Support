@@ -24,7 +24,15 @@ Only `Apply`, `Continue`, and `Rollback` can PATCH, and only an existing `sdkmes
 
 At that historical R4L stage, the runtime runner required package-backed guard steps and zero-row preflight before its distinct R4L one-shot Apply. That authorization is not reusable. Local static checks were `& .\tests\Phase3DR4LGuardCutover.Tests.ps1`; SDK marker/context checks were `dotnet run --project .\tests\CandidateCoreSdk\CandidateCoreSdk.Tests.csproj -c Release`.
 
-## Current R4M predicate-localization disposition
+## Verified-ancestor acceptance authorization
+
+**Consumed outcome:** one existing-package update, one failed CreateCandidate, zero retries, zero matrix actions; `CANDIDATE_CORE_TRUST_MODEL_FAILURE:UNSUPPORTED_CORE_WRITE_CONTEXT`. Final counts are 0/0/0/0. Do not rerun this mode or remove its lock/evidence. The reporting parser now preserves the generic unsupported-core-write category as well as trusted-parent predicates; this post-call local parser correction did not trigger a deployment or replay.
+
+`VerifiedAncestorApply` in [Test-BsoRsCandidateCoreRuntime.ps1](Test-BsoRsCandidateCoreRuntime.ps1) selects a distinct owner-approved one-shot authorization and lock. It does not reopen historical R4M Apply. It requires trace logging Off, no active Candidate Core Profiler wrappers, the exact existing package-backed handler and all 50 package-backed guards, and zero initial rows. Its eight-call ceiling includes one minimal CreateCandidate, then the supported matrix only on success. Candidate autonumber/owner/actor/empty optional lookups, counts and creation Receipt are verified before proceeding.
+
+The guard's server-owned registration model and matching-guard rollback requirement are defined in the [Security Model](../docs/SECURITY_MODEL.md). Registration reads run as the caller; missing read permission fails closed without granting privileges. Retained frozen deployment pins do not describe this new build and must not be silently bypassed or repurposed. The authorized package update uses its separately pinned artifact and new local durable one-shot evidence. See the latest [runtime report](../docs/PHASE_3D_CANDIDATE_CORE_RUNTIME_ACCEPTANCE_REPORT.md) for actual deployment/results. No safe existing live direct-write negative runner was found; do not improvise a successful-write canary.
+
+## Historical R4M predicate-localization disposition
 
 The owner-authorized fast-track diagnostic used a separately bounded session journal, not a replay of the consumed runtime Apply lock or frozen deployment pins. One existing package update returned HTTP 204; one minimal CreateCandidate returned the safe category `CANDIDATE_CREATE:TRUSTED_PARENT:MARKER_MISSING`. All earlier ancestor predicates passed. Post-counts remain 0/0/0/0, trace logging is Off, and there are no active Candidate Core Profiler wrappers. No deterministic propagation repair was proven, so no second build/update/call or matrix ran. Do not automatically rerun the diagnostic or open another backend phase.
 

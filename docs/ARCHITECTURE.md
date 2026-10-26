@@ -1,5 +1,13 @@
 # Architecture
 
+## Candidate Core verified-ancestor trust correction
+
+The owner-approved trust contract supersedes required cross-pipeline SharedVariables authorization following live `MARKER_MISSING` evidence. Protected child writes require the approved Custom API ancestor semantics plus read-only validation of server-owned `OwningExtension` through processing step, handler type, assembly and existing unsigned package. Markers are non-authoritative; direct callers cannot supply the execution registration. The calling-user validation, bounded positive cache, fail-closed behavior, ParentContext platform caveat and matching-guard legacy rollback requirement are specified in the [Security Model](SECURITY_MODEL.md). Deployment and runtime verification are recorded separately in the [Phase 3D runtime report](PHASE_3D_CANDIDATE_CORE_RUNTIME_ACCEPTANCE_REPORT.md); source implementation is not itself live acceptance.
+
+## Historical target-architecture baseline
+
+The older provisioning/readiness statements below are historical and superseded for Candidate Core by [Current State](CURRENT_STATE.md) and the latest [runtime report](PHASE_3D_CANDIDATE_CORE_RUNTIME_ACCEPTANCE_REPORT.md). The verified-ancestor package is deployed, but its acceptance call failed with `UNSUPPORTED_CORE_WRITE_CONTEXT`; the matrix did not run.
+
 **Status:** Proposed target architecture, based on the draft blueprint. The four reference tables and unmanaged Solution are verified. The owner-adopted AppModule `srapp` (ID `3709bb7c-28cd-f111-a05c-70a8a581cbfa`) was separately composed and published as the complete 13-component reference-administration app; Phase 2D.4F accepted its UI with record-form tests deferred because no safe row existed. The app-only `srapp` name supersedes `os_srapp`; normal Dataverse table naming remains `os_sr_*`. Candidate-core owner decisions are now approved and documented, but Candidate schema and business operations remain unprovisioned proposals; Phase 3A readiness is blocked by external audit and API privilege prerequisites. See [Current State](CURRENT_STATE.md) and the [Phase 3A.2 report](PHASE_3A2_CANDIDATE_CORE_DECISION_APPLICATION.md).
 
 ## Logical components

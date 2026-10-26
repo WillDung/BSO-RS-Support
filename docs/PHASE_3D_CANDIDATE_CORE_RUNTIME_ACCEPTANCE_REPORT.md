@@ -2,7 +2,59 @@
 
 Date: 26 October 2026. This report records the current Phase 3D-R4M package disposition and CreateCandidate runtime failure; earlier assessments are retained as history. Source: owner authorization, current repository contract/source, guarded live reconciliation, local offline validation, and the supported Dataverse plug-in package model.
 
-## Latest R4M Fast-Track Predicate Localization (2026-10-26)
+## Latest Verified Server-Owned Ancestor Acceptance Attempt (2026-10-26)
+
+**`CANDIDATE_CORE_TRUST_MODEL_FAILURE:UNSUPPORTED_CORE_WRITE_CONTEXT`.** The owner explicitly approved replacing required SharedVariables marker authorization with the verified server-owned API ancestor model. The preceding R4M diagnostic proved `MARKER_MISSING`; it did not prove the transport mechanism. The owner-approved architecture decision supersedes the old marker requirement without claiming that mechanism was diagnosed.
+
+### Implemented trust contract
+
+[ProtectCandidateCore](../solutions/CandidateCore/DataversePlugin.cs) retains the bounded eight-ancestor search, expected `os_sr_cact` message/stage 30/synchronous transaction, positive lower depth, matching calling/initiating users, supported ActionType and operation-specific table/message compatibility. It now requires server-owned `OwningExtension` of logical type `sdkmessageprocessingstep`. Calling-user read-only resolution follows `eventhandler` -> exact `os_sr_cact.ApplyCandidateAction` PlugInType -> `os_sr_cact` assembly v1.0.0.0 -> existing `os_sr_cact_pkg` package v1.0.0. The live assembly-to-package attribute was separately verified as `packageid`. No registration IDs are hard-coded.
+
+Closed failure categories cover missing/wrong extension, handler type, assembly/package mismatch and unreadable registration. A registration service fault stops traversal immediately, without another service call in a potentially failed transaction. Positive validation is cached for at most one minute by organization/calling user/server-owned extension ID, locked and capped at 128 entries; negative decisions are not cached. Cache expiry or process restart requires a fresh chain read. No service-user elevation or privilege grant is used.
+
+The private marker is retained solely as non-authoritative, nonpersisted evidence. Its absence, type or fingerprint does not authorize or reject writes. Caller tags, input parameters and entity attributes cannot substitute for the server-owned registration. Removal of exact child-payload fingerprint authorization is intentional under the new approved boundary; API engine validation/idempotency and operation-specific ancestry remain required. Receipts remain append-only: operations create receipts and replay reads them; no receipt-update path was introduced.
+
+**Legacy handler rollback also requires matching guard rollback.** The signed legacy assembly was not changed and is not accepted merely for matching a type/name. ParentContext remains subject to [Microsoft's platform-fragility caveat](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/understand-the-data-context#parentcontext); tests and live reconciliation must be repeated after relevant platform/package changes. The model is detailed in the [Security Model](SECURITY_MODEL.md) and [Architecture](ARCHITECTURE.md).
+
+### Live execution evidence
+
+| Gate or operation | Verified result for this authorization |
+|---|---|
+| Identity | VN LMV IT; fresh PAC/WhoAmI agreement |
+| Schema/API | Exact Candidate Core storage/Choice/relationship reconciliation; Receipt alternate key Active; unchanged 13 inputs/five outputs |
+| Package and types | One existing unsigned `os_sr_cact_pkg` v1.0.0; unchanged assembly/type identities; package-backed ApplyCandidateAction and ProtectCandidateCore |
+| Guard topology | All 50 package-backed; protected registration fingerprints/configuration/message/filter/impersonation/secure-reference checks exact before and after update |
+| Trace setting / active Candidate Core Profiler wrappers | 0 (Off) / 0; unchanged, no Profiler activity |
+| Existing-package updates | Exactly 1, HTTP 204; immediate package/type/API/guard topology reconciliation passed |
+| Package disposition | `PACKAGE_UPDATE_ACCEPTED_CONTENT_NOT_BYTE_RECONCILABLE`; no deployed-byte equivalence claim |
+| CreateCandidate / all Custom API dispatches | 1 / 1; minimal four-input synthetic request, no optional fields |
+| Runtime result | HTTP 400 / `0x80040265` |
+| Exact safe returned guard category | `DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_CORE_WRITE_CONTEXT:CC_CREATE_CANDIDATE:0x80040265` |
+| Automatic retries | 0 |
+| Pre/post/final Candidate / Call Log / History / Receipt | 0/0/0/0 -> 0/0/0/0 -> 0/0/0/0 |
+| Matrix | Not entered; CreateCandidate failed |
+| Live direct-write canary | Not executed; no existing safe negative runner found, and success prerequisite was not met |
+| Final read-only reconciliation | Package-backed handler/types and all 50 guards exact; API unchanged; trace Off; no active Candidate Core Profiler wrappers |
+
+The returned category does not identify which nested execution produced an unsupported protected-write context. It does not establish that OwningExtension verification succeeded or failed. No trace content was captured, no additional business call was issued, and no speculative cause is claimed. Per the stop rule, no second source/package repair or backend diagnostic was opened.
+
+The runtime journal retained the sanitized HTTP/guard error, but the dispatch's parsed ResultCode was null because the older parser did not recognize the generic unsupported-core-write category. The local reporting parser was then extended and regression-tested to preserve that closed category. This was a reporting-only correction: no package rebuild/update or runtime replay followed. A local GET-only final-reconciliation adapter initially failed from PowerShell dynamic variable shadowing; that local adapter was corrected and the read-only reconciliation completed. Neither issue caused an additional tenant write or business dispatch.
+
+### Artifact and validation evidence
+
+Local SHA-256 hashes of the uploaded input:
+
+- DLL: `dcae627458b081e162ec49bc20632a7a185d08f563dca887954bb69aedf944df`
+- NuGet package: `d0c328c0b69d586e9952a0a2a1483a45ad345b3c0c4e0989285639194858e655`
+- Inventory (`Sort-Object FullName`, `name|length|compressed-length` lines joined by LF): `bd0a8a423494cb1efe9e0c46399ece92346615636a6025df2e3cae8b8fd5d990`
+
+Local gates passed: Candidate engine 109 assertions; SDK adapter/guard 202 assertions (including direct negatives, verified registration, missing-marker positive, cache reuse/expiry, uncached negatives, legacy rejection, R4J projection and R4K service-stage regressions); unsigned Rebuild/package validation; all 12 PowerShell suites, 1,138 assertions; all 11 repository scripts parsed; added-line privacy scan, 221 relative links across eight affected guidance/status documents and `git diff --check`. The final PowerShell suite count includes the post-call reporting-parser regression; it was not deployed plug-in code. The uploaded package input hash was rechecked unchanged after final validation.
+
+**Phase 3D remains incomplete.** None of `CANDIDATE_CORE_RUNTIME_ACCEPTED_AUDIT_ACTIVATION_PENDING`, `PHASE_3D_COMPLETE_FOR_CURRENT_CANDIDATE_CORE_SCOPE`, or live-verified `DIRECT_WRITE_GUARD_TRUST_MODEL = VERIFIED_API_ANCESTOR` is earned. The package-backed topology remains active, but successful business runtime acceptance is not proven. Candidate UI/BSO Security is not automatically started.
+
+No second update/call, trace-setting write, Profiler operation, new PluginPackage, schema/Choice/API/security/app/audit/publication change, handler/guard-step PATCH, signed legacy assembly update, signing-key access, commit or push was performed by the assistant.
+
+## Earlier R4M Fast-Track Predicate Localization (2026-10-26)
 
 **Classification: `CANDIDATE_CORE_GUARD_FAILURE_LOCALIZED` - `MARKER_MISSING`.** Owner authorization covered a diagnostic-only source/test change, at most two existing unsigned package updates and two CreateCandidate attempts, with the second cycle conditional on a deterministic correction. This continuation remains R4M; the isolated R4N reference in the authorization was treated as a label inconsistency, not a new phase or additional allowance.
 

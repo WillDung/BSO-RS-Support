@@ -1,7 +1,7 @@
 #requires -Version 7.4
 [CmdletBinding()]
 param(
-    [ValidateSet('Preflight', 'Apply')][string]$RuntimeMode = 'Preflight',
+    [ValidateSet('Preflight', 'Apply', 'VerifiedAncestorApply')][string]$RuntimeMode = 'Preflight',
     [Parameter(Mandatory)][string]$EnvironmentName,
     [Parameter(Mandatory)][string]$OrganizationUrl,
     [Parameter(Mandatory)][string]$ExpectedEnvironmentId,
@@ -19,6 +19,11 @@ $contractPath = Join-Path $root 'docs\PHASE_3C_API_CONTRACT.json'
 $script:apiContract = Get-Content -LiteralPath $contractPath -Raw | ConvertFrom-Json
 $expectedManifestHash = '63f56173f61265f539d23d6ceffb5631e23f438e4e254755c1e24c7d17eb1915'
 $runtimeAuthorizationId = 'phase3d-r4m-owner-authorized-marker-propagation-runtime'
+$verifiedAncestorAuthorization = $RuntimeMode -ceq 'VerifiedAncestorApply'
+if ($verifiedAncestorAuthorization) {
+    $runtimeAuthorizationId = 'phase3d-owner-authorized-verified-ancestor-runtime'
+    $RuntimeMode = 'Apply'
+}
 $expectedActionCalls = 8
 $schedulingEvidenceChecks = @(
     [ordered]@{
@@ -64,6 +69,9 @@ function Save-RuntimeJournal {
 
 function Get-RuntimeErrorCode {
     param([string]$Message)
+    $coreWriteFailure = [regex]::Match($Message,
+        '(?<![A-Z0-9_])DIRECT_WRITE_GUARD_REJECTED:(UNSUPPORTED_CORE_WRITE_CONTEXT|ASSOCIATION_PROJECT_RELATIONSHIP|ASSOCIATION_PROJECT_TABLE|ASSOCIATION_CONTAINS_PROJECT_TABLE)(?::CC_[A-Z_]+)?(?::0x[0-9A-F]{8})?(?![A-Z0-9_])')
+    if ($coreWriteFailure.Success) { return $coreWriteFailure.Value }
     $trustedParentFailure = [regex]::Match($Message,
         '(?<![A-Z0-9_])DIRECT_WRITE_GUARD_REJECTED:(CANDIDATE_CREATE|CANDIDATE_UPDATE|CALL_LOG_CREATE|STATUS_HISTORY_CREATE|RECEIPT_CREATE):TRUSTED_PARENT:(API_MESSAGE_MISMATCH|STAGE_MISMATCH|MODE_MISMATCH|TRANSACTION_MISMATCH|DEPTH_MISMATCH|USER_CONTEXT_MISMATCH|INITIATING_USER_MISMATCH|ACTIONTYPE_MISSING|ACTIONTYPE_MISMATCH|MARKER_MISSING|MARKER_TYPE_MISMATCH|MARKER_FINGERPRINT_MISMATCH|ANCESTOR_BOUND_EXCEEDED|OWNING_EXTENSION_MISSING|OWNING_EXTENSION_TYPE_MISMATCH|HANDLER_TYPE_MISMATCH|ASSEMBLY_MISMATCH|PACKAGE_MISMATCH|REGISTRATION_READ_FAILED)(?::CC_[A-Z_]+)?(?::0x[0-9A-F]{8})?(?![A-Z0-9_])')
     if ($trustedParentFailure.Success) { return $trustedParentFailure.Value }
@@ -486,6 +494,20 @@ try {
         throw 'Runtime WhoAmI/expected-user guard failed.'
     }
     $script:actorId = [string]$who.UserId
+    if ($verifiedAncestorAuthorization) {
+        if ($ExpectedHandlerPackageUniqueName -cne 'os_sr_cact_pkg' -or
+            -not $RequirePackageGuardSteps -or $ExpectedGuardStepCount -ne 50) {
+            throw 'Verified-ancestor acceptance requires the exact package and 50 package-backed guards.'
+        }
+        $organization = Invoke-RuntimeRequest -Method GET -Path "organizations($ExpectedOrganizationId)?%24select=plugintracelogsetting"
+        if ($organization.plugintracelogsetting -ne 0) { throw 'TRACE_SETTING_BASELINE_DRIFT' }
+        $profilerTypes = @(Get-Rows -Path "plugintypes?%24select=plugintypeid&%24filter=typename eq 'PluginProfiler.Plugins.ProfilerPlugin'")
+        foreach ($profiler in $profilerTypes) {
+            $wrappers = @(Get-Rows -Path "sdkmessageprocessingsteps?%24select=name&%24filter=_eventhandler_value eq $($profiler.plugintypeid) and statecode eq 0" |
+                Where-Object { $_.name -like '*os_sr_cact*' })
+            if ($wrappers.Count) { throw 'Active Candidate Core Profiler wrapper blocks acceptance.' }
+        }
+    }
     foreach ($logicalName in @('os_sr_cand', 'os_sr_call', 'os_sr_csh', 'os_sr_oprc')) {
         $metadata = Invoke-RuntimeRequest -Method GET -Path "EntityDefinitions(LogicalName='$logicalName')?%24select=EntitySetName,PrimaryIdAttribute"
         if (-not $metadata.EntitySetName -or $metadata.PrimaryIdAttribute -cne "$logicalName`id") {
@@ -568,13 +590,23 @@ try {
     $script:expectedReceiptEvidence[$creationCorrelation] = @{ Action = 'CreateCandidate'; CallId = ''; HistoryId = '' }
     $script:expectedCounts.Candidates = 1
     $script:expectedCounts.Receipts = 1
-    $candidateRows = Get-Rows -Path "$($script:sets.Candidate)?%24select=os_sr_candid,os_sr_cand_stat,os_sr_cand_cnum&%24filter=$([Uri]::EscapeDataString("os_sr_cand_corid eq '$creationCorrelation'"))&%24top=2"
-    if ($candidateRows.Count -ne 1 -or [string]$candidateRows[0].os_sr_cand_cnum -notmatch '^CAND-[0-9]{8}$') {
+    $candidateRows = Get-Rows -Path "$($script:sets.Candidate)?%24select=os_sr_candid,os_sr_cand_stat,os_sr_cand_cnum,_createdby_value,_ownerid_value,_os_sr_cand_pos_value,_os_sr_cand_csrc_value&%24filter=$([Uri]::EscapeDataString("os_sr_cand_corid eq '$creationCorrelation'"))&%24top=2"
+    if ($candidateRows.Count -ne 1 -or [string]$candidateRows[0].os_sr_cand_cnum -notmatch '^CAND-[0-9]{8}$' -or
+        $candidateRows[0]._createdby_value -ine $script:actorId -or $candidateRows[0]._ownerid_value -ine $script:actorId -or
+        $candidateRows[0]._os_sr_cand_pos_value -or $candidateRows[0]._os_sr_cand_csrc_value) {
         throw 'Created synthetic Candidate did not resolve uniquely or its AutoNumber did not reconcile.'
     }
     $script:candidateId = ([string]$candidateRows[0].os_sr_candid).ToLowerInvariant()
     Assert-Counts 'CreateCandidate'
     Assert-Status 100010000
+    $creationReceipts = @(Get-Rows -Path "$($script:sets.Receipt)?%24select=os_sr_oprc_cact,os_sr_oprc_newstat,_os_sr_oprc_cand_value,_createdby_value,_ownerid_value,os_sr_oprc_hash&%24filter=$([Uri]::EscapeDataString("os_sr_oprc_corid eq '$creationCorrelation'"))&%24top=2")
+    if ($creationReceipts.Count -ne 1 -or $creationReceipts[0].os_sr_oprc_cact -cne 'CreateCandidate' -or
+        $creationReceipts[0].os_sr_oprc_newstat -ne '100010000' -or
+        $creationReceipts[0]._os_sr_oprc_cand_value -ine $script:candidateId -or
+        $creationReceipts[0]._createdby_value -ine $script:actorId -or $creationReceipts[0]._ownerid_value -ine $script:actorId -or
+        $creationReceipts[0].os_sr_oprc_hash -cnotmatch '^[0-9a-f]{64}$') {
+        throw 'CreateCandidate receipt did not reconcile before the runtime matrix.'
+    }
 
     $noAnswer = [ordered]@{
         ActionType = 'RecordCall'; CorrelationId = (New-Correlation); CandidateId = $script:candidateId

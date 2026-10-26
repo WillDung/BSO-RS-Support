@@ -1,6 +1,16 @@
 # Current State
 
-## Phase 3D-R4M Fast-Track Predicate Localization (2026-10-26)
+## Verified Server-Owned Ancestor Acceptance Attempt (2026-10-26)
+
+**`CANDIDATE_CORE_TRUST_MODEL_FAILURE:UNSUPPORTED_CORE_WRITE_CONTEXT`.** Following explicit owner architecture approval, the guard now uses verified server-owned API ancestor/OwningExtension registration rather than a required SharedVariables marker. Calling-user read-only step -> handler type -> assembly -> existing package validation is fail-closed, with a bounded one-minute positive cache. The marker is retained only as non-authoritative evidence. Legacy handler rollback also requires matching guard rollback; Receipts remain append-only.
+
+Fresh exact schema/API/package/50-guard gates, Active Receipt key, trace Off, no active Candidate Core Profiler wrappers, PAC/WhoAmI agreement and 0/0/0/0 passed. Exactly one existing-package update returned HTTP 204 and topology reconciled. One minimal CreateCandidate returned HTTP 400 / `0x80040265` / `DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_CORE_WRITE_CONTEXT:CC_CREATE_CANDIDATE:0x80040265`. Pre/post/final counts were 0/0/0/0. Automatic retries: 0. The exact nested cause is not established; no second speculative repair/deployment/call or matrix ran.
+
+Final read-only reconciliation confirmed package-backed handler/types, all 50 guards, unchanged API, trace setting Off and no active Candidate Core Profiler wrappers. No safe existing live direct-write negative runner was found; live direct-write rejection was not tested in this failed acceptance run. Local engine 109 and SDK 202 assertions, all PowerShell suites, unsigned Rebuild/package validation, script parsing and privacy/link/diff checks passed. See the [runtime report](PHASE_3D_CANDIDATE_CORE_RUNTIME_ACCEPTANCE_REPORT.md) for hashes, exact boundaries and reporting-only corrections.
+
+Phase 3D is not complete or runtime accepted. No trace-setting/Profiler/metadata/security/app/audit/publication/legacy/signing-key changes, commit or push were performed by the assistant.
+
+## Earlier Phase 3D-R4M Fast-Track Predicate Localization (2026-10-26)
 
 **`CANDIDATE_CORE_GUARD_FAILURE_LOCALIZED` - `MARKER_MISSING`.** The owner-authorized diagnostic-only build preserves every trust predicate, private marker requirement, direct-write rejection and bounded ancestor traversal. One existing unsigned `os_sr_cact_pkg` v1.0.0 content update returned HTTP 204; package/API/type identities and all 50 package-backed guard protected properties reconciled exactly.
 

@@ -412,6 +412,11 @@ internal static class Program
         var reads = registrationReads;
         ExecuteGuard("Create", candidateTarget, trustedParent);
         Check(registrationReads == reads, "Positive registration cache avoids repeated reads");
+        var cacheField = typeof(ProtectCandidateCore).GetField("RegistrationCache", BindingFlags.Static | BindingFlags.NonPublic)!;
+        var cache = (Dictionary<Tuple<Guid, Guid, Guid>, DateTime>)cacheField.GetValue(null)!;
+        cache[Tuple.Create(Organization, Actor, trustedParent.OwningExtension.Id)] = DateTime.UtcNow.AddSeconds(-1);
+        ExecuteGuard("Create", candidateTarget, trustedParent);
+        Check(registrationReads == reads + 4, "Expired positive cache revalidates all four registration records");
         var trustedGrandparent = CreateTrustedParent("CreateCandidate", "Create", candidateTarget, 2);
         ExecuteGuard("Create", candidateTarget, trustedGrandparent);
         Check(true, "Trusted Candidate Create marker two ancestors up is accepted");
@@ -452,6 +457,9 @@ internal static class Program
         var receiptTarget = new Entity("os_sr_oprc", Guid.NewGuid());
         ExecuteGuard("Create", receiptTarget, CreateTrustedParent("CreateCandidate", "Create", receiptTarget, 1));
         Check(true, "Operation Receipt child write is accepted only under a trusted CreateCandidate");
+        RejectDirectGuard("Update", receiptTarget, CreateTrustedParent("CreateCandidate", "Update", receiptTarget, 1),
+            "DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_CORE_WRITE_CONTEXT");
+        Check(true, "Operation Receipts remain append-only; no receipt update path is introduced");
         var callTarget = new Entity("os_sr_call", Guid.NewGuid());
         ExecuteGuard("Create", callTarget, CreateTrustedParent("RecordCall", "Create", callTarget, 1));
         Check(true, "Call Log child write is accepted only under a trusted RecordCall");

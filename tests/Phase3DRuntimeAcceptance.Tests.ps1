@@ -68,6 +68,20 @@ Assert-Test ($runtime -match 'UNEXPECTED_INPUT:\(SDK_ADAPTER\|ACTION_REQUEST\)' 
 Assert-Test ($runtime -match 'DATAVERSE_OPERATION_REJECTED:\(CC_\[A-Z_\]\+\):0x' -and
     $runtime -match 'CANDIDATE_CORE_FAILURE:\(CC_\[A-Z_\]\+\)' -and
     $runtime -match 'DIRECT_WRITE_GUARD_REJECTED:\(CANDIDATE_CREATE') 'Runtime parser preserves safe service stage and guard categories'
+Assert-Test ($runtime -match 'VerifiedAncestorApply' -and
+    $runtime -match 'phase3d-owner-authorized-verified-ancestor-runtime' -and
+    $runtime -match 'TRACE_SETTING_BASELINE_DRIFT' -and
+    $runtime -match 'Active Candidate Core Profiler wrapper blocks acceptance' -and
+    $runtime -match 'CreateCandidate receipt did not reconcile before the runtime matrix') `
+    'Verified-ancestor authorization is distinct, trace-off gated and reconciles creation before the matrix'
+$runtimeAst = [System.Management.Automation.Language.Parser]::ParseFile($runtimePath, [ref]$tokens, [ref]$errors)
+$parser = @($runtimeAst.EndBlock.Statements | Where-Object {
+    $_ -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $_.Name -ceq 'Get-RuntimeErrorCode'
+})[0]
+. ([scriptblock]::Create($parser.Extent.Text))
+$safeGuard = 'DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_CORE_WRITE_CONTEXT:CC_CREATE_CANDIDATE:0x80040265'
+Assert-Test ((Get-RuntimeErrorCode "HTTP 400; $safeGuard") -ceq $safeGuard) `
+    'Exact live unsupported-core-write guard category is retained without fault text'
 Assert-Test ($runtime -match 'CreateCandidate' -and $runtime -match 'STALE_EXPECTED_STATUS' -and
     $runtime -match 'RecordCall no-answer replay' -and
     $runtime -match 'RecordCall no-answer conflict' -and

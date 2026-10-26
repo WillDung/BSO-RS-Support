@@ -4,6 +4,23 @@ Date: 26 October 2026. This report records the current Phase 3D-R4M package disp
 
 ## Phase 3D-R4M Package Update Accepted; Caller-Marker Runtime Failure
 
+### Execution-context capture installation gate
+
+**Subsequent R4M-P installation authorization and result:** the owner explicitly approved installing Microsoft Plug-in Profiler in VN LMV IT. PAC target verification passed. PRT 9.1.0.235 was launched, but this session has no desktop UI control for Install Profiler. One PAC import was attempted using the untouched managed `PluginProfiler` 2.0.0.0 Solution (publisher `mbs`) extracted from the official PRT cabinet. No publication, overwrite, dependency-bypass, or plug-in activation flags were supplied. Dataverse rejected the import with `PluginProfiler.Plugins cannot be installed this way. Please use a microsoft signed solution file to install a microsoft signed assembly`. No signing bypass, altered package, or repeated import was attempted.
+
+Fresh post-error queries returned no `PluginProfiler` Solution and no assembly whose name contained `profiler`. Current installation disposition: `PLUGIN_PROFILER_INSTALLATION_FAILED_MICROSOFT_SIGNED_SOLUTION_REQUIRED`, not missing owner approval. The supported PRT UI installation remains pending under the existing approval. Diagnostic calls and invocation retries remain 0; no profiling, context capture, Candidate Core package update, handler/guard change, source correction, signing-key access, commit, or push occurred. Business counts were not re-counted. The following missing-approval gate is historical.
+
+On 26 October 2026, the owner separately authorized one diagnostic synthetic invocation only after Microsoft Plug-in Profiler was confirmed installed and active on the exact package-backed Candidate Create guard step. The fresh PAC identity check matched the confirmed VN LMV IT target. Read-only FetchXML queries against that explicit target returned:
+
+| Installation evidence | Result |
+|---|---|
+| Solution unique name or display name contains `profiler` | No results |
+| PluginAssembly name contains `profiler` | No results |
+
+Disposition: `PLUGIN_PROFILER_NOT_INSTALLED_REQUIRES_ENVIRONMENT_APPROVAL`. No installation or solution import was attempted. Profiling was not started, no step was changed, and no restoration was required. Diagnostic runtime calls: 0; invocation retries: 0. No raw profile exists from this continuation; no execution-context tree, marker location, or exact live predicate defect is proven. SDK reproduction, source correction, rebuild, and repair validation were not reached. Installation requires separate environment approval; the diagnostic invocation remains unused and gated on Profiler availability.
+
+No package update, handler/guard PATCH, schema/API/security/audit/app/publication/legacy assembly change, signing-key access, commit, or push occurred. The prior 0/0/0/0 business/evidence counts below remain the last verified counts; this installation-gate check did not re-count them. Existing R4M acceptance and package-update authorizations remain consumed. No new backend implementation phase was created.
+
 **Runtime classification: `PACKAGE_GUARD_PARENT_CONTEXT_FAILURE`. Package disposition: `PACKAGE_UPDATE_ACCEPTED_CONTENT_NOT_BYTE_RECONCILABLE`.** The earlier audit stop was `STALE_AUDIT_GOVERNANCE_GATE`, not a valid runtime blocker. Owner direction permits bounded synthetic Candidate Core runtime acceptance while organization auditing is disabled and unchanged. Audit activation remains an external governance/release prerequisite before real candidate rollout; no real candidate data, CV, phone, production email, or real-person reference data is permitted.
 
 Fresh pre-deployment reconciliation verified the confirmed VN LMV IT target and identity, the existing `os_sr_cact_pkg`, package-backed assembly/types and handler topology, all 50 package-backed Candidate Core guards, unchanged Custom API contract, exact Candidate Core schema, Active Operation Receipt key, and 0 Candidate / 0 Call Log / 0 Status History / 0 Receipt rows. The R4M local unsigned artifact passed its existing identity/type/hash checks. The recorded local hashes identify the submitted artifact, not live content.

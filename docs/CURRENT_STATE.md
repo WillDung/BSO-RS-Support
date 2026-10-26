@@ -1,5 +1,21 @@
 # Current State
 
+## Phase 3D-R4M-P Profiler Installation Approved; CLI Import Rejected (2026-10-26)
+
+The owner explicitly approved installing Microsoft Plug-in Profiler in VN LMV IT for the existing R4M diagnosis. Installation approval is no longer missing. PAC target checks matched the confirmed environment. The installed Microsoft PRT 9.1.0.235 was launched; this session has no desktop UI control for its Install Profiler command.
+
+An alternative PAC installation was attempted once using the untouched `PluginProfiler.Solution.zip` extracted from the official PRT `PluginProfiler.Solution.cab`. Its manifest identified managed Solution `PluginProfiler` version 2.0.0.0, publisher `mbs`. `pac solution import` was run against the explicit confirmed target without publication, overwrite, dependency-bypass, or plug-in activation flags. Dataverse rejected assembly import: `PluginProfiler.Plugins cannot be installed this way. Please use a microsoft signed solution file to install a microsoft signed assembly`. No signing bypass or import retry was attempted. Fresh post-failure reads returned no `PluginProfiler` Solution and no assembly name containing `profiler`; installation is not verified and the profiler is not available for capture.
+
+Disposition: `PLUGIN_PROFILER_INSTALLATION_FAILED_MICROSOFT_SIGNED_SOLUTION_REQUIRED`. The next supported action is Install Profiler through the Microsoft PRT UI under the existing installation approval, followed by live reconciliation. Diagnostic runtime calls: 0; invocation retries: 0. No profiling was started, no Candidate Core package/handler/guard was changed, no source repair was made, and no commit or push occurred. Business counts were not freshly queried in this installation attempt. No root cause or context capture is claimed.
+
+## Phase 3D-R4M Execution-Context Capture Installation Gate (2026-10-26)
+
+**`PLUGIN_PROFILER_NOT_INSTALLED_REQUIRES_ENVIRONMENT_APPROVAL`.** Under the owner's separate R4M diagnostic authorization, a fresh read-only PAC identity check matched the confirmed VN LMV IT target. Environment-targeted FetchXML queries returned no Solution whose unique name or display name contained `profiler` and no PluginAssembly whose name contained `profiler`. Microsoft Plug-in Profiler was not found installed; the installation gate stopped this continuation.
+
+No Profiler installation/import, profiling start/stop, registration modification, diagnostic CreateCandidate invocation, package update, source correction, rebuild, commit, or push occurred. Diagnostic runtime calls: 0; invocation retries: 0. No context was captured, so marker location and the exact live failed predicate remain unproven. No registration restoration was needed. The diagnostic invocation authorization remains unused and gated on Profiler availability; installation requires separate environment approval. No new backend phase was created.
+
+The previous runtime classification and package disposition below remain unchanged. Business/evidence counts were last verified as 0/0/0/0 after the prior rejected acceptance call; they were not re-counted during this installation-gate-only check. Organization auditing remains an external release prerequisite, not the reason for this diagnostic stop. The subsequent owner approval and installation attempt above supersede this section's missing-approval disposition.
+
 ## Phase 3D-R4M Package Update Accepted; Caller-Marker Runtime Failure (2026-10-26)
 
 **Runtime classification: `PACKAGE_GUARD_PARENT_CONTEXT_FAILURE`. Package disposition: `PACKAGE_UPDATE_ACCEPTED_CONTENT_NOT_BYTE_RECONCILABLE`.** The earlier R4M stop was a `STALE_AUDIT_GOVERNANCE_GATE`: disabled organization auditing does not block the explicitly authorized bounded synthetic Candidate Core acceptance. Auditing remains disabled and unchanged as an external governance/release prerequisite before real candidate rollout. No real candidate data, CV, phone, production email, or real-person reference data is permitted.

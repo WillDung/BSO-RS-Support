@@ -359,13 +359,15 @@ No solution source, environment configuration, business data, or published app c
 
 ## 24. Final Classification
 
+**Historical assessment; superseded for synthetic runtime by the owner-approved Phase 3D-R4M decision.** The audit prohibition below reflected the earlier governance interpretation. Organization auditing is still disabled and remains a governance/release prerequisite before real candidate rollout, but bounded synthetic Candidate Core acceptance is permitted while it is pending.
+
 **`BLOCKED_STATUS_HISTORY_CHOICE_BINDING_MISMATCH_AND_EXTERNAL_AUDIT_API_PRIVILEGE_PREREQUISITES` for further Candidate Core implementation.**
 
-All owner product decisions are recorded. Candidate-only metadata is exact. Phase 3B.2's seven remaining metadata writes completed without retry, but final reconciliation found two Status History attributes bound to the wrong Choice; the authorization is consumed and no corrective write was attempted. Organization auditing is disabled, so no Candidate business data may be created; the least-privilege Custom API execution privilege model remains unapproved/untested. No Candidate data, API/plugin, app, access, or publication change occurred.
+All owner product decisions are recorded. Candidate-only metadata is exact. Phase 3B.2's seven remaining metadata writes completed without retry, but final reconciliation found two Status History attributes bound to the wrong Choice; the authorization is consumed and no corrective write was attempted. At that historical assessment, organization auditing was disabled and no Candidate data was authorized; the later R4M owner decision permits bounded synthetic acceptance only. The least-privilege Custom API execution privilege model remains unapproved/untested. No Candidate data, API/plugin, app, access, or publication change occurred at this assessment.
 
 ## 25. Exact Recommended Next Task
 
-First obtain new bounded authorization to plan a non-destructive correction for `os_sr_csh_prevstat` and `os_sr_csh_newstat`, currently bound to `os_sr_callout` but required to bind to `os_sr_candstat`; start with fresh read-only metadata reconciliation and supported-correction analysis. Do not retry table/relationship/key creation or modify Candidate. Separately resolve organization-audit governance before Candidate data creation and approve/test least-privilege Custom API execution before API/plugin implementation.
+First obtain new bounded authorization to plan a non-destructive correction for `os_sr_csh_prevstat` and `os_sr_csh_newstat`, currently bound to `os_sr_callout` but required to bind to `os_sr_candstat`; start with fresh read-only metadata reconciliation and supported-correction analysis. Do not retry table/relationship/key creation or modify Candidate. Resolve organization-audit governance before real Candidate data or rollout, and approve/test least-privilege Custom API execution before real use.
 
 ## 26. AI HANDOVER
 
@@ -376,7 +378,7 @@ First obtain new bounded authorization to plan a non-destructive correction for 
 - Proposed `os_sr_cact` must require a caller-generated GUID CorrelationId for every state-changing operation, compare expected status/version, and atomically persist Candidate status, applicable Call Log, and exactly one Status History row.
 - Answered logs and transitions atomically; No Answer and Call Back Requested log only. Reschedule requires a reason and full history evidence but stays disabled until the later cancellation-attempt boundary is implemented.
 - Candidate Number, call outcomes, contact requiredness, Owner-as-BSO, auditing, contact field-security, and LEGO Career deferral are owner-approved decisions.
-- Organization auditing is disabled; no Candidate records were created and none may be created until audit governance is resolved.
+- At the time of this historical handover, organization auditing was disabled and no Candidate records had been created. The later R4M decision permits synthetic Candidate Core acceptance only; real Candidate data remains gated on audit governance.
 - Candidate-only provisioning used seven authorized writes, zero retries, and a final GET-only reconciliation (31 GET, 0 POST). Phase 3B.2's corrected Call Log create plus seven remaining-scope writes were dispatched once; the latest child-scope reconciliation returned 17 GET and 0 POST. No Candidate data or other prohibited writes occurred.
 - Next action: obtain a new bounded authorization to correct the two History Choice bindings after supported non-destructive repair analysis; do not repeat any of the seven writes. Organization auditing and API privilege design remain separate gates.
 
@@ -464,6 +466,6 @@ One signed `os_sr_cact` .NET Framework 4.6.2 assembly contains the handler and d
 
 Caller-context service operations require UserId = InitiatingUserId and a synchronous transaction; no elevation or grant was introduced. The receipt and applicable effects commit together. Identical replay returns original persisted effects after later edits; conflicting correlation reuse fails. Direct/bulk mutations and project lookup reassociation are rejected outside the exact validated API intent; unrelated associations are no-op. Profile fields use present=replace, omitted=preserve, explicit null=clear optional fields. The original API output list is unchanged.
 
-Organization auditing remains inactive, so runtime rejects business execution. Future scheduled/result/reschedule actions remain unavailable pending their approved trusted evidence boundaries. No UI or integration was implemented. No live business invocation occurred; four-table count-only closeout returned 0 rows.
+The Phase 3C assembly update removed organization auditing as a plug-in runtime rejection. Organization auditing remains inactive as an external governance/release prerequisite; the later owner-approved Phase 3D-R4M decision permits bounded synthetic Candidate Core acceptance while it is pending, but not real candidate data or rollout. Future scheduled/result/reschedule actions remain unavailable pending their approved trusted evidence boundaries. No UI or integration was implemented. No live business invocation occurred at this Phase 3C closeout; four-table count-only closeout returned 0 rows.
 
 The final result is **`CANDIDATE_CORE_API_DEPLOYED_AUDIT_ACTIVATION_PENDING`**. Build passed with zero warnings/errors; nine offline suites passed 1,145 assertions, including real SDK adapter/guard types with mocked services and host rollback simulation. These are not live transaction/non-admin security acceptance. The [Phase 3C report](PHASE_3C_CANDIDATE_CORE_API_PLUGIN_REPORT.md) records exact request/write counts, assembly/payload hashes, observed metadata defaults/corrections, key propagation, supported private export snapshot, and next acceptance gate. No commit or push.

@@ -1,6 +1,34 @@
 # Phase 3D - Candidate Core Synthetic Runtime Acceptance
 
-Date: 26 October 2026. This report records the current Phase 3D-R4K guard-diagnosed CreateCandidate runtime failure, with earlier assessments retained as history. Source: owner authorization, current repository contract/source, guarded live reconciliation, local offline validation, and Microsoft's published Dataverse metadata documentation.
+Date: 26 October 2026. This report records the current Phase 3D-R4L guard cutover and CreateCandidate runtime failure, with earlier assessments retained as history. Source: owner authorization, current repository contract/source, guarded live reconciliation, local offline validation, and Microsoft's published Dataverse metadata documentation.
+
+## Phase 3D-R4L Guard Cutover and CreateCandidate Stop
+
+**`CREATECANDIDATE_RUNTIME_FAILURE` — all 50 Candidate Core direct-write guard EventHandlers were migrated to the existing package-backed guard and GET-reconciled. The one authorized CreateCandidate dispatch was rejected by the guard's caller-marker check; no later runtime-matrix operation occurred.**
+
+### Guard migration and reconciliation
+
+The owner-confirmed VN LMV IT target and expected PAC/Dataverse identity guards passed. The retained rollback map covered 50 exact SDK message-processing steps, their protected-property fingerprints, unsecure-configuration hashes, secure-configuration relationship IDs only, and project Solution memberships. No secure-configuration contents were read.
+
+The initial Apply sent one EventHandler PATCH (HTTP 204). Its immediate readback matched the package-backed handler, protected-property digest, and Solution memberships, but the journal compared an empty string to a null configuration hash because the plan hash had been cast to `[string]`. A fresh GET-only reconcile against the immutable map proved configuration, protected properties, memberships, package identity, and the exact one-package/49-legacy topology unchanged. The local journal was preserved, and the runner was corrected to preserve nullable fingerprints.
+
+The first continuation reconciled 14 further EventHandler PATCHes and stopped at local journal persistence before sending the next request. Its journal recorded 14 `GET_RECONCILED`, one `DISPATCH_RESERVED` with no HTTP status or readback, and 34 `PLANNED`; its PATCH count was 14 and automatic retries were 0. The prior/root journal SHA-256 link was verified. Journal-aware GET-only reconciliation mapped all 15 completed steps to package handlers and the remaining 35 steps to legacy handlers with no property or membership drift. The reserved step was proven undispatched and was not retried.
+
+A second continuation preflight then stopped before any PATCH due to a local variable collision; it made 7 GETs, 0 PATCHes, and 0 retries, and did not create a new journal. After correcting the local variable name, both the journal-aware GET-only reconciliation and continuation preflight passed. The new continuation dispatched only the remaining 35 pending EventHandlers and reconciled all 50 package-backed. Its totals were 574 GETs, 35 PATCHes, and 0 retries. Across R4L there were 50 successful one-time EventHandler PATCHes: 1 initial, 14 in the first continuation, and 35 in the final continuation. No rollback PATCH was needed or made.
+
+No package update, new package, Custom API handler PATCH, schema or Choice write, privilege/security change, app change, PublishXml/PublishAllXml, audit-setting change, or legacy assembly write occurred. Both original evidence journals and the continuation journal were preserved locally; no environment-specific IDs or journal contents were added to the repository.
+
+### Single runtime attempt and stop
+
+With all 50 guard steps package-backed, fresh runtime preflight reconciled the existing `os_sr_cact_pkg`, assembly and both exact package types, the unchanged 13-parameter Custom API contract, and the package-backed API handler. It required the 50-step package guard topology and count-only returned 0 Candidates / 0 Call Logs / 0 Status History / 0 Receipts. The one-shot R4L runtime authorization was confirmed unused before Apply.
+
+The runtime runner dispatched CreateCandidate exactly once using the synthetic name `[SYNTHETIC-E2E] Candidate Core Acceptance`, a reserved `.invalid` address, fresh CorrelationId, and no CandidateId or ExpectedStatus. It returned HTTP 400 / `0x80040265` / `DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:CALLER_MARKER:CC_CREATE_CANDIDATE:0x80040265`. The journal records one rejected CreateCandidate, zero retries, and no CandidateId reference. A fresh GET-only post-failure preflight again returned 0/0/0/0 and confirmed all 50 package-backed guard steps. No Call Log, Status History, Receipt, or Candidate persisted; the remaining seven API dispatches were not attempted.
+
+This does not establish that the guard-step migration introduced a regression: R4K's preceding CreateCandidate attempt was rejected by the legacy guard with the same Dataverse error code. The R4L package guard provides the specific `CALLER_MARKER` classification, localizing the rejection predicate, but the live request did not capture enough execution context to determine whether the operation handler omitted the marker or Dataverse failed to propagate it. No rollback was performed. The R4L one-shot runtime authorization is consumed; further marker diagnosis or live runtime calls require a new bounded authorization. Final classification: **`CREATECANDIDATE_RUNTIME_FAILURE`**.
+
+### Local validation
+
+All 11 PowerShell suites passed (1,122 assertions), including the 14-assertion R4L guard-cutover suite. The Candidate Core engine harness passed 109 assertions; the SDK adapter/guard harness passed 125 assertions. All 22 PowerShell scripts parsed, relative links in the five changed documentation files resolved, the added-diff privacy scan passed, and `git diff --check` passed. No package was rebuilt or updated in R4L.
 
 ## Phase 3D-R4K Guard-Diagnosed CreateCandidate Stop
 

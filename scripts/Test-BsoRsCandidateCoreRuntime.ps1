@@ -7,6 +7,8 @@ param(
     [Parameter(Mandatory)][string]$ExpectedEnvironmentId,
     [Parameter(Mandatory)][string]$ExpectedOrganizationId,
     [string]$ExpectedHandlerPackageUniqueName,
+    [switch]$RequirePackageGuardSteps,
+    [int]$ExpectedGuardStepCount,
     [string]$RuntimeEvidencePath
 )
 
@@ -16,7 +18,7 @@ $manifestPath = Join-Path $root 'docs\PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json
 $contractPath = Join-Path $root 'docs\PHASE_3C_API_CONTRACT.json'
 $script:apiContract = Get-Content -LiteralPath $contractPath -Raw | ConvertFrom-Json
 $expectedManifestHash = '63f56173f61265f539d23d6ceffb5631e23f438e4e254755c1e24c7d17eb1915'
-$runtimeAuthorizationId = 'phase3d-r4k-owner-authorized-package-runtime'
+$runtimeAuthorizationId = 'phase3d-r4l-owner-authorized-guard-cutover-runtime'
 $expectedActionCalls = 8
 $schedulingEvidenceChecks = @(
     [ordered]@{
@@ -258,6 +260,7 @@ function Assert-PackageBackedHandler {
     [ordered]@{
         ApiUniqueName = [string]$api[0].uniquename
         HandlerType = [string]$type.typename
+        HandlerAssemblyId = $assemblyId.ToLowerInvariant()
         PackageUniqueName = [string]$package.uniquename
         PackageCount = $packagesByName.Count
         PackageTypes = $actualPackageTypes
@@ -269,6 +272,26 @@ function Assert-PackageBackedHandler {
                 LogicalEntityName = if ($_.logicalentityname) { [string]$_.logicalentityname } else { $null }
             }
         })
+    }
+}
+
+function Assert-PackageGuardSteps {
+    param([object]$PackageHandler, [int]$ExpectedCount)
+    if ($ExpectedCount -le 0) { throw 'Package guard verification requires a positive expected step count.' }
+    $guardTypes = @(Get-Rows -Path "plugintypes?%24select=plugintypeid,typename,_pluginassemblyid_value&%24filter=typename eq '$($script:apiContract.guard)' and _pluginassemblyid_value eq $($PackageHandler.HandlerAssemblyId)")
+    if ($guardTypes.Count -ne 1 -or [string]$guardTypes[0].typename -cne $script:apiContract.guard) {
+        throw 'Runtime package assembly does not resolve exactly one approved guard type.'
+    }
+    $steps = @(Get-Rows -Path "sdkmessageprocessingsteps?%24select=sdkmessageprocessingstepid,name,_eventhandler_value&%24filter=startswith(name,'os_sr_cact.guard.')")
+    if ($steps.Count -ne $ExpectedCount -or
+        @($steps | ForEach-Object { [string]$_.sdkmessageprocessingstepid } | Sort-Object -Unique).Count -ne $ExpectedCount -or
+        @($steps | Where-Object { [string]$_._eventhandler_value -ine [string]$guardTypes[0].plugintypeid }).Count -ne 0) {
+        throw 'Candidate Core guard steps are not all mapped to the package-backed guard type.'
+    }
+    [ordered]@{
+        PackageGuardType = [string]$guardTypes[0].typename
+        GuardStepCount = $steps.Count
+        PackageBackedGuardSteps = $steps.Count
     }
 }
 
@@ -479,6 +502,10 @@ try {
     $packageHandler = if ($ExpectedHandlerPackageUniqueName) {
         Assert-PackageBackedHandler -PackageUniqueName $ExpectedHandlerPackageUniqueName
     } else { $null }
+    $packageGuard = if ($RequirePackageGuardSteps) {
+        if ($null -eq $packageHandler) { throw 'Package-backed guard verification requires the package handler gate.' }
+        Assert-PackageGuardSteps -PackageHandler $packageHandler -ExpectedCount $ExpectedGuardStepCount
+    } else { $null }
     $script:expectedCounts = Get-ScopedCounts
     if (@($script:expectedCounts.Values | Where-Object { $_ -ne 0 }).Count -ne 0) {
         throw 'Zero-row safety gate failed; no business API invocation was sent.'
@@ -493,6 +520,7 @@ try {
             OrganizationAuditSettingWrites = 0
             AutomaticRetries = 0
             PackageHandler = $packageHandler
+            PackageGuard = $packageGuard
         } | ConvertTo-Json -Depth 10
         return
     }
@@ -513,6 +541,8 @@ try {
         ManifestSha256 = $expectedManifestHash
         ApiUniqueName = 'os_sr_cact'
         ExpectedHandlerPackageUniqueName = $ExpectedHandlerPackageUniqueName
+        RequirePackageGuardSteps = [bool]$RequirePackageGuardSteps
+        ExpectedGuardStepCount = $ExpectedGuardStepCount
         MaximumApiDispatches = $expectedActionCalls
         AutomaticRetries = 0
         Dispatches = @()
@@ -635,7 +665,7 @@ try {
         Result = 'PHASE_3D_SYNTHETIC_RUNTIME_ACCEPTED'
         AuthorizationId = $runtimeAuthorizationId
         CandidateFixtureCount = 1
-        SyntheticName = '[SYNTHETIC-E2E] Candidate Core Runtime'
+        SyntheticName = '[SYNTHETIC-E2E] Candidate Core Acceptance'
         EmailDomain = '.invalid'
         RetainedCandidate = $true
         RetentionReason = 'Direct-delete guard and restrictive relationship policy remain intact.'
@@ -645,6 +675,7 @@ try {
         TotalBusinessRecordWrites = 9
         Replays = 1; Conflicts = 1; ExpectedRejections = 2
         SchedulingEvidenceChecks = $schedulingEvidenceChecks
+        PackageGuard = $packageGuard
         FinalCounts = $script:journal.FinalCounts
         CandidateIdReferenceSha256 = $script:journal.CandidateIdSha256
         ActorIdReferenceSha256 = $script:journal.ActorIdSha256

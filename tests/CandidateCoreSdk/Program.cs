@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Runtime.Remoting.Messaging;
 using System.Runtime.Remoting.Proxies;
 using System.ServiceModel;
@@ -267,9 +268,48 @@ internal static class Program
         unknownAction.Input["ActionType"] = "UnsupportedOperation";
         unknownAction.Input["Actor"] = Guid.NewGuid();
         Reject(() => new ApplyCandidateAction().Execute(unknownAction), "INVALID_ACTION");
-        var direct = new Host(100010000);
-        Reject(() => direct.Guard("Create", new Entity("os_sr_csh", Guid.NewGuid()), null),
-            "DIRECT_WRITE_GUARD_REJECTED:STATUS_HISTORY_CREATE:PARENT_CONTEXT");
+        foreach (var directWrite in new[]
+        {
+            (Message: "Create", Table: "os_sr_cand", Category: "CANDIDATE_CREATE"),
+            (Message: "Update", Table: "os_sr_cand", Category: "CANDIDATE_UPDATE"),
+            (Message: "Create", Table: "os_sr_call", Category: "CALL_LOG_CREATE"),
+            (Message: "Create", Table: "os_sr_csh", Category: "STATUS_HISTORY_CREATE"),
+            (Message: "Create", Table: "os_sr_oprc", Category: "RECEIPT_CREATE")
+        })
+        {
+            RejectDirectGuard(directWrite.Message, new Entity(directWrite.Table, Guid.NewGuid()), null,
+                "DIRECT_WRITE_GUARD_REJECTED:" + directWrite.Category + ":PARENT_CONTEXT");
+        }
+        var candidateTarget = new Entity("os_sr_cand", Guid.NewGuid())
+        {
+            ["os_sr_cand_stat"] = new OptionSetValue(ActionRequest.NeedCall)
+        };
+        var intentKey = GetGuardIntentKey();
+        var validIntent = GetGuardIntent("Create", candidateTarget);
+        var unrelatedParent = CreateGuardParent("Update", new ParameterCollection(),
+            new ParameterCollection { [intentKey] = validIntent });
+        unrelatedParent["OwningExtension"] = new Entity("plugintype",
+            Guid.Parse("00000000-0000-0000-0000-000000000202"));
+        RejectDirectGuard("Create", candidateTarget, unrelatedParent,
+            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:PARENT_CONTEXT");
+
+        var ancestor = CreateGuardParent("os_sr_cact", new ParameterCollection(),
+            new ParameterCollection { [intentKey] = validIntent });
+        var nestedParent = CreateGuardParent("os_sr_cact", new ParameterCollection(), new ParameterCollection());
+        nestedParent["ParentContext"] = Execution(ancestor);
+        RejectDirectGuard("Create", candidateTarget, nestedParent,
+            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:CALLER_MARKER");
+
+        var callerSuppliedMarkerParent = CreateGuardParent("os_sr_cact",
+            new ParameterCollection { [intentKey] = validIntent }, new ParameterCollection());
+        RejectDirectGuard("Create", candidateTarget, callerSuppliedMarkerParent,
+            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:CALLER_MARKER");
+
+        var wrongMarkerParent = CreateGuardParent("os_sr_cact", new ParameterCollection(),
+            new ParameterCollection { [intentKey] = "not-the-current-target-intent" });
+        RejectDirectGuard("Create", candidateTarget, wrongMarkerParent,
+            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:CALLER_MARKER");
+
         foreach (string table in new[] { "os_sr_cand", "os_sr_call", "os_sr_csh", "os_sr_oprc" })
         {
             var host = new Host(100010000);
@@ -308,6 +348,48 @@ internal static class Program
         var host = new Host(100010000, true);
         host.Input["ExpectedStatus"] = new OptionSetValue(ActionRequest.NeedCall);
         return host;
+    }
+
+    private static Dictionary<string, object?> CreateGuardParent(
+        string message, ParameterCollection input, ParameterCollection shared)
+    {
+        var values = Context(input, shared, new ParameterCollection());
+        values["MessageName"] = message;
+        return values;
+    }
+
+    private static string GetGuardIntent(string message, Entity target)
+    {
+        var method = typeof(ProtectCandidateCore).GetMethod("Intent", BindingFlags.Static | BindingFlags.NonPublic)
+            ?? throw new Exception("Guard intent method is unavailable.");
+        return (string)(method.Invoke(null, new object[] { message, target })
+            ?? throw new Exception("Guard intent method returned no value."));
+    }
+
+    private static string GetGuardIntentKey()
+    {
+        var field = typeof(ProtectCandidateCore).GetField("IntentKey", BindingFlags.Static | BindingFlags.NonPublic)
+            ?? throw new Exception("Guard intent key is unavailable.");
+        return (string)(field.GetValue(null) ?? throw new Exception("Guard intent key is empty."));
+    }
+
+    private static void RejectDirectGuard(
+        string message, Entity target, Dictionary<string, object?>? parent, string expected)
+    {
+        Reject(() => ExecuteGuard(message, target, parent), expected);
+    }
+
+    private static void ExecuteGuard(string message, Entity target, Dictionary<string, object?>? parent)
+    {
+        var child = Context(new ParameterCollection { ["Target"] = target },
+            new ParameterCollection(), new ParameterCollection());
+        child["MessageName"] = message;
+        child["Stage"] = 10;
+        child["PrimaryEntityName"] = target.LogicalName;
+        child["OwningExtension"] = new Entity("plugintype", Guid.Parse("00000000-0000-0000-0000-000000000201"));
+        child["ParentContext"] = parent == null ? null : Execution(parent);
+        new ProtectCandidateCore().Execute(new ContextProvider(Execution(child),
+            Proxy<ITracingService>(call => null)));
     }
 
     private sealed class Host : IServiceProvider

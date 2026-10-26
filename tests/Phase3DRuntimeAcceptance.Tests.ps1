@@ -26,14 +26,15 @@ Assert-Test ($runtime -match "ValidateSet\('GET', 'POST'\)" -and
     $runtime -match "Path -cne 'os_sr_cact'" -and $runtime -match 'MaximumRetryCount = 0' -and
     $runtime -match 'MaximumRedirection = 0' -and $runtime -match 'expectedActionCalls = 8') 'Only bounded Custom API calls with zero retries'
 Assert-Test ($runtime -match 'FileMode\]::CreateNew' -and $runtime -match 'phase3d-r-runtime-' -and
-    $runtime -match 'phase3d-r4k-owner-authorized-package-runtime' -and
+    $runtime -match 'phase3d-r4l-owner-authorized-guard-cutover-runtime' -and
+    $runtime -notmatch 'phase3d-r4k-owner-authorized-package-runtime' -and
     $runtime -notmatch 'phase3d-r4j-owner-authorized-package-runtime' -and
     $runtime -notmatch 'phase3d-r4i-owner-authorized-package-runtime' -and
     $runtime -notmatch 'phase3d-r4g-owner-authorized-package-runtime' -and
     $runtime -notmatch 'phase3d-r4f-owner-authorized-package-runtime' -and
     $runtime -notmatch 'phase3d-r4e-owner-authorized-package-runtime' -and
     $runtime -notmatch 'phase3d-r4d-owner-authorized-package-runtime' -and
-    $runtime -match 'one-shot runtime authorization consumed') 'R4K has a distinct one-shot lock from all prior consumed authorizations'
+    $runtime -match 'one-shot runtime authorization consumed') 'R4L has a distinct one-shot lock from all prior consumed authorizations'
 Assert-Test ($runtime -match "\`$name = '\[SYNTHETIC-E2E\]" -and
     $runtime -match '\[SYNTHETIC-E2E\] Candidate Core Acceptance' -and
     $runtime -match '@example\.invalid' -and $runtime -notmatch '@example\.com') 'Fixture identity is unmistakably synthetic and reserved'
@@ -99,6 +100,9 @@ Assert-Test ($runtime -match 'AuditSettingWrites = 0' -and $runtime -match 'Publ
     $runtime -notmatch 'Invoke-RuntimeRequest -Method (PUT|PATCH|DELETE)') 'No audit, app, or metadata mutation path exists'
 Assert-Test ($runtime -match 'ExpectedHandlerPackageUniqueName' -and
     $runtime -match 'Assert-PackageBackedHandler' -and
+    $runtime -match 'RequirePackageGuardSteps' -and
+    $runtime -match 'Assert-PackageGuardSteps' -and
+    $runtime -match 'Candidate Core guard steps are not all mapped to the package-backed guard type' -and
     $runtime -match 'Runtime Apply requires the reconciled package-backed handler identity' -and
     $runtime -match 'Runtime package assembly does not contain exactly the approved handler and guard types' -and
     $runtime -match 'PackageCount = \$packagesByName.Count' -and

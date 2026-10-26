@@ -1,6 +1,23 @@
 # Current State
 
-## Phase 3D-R4M-P Profiler Installation Approved; CLI Import Rejected (2026-10-26)
+## Phase 3D-R4M Temporary Exception Trace Capture (2026-10-26)
+
+**`R4M_TRACE_EVIDENCE_INSUFFICIENT`.** The owner explicitly approved one bounded synthetic CreateCandidate with organization Plugin Trace Log temporarily changed from Off (0) to Exception (1), then restored to Off (0). Fresh PAC/WhoAmI agreement, existing package-backed ApplyCandidateAction topology, all 50 package-backed ProtectCandidateCore guards, no active Candidate Core Profiler wrapper, and 0/0/0/0 Candidate / Call Log / Status History / Receipt counts passed. The initial trace setting was exactly 0.
+
+One enable write was followed by readback 1. Exactly one minimal synthetic CreateCandidate was dispatched with no optional inputs; HTTP 400 / `0x80040265` resulted. Automatic retries were 0. Immediate post-call counts remained 0/0/0/0. One mandatory restore write ran in `finally`; readback positively confirmed 0. No further runtime call occurred.
+
+The immediate query returned no traces. One GET-only follow-up after restoration found two relevant records in the bounded diagnostic window (including assembly-qualified type-name matching):
+
+| TypeName | MessageName | Depth | Mode | Sanitized trace markers |
+|---|---|---|---|---|
+| `os_sr_cact.ProtectCandidateCore` | `Create` | 2 | 0 (synchronous) | `CC_GUARD_TRUSTED_PARENT_NOT_FOUND:ANCESTOR_HOPS:1` |
+| `os_sr_cact.ApplyCandidateAction` | `os_sr_cact` | 1 | 0 (synchronous) | `CC_STAGE:CC_READ_RECEIPT`; `CC_STAGE:CC_CREATE_CANDIDATE`; `CC_SERVICE_FAULT:CC_CREATE_CANDIDATE:0x80040265` |
+
+The trace proves package-backed guard execution emitted the expected R4M bounded-search marker and found no accepted trusted parent in one searched ancestor. It does not expose marker presence/location, ancestor MessageName/Stage/transaction/actor properties, or fingerprint equality. It cannot distinguish a missing marker, ancestor-shape mismatch, or fingerprint mismatch; none is claimed proven. No local source correction, rebuild, repair tests, or deployment was warranted. No Profiler operation, package update, handler/guard PATCH, schema/API/security/app/audit/publication change, legacy assembly change, signing-key access, commit, or push occurred. Final organization trace setting: **0 - Off**. See the [runtime acceptance report](PHASE_3D_CANDIDATE_CORE_RUNTIME_ACCEPTANCE_REPORT.md).
+
+## Phase 3D-R4M-P Historical Profiler Installation Attempt (2026-10-26)
+
+This installation-attempt disposition is historical: later live checks verified the installed Profiler type and owner-configured wrappers. Cleanup subsequently verified no active Candidate Core wrapper and the original Candidate Create guard protected-property fingerprint and package-backed handler exact. Profiler was not uninstalled. The current trace-only diagnostic above did not use Profiler.
 
 The owner explicitly approved installing Microsoft Plug-in Profiler in VN LMV IT for the existing R4M diagnosis. Installation approval is no longer missing. PAC target checks matched the confirmed environment. The installed Microsoft PRT 9.1.0.235 was launched; this session has no desktop UI control for its Install Profiler command.
 

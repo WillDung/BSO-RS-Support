@@ -2,9 +2,41 @@
 
 Date: 26 October 2026. This report records the current Phase 3D-R4M package disposition and CreateCandidate runtime failure; earlier assessments are retained as history. Source: owner authorization, current repository contract/source, guarded live reconciliation, local offline validation, and the supported Dataverse plug-in package model.
 
-## Phase 3D-R4M Package Update Accepted; Caller-Marker Runtime Failure
+## Latest R4M Temporary Exception Trace Diagnostic (2026-10-26)
 
-### Execution-context capture installation gate
+**Classification: `R4M_TRACE_EVIDENCE_INSUFFICIENT`.** Explicit owner environment-level approval covered only the bounded Off (0) -> Exception (1) -> Off (0) trace window and one synthetic CreateCandidate, using the existing deployed package without Profiler.
+
+| Gate or operation | Verified result |
+|---|---|
+| Target and identity | VN LMV IT; confirmed target URL and PAC/WhoAmI agreement |
+| Package topology | Existing package-backed ApplyCandidateAction; all 50 ProtectCandidateCore guards package-backed |
+| Active Candidate Core Profiler wrappers | 0 |
+| Original trace setting | 0, retained locally before enable |
+| Enable writes / enabled readback | 1 / 1 |
+| CreateCandidate dispatches / automatic retries | 1 / 0 |
+| Request | Approved minimal synthetic trace-capture contract; no optional parameters |
+| Response | HTTP 400 / `0x80040265` |
+| Pre-counts: Candidate / Call Log / Status History / Receipt | 0 / 0 / 0 / 0 |
+| Immediate post-counts | 0 / 0 / 0 / 0 |
+| Restore writes / final readback | 1 / 0 (Off), reconciled in `finally` |
+| Trace rows inspected | 2 in a bounded GET-only follow-up after restoration; immediate query returned 0 |
+
+The follow-up included assembly-qualified type-name matching and remained limited to the two Candidate Core types and the diagnostic window. Only sanitized structural markers were retained:
+
+| TypeName | MessageName | Depth | Mode | Safe markers |
+|---|---|---|---|---|
+| `os_sr_cact.ProtectCandidateCore` | `Create` | 2 | 0 | `CC_GUARD_TRUSTED_PARENT_NOT_FOUND:ANCESTOR_HOPS:1` |
+| `os_sr_cact.ApplyCandidateAction` | `os_sr_cact` | 1 | 0 | `CC_STAGE:CC_READ_RECEIPT`; `CC_STAGE:CC_CREATE_CANDIDATE`; `CC_SERVICE_FAULT:CC_CREATE_CANDIDATE:0x80040265` |
+
+This establishes that package-backed execution emitted the expected R4M trusted-parent-search trace, searched one ancestor, and found no accepted trusted parent. It does not prove which conjunct failed: private marker visibility, ancestor message/stage/mode/transaction/depth/actor semantics, operation trust, or fingerprint equality. No actual ancestor tree or marker-present boolean was traced. Therefore `MARKER_NOT_VISIBLE_IN_ANCESTOR_CHAIN`, `TRUSTED_API_ANCESTOR_SHAPE_MISMATCH`, and `MARKER_FINGERPRINT_MISMATCH` remain unproven. Missing R4M trace emission is not the observed issue.
+
+No source correction or trace-derived regression was justified; no rebuild, package validation, or repair test suite was run. Documentation-only validation is reported separately. No further runtime call, Profiler operation, package update/deployment, handler/guard PATCH, schema/API/security/app/audit/publication change, legacy assembly change, signing-key access, commit, or push occurred. The package disposition remains `PACKAGE_UPDATE_ACCEPTED_CONTENT_NOT_BYTE_RECONCILABLE`; no new backend phase was created.
+
+## Phase 3D-R4M Package Update and Earlier Caller-Marker Runtime Failure
+
+### Historical execution-context capture installation gate
+
+The installation-attempt status below is historical. Subsequent live checks verified the installed Profiler type and owner-configured wrappers; cleanup later verified zero active Candidate Core Profiler wrappers and the original Candidate Create guard protected-property fingerprint and package-backed handler exact. Profiler was not uninstalled. The latest trace diagnostic above used no Profiler.
 
 **Subsequent R4M-P installation authorization and result:** the owner explicitly approved installing Microsoft Plug-in Profiler in VN LMV IT. PAC target verification passed. PRT 9.1.0.235 was launched, but this session has no desktop UI control for Install Profiler. One PAC import was attempted using the untouched managed `PluginProfiler` 2.0.0.0 Solution (publisher `mbs`) extracted from the official PRT cabinet. No publication, overwrite, dependency-bypass, or plug-in activation flags were supplied. Dataverse rejected the import with `PluginProfiler.Plugins cannot be installed this way. Please use a microsoft signed solution file to install a microsoft signed assembly`. No signing bypass, altered package, or repeated import was attempted.
 

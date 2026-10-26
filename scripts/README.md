@@ -24,7 +24,13 @@ Only `Apply`, `Continue`, and `Rollback` can PATCH, and only an existing `sdkmes
 
 At that historical R4L stage, the runtime runner required package-backed guard steps and zero-row preflight before its distinct R4L one-shot Apply. That authorization is not reusable. Local static checks were `& .\tests\Phase3DR4LGuardCutover.Tests.ps1`; SDK marker/context checks were `dotnet run --project .\tests\CandidateCoreSdk\CandidateCoreSdk.Tests.csproj -c Release`.
 
-## Phase 3D-R4M trusted-parent correction
+## Current R4M predicate-localization disposition
+
+The owner-authorized fast-track diagnostic used a separately bounded session journal, not a replay of the consumed runtime Apply lock or frozen deployment pins. One existing package update returned HTTP 204; one minimal CreateCandidate returned the safe category `CANDIDATE_CREATE:TRUSTED_PARENT:MARKER_MISSING`. All earlier ancestor predicates passed. Post-counts remain 0/0/0/0, trace logging is Off, and there are no active Candidate Core Profiler wrappers. No deterministic propagation repair was proven, so no second build/update/call or matrix ran. Do not automatically rerun the diagnostic or open another backend phase.
+
+[Test-BsoRsCandidateCoreRuntime.ps1](Test-BsoRsCandidateCoreRuntime.ps1) now preserves the closed trusted-parent predicate categories in sanitized failures. Its older Apply authorization remains consumed. [Deploy-BsoRsCandidatePluginPackage.ps1](Deploy-BsoRsCandidatePluginPackage.ps1) retains its historical artifact pins; they do not identify the newer diagnostic build. Do not bypass or silently replace those pins. Current artifact hashes, exact predicate order, validation and evidence limits are in the [runtime acceptance report](../docs/PHASE_3D_CANDIDATE_CORE_RUNTIME_ACCEPTANCE_REPORT.md).
+
+## Historical Phase 3D-R4M trusted-parent correction
 
 `CandidateCore/DataversePlugin.cs` now recognizes the private per-write marker on a bounded (eight-context) trusted `os_sr_cact` ancestor chain. It requires matching action category, stage, synchronous transaction, nested depth, caller identity, and exact mutation fingerprint; current-context values, caller `tag`, unrelated parents, malformed markers, and ancestors beyond the bound remain rejected. The marker is removed after each protected write and is not logged or persisted.
 

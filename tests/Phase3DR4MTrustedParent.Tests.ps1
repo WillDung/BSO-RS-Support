@@ -17,16 +17,16 @@ Assert-Test ($plugin -match 'IntentKey = "os_sr_cact\.validated_intent"' -and
 Assert-Test ($search.Success -and $search.Value -match 'context\.ParentContext' -and
     $search.Value -match 'searched < MaximumParentContexts' -and
     $search.Value -match 'ancestor\.ParentContext') 'Guard traverses only the bounded ParentContext chain'
-Assert-Test ($search.Value -match 'ancestor\.MessageName == "os_sr_cact"' -and
-    $search.Value -match 'ancestor\.Stage == 30' -and $search.Value -match 'ancestor\.Mode == 0' -and
+Assert-Test ($search.Value -match 'ancestor\.MessageName != "os_sr_cact"' -and
+    $search.Value -match 'ancestor\.Stage != 30' -and $search.Value -match 'ancestor\.Mode != 0' -and
     $search.Value -match 'ancestor\.IsInTransaction' -and
     $search.Value -match 'ancestor\.Depth > 0 && ancestor\.Depth < context\.Depth' -and
-    $search.Value -match 'ancestor\.UserId == context\.UserId' -and
-    $search.Value -match 'ancestor\.InitiatingUserId == context\.InitiatingUserId') `
+    $search.Value -match 'ancestor\.UserId != context\.UserId' -and
+    $search.Value -match 'ancestor\.InitiatingUserId != context\.InitiatingUserId') `
     'Trusted ancestor requires approved API, synchronous transaction, nested depth, and caller identity'
-Assert-Test ($search.Value -match 'ancestor\.SharedVariables\.TryGetValue\(IntentKey, out var marker\)' -and
-    $search.Value -match 'marker is string value && value == expectedIntent' -and
-    $search.Value -notmatch 'OwningExtension|\.Id\b') 'Only the exact private intent on a semantically trusted ancestor is accepted'
+Assert-Test ($search.Value -notmatch 'ancestor\.SharedVariables|expectedIntent' -and
+    $search.Value -match 'RegistrationFailure\(ancestor, context, factory\)') `
+    'SharedVariables marker is superseded by server-owned registration verification'
 Assert-Test ($search.Value -match 'IsActionForOperation\(ancestor, operation\)' -and
     $plugin -match 'action == "CreateCandidate"' -and $plugin -match 'action == "RecordCall"' -and
     $plugin -match 'action == "ProceedToScheduling"') 'Trusted Custom API actions are constrained to the protected mutation category'
@@ -51,5 +51,15 @@ Assert-Test ($sdk -match 'Operation Receipt child write' -and $sdk -match 'Call 
     'SDK tests accept legitimate Candidate, Call Log, History, and Receipt child writes by action'
 Assert-Test ($sdk -match 'Private mutation marker is removed and never persisted, returned, or traced' -and
     $sdk -match 'TRUSTED_PARENT_FOUND:ANCESTOR_HOPS') 'SDK tests verify marker lifetime and safe trace category'
+Assert-Test ($plugin -match 'extension\.LogicalName != "sdkmessageprocessingstep"' -and
+    $plugin -match 'Retrieve\("sdkmessageprocessingstep", extension\.Id' -and
+    $plugin -match 'Retrieve\("plugintype", handler\.Id' -and
+    $plugin -match 'Retrieve\("pluginassembly", assemblyReference\.Id' -and
+    $plugin -match 'Retrieve\("pluginpackage", packageReference\.Id') `
+    'Trust follows the server-owned step type assembly package chain without fixed registration IDs'
+Assert-Test ($plugin -match 'CreateOrganizationService\(context\.UserId\)' -and
+    $plugin -match 'Tuple.Create\(context.OrganizationId, context.UserId, extension.Id\)' -and
+    $plugin -match 'RegistrationCache.Count >= 128' -and $plugin -match 'AddMinutes\(1\)' -and
+    $plugin -match 'return "REGISTRATION_READ_FAILED"') 'Calling-user positive cache is bounded, expiring and fail closed'
 
 "PASS: $script:Passed Phase 3D-R4M trusted-parent source assertions; no authentication/network."

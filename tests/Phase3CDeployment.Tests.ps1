@@ -49,7 +49,7 @@ $plugin = Get-Content -Raw (Join-Path $root 'solutions\CandidateCore\DataversePl
 Assert-Test ($plugin -match 'context.UserId != context.InitiatingUserId' -and $plugin -match 'CreateOrganizationService\(context.InitiatingUserId\)') 'No implicit execution-user elevation'
 Assert-Test ($plugin -match 'IfRowVersionMatches' -and $plugin -match 'RequireTransaction' -and
     $plugin -notmatch 'isauditenabled|AUDIT_ACTIVATION_PENDING') 'Conditional writes retain transaction gate without organization-audit runtime blocker'
-Assert-Test ($plugin -match 'ancestor.SharedVariables' -and $plugin -match 'value == expectedIntent' -and
+Assert-Test ($plugin -match 'RegistrationFailure' -and $plugin -match 'ancestor.OwningExtension' -and
     $plugin -match 'MaximumParentContexts = 8' -and
     $plugin -match 'DIRECT_WRITE_GUARD_REJECTED:' -and $plugin -match 'CC_GUARD_REJECTED:') 'Server guard checks validated parent intent and emits sanitized rejection categories'
 Assert-Test ($plugin -notmatch 'trace.Trace\([^;]*(Fingerprint|CandidateName|CandidateEmail|InputParameters)') 'No raw input/PII fingerprint tracing'

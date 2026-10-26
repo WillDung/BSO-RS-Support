@@ -16,6 +16,39 @@ internal static class Program
     private static readonly Guid Actor = Guid.Parse("00000000-0000-0000-0000-000000000001");
     private static readonly Guid Candidate = Guid.Parse("00000000-0000-0000-0000-000000000002");
     private static readonly Guid Organization = Guid.Parse("00000000-0000-0000-0000-000000000003");
+    private static readonly Dictionary<Guid, Entity> Registrations = new Dictionary<Guid, Entity>();
+    private static int registrationReads;
+    private static EntityReference RegisterImplementation()
+    {
+        var package = new Entity("pluginpackage", Guid.NewGuid())
+        {
+            ["name"] = "os_sr_cact_pkg", ["uniquename"] = "os_sr_cact_pkg", ["version"] = "1.0.0"
+        };
+        var assembly = new Entity("pluginassembly", Guid.NewGuid())
+        {
+            ["name"] = "os_sr_cact", ["version"] = "1.0.0.0", ["packageid"] = package.ToEntityReference()
+        };
+        var type = new Entity("plugintype", Guid.NewGuid())
+        {
+            ["typename"] = "os_sr_cact.ApplyCandidateAction", ["pluginassemblyid"] = assembly.ToEntityReference()
+        };
+        var step = new Entity("sdkmessageprocessingstep", Guid.NewGuid()) { ["eventhandler"] = type.ToEntityReference() };
+        foreach (var row in new[] { step, type, assembly, package }) Registrations.Add(row.Id, row);
+        return step.ToEntityReference();
+    }
+    private static IOrganizationServiceFactory RegistrationFactory() => Proxy<IOrganizationServiceFactory>(call =>
+    {
+        if ((Guid?)call.Args[0] != Actor) throw new Exception("Registration reads elevated identity");
+        return Proxy<IOrganizationService>(request =>
+        {
+            if (request.MethodName != "Retrieve") throw new Exception("Unexpected registration write/read");
+            registrationReads++;
+            if (!Registrations.TryGetValue((Guid)request.Args[1], out var row))
+                throw new FaultException<OrganizationServiceFault>(new OrganizationServiceFault { Message = "SENSITIVE_SENTINEL" });
+            if (row.LogicalName != (string)request.Args[0]) throw new Exception("Registration logical type mismatch");
+            return row;
+        });
+    });
 
     private static void Check(bool value, string name)
     {
@@ -38,7 +71,7 @@ internal static class Program
             ["MessageName"] = "os_sr_cact", ["Stage"] = 30, ["Mode"] = 0, ["IsInTransaction"] = true,
             ["Depth"] = 1, ["UserId"] = Actor, ["InitiatingUserId"] = Actor, ["OrganizationId"] = Organization,
             ["InputParameters"] = input, ["OutputParameters"] = output, ["SharedVariables"] = shared,
-            ["ParentContext"] = null
+            ["ParentContext"] = null, ["OwningExtension"] = RegisterImplementation()
         };
     }
     private static T Proxy<T>(Func<IMethodCallMessage, object?> call) => (T)new DynamicProxy(typeof(T), call).GetTransparentProxy();
@@ -78,19 +111,17 @@ internal static class Program
         Check(createWithoutOptionalGuids.TraceMessages.Contains("CC_GUARD_TRUSTED_PARENT_FOUND:ANCESTOR_HOPS:1"),
             "Trusted parent trace contains only the safe ancestor-hop category");
         var packageApiParent = CreateCandidateHost();
-        packageApiParent.MainValues["OwningExtension"] =
-            new Entity("plugintype", Guid.Parse("00000000-0000-0000-0000-000000000101"));
         new ApplyCandidateAction().Execute(packageApiParent);
         Check(packageApiParent.CreatedCandidates == 1 && packageApiParent.Receipt != null &&
             packageApiParent.TraceMessages.Contains("CC_GUARD_ALLOWED:CANDIDATE_CREATE"),
-            "Package-backed ApplyCandidateAction is accepted by the historical-assembly guard context");
+            "Package-backed ApplyCandidateAction server registration is accepted");
         var legacyApiParent = CreateCandidateHost();
-        legacyApiParent.MainValues["OwningExtension"] =
-            new Entity("plugintype", Guid.Parse("00000000-0000-0000-0000-000000000102"));
-        new ApplyCandidateAction().Execute(legacyApiParent);
-        Check(legacyApiParent.CreatedCandidates == 1 && legacyApiParent.Receipt != null &&
-            legacyApiParent.TraceMessages.Contains("CC_GUARD_ALLOWED:CANDIDATE_CREATE"),
-            "Historical ApplyCandidateAction satisfies the same guard context");
+        var legacyStep = Registrations[((EntityReference)legacyApiParent.MainValues["OwningExtension"]!).Id];
+        var legacyType = Registrations[legacyStep.GetAttributeValue<EntityReference>("eventhandler").Id];
+        Registrations[legacyType.GetAttributeValue<EntityReference>("pluginassemblyid").Id].Attributes.Remove("packageid");
+        Reject(() => new ApplyCandidateAction().Execute(legacyApiParent),
+            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:TRUSTED_PARENT:PACKAGE_MISMATCH:CC_CREATE_CANDIDATE");
+        Check(legacyApiParent.CreatedCandidates == 0, "Legacy handler requires matching guard rollback");
         var candidateCreateFault = CreateCandidateHost();
         candidateCreateFault.FaultOnCreateTable = "os_sr_cand";
         candidateCreateFault.FaultMessage = "SENSITIVE_SENTINEL " + Actor.ToString("D");
@@ -127,12 +158,13 @@ internal static class Program
             "Legacy guard fault is classified by safe category without exposing its raw message");
         var tamperedCreate = CreateCandidateHost();
         tamperedCreate.TamperTarget = true;
+        tamperedCreate.MainValues["OwningExtension"] = null;
         var guardMessage = Reject(() => new ApplyCandidateAction().Execute(tamperedCreate),
-            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:CALLER_MARKER:CC_CREATE_CANDIDATE");
+            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:TRUSTED_PARENT:OWNING_EXTENSION_MISSING:CC_CREATE_CANDIDATE");
         Check(tamperedCreate.ServiceOperations.SequenceEqual(new[]
             { "RetrieveMultiple:os_sr_oprc", "Create:os_sr_cand" }) &&
-            tamperedCreate.TraceMessages.Contains("CC_GUARD_REJECTED:CANDIDATE_CREATE:CALLER_MARKER"),
-            "Guard caller-marker rejection is categorized and stops before Receipt Create");
+            tamperedCreate.TraceMessages.Contains("CC_GUARD_REJECTED:CANDIDATE_CREATE:TRUSTED_PARENT:OWNING_EXTENSION_MISSING"),
+            "Guard registration rejection is categorized and stops before Receipt Create");
         Check(!candidateFaultMessage.Contains("SENSITIVE_SENTINEL") &&
             !candidateFaultMessage.Contains(Actor.ToString("D")) &&
             !receiptFaultMessage.Contains("SENSITIVE_SENTINEL") &&
@@ -302,42 +334,110 @@ internal static class Program
         {
             ["os_sr_cand_stat"] = new OptionSetValue(ActionRequest.NeedCall)
         };
+        foreach (var predicate in new[] { "API_MESSAGE_MISMATCH", "STAGE_MISMATCH", "MODE_MISMATCH",
+            "TRANSACTION_MISMATCH", "DEPTH_MISMATCH", "USER_CONTEXT_MISMATCH", "INITIATING_USER_MISMATCH",
+            "ACTIONTYPE_MISSING", "ACTIONTYPE_MISMATCH", "MARKER_MISSING", "MARKER_TYPE_MISMATCH",
+            "MARKER_FINGERPRINT_MISMATCH", "ANCESTOR_BOUND_EXCEEDED", "OWNING_EXTENSION_MISSING",
+            "OWNING_EXTENSION_TYPE_MISMATCH", "HANDLER_TYPE_MISMATCH", "ASSEMBLY_MISMATCH",
+            "PACKAGE_MISMATCH", "REGISTRATION_READ_FAILED" })
+        {
+            var host = CreateCandidateHost();
+            host.FaultOnCreateTable = "os_sr_cand";
+            host.FaultErrorCode = unchecked((int)0x80040265);
+            host.FaultMessage = "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:TRUSTED_PARENT:" + predicate;
+            Reject(() => new ApplyCandidateAction().Execute(host),
+                host.FaultMessage + ":CC_CREATE_CANDIDATE:0x80040265");
+        }
         var intentKey = GetGuardIntentKey();
         var validIntent = GetGuardIntent("Create", candidateTarget);
+        foreach (var failure in new[] { "OWNING_EXTENSION_MISSING", "OWNING_EXTENSION_TYPE_MISMATCH",
+            "HANDLER_TYPE_MISMATCH", "ASSEMBLY_MISMATCH", "PACKAGE_MISMATCH", "REGISTRATION_READ_FAILED" })
+        {
+            var values = CreateGuardParent("os_sr_cact",
+                new ParameterCollection { ["ActionType"] = "CreateCandidate" }, new ParameterCollection());
+            var extension = (EntityReference)values["OwningExtension"]!;
+            var step = Registrations[extension.Id];
+            var type = Registrations[step.GetAttributeValue<EntityReference>("eventhandler").Id];
+            var assembly = Registrations[type.GetAttributeValue<EntityReference>("pluginassemblyid").Id];
+            if (failure == "OWNING_EXTENSION_MISSING") values["OwningExtension"] = null;
+            if (failure == "OWNING_EXTENSION_TYPE_MISMATCH")
+                values["OwningExtension"] = new EntityReference("plugintype", extension.Id);
+            if (failure == "HANDLER_TYPE_MISMATCH") type["typename"] = "synthetic.UnrelatedPlugin";
+            if (failure == "ASSEMBLY_MISMATCH") assembly["name"] = "synthetic_legacy";
+            if (failure == "PACKAGE_MISMATCH") assembly.Attributes.Remove("packageid");
+            if (failure == "REGISTRATION_READ_FAILED") Registrations.Remove(extension.Id);
+            RejectDirectGuard("Create", candidateTarget, Execution(values),
+                "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:TRUSTED_PARENT:" + failure);
+            // Negative decisions are not cached: correcting the server fixture must take effect immediately.
+            if (failure == "HANDLER_TYPE_MISMATCH")
+            {
+                type["typename"] = "os_sr_cact.ApplyCandidateAction";
+                ExecuteGuard("Create", candidateTarget, Execution(values));
+                Check(true, "Negative registration result is not cached");
+            }
+        }
+        foreach (var mutation in new (string Property, object Value, string Predicate)[]
+        {
+            ("MessageName", "unrelated_api", "API_MESSAGE_MISMATCH"),
+            ("Stage", 20, "STAGE_MISMATCH"),
+            ("Mode", 1, "MODE_MISMATCH"),
+            ("IsInTransaction", false, "TRANSACTION_MISMATCH"),
+            ("Depth", 0, "DEPTH_MISMATCH"),
+            ("Depth", 2, "DEPTH_MISMATCH"),
+            ("UserId", Guid.NewGuid(), "USER_CONTEXT_MISMATCH"),
+            ("InitiatingUserId", Guid.NewGuid(), "INITIATING_USER_MISMATCH"),
+            ("InputParameters", new ParameterCollection(), "ACTIONTYPE_MISSING"),
+            ("InputParameters", new ParameterCollection { ["ActionType"] = "UnsupportedOperation" }, "ACTIONTYPE_MISMATCH"),
+            ("InputParameters", new ParameterCollection { ["ActionType"] = 42 }, "ACTIONTYPE_MISMATCH")
+        })
+        {
+            var values = CreateGuardParent("os_sr_cact",
+                new ParameterCollection { ["ActionType"] = "CreateCandidate" },
+                new ParameterCollection { [intentKey] = validIntent });
+            values[mutation.Property] = mutation.Value;
+            Reject(() => ExecuteGuard("Create", candidateTarget, Execution(values), childDepth: 2),
+                "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:TRUSTED_PARENT:" + mutation.Predicate);
+        }
         var unrelatedParent = CreateGuardParent("Update",
             new ParameterCollection { ["ActionType"] = "CreateCandidate" },
             new ParameterCollection { [intentKey] = validIntent });
         unrelatedParent["OwningExtension"] = new Entity("plugintype",
             Guid.Parse("00000000-0000-0000-0000-000000000202"));
         RejectDirectGuard("Create", candidateTarget, Execution(unrelatedParent),
-            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:CALLER_MARKER");
+            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:TRUSTED_PARENT:API_MESSAGE_MISMATCH");
 
         var trustedParent = CreateTrustedParent("CreateCandidate", "Create", candidateTarget, 1);
         ExecuteGuard("Create", candidateTarget, trustedParent);
         Check(true, "Trusted Candidate Create marker one ancestor up is accepted");
+        var reads = registrationReads;
+        ExecuteGuard("Create", candidateTarget, trustedParent);
+        Check(registrationReads == reads, "Positive registration cache avoids repeated reads");
         var trustedGrandparent = CreateTrustedParent("CreateCandidate", "Create", candidateTarget, 2);
         ExecuteGuard("Create", candidateTarget, trustedGrandparent);
         Check(true, "Trusted Candidate Create marker two ancestors up is accepted");
+        ExecuteGuard("Create", candidateTarget,
+            CreateTrustedParent("CreateCandidate", "Create", candidateTarget, 8));
+        Check(true, "Trusted ancestor at the traversal bound is accepted");
 
         var wrongMessageParent = CreateTrustedParent("CreateCandidate", "unrelated_operation",
             candidateTarget, 1);
-        RejectDirectGuard("Create", candidateTarget, wrongMessageParent,
-            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:CALLER_MARKER");
+        ExecuteGuard("Create", candidateTarget, wrongMessageParent);
+        Check(true, "Historical marker fingerprint is not authorization");
         var missingMarkerParent = CreateTrustedParent("CreateCandidate", "Create", candidateTarget, 1,
             includeMarker: false);
-        RejectDirectGuard("Create", candidateTarget, missingMarkerParent,
-            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:CALLER_MARKER");
+        ExecuteGuard("Create", candidateTarget, missingMarkerParent);
+        Check(true, "Live depth one parent depth two child with missing marker is accepted");
         var wrongMarkerParent = CreateTrustedParent("CreateCandidate", "Create", candidateTarget, 1,
             markerValue: "not-the-current-target-intent");
-        RejectDirectGuard("Create", candidateTarget, wrongMarkerParent,
-            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:CALLER_MARKER");
+        ExecuteGuard("Create", candidateTarget, wrongMarkerParent);
+        Check(true, "Wrong marker value cannot change verified ancestor trust");
         var malformedMarkerParent = CreateTrustedParent("CreateCandidate", "Create", candidateTarget, 1,
             markerValue: new byte[] { 1, 2, 3 });
-        RejectDirectGuard("Create", candidateTarget, malformedMarkerParent,
-            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:CALLER_MARKER");
+        ExecuteGuard("Create", candidateTarget, malformedMarkerParent);
+        Check(true, "Malformed non-authoritative marker cannot change verified ancestor trust");
         var actionMismatchParent = CreateTrustedParent("RecordCall", "Create", candidateTarget, 1);
         RejectDirectGuard("Create", candidateTarget, actionMismatchParent,
-            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:CALLER_MARKER");
+            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:TRUSTED_PARENT:ACTIONTYPE_MISMATCH");
 
         var externalTag = new ParameterCollection { ["tag"] = validIntent };
         RejectDirectGuard("Create", candidateTarget, null,
@@ -347,7 +447,7 @@ internal static class Program
             "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:PARENT_CONTEXT", injectedPrivateKey);
         var tagWithUntrustedParent = new ParameterCollection { ["tag"] = validIntent };
         RejectDirectGuard("Create", candidateTarget, Execution(unrelatedParent),
-            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:CALLER_MARKER", tagWithUntrustedParent);
+            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:TRUSTED_PARENT:API_MESSAGE_MISMATCH", tagWithUntrustedParent);
 
         var receiptTarget = new Entity("os_sr_oprc", Guid.NewGuid());
         ExecuteGuard("Create", receiptTarget, CreateTrustedParent("CreateCandidate", "Create", receiptTarget, 1));
@@ -364,7 +464,7 @@ internal static class Program
 
         var excessiveChain = CreateTrustedParent("CreateCandidate", "Create", candidateTarget, 9);
         RejectDirectGuard("Create", candidateTarget, excessiveChain,
-            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:CALLER_MARKER");
+            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:TRUSTED_PARENT:ANCESTOR_BOUND_EXCEEDED");
         Check(GetMaximumParentContexts() == 8,
             "ParentContext traversal is bounded at eight contexts and fails closed beyond the bound");
 
@@ -377,9 +477,10 @@ internal static class Program
                 "DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_CORE_WRITE_CONTEXT");
         }
         var changed = new Host(100010000) { TamperTarget = true };
+        changed.MainValues["OwningExtension"] = null;
         Reject(() => new ApplyCandidateAction().Execute(changed),
-            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_UPDATE:CALLER_MARKER:CC_UPDATE_CANDIDATE");
-        Check(changed.Calls == 0, "SDK tampered target rejected before storage");
+            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_UPDATE:TRUSTED_PARENT:OWNING_EXTENSION_MISSING:CC_UPDATE_CANDIDATE");
+        Check(changed.Calls == 0, "SDK unverified parent rejected before storage");
         foreach (string message in new[] { "Associate", "Disassociate" })
         {
             var values = Context(new ParameterCollection
@@ -466,13 +567,14 @@ internal static class Program
     }
 
     private static void ExecuteGuard(
-        string message, Entity target, IPluginExecutionContext? parent, ParameterCollection? shared = null)
+        string message, Entity target, IPluginExecutionContext? parent, ParameterCollection? shared = null,
+        int? childDepth = null)
     {
         var child = Context(new ParameterCollection { ["Target"] = target },
             shared ?? new ParameterCollection(), new ParameterCollection());
         child["MessageName"] = message;
         child["Stage"] = 10;
-        child["Depth"] = parent == null ? 1 : parent.Depth + 1;
+        child["Depth"] = childDepth ?? (parent == null ? 1 : parent.Depth + 1);
         child["PrimaryEntityName"] = target.LogicalName;
         child["OwningExtension"] = new Entity("plugintype", Guid.Parse("00000000-0000-0000-0000-000000000201"));
         child["ParentContext"] = parent;
@@ -617,7 +719,8 @@ internal static class Program
             this.trace = trace;
         }
         public object GetService(Type type) => type == typeof(IPluginExecutionContext) ? context :
-            type == typeof(ITracingService) ? trace : throw new Exception("Unexpected service");
+            type == typeof(ITracingService) ? trace :
+            type == typeof(IOrganizationServiceFactory) ? RegistrationFactory() : throw new Exception("Unexpected service");
     }
     private sealed class DynamicProxy : RealProxy
     {

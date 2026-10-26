@@ -213,6 +213,19 @@ namespace os_sr_cact
         {
             if (message == null) return null;
             var normalized = message.Trim();
+            var predicates = new[] { "API_MESSAGE_MISMATCH", "STAGE_MISMATCH", "MODE_MISMATCH",
+                "TRANSACTION_MISMATCH", "DEPTH_MISMATCH", "USER_CONTEXT_MISMATCH", "INITIATING_USER_MISMATCH",
+                "ACTIONTYPE_MISSING", "ACTIONTYPE_MISMATCH", "MARKER_MISSING", "MARKER_TYPE_MISMATCH",
+                "MARKER_FINGERPRINT_MISMATCH", "ANCESTOR_BOUND_EXCEEDED", "OWNING_EXTENSION_MISSING",
+                "OWNING_EXTENSION_TYPE_MISMATCH", "HANDLER_TYPE_MISMATCH", "ASSEMBLY_MISMATCH",
+                "PACKAGE_MISMATCH", "REGISTRATION_READ_FAILED" };
+            foreach (var operation in new[] { "CANDIDATE_CREATE", "CANDIDATE_UPDATE", "CALL_LOG_CREATE",
+                "STATUS_HISTORY_CREATE", "RECEIPT_CREATE" })
+                foreach (var predicate in predicates)
+                {
+                    var diagnostic = "DIRECT_WRITE_GUARD_REJECTED:" + operation + ":TRUSTED_PARENT:" + predicate;
+                    if (normalized == diagnostic) return diagnostic;
+                }
             var guardDiagnostic = GuardDiagnostics.FirstOrDefault(diagnostic =>
                 string.Equals(normalized, diagnostic, StringComparison.Ordinal));
             if (guardDiagnostic != null) return guardDiagnostic;
@@ -232,6 +245,7 @@ namespace os_sr_cact
 
         private void Authorize(string message, Entity row)
         {
+            // Retained as non-authoritative evidence only; nested writes use verified server registration.
             context.SharedVariables[ProtectCandidateCore.IntentKey] = ProtectCandidateCore.Intent(message, row);
         }
 
@@ -322,6 +336,9 @@ namespace os_sr_cact
     {
         internal const string IntentKey = "os_sr_cact.validated_intent";
         private const int MaximumParentContexts = 8;
+        private static readonly object RegistrationCacheLock = new object();
+        private static readonly Dictionary<Tuple<Guid, Guid, Guid>, DateTime> RegistrationCache =
+            new Dictionary<Tuple<Guid, Guid, Guid>, DateTime>();
         private static readonly string[] ProjectTables = { "os_sr_cand", "os_sr_call", "os_sr_csh", "os_sr_oprc" };
         private static readonly string[] ProjectRelationships = { "os_sr_pos_cand", "os_sr_csrc_cand", "os_sr_ta_cand",
             "os_sr_cand_call", "os_sr_cand_csh", "os_sr_usr_call_ctby", "os_sr_usr_csh_actr", "os_sr_cand_oprc" };
@@ -354,34 +371,105 @@ namespace os_sr_cact
                 throw Rejection(trace, operation + ":CALLER_CONTEXT");
             if (!context.InputParameters.Contains("Target") || !(context.InputParameters["Target"] is Entity target))
                 throw Rejection(trace, operation + ":CALLER_MARKER");
-            var trustedParent = FindTrustedParent(context, operation, target, out var searched);
+            var factory = (IOrganizationServiceFactory)serviceProvider.GetService(typeof(IOrganizationServiceFactory));
+            var trustedParent = FindTrustedParent(context, operation, factory, trace, out var searched, out var failure);
             if (trustedParent == null)
             {
                 trace.Trace("CC_GUARD_TRUSTED_PARENT_NOT_FOUND:ANCESTOR_HOPS:{0}", searched);
-                throw Rejection(trace, operation + ":CALLER_MARKER");
+                throw Rejection(trace, operation + ":TRUSTED_PARENT:" + failure);
             }
             trace.Trace("CC_GUARD_TRUSTED_PARENT_FOUND:ANCESTOR_HOPS:{0}", searched);
             trace.Trace("CC_GUARD_ALLOWED:{0}", operation);
         }
 
         private static IPluginExecutionContext? FindTrustedParent(
-            IPluginExecutionContext context, string operation, Entity target, out int searched)
+            IPluginExecutionContext context, string operation, IOrganizationServiceFactory factory, ITracingService trace,
+            out int searched, out string failure)
         {
             var ancestor = context.ParentContext;
             searched = 0;
-            var expectedIntent = Intent(context.MessageName, target);
+            failure = "PARENT_CONTEXT";
             while (ancestor != null && searched < MaximumParentContexts)
             {
                 searched++;
-                if (ancestor.MessageName == "os_sr_cact" && ancestor.Stage == 30 && ancestor.Mode == 0 &&
-                    ancestor.IsInTransaction && ancestor.Depth > 0 && ancestor.Depth < context.Depth &&
-                    ancestor.UserId == context.UserId && ancestor.InitiatingUserId == context.InitiatingUserId &&
-                    IsActionForOperation(ancestor, operation) &&
-                    ancestor.SharedVariables != null &&
-                    ancestor.SharedVariables.TryGetValue(IntentKey, out var marker) &&
-                    marker is string value && value == expectedIntent)
-                    return ancestor;
+                var predicate = TrustedParentFailure(ancestor, context, operation);
+                if (predicate == null) predicate = RegistrationFailure(ancestor, context, factory);
+                trace.Trace("CC_GUARD_ANCESTOR:HOP:{0}:PREDICATE:{1}", searched, predicate ?? "TRUSTED");
+                if (predicate == null) return ancestor;
+                if (predicate == "REGISTRATION_READ_FAILED")
+                {
+                    failure = predicate;
+                    return null;
+                }
+                if (searched == 1) failure = predicate;
                 ancestor = ancestor.ParentContext;
+            }
+            if (ancestor != null) failure = "ANCESTOR_BOUND_EXCEEDED";
+            return null;
+        }
+
+        private static string? TrustedParentFailure(
+            IPluginExecutionContext ancestor, IPluginExecutionContext context, string operation)
+        {
+            if (ancestor.MessageName != "os_sr_cact") return "API_MESSAGE_MISMATCH";
+            if (ancestor.Stage != 30) return "STAGE_MISMATCH";
+            if (ancestor.Mode != 0) return "MODE_MISMATCH";
+            if (!ancestor.IsInTransaction) return "TRANSACTION_MISMATCH";
+            if (!(ancestor.Depth > 0 && ancestor.Depth < context.Depth)) return "DEPTH_MISMATCH";
+            if (ancestor.UserId != context.UserId) return "USER_CONTEXT_MISMATCH";
+            if (ancestor.InitiatingUserId != context.InitiatingUserId) return "INITIATING_USER_MISMATCH";
+            if (!ancestor.InputParameters.TryGetValue("ActionType", out var action) || action == null)
+                return "ACTIONTYPE_MISSING";
+            if (!IsActionForOperation(ancestor, operation)) return "ACTIONTYPE_MISMATCH";
+            return null;
+        }
+
+        private static string? RegistrationFailure(IPluginExecutionContext ancestor,
+            IPluginExecutionContext context, IOrganizationServiceFactory factory)
+        {
+            var extension = ancestor.OwningExtension;
+            if (extension == null || extension.Id == Guid.Empty) return "OWNING_EXTENSION_MISSING";
+            if (extension.LogicalName != "sdkmessageprocessingstep") return "OWNING_EXTENSION_TYPE_MISMATCH";
+            var key = Tuple.Create(context.OrganizationId, context.UserId, extension.Id);
+            lock (RegistrationCacheLock)
+            {
+                if (RegistrationCache.TryGetValue(key, out var expires) && expires > DateTime.UtcNow) return null;
+            }
+            // Calling-user reads only. Cache misses, unreadable metadata and negative results fail closed.
+            var service = factory.CreateOrganizationService(context.UserId);
+            try
+            {
+                var step = service.Retrieve("sdkmessageprocessingstep", extension.Id, new ColumnSet("eventhandler"));
+                var handler = step.GetAttributeValue<EntityReference>("eventhandler");
+                if (handler == null || handler.LogicalName != "plugintype" || handler.Id == Guid.Empty)
+                    return "HANDLER_TYPE_MISMATCH";
+                var type = service.Retrieve("plugintype", handler.Id, new ColumnSet("typename", "pluginassemblyid"));
+                if (type.GetAttributeValue<string>("typename") != "os_sr_cact.ApplyCandidateAction")
+                    return "HANDLER_TYPE_MISMATCH";
+                var assemblyReference = type.GetAttributeValue<EntityReference>("pluginassemblyid");
+                if (assemblyReference == null || assemblyReference.LogicalName != "pluginassembly" ||
+                    assemblyReference.Id == Guid.Empty) return "ASSEMBLY_MISMATCH";
+                var assembly = service.Retrieve("pluginassembly", assemblyReference.Id,
+                    new ColumnSet("name", "version", "packageid"));
+                if (assembly.GetAttributeValue<string>("name") != "os_sr_cact" ||
+                    assembly.GetAttributeValue<string>("version") != "1.0.0.0") return "ASSEMBLY_MISMATCH";
+                var packageReference = assembly.GetAttributeValue<EntityReference>("packageid");
+                if (packageReference == null || packageReference.LogicalName != "pluginpackage" ||
+                    packageReference.Id == Guid.Empty) return "PACKAGE_MISMATCH";
+                var package = service.Retrieve("pluginpackage", packageReference.Id,
+                    new ColumnSet("name", "uniquename", "version"));
+                if (package.GetAttributeValue<string>("name") != "os_sr_cact_pkg" ||
+                    package.GetAttributeValue<string>("uniquename") != "os_sr_cact_pkg" ||
+                    package.GetAttributeValue<string>("version") != "1.0.0") return "PACKAGE_MISMATCH";
+            }
+            catch (FaultException<OrganizationServiceFault>)
+            {
+                return "REGISTRATION_READ_FAILED";
+            }
+            lock (RegistrationCacheLock)
+            {
+                if (RegistrationCache.Count >= 128) RegistrationCache.Clear();
+                RegistrationCache[key] = DateTime.UtcNow.AddMinutes(1);
             }
             return null;
         }

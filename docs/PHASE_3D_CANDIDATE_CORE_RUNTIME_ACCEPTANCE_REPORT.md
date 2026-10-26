@@ -2,7 +2,79 @@
 
 Date: 26 October 2026. This report records the current Phase 3D-R4M package disposition and CreateCandidate runtime failure; earlier assessments are retained as history. Source: owner authorization, current repository contract/source, guarded live reconciliation, local offline validation, and the supported Dataverse plug-in package model.
 
-## Latest R4M Temporary Exception Trace Diagnostic (2026-10-26)
+## Latest R4M Fast-Track Predicate Localization (2026-10-26)
+
+**Classification: `CANDIDATE_CORE_GUARD_FAILURE_LOCALIZED` - `MARKER_MISSING`.** Owner authorization covered a diagnostic-only source/test change, at most two existing unsigned package updates and two CreateCandidate attempts, with the second cycle conditional on a deterministic correction. This continuation remains R4M; the isolated R4N reference in the authorization was treated as a label inconsistency, not a new phase or additional allowance.
+
+The earlier trace below established handler depth 1, Candidate Create guard depth 2, and `CC_GUARD_TRUSTED_PARENT_NOT_FOUND:ANCESTOR_HOPS:1`. It did not prove a failing predicate. The diagnostic build preserved the authorization conditions and now returns the first failed predicate on the nearest ancestor if no ancestor is trusted. It still searches all eight permitted ancestors before rejecting; an uninspected continuation produces `ANCESTOR_BOUND_EXCEEDED`. Per-ancestor traces contain only bounded hop numbers and closed predicate categories. No marker, fingerprint, identity, payload, or candidate value is emitted.
+
+### Exact predicate map
+
+The sequence in [ProtectCandidateCore](../solutions/CandidateCore/DataversePlugin.cs) is:
+
+| Order | Ancestor condition | First-failure category |
+|---|---|---|
+| 1 | MessageName is `os_sr_cact` | `API_MESSAGE_MISMATCH` |
+| 2 | Stage is 30 | `STAGE_MISMATCH` |
+| 3 | Mode is 0 | `MODE_MISMATCH` |
+| 4 | IsInTransaction is true | `TRANSACTION_MISMATCH` |
+| 5 | Positive depth below child depth | `DEPTH_MISMATCH` |
+| 6 | UserId equals child UserId | `USER_CONTEXT_MISMATCH` |
+| 7 | InitiatingUserId equals child InitiatingUserId | `INITIATING_USER_MISMATCH` |
+| 8 | ActionType is present and non-null | `ACTIONTYPE_MISSING` |
+| 9 | ActionType is a supported string compatible with the protected write | `ACTIONTYPE_MISMATCH` |
+| 10 | Ancestor SharedVariables contains the private intent key | `MARKER_MISSING` |
+| 11 | Marker is a string | `MARKER_TYPE_MISMATCH` |
+| 12 | Marker equals the canonical protected-mutation fingerprint | `MARKER_FINGERPRINT_MISMATCH` |
+
+Existing child-context gates remain unchanged: unsupported write, invalid stage/mode/transaction/depth or no parent, caller identity mismatch, and missing/malformed Target still fail closed using their existing categories. The current context and caller `tag` are not trusted marker sources. No registration GUID is used as a trust predicate.
+
+### Verified execution and limits
+
+| Gate or operation | Result |
+|---|---|
+| Target | Owner-confirmed VN LMV IT; fresh PAC/WhoAmI agreement |
+| Storage | Exact Candidate/Call/History/Receipt schema reconciliation; Receipt alternate key Active |
+| API and package | Unchanged 13 inputs/five outputs; one existing `os_sr_cact_pkg` v1.0.0; unchanged package, assembly and type identities |
+| Guards | All 50 package-backed; protected-property fingerprints, configuration hashes, message/filter, impersonation and secure-configuration references exact against retained rollback map |
+| Trace setting / active Candidate Core Profiler wrappers | 0 (Off) / 0; no setting or Profiler changes |
+| Diagnostic package updates | 1; HTTP 204; immediate post-update topology exact |
+| Package disposition | `PACKAGE_UPDATE_ACCEPTED_CONTENT_NOT_BYTE_RECONCILABLE`; no unsupported deployed-byte/timestamp claim |
+| Minimal synthetic CreateCandidate dispatches | 1; four required inputs only; no optional parameters |
+| First runtime result | HTTP 400 / `0x80040265` |
+| Exact safe diagnostic | `DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:TRUSTED_PARENT:MARKER_MISSING:CC_CREATE_CANDIDATE:0x80040265` |
+| Pre/post Candidate / Call Log / Status History / Receipt | 0/0/0/0 -> 0/0/0/0 |
+| Second package / second CreateCandidate / matrix | Not reached; no deterministic correction established |
+| Automatic retries | 0 |
+| Final read-only reconciliation | Exact storage/API/package/50-guard properties; trace Off; no active Candidate Core Profiler wrappers; 0/0/0/0 |
+
+Local diagnostic artifact SHA-256:
+
+- DLL: `404667ac488564ea9c7929578f81f441d13c65ed35b320a99973347868a9a66c`
+- NuGet package: `2e0fbee6e0f6ef24416ae5c1832ff1c2455e03a3d0acbb993dd031c4b85e3848`
+
+### Proven localization versus unproven repair
+
+The returned category proves that the inspected ancestor passed API message, stage, mode, transaction, depth, both actor comparisons, and operation-specific ActionType checks, but its SharedVariables did not contain the private intent key. Marker CLR type and fingerprint checks were not reached. The observed rejection is at marker presence, not at stage, identity or fingerprint validation; this does not prove that a later fingerprint check would pass after propagation is repaired.
+
+Source inspection confirms `DataverseStore.Authorize` writes the string fingerprint to the handler's SharedVariables immediately before the protected service call, and removes it in `finally`. The organization service is constructed earlier in the handler. The local SDK harness uses a live context reference; it does not reproduce the platform's context serialization/handoff. Neither that ordering nor the absent marker proves when or how the live parent context was captured. In particular, changing service-construction timing would be a hypothesis, not a trace-proven correction.
+
+[Microsoft's execution-context guidance](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/understand-the-data-context#shared-variables) documents SharedVariables between pipeline steps and specific ParentContext cases; it does not establish that this late handler mutation must appear in a nested Create ancestor. Its ParentContext guidance also warns against undocumented dependencies. Therefore no second speculative build, marker bypass, caller-tag authorization, identity relaxation, or semantic guard correction was made. The missing-marker SDK regression reproduces the observed rejection shape, not an asserted transport mechanism.
+
+Runtime acceptance remains blocked. Phase 3D is not complete; the UI/security next-phase classification and runtime-accepted/audit-pending classification are not earned. No additional backend diagnostic was automatically opened.
+
+### Local validation
+
+- Engine harness: PASS, 109 assertions.
+- SDK guard harness: PASS, 178 assertions, including all reachable predicate categories, no ancestor, traversal boundary, trusted ancestors, direct-write negatives, action-specific child writes, exact safe rejection messages, service-fault propagation, and R4J projection regressions.
+- All 12 PowerShell suites: PASS, 1,134 assertions, including package validation.
+- Unsigned package Rebuild: PASS, zero build warnings/errors; no signing-key access.
+- All 11 repository scripts parsed; added-line privacy scan and `git diff --check` passed.
+- Historical frozen deployment hash pins/consumed locks were not altered. The current bounded session runner used a distinct durable journal and the diagnostic package hash above; no old Apply authorization was reused.
+
+No second update, second CreateCandidate, matrix action, trace-setting write, Profiler activity, new package, handler/guard PATCH, schema/Choice/API/security/app/audit/publication change, legacy signed assembly update, signing-key access, commit, or push occurred.
+
+## Earlier R4M Temporary Exception Trace Diagnostic (2026-10-26)
 
 **Classification: `R4M_TRACE_EVIDENCE_INSUFFICIENT`.** Explicit owner environment-level approval covered only the bounded Off (0) -> Exception (1) -> Off (0) trace window and one synthetic CreateCandidate, using the existing deployed package without Profiler.
 

@@ -1,6 +1,16 @@
 # Current State
 
-## Phase 3D-R4M Temporary Exception Trace Capture (2026-10-26)
+## Phase 3D-R4M Fast-Track Predicate Localization (2026-10-26)
+
+**`CANDIDATE_CORE_GUARD_FAILURE_LOCALIZED` - `MARKER_MISSING`.** The owner-authorized diagnostic-only build preserves every trust predicate, private marker requirement, direct-write rejection and bounded ancestor traversal. One existing unsigned `os_sr_cact_pkg` v1.0.0 content update returned HTTP 204; package/API/type identities and all 50 package-backed guard protected properties reconciled exactly.
+
+One minimal synthetic CreateCandidate returned HTTP 400 / `0x80040265` with `DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:TRUSTED_PARENT:MARKER_MISSING:CC_CREATE_CANDIDATE:0x80040265`. The ancestor passed all predicates before marker presence; marker type/fingerprint checks were not reached. Pre/post counts were 0/0/0/0. Source confirms the marker is written before the protected service call, but the cause of its absence in the platform ParentContext is not proven. No speculative propagation fix or marker bypass was made.
+
+Totals for this fast-track authorization: package updates 1; CreateCandidate dispatches 1; automatic retries 0; second correction cycle and matrix not reached. Final read-only reconciliation: storage/API/package topology exact, all 50 guard fingerprints exact, trace setting Off (0), no active Candidate Core Profiler wrappers, and 0/0/0/0. No trace-setting/Profiler/metadata/security/app/audit/publication/legacy/signing-key changes, commit or push.
+
+Local validation passed: engine 109, SDK 178, 12 PowerShell suites/1,134 assertions, unsigned Rebuild/package validation and script parsing; privacy/diff checks passed. Phase 3D remains blocked, not runtime accepted or complete. See the [runtime acceptance report](PHASE_3D_CANDIDATE_CORE_RUNTIME_ACCEPTANCE_REPORT.md) for the ordered predicate map, artifact hashes, evidence limits and exact test scope.
+
+## Earlier Phase 3D-R4M Temporary Exception Trace Capture (2026-10-26)
 
 **`R4M_TRACE_EVIDENCE_INSUFFICIENT`.** The owner explicitly approved one bounded synthetic CreateCandidate with organization Plugin Trace Log temporarily changed from Off (0) to Exception (1), then restored to Off (0). Fresh PAC/WhoAmI agreement, existing package-backed ApplyCandidateAction topology, all 50 package-backed ProtectCandidateCore guards, no active Candidate Core Profiler wrapper, and 0/0/0/0 Candidate / Call Log / Status History / Receipt counts passed. The initial trace setting was exactly 0.
 

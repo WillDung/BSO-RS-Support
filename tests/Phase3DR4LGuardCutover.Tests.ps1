@@ -82,12 +82,13 @@ Assert-Test ($guard -match 'Not all Candidate Core guard steps are package-backe
     $guard -match 'Prior rollback attempt is unresolved; no rollback PATCH may be repeated' -and
     $guard -match 'AutomaticRetries = 0') `
     'Post-cutover verification and exact non-repeating rollback are enforced'
-Assert-Test ($runtime -match 'phase3d-r4l-owner-authorized-guard-cutover-runtime' -and
+Assert-Test ($runtime -match 'phase3d-r4m-owner-authorized-marker-propagation-runtime' -and
+    $runtime -notmatch 'phase3d-r4l-owner-authorized-guard-cutover-runtime' -and
     $runtime -match 'RequirePackageGuardSteps' -and
     $runtime -match 'ExpectedGuardStepCount' -and
     $runtime -match 'Assert-PackageGuardSteps' -and
     $runtime -match 'Candidate Core guard steps are not all mapped to the package-backed guard type') `
-    'R4L runtime authorization is distinct and runtime apply can require exact package guard topology'
+    'R4M runtime authorization is distinct and runtime apply can require exact package guard topology'
 Assert-Test ($guard -notmatch "Invoke-GuardRequest -Method '(POST|PUT|DELETE)'|ValidateSet\([^)]*(POST|PUT|DELETE)" -and
     $guard -notmatch 'PublishXml|pluginpackages\([^)]+\).*PATCH|customapis\([^)]+\).*PATCH') `
     'Guard migration has no package, API, schema, security, or publication write path'

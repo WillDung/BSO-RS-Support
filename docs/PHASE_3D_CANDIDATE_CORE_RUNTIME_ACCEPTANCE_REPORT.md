@@ -2,6 +2,32 @@
 
 Date: 26 October 2026. This report records the current Phase 3D-R4L guard cutover and CreateCandidate runtime failure, with earlier assessments retained as history. Source: owner authorization, current repository contract/source, guarded live reconciliation, local offline validation, and Microsoft's published Dataverse metadata documentation.
 
+## Phase 3D-R4M Trusted-Parent Correction; Live Deployment Blocked
+
+**Local guard correction and offline validation passed; the existing live package was not updated and no runtime operation was attempted.** Fresh read-only preflight verified the PAC/Dataverse target and expected-user agreement, package-backed ApplyCandidateAction handler, all 50 package-backed guard registrations, and zero Candidate / Call Log / Status History / Operation Receipt rows. The environment's `isauditenabled` value was freshly read as `No`. The approved project state prohibits creating Candidate business data until external IT/Compliance audit governance is resolved, so the package update and runtime sequence were stopped before any write. No handler/guard registration PATCH, direct-write probe, package update, Custom API call, retry, or business-data write occurred. R4L remains the deployed runtime state; the R4M runtime authorization is unconsumed.
+
+### Marker source, R4L diagnosis, and correction
+
+The existing private key is `os_sr_cact.validated_intent`. `DataverseStore.Authorize` writes a string SHA-256 fingerprint of the exact protected operation and target to the `ApplyCandidateAction` execution context's `SharedVariables` immediately before its `OrganizationService.Create` or `Execute` call. Each write removes the marker in `finally`, including service failures. It is not a Custom API parameter, entity field, environment variable, receipt value, request fingerprint, response value, or trace value.
+
+Before R4M, `ProtectCandidateCore` inspected only `context.ParentContext` and required that single context to be the `os_sr_cact` stage-30 parent carrying the matching fingerprint. The R4L child reached the `CALLER_MARKER` rejection category. The offline SDK harness also reproduced the exact source-level mismatch: a matching marker on the trusted API ancestor one or two parent links up was rejected when the immediate parent had no marker. The live R4L trace did not retain a sanitized ParentContext depth/shape, so it does not prove how many contexts separated that live child from its trusted operation. The source defect is the guard's fixed immediate-parent lookup; the exact live ancestor location remains unknown.
+
+R4M now walks no more than eight `ParentContext` links. It accepts only a context whose message is `os_sr_cact`, stage is 30, mode is synchronous, transaction is active, depth is lower than the protected child, user and initiating user agree with the child, `ActionType` is supported and consistent with the protected write category, and private marker exactly matches the target mutation fingerprint. It does not depend on context position or registration GUIDs. It fails closed when no such ancestor is found within the bound. The current context's SharedVariables are not trusted.
+
+SDK harness coverage includes direct Candidate Create without a parent; caller `tag` equal to the marker; a private-key-like value placed in current SharedVariables; unrelated parent with a marker; trusted CreateCandidate marker one and two ancestors up; wrong API message; missing, wrong-type, and wrong-value marker; action/write mismatch; Candidate Create, Candidate Update, Call Log, Status History, and Receipt child writes; and a trusted marker beyond the eight-context limit. It also verifies marker cleanup and that the marker key/value is absent from receipts, outputs, and traces. Synthetic traces contain only trusted-parent found/not-found plus ancestor-hop category.
+
+### Local artifact and checks
+
+The package was rebuilt unsigned from the existing package project. Package ID/version, assembly identity/version, and both plug-in type full names are unchanged. Its five-entry package inventory is unchanged except for the intended DLL bytes; no signing key was accessed.
+
+| R4M local artifact | SHA-256 |
+|---|---|
+| `os_sr_cact.dll` | `1d32def744252c4bc4f829455f0cb89bdbb656b79cfce69f840d0de3f4236f8e` |
+| `os_sr_cact_pkg.1.0.0.nupkg` | `16d3adf6146edbcb22669c93a6bc33ef7cd8b062948108ee9a5cbee98ab3d5de` |
+| Five-entry inventory (`path|uncompressed length|compressed length`, sorted and LF-joined) | `b2b341b52d1f19ed63efbb48fde82f0df18dd07db51f29312fa566608f1ee562` |
+
+The current artifact pins are recorded in the package inspection runner. They identify the local submitted artifact only; the live package bytes were not updated or independently read back. The unsigned package rebuild succeeded with 0 build warnings/errors; identity, version, five-entry inventory, type names, and no-signing-material checks passed. Candidate Core engine harness: 109 assertions. SDK adapter/guard harness: 140 assertions. PowerShell: all 12 suites passed (1,134 assertions), and all 11 scripts parsed. The R4M trusted-parent suite passed 12 source assertions; relative-link, added-diff privacy, and `git diff --check` validations passed. The legacy signed harness was not run and no signing key was accessed.
+
 ## Phase 3D-R4L Guard Cutover and CreateCandidate Stop
 
 **`CREATECANDIDATE_RUNTIME_FAILURE` — all 50 Candidate Core direct-write guard EventHandlers were migrated to the existing package-backed guard and GET-reconciled. The one authorized CreateCandidate dispatch was rejected by the guard's caller-marker check; no later runtime-matrix operation occurred.**

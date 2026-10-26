@@ -26,7 +26,7 @@ Assert-Test ($runtime -match "ValidateSet\('GET', 'POST'\)" -and
     $runtime -match "Path -cne 'os_sr_cact'" -and $runtime -match 'MaximumRetryCount = 0' -and
     $runtime -match 'MaximumRedirection = 0' -and $runtime -match 'expectedActionCalls = 8') 'Only bounded Custom API calls with zero retries'
 Assert-Test ($runtime -match 'FileMode\]::CreateNew' -and $runtime -match 'phase3d-r-runtime-' -and
-    $runtime -match 'phase3d-r4l-owner-authorized-guard-cutover-runtime' -and
+    $runtime -match 'phase3d-r4m-owner-authorized-marker-propagation-runtime' -and
     $runtime -notmatch 'phase3d-r4k-owner-authorized-package-runtime' -and
     $runtime -notmatch 'phase3d-r4j-owner-authorized-package-runtime' -and
     $runtime -notmatch 'phase3d-r4i-owner-authorized-package-runtime' -and

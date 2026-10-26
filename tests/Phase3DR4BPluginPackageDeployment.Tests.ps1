@@ -24,9 +24,9 @@ foreach ($path in @($deploymentPath, $runtimePath)) {
 Assert-Test ($deployment -match "ValidateSet\('Preflight', 'Apply', 'InspectPackage', 'Reconcile', 'Rollback'," -and
     $deployment -match "'CutoverExistingPreflight', 'CutoverExistingApply', 'RollbackExistingCutover'\)" -and
     $deployment -match "Name = 'os_sr_cact_pkg'" -and $deployment -match "Version = '1\.0\.0'") 'Package deployment modes and identity are pinned'
-Assert-Test ($deployment -match [regex]::Escape('f0403d61e3cfa92595e469e1332716a609c8d597c9d047bfc8bcb9a9379941b8') -and
-    $deployment -match [regex]::Escape('fd5f46e9d2e9388c7f5fefb90dc327ef9d1d40d241b5897c7e2913a92f2113b0') -and
-    $deployment -match [regex]::Escape('9df64f69b291f880e4d379899729f46196c6626a1f71658f6cad3f3d0be0fe92')) 'Frozen package, DLL, and inventory fingerprints are enforced'
+Assert-Test ($deployment -match [regex]::Escape('16d3adf6146edbcb22669c93a6bc33ef7cd8b062948108ee9a5cbee98ab3d5de') -and
+    $deployment -match [regex]::Escape('1d32def744252c4bc4f829455f0cb89bdbb656b79cfce69f840d0de3f4236f8e') -and
+    $deployment -match [regex]::Escape('b2b341b52d1f19ed63efbb48fde82f0df18dd07db51f29312fa566608f1ee562')) 'Frozen package, DLL, and inventory fingerprints are enforced'
 Assert-Test ($deployment -match 'MaximumRetryCount = 0' -and $deployment -match 'MaximumRedirection = 0' -and
     $deployment -match 'AutomaticRetries = 0' -and $deployment -match 'RollbackAutomaticRetries = 0') 'All deployment and rollback writes disable automatic retries'
 Assert-Test ($deployment -match 'MaximumPackagePosts = 1' -and $deployment -match 'MaximumHandlerPatches = 1' -and
@@ -137,7 +137,8 @@ Assert-Test ($contract.handler -ceq 'os_sr_cact.ApplyCandidateAction' -and
 Assert-Test ($runtime -match 'ExpectedHandlerPackageUniqueName' -and
     $runtime -match 'Assert-PackageBackedHandler' -and
     $runtime -match 'Runtime Apply requires the reconciled package-backed handler identity') 'Runtime execution is gated on the package-backed API chain'
-Assert-Test ($runtime -match 'phase3d-r4l-owner-authorized-guard-cutover-runtime' -and
+Assert-Test ($runtime -match 'phase3d-r4m-owner-authorized-marker-propagation-runtime' -and
+    $runtime -notmatch 'phase3d-r4l-owner-authorized-guard-cutover-runtime' -and
     $runtime -notmatch 'phase3d-r4k-owner-authorized-package-runtime' -and
     $runtime -notmatch 'phase3d-r4j-owner-authorized-package-runtime' -and
     $runtime -notmatch 'phase3d-r4i-owner-authorized-package-runtime' -and
@@ -146,7 +147,7 @@ Assert-Test ($runtime -match 'phase3d-r4l-owner-authorized-guard-cutover-runtime
     $runtime -notmatch 'phase3d-r4e-owner-authorized-package-runtime' -and
     $runtime -notmatch 'phase3d-r4d-owner-authorized-package-runtime' -and
     $runtime -match '\[SYNTHETIC-E2E\] Candidate Core Acceptance' -and
-    $runtime -match '@example\.invalid') 'R4L runtime uses a fresh one-shot authorization and approved synthetic identity'
+    $runtime -match '@example\.invalid') 'R4M runtime uses a fresh one-shot authorization and approved synthetic identity'
 Assert-Test ($runtime -match 'MaximumRetryCount = 0' -and
     $runtime -match 'MaximumApiDispatches = \$expectedActionCalls' -and
     $runtime -match 'AutomaticRetries = 0') 'Runtime dispatch remains bounded with zero retries'

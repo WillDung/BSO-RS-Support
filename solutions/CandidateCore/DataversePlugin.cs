@@ -321,6 +321,7 @@ namespace os_sr_cact
     public sealed class ProtectCandidateCore : IPlugin
     {
         internal const string IntentKey = "os_sr_cact.validated_intent";
+        private const int MaximumParentContexts = 8;
         private static readonly string[] ProjectTables = { "os_sr_cand", "os_sr_call", "os_sr_csh", "os_sr_oprc" };
         private static readonly string[] ProjectRelationships = { "os_sr_pos_cand", "os_sr_csrc_cand", "os_sr_ta_cand",
             "os_sr_cand_call", "os_sr_cand_csh", "os_sr_usr_call_ctby", "os_sr_usr_csh_actr", "os_sr_cand_oprc" };
@@ -342,24 +343,61 @@ namespace os_sr_cact
                     throw Rejection(trace, "ASSOCIATION_CONTAINS_PROJECT_TABLE");
                 return;
             }
-            var parent = context.ParentContext;
             var operation = SafeOperation(context.MessageName, context.PrimaryEntityName);
             if (operation == null || (context.MessageName != "Create" && context.MessageName != "Update") ||
                 (context.MessageName == "Update" && context.PrimaryEntityName != "os_sr_cand"))
                 throw Rejection(trace, "UNSUPPORTED_CORE_WRITE_CONTEXT");
             if (context.Stage != 10 || context.Mode != 0 || !context.IsInTransaction ||
-                parent == null || parent.MessageName != "os_sr_cact" || parent.Stage != 30 ||
-                !parent.IsInTransaction)
+                context.Depth <= 1 || context.ParentContext == null)
                 throw Rejection(trace, operation + ":PARENT_CONTEXT");
-            if (context.UserId != context.InitiatingUserId || parent.UserId != context.UserId ||
-                parent.InitiatingUserId != context.InitiatingUserId)
+            if (context.UserId != context.InitiatingUserId)
                 throw Rejection(trace, operation + ":CALLER_CONTEXT");
-            if (!context.InputParameters.Contains("Target") || !(context.InputParameters["Target"] is Entity target) ||
-                !parent.SharedVariables.Contains(IntentKey) ||
-                !(parent.SharedVariables[IntentKey] is string expected) ||
-                expected != Intent(context.MessageName, target))
+            if (!context.InputParameters.Contains("Target") || !(context.InputParameters["Target"] is Entity target))
                 throw Rejection(trace, operation + ":CALLER_MARKER");
+            var trustedParent = FindTrustedParent(context, operation, target, out var searched);
+            if (trustedParent == null)
+            {
+                trace.Trace("CC_GUARD_TRUSTED_PARENT_NOT_FOUND:ANCESTOR_HOPS:{0}", searched);
+                throw Rejection(trace, operation + ":CALLER_MARKER");
+            }
+            trace.Trace("CC_GUARD_TRUSTED_PARENT_FOUND:ANCESTOR_HOPS:{0}", searched);
             trace.Trace("CC_GUARD_ALLOWED:{0}", operation);
+        }
+
+        private static IPluginExecutionContext? FindTrustedParent(
+            IPluginExecutionContext context, string operation, Entity target, out int searched)
+        {
+            var ancestor = context.ParentContext;
+            searched = 0;
+            var expectedIntent = Intent(context.MessageName, target);
+            while (ancestor != null && searched < MaximumParentContexts)
+            {
+                searched++;
+                if (ancestor.MessageName == "os_sr_cact" && ancestor.Stage == 30 && ancestor.Mode == 0 &&
+                    ancestor.IsInTransaction && ancestor.Depth > 0 && ancestor.Depth < context.Depth &&
+                    ancestor.UserId == context.UserId && ancestor.InitiatingUserId == context.InitiatingUserId &&
+                    IsActionForOperation(ancestor, operation) &&
+                    ancestor.SharedVariables != null &&
+                    ancestor.SharedVariables.TryGetValue(IntentKey, out var marker) &&
+                    marker is string value && value == expectedIntent)
+                    return ancestor;
+                ancestor = ancestor.ParentContext;
+            }
+            return null;
+        }
+
+        private static bool IsActionForOperation(IPluginExecutionContext context, string operation)
+        {
+            if (!context.InputParameters.TryGetValue("ActionType", out var value) ||
+                !(value is string action) || !ActionRequest.IsSupportedAction(action))
+                return false;
+            if (operation == "CANDIDATE_CREATE") return action == "CreateCandidate";
+            if (operation == "CALL_LOG_CREATE") return action == "RecordCall";
+            if (operation == "CANDIDATE_UPDATE")
+                return action == "UpdateCandidate" || action == "RecordCall" || action == "ProceedToScheduling";
+            if (operation == "STATUS_HISTORY_CREATE")
+                return action == "RecordCall" || action == "ProceedToScheduling";
+            return operation == "RECEIPT_CREATE";
         }
 
         private static string? SafeOperation(string message, string entity)

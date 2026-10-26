@@ -1,6 +1,18 @@
 # Current State
 
-## Phase 3D-R4L Guard Cutover and CreateCandidate Failure (2026-10-26)
+## Phase 3D-R4M Local Marker Correction; Live Deployment Blocked (2026-10-26)
+
+**The trusted-parent correction is implemented and locally validated in the unsigned package source, but it has not been deployed.** Source inspection found that `ApplyCandidateAction` already writes the private `os_sr_cact.validated_intent` SHA-256 mutation fingerprint to its current `SharedVariables` before each protected `OrganizationService.Create` / `Execute`, then removes it in `finally`. The guard only checked the immediate `ParentContext`; its local harness reproduced rejection when the matching marker was on the API ancestor one or two contexts higher. R4L's live `CALLER_MARKER` failure did not record the actual runtime ancestor depth, so that exact live shape remains unverified.
+
+The local R4M guard now searches at most eight parent contexts and accepts only an ancestor with the `os_sr_cact` message, synchronous main-operation stage, active transaction, lower nested depth, matching caller identity, supported action-to-write category, and exact private mutation marker. The current context's SharedVariables, caller `tag`, wrong/malformed markers, unrelated parents, and ancestors beyond the bound do not authorize a write. The marker is not logged, persisted, fingerprinted, or returned. SDK guard coverage now exercises the caller-injection cases, one/two-level ancestors, Candidate/Call/History/Receipt writes, and bounded fail-closed search.
+
+The unsigned `os_sr_cact_pkg` v1.0.0 local artifact passed package identity/type validation. DLL SHA-256: `1d32def744252c4bc4f829455f0cb89bdbb656b79cfce69f840d0de3f4236f8e`; package SHA-256: `16d3adf6146edbcb22669c93a6bc33ef7cd8b062948108ee9a5cbee98ab3d5de`; five-entry inventory SHA-256: `b2b341b52d1f19ed63efbb48fde82f0df18dd07db51f29312fa566608f1ee562`. The existing package pins were updated to these local artifact hashes. No signing key was accessed.
+
+Fresh read-only R4M preflight matched PAC identity to VN LMV IT / the confirmed Dataverse organization, reconciled the package-backed handler and all 50 package-backed guard registrations, and counted 0 Candidates / 0 Call Logs / 0 Status History / 0 Receipts (20 GETs; 0 API calls, writes, or retries). A separate organization read verified `isauditenabled = No`. Because [Master Production Rules](../MASTER_PRODUCTION_RULES.md) and the approved project state prohibit creating Candidate business data until IT/Compliance audit governance is resolved, no package deployment, direct-write probe, CreateCandidate invocation, or runtime-matrix operation was sent. The R4M runtime authorization remains unconsumed. R4L remains the current live package/runtime state; the local R4M correction is not deployed and is not yet runtime-accepted.
+
+Local validation: unsigned package rebuild succeeded with 0 build warnings/errors; package identity/inventory validation passed; Candidate Core engine harness passed 109 assertions; SDK adapter/guard harness passed 140 assertions; all 12 PowerShell suites passed (1,134 assertions); all 11 PowerShell scripts parsed. Relative Markdown links, added-diff privacy scan, and `git diff --check` passed. No legacy signed harness or signing key was used.
+
+## Phase 3D-R4L Live Guard Cutover and CreateCandidate Failure (2026-10-26)
 
 **`CREATECANDIDATE_RUNTIME_FAILURE` — all 50 Candidate Core direct-write guard EventHandlers were migrated to the existing package-backed guard and GET-reconciled. The single authorized CreateCandidate dispatch was rejected by the package guard with `CALLER_MARKER`; no runtime-matrix action followed.**
 

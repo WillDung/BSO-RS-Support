@@ -24,6 +24,12 @@ Only `Apply`, `Continue`, and `Rollback` can PATCH, and only an existing `sdkmes
 
 After all guard steps are package-backed and reconciled, run the runtime runner in `Preflight` and `Apply` with `-RequirePackageGuardSteps -ExpectedGuardStepCount <count-from-map>`. The runtime runner uses the distinct R4L one-shot authorization, a new empty evidence file, the fresh zero-row gate, and zero retries. Do not run the runtime matrix before the guard topology gate passes. Local static checks: `& .\tests\Phase3DR4LGuardCutover.Tests.ps1`; SDK marker/context checks: `dotnet run --project .\tests\CandidateCoreSdk\CandidateCoreSdk.Tests.csproj -c Release`.
 
+## Phase 3D-R4M trusted-parent correction
+
+`CandidateCore/DataversePlugin.cs` now recognizes the private per-write marker on a bounded (eight-context) trusted `os_sr_cact` ancestor chain. It requires matching action category, stage, synchronous transaction, nested depth, caller identity, and exact mutation fingerprint; current-context values, caller `tag`, unrelated parents, malformed markers, and ancestors beyond the bound remain rejected. The marker is removed after each protected write and is not logged or persisted.
+
+The unsigned existing package was rebuilt without signing-key access. R4M local DLL/package/inventory pins are used by `Deploy-BsoRsCandidatePluginPackage.ps1` for package inspection. The fresh R4M GET-only preflight found the package-backed API handler and all 50 package-backed guards, with zero Candidate Core rows and zero API calls. Organization auditing is still disabled; until external IT/Compliance governance is resolved, do not update the package or invoke a Candidate API that can create business data. The R4M runtime lock is distinct and remains unconsumed. Run `& .\tests\Phase3DR4MTrustedParent.Tests.ps1` and the SDK harness before any separately authorized live continuation. No handler or guard-step PATCH is required by the approved R4M scope.
+
 ## VS Code Readiness
 
 [Test-BsoVsCodeReadiness.ps1](Test-BsoVsCodeReadiness.ps1) performs local tool checks and read-only PAC environment/Solution checks. Its PAC app-authoring capability result is based on the `create` entry in successful `pac model help` output, not the literal phrase `model create`. Run the synthetic parser regression checks with `& ./tests/ReadinessChecks.Tests.ps1`; they do not invoke PAC or contact an environment.

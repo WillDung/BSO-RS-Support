@@ -25,7 +25,11 @@ internal static class Program
     private static string Reject(Action action, string code)
     {
         try { action(); throw new Exception("Expected rejection: " + code); }
-        catch (InvalidPluginExecutionException error) { Check(error.Message == code, code); return error.Message; }
+        catch (InvalidPluginExecutionException error)
+        {
+            Check(error.Message == code, "Expected " + code + ", received " + error.Message);
+            return error.Message;
+        }
     }
     private static Dictionary<string, object?> Context(ParameterCollection input, ParameterCollection shared, ParameterCollection output)
     {
@@ -33,7 +37,8 @@ internal static class Program
         {
             ["MessageName"] = "os_sr_cact", ["Stage"] = 30, ["Mode"] = 0, ["IsInTransaction"] = true,
             ["Depth"] = 1, ["UserId"] = Actor, ["InitiatingUserId"] = Actor, ["OrganizationId"] = Organization,
-            ["InputParameters"] = input, ["OutputParameters"] = output, ["SharedVariables"] = shared
+            ["InputParameters"] = input, ["OutputParameters"] = output, ["SharedVariables"] = shared,
+            ["ParentContext"] = null
         };
     }
     private static T Proxy<T>(Func<IMethodCallMessage, object?> call) => (T)new DynamicProxy(typeof(T), call).GetTransparentProxy();
@@ -59,6 +64,19 @@ internal static class Program
         Check(createWithoutOptionalGuids.TraceMessages.Contains("CC_GUARD_ALLOWED:CANDIDATE_CREATE") &&
             createWithoutOptionalGuids.TraceMessages.Contains("CC_GUARD_ALLOWED:RECEIPT_CREATE"),
             "Approved package-backed Custom API parent context satisfies Candidate and Receipt guard rules");
+        Check(!createWithoutOptionalGuids.Shared.Contains(GetGuardIntentKey()) &&
+            createWithoutOptionalGuids.Receipt!.Attributes.Keys.All(name => name != GetGuardIntentKey()) &&
+            createWithoutOptionalGuids.Output.Keys.All(name => name != GetGuardIntentKey()) &&
+            !createWithoutOptionalGuids.TraceMessages.Any(message => message.Contains(GetGuardIntentKey())) &&
+            createWithoutOptionalGuids.MarkersAtProtectedWrites.Count == 2 &&
+            createWithoutOptionalGuids.MarkersAtProtectedWrites.All(marker => marker.Length == 64) &&
+            createWithoutOptionalGuids.MarkersAtProtectedWrites.All(marker =>
+                !createWithoutOptionalGuids.TraceMessages.Any(message => message.Contains(marker)) &&
+                !createWithoutOptionalGuids.Receipt.Attributes.Values.OfType<string>().Contains(marker) &&
+                !createWithoutOptionalGuids.Output.Values.OfType<string>().Contains(marker)),
+            "Private mutation marker is removed and never persisted, returned, or traced");
+        Check(createWithoutOptionalGuids.TraceMessages.Contains("CC_GUARD_TRUSTED_PARENT_FOUND:ANCESTOR_HOPS:1"),
+            "Trusted parent trace contains only the safe ancestor-hop category");
         var packageApiParent = CreateCandidateHost();
         packageApiParent.MainValues["OwningExtension"] =
             new Entity("plugintype", Guid.Parse("00000000-0000-0000-0000-000000000101"));
@@ -286,29 +304,69 @@ internal static class Program
         };
         var intentKey = GetGuardIntentKey();
         var validIntent = GetGuardIntent("Create", candidateTarget);
-        var unrelatedParent = CreateGuardParent("Update", new ParameterCollection(),
+        var unrelatedParent = CreateGuardParent("Update",
+            new ParameterCollection { ["ActionType"] = "CreateCandidate" },
             new ParameterCollection { [intentKey] = validIntent });
         unrelatedParent["OwningExtension"] = new Entity("plugintype",
             Guid.Parse("00000000-0000-0000-0000-000000000202"));
-        RejectDirectGuard("Create", candidateTarget, unrelatedParent,
-            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:PARENT_CONTEXT");
-
-        var ancestor = CreateGuardParent("os_sr_cact", new ParameterCollection(),
-            new ParameterCollection { [intentKey] = validIntent });
-        var nestedParent = CreateGuardParent("os_sr_cact", new ParameterCollection(), new ParameterCollection());
-        nestedParent["ParentContext"] = Execution(ancestor);
-        RejectDirectGuard("Create", candidateTarget, nestedParent,
+        RejectDirectGuard("Create", candidateTarget, Execution(unrelatedParent),
             "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:CALLER_MARKER");
 
-        var callerSuppliedMarkerParent = CreateGuardParent("os_sr_cact",
-            new ParameterCollection { [intentKey] = validIntent }, new ParameterCollection());
-        RejectDirectGuard("Create", candidateTarget, callerSuppliedMarkerParent,
-            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:CALLER_MARKER");
+        var trustedParent = CreateTrustedParent("CreateCandidate", "Create", candidateTarget, 1);
+        ExecuteGuard("Create", candidateTarget, trustedParent);
+        Check(true, "Trusted Candidate Create marker one ancestor up is accepted");
+        var trustedGrandparent = CreateTrustedParent("CreateCandidate", "Create", candidateTarget, 2);
+        ExecuteGuard("Create", candidateTarget, trustedGrandparent);
+        Check(true, "Trusted Candidate Create marker two ancestors up is accepted");
 
-        var wrongMarkerParent = CreateGuardParent("os_sr_cact", new ParameterCollection(),
-            new ParameterCollection { [intentKey] = "not-the-current-target-intent" });
+        var wrongMessageParent = CreateTrustedParent("CreateCandidate", "unrelated_operation",
+            candidateTarget, 1);
+        RejectDirectGuard("Create", candidateTarget, wrongMessageParent,
+            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:CALLER_MARKER");
+        var missingMarkerParent = CreateTrustedParent("CreateCandidate", "Create", candidateTarget, 1,
+            includeMarker: false);
+        RejectDirectGuard("Create", candidateTarget, missingMarkerParent,
+            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:CALLER_MARKER");
+        var wrongMarkerParent = CreateTrustedParent("CreateCandidate", "Create", candidateTarget, 1,
+            markerValue: "not-the-current-target-intent");
         RejectDirectGuard("Create", candidateTarget, wrongMarkerParent,
             "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:CALLER_MARKER");
+        var malformedMarkerParent = CreateTrustedParent("CreateCandidate", "Create", candidateTarget, 1,
+            markerValue: new byte[] { 1, 2, 3 });
+        RejectDirectGuard("Create", candidateTarget, malformedMarkerParent,
+            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:CALLER_MARKER");
+        var actionMismatchParent = CreateTrustedParent("RecordCall", "Create", candidateTarget, 1);
+        RejectDirectGuard("Create", candidateTarget, actionMismatchParent,
+            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:CALLER_MARKER");
+
+        var externalTag = new ParameterCollection { ["tag"] = validIntent };
+        RejectDirectGuard("Create", candidateTarget, null,
+            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:PARENT_CONTEXT", externalTag);
+        var injectedPrivateKey = new ParameterCollection { [intentKey] = validIntent };
+        RejectDirectGuard("Create", candidateTarget, null,
+            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:PARENT_CONTEXT", injectedPrivateKey);
+        var tagWithUntrustedParent = new ParameterCollection { ["tag"] = validIntent };
+        RejectDirectGuard("Create", candidateTarget, Execution(unrelatedParent),
+            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:CALLER_MARKER", tagWithUntrustedParent);
+
+        var receiptTarget = new Entity("os_sr_oprc", Guid.NewGuid());
+        ExecuteGuard("Create", receiptTarget, CreateTrustedParent("CreateCandidate", "Create", receiptTarget, 1));
+        Check(true, "Operation Receipt child write is accepted only under a trusted CreateCandidate");
+        var callTarget = new Entity("os_sr_call", Guid.NewGuid());
+        ExecuteGuard("Create", callTarget, CreateTrustedParent("RecordCall", "Create", callTarget, 1));
+        Check(true, "Call Log child write is accepted only under a trusted RecordCall");
+        var historyTarget = new Entity("os_sr_csh", Guid.NewGuid());
+        ExecuteGuard("Create", historyTarget, CreateTrustedParent("ProceedToScheduling", "Create", historyTarget, 2));
+        Check(true, "Status History child write is accepted under a trusted scheduling transition");
+        var answerUpdate = new Entity("os_sr_cand", Guid.NewGuid());
+        ExecuteGuard("Update", answerUpdate, CreateTrustedParent("RecordCall", "Update", answerUpdate, 1));
+        Check(true, "Candidate Answered update is accepted only under a trusted RecordCall");
+
+        var excessiveChain = CreateTrustedParent("CreateCandidate", "Create", candidateTarget, 9);
+        RejectDirectGuard("Create", candidateTarget, excessiveChain,
+            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:CALLER_MARKER");
+        Check(GetMaximumParentContexts() == 8,
+            "ParentContext traversal is bounded at eight contexts and fails closed beyond the bound");
 
         foreach (string table in new[] { "os_sr_cand", "os_sr_call", "os_sr_csh", "os_sr_oprc" })
         {
@@ -351,11 +409,30 @@ internal static class Program
     }
 
     private static Dictionary<string, object?> CreateGuardParent(
-        string message, ParameterCollection input, ParameterCollection shared)
+        string message, ParameterCollection input, ParameterCollection shared, int depth = 1)
     {
         var values = Context(input, shared, new ParameterCollection());
         values["MessageName"] = message;
+        values["Depth"] = depth;
         return values;
+    }
+
+    private static IPluginExecutionContext CreateTrustedParent(
+        string action, string markerMessage, Entity target, int hops,
+        bool includeMarker = true, object? markerValue = null)
+    {
+        var shared = new ParameterCollection();
+        if (includeMarker)
+            shared[GetGuardIntentKey()] = markerValue ?? GetGuardIntent(markerMessage, target);
+        var root = CreateGuardParent("os_sr_cact", new ParameterCollection { ["ActionType"] = action }, shared);
+        IPluginExecutionContext parent = Execution(root);
+        for (int depth = 2; depth <= hops; depth++)
+        {
+            var intermediate = CreateGuardParent("Create", new ParameterCollection(), new ParameterCollection(), depth);
+            intermediate["ParentContext"] = parent;
+            parent = Execution(intermediate);
+        }
+        return parent;
     }
 
     private static string GetGuardIntent(string message, Entity target)
@@ -373,21 +450,32 @@ internal static class Program
         return (string)(field.GetValue(null) ?? throw new Exception("Guard intent key is empty."));
     }
 
-    private static void RejectDirectGuard(
-        string message, Entity target, Dictionary<string, object?>? parent, string expected)
+    private static int GetMaximumParentContexts()
     {
-        Reject(() => ExecuteGuard(message, target, parent), expected);
+        var field = typeof(ProtectCandidateCore).GetField("MaximumParentContexts",
+            BindingFlags.Static | BindingFlags.NonPublic)
+            ?? throw new Exception("ParentContext search bound is unavailable.");
+        return (int)(field.GetRawConstantValue() ?? throw new Exception("ParentContext search bound is empty."));
     }
 
-    private static void ExecuteGuard(string message, Entity target, Dictionary<string, object?>? parent)
+    private static void RejectDirectGuard(
+        string message, Entity target, IPluginExecutionContext? parent, string expected,
+        ParameterCollection? shared = null)
+    {
+        Reject(() => ExecuteGuard(message, target, parent, shared), expected);
+    }
+
+    private static void ExecuteGuard(
+        string message, Entity target, IPluginExecutionContext? parent, ParameterCollection? shared = null)
     {
         var child = Context(new ParameterCollection { ["Target"] = target },
-            new ParameterCollection(), new ParameterCollection());
+            shared ?? new ParameterCollection(), new ParameterCollection());
         child["MessageName"] = message;
         child["Stage"] = 10;
+        child["Depth"] = parent == null ? 1 : parent.Depth + 1;
         child["PrimaryEntityName"] = target.LogicalName;
         child["OwningExtension"] = new Entity("plugintype", Guid.Parse("00000000-0000-0000-0000-000000000201"));
-        child["ParentContext"] = parent == null ? null : Execution(parent);
+        child["ParentContext"] = parent;
         new ProtectCandidateCore().Execute(new ContextProvider(Execution(child),
             Proxy<ITracingService>(call => null)));
     }
@@ -404,6 +492,7 @@ internal static class Program
         public List<UpdateRequest> CandidateRequests = new List<UpdateRequest>();
         public List<string> ServiceOperations = new List<string>();
         public List<string> TraceMessages = new List<string>();
+        public List<string> MarkersAtProtectedWrites = new List<string>();
         public string? FaultOnCreateTable;
         public string? UnknownFailureOnCreateTable;
         public string FaultMessage = "Synthetic service failure.";
@@ -443,6 +532,7 @@ internal static class Program
         {
             var child = Context(new ParameterCollection { ["Target"] = target }, new ParameterCollection(), new ParameterCollection());
             child["MessageName"] = message; child["Stage"] = 10; child["ParentContext"] = parent;
+            child["Depth"] = parent == null ? 1 : parent.Depth + 1;
             child["PrimaryEntityName"] = target.LogicalName;
             child["OwningExtension"] = new Entity("plugintype", Guid.Parse("00000000-0000-0000-0000-000000000201"));
             new ProtectCandidateCore().Execute(new ContextProvider(Execution(child), CreateTracingService()));
@@ -471,6 +561,8 @@ internal static class Program
             {
                 var row = (Entity)call.Args[0];
                 ServiceOperations.Add("Create:" + row.LogicalName);
+                if (Shared.TryGetValue(GetGuardIntentKey(), out var marker) && marker is string markerValue)
+                    MarkersAtProtectedWrites.Add(markerValue);
                 row[row.LogicalName + "id"] = row.Id;
                 if (TamperTarget) row["unexpected"] = "synthetic";
                 Guard("Create", row, MainContext);
@@ -491,6 +583,8 @@ internal static class Program
             {
                 var request = (UpdateRequest)call.Args[0];
                 ServiceOperations.Add("Execute:Update:" + request.Target.LogicalName);
+                if (Shared.TryGetValue(GetGuardIntentKey(), out var marker) && marker is string markerValue)
+                    MarkersAtProtectedWrites.Add(markerValue);
                 if (TamperTarget) request.Target["unexpected"] = "synthetic";
                 Guard("Update", request.Target, MainContext);
                 CandidateRequests.Add(request); Updates++;

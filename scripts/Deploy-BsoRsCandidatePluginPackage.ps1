@@ -23,9 +23,9 @@ $legacyRunner = Join-Path $PSScriptRoot 'Deploy-BsoRsCandidateOperations.ps1'
 $packagePath = Join-Path $root 'solutions\CandidateCorePackage\bin\Release\os_sr_cact_pkg.1.0.0.nupkg'
 $contractPath = Join-Path $root 'docs\PHASE_3C_API_CONTRACT.json'
 $manifestPath = Join-Path $root 'docs\PHASE_3A_CANDIDATE_CORE_METADATA_PLAN.json'
-$expectedPackageSha256 = 'f0403d61e3cfa92595e469e1332716a609c8d597c9d047bfc8bcb9a9379941b8'
-$expectedDllSha256 = 'fd5f46e9d2e9388c7f5fefb90dc327ef9d1d40d241b5897c7e2913a92f2113b0'
-$expectedInventorySha256 = '9df64f69b291f880e4d379899729f46196c6626a1f71658f6cad3f3d0be0fe92'
+$expectedPackageSha256 = '16d3adf6146edbcb22669c93a6bc33ef7cd8b062948108ee9a5cbee98ab3d5de'
+$expectedDllSha256 = '1d32def744252c4bc4f829455f0cb89bdbb656b79cfce69f840d0de3f4236f8e'
+$expectedInventorySha256 = 'b2b341b52d1f19ed63efbb48fde82f0df18dd07db51f29312fa566608f1ee562'
 $expectedLegacyAssemblySha256 = '089deb40816e7fd6d80d117ba3894b5d5dadbcf65ac8111e25bb0520ff6feb85'
 $script:RequestCounts = @{ GET = 0; POST = 0; PATCH = 0 }
 $script:Journal = $null

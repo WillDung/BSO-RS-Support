@@ -14,6 +14,7 @@
     100010001: "No Answer",
     100010002: "Call Back Requested"
   };
+  const DEV_FAILURE_PATTERN = /\b(DEV_SLICE_INPUT_REJECTED(?::(?:CONTEXT|ACTION|PARAMETER_SHAPE|SYNTHETIC_PROFILE|CALL_PARAMETERS|REQUIRED_VALUE|OPTIONAL_TEXT|OPTIONAL_LOOKUP|CONTACTED_AT))?|DEV_SLICE_(?:ENVIRONMENT_REJECTED|CANDIDATE_CREATE_FAILED|CANDIDATE_READBACK_FAILED|CALL_CREATE_FAILED|STATUS_UPDATE_FAILED|HISTORY_CREATE_FAILED|RESPONSE_FAILED)|DEV_SLICE_REQUEST_REJECTED_HTTP_[1-5]\d\d)(?::(0x[0-9a-f]{8}))?\b/i;
   const TABLES = {
     candidate: {
       logicalName: "os_sr_cand",
@@ -71,6 +72,14 @@
     notice.textContent = message;
     notice.classList.toggle("error", isError);
     notice.hidden = false;
+  }
+
+  function safeDevFailure(error, action) {
+    const message = error && typeof error.message === "string" ? error.message : "";
+    const match = DEV_FAILURE_PATTERN.exec(message);
+    if (!match) return `The DEV Candidate Slice could not ${action}.`;
+    const code = match[2] ? `, ${match[2].toUpperCase()}` : "";
+    return `The DEV Candidate Slice could not ${action} (${match[1].toUpperCase()}${code}).`;
   }
 
   function hideNotice() {
@@ -132,7 +141,6 @@
   };
 
   function CandidateActionRequest(parameters) {
-    for (const name of Object.keys(API_PARAMETER_TYPES)) this[name] = null;
     Object.assign(this, parameters);
   }
 
@@ -146,15 +154,21 @@
   };
 
   async function executeCandidateAction(parameters) {
-    const requestParameters = { ...parameters };
-    if (requestParameters.ActionType === "CreateCandidate") {
-      requestParameters.CandidateId = null;
-      requestParameters.PositionId = requestParameters.PositionId || null;
-      requestParameters.CandidateSourceId = requestParameters.CandidateSourceId || null;
-    }
-    const request = new CandidateActionRequest(requestParameters);
+    const request = new CandidateActionRequest(parameters);
     const response = await xrm().WebApi.online.execute(request);
-    if (!response.ok) throw new Error("Candidate Core did not accept the requested action.");
+    if (!response.ok) {
+      let safeCategory = "";
+      try {
+        const body = await response.text();
+        const match = DEV_FAILURE_PATTERN.exec(body);
+        if (match) {
+          safeCategory = `${match[1].toUpperCase()}${match[2] ? `:${match[2].toUpperCase()}` : ""}`;
+        }
+      } catch {
+        safeCategory = "";
+      }
+      throw new Error(safeCategory || `DEV_SLICE_REQUEST_REJECTED_HTTP_${response.status}`);
+    }
     return response.json();
   }
 
@@ -220,7 +234,9 @@
     const query = `?$select=${[
       c.id, c.number, c.name, c.email, c.phone, c.status, c.position, c.source,
       "createdon", "_ownerid_value"
-    ].join(",")}&$orderby=createdon desc&$top=100`;
+    ].join(",")}&$filter=${encodeURIComponent(
+      `startswith(${c.name},'[SYNTHETIC-E2E]') and endswith(${c.email},'.invalid')`
+    )}&$orderby=createdon desc&$top=100`;
     const rows = await retrieveAll(c.logicalName, query);
     renderCandidateRows(rows);
   }
@@ -413,8 +429,8 @@
       await refreshCandidates();
       await openCandidate(candidate[c.id]);
       showNotice("Candidate created successfully.");
-    } catch {
-      showNotice("The DEV Candidate Slice could not create the candidate.", true);
+    } catch (error) {
+      showNotice(safeDevFailure(error, "create the candidate"), true);
     } finally {
       setBusy(false);
     }
@@ -448,8 +464,8 @@
       await refreshCandidates();
       await openCandidate(candidateId);
       showNotice("Call recorded successfully.");
-    } catch {
-      showNotice("The DEV Candidate Slice could not record the call.", true);
+    } catch (error) {
+      showNotice(safeDevFailure(error, "record the call"), true);
     } finally {
       setBusy(false);
     }

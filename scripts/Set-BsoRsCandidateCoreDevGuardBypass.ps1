@@ -18,9 +18,9 @@ $expectedNames = @(
     'os_sr_cact.guard.os_sr_cand.Create',
     'os_sr_cact.guard.os_sr_call.Create',
     'os_sr_cact.guard.os_sr_cand.Update',
-    'os_sr_cact.guard.os_sr_csh.Create',
-    'os_sr_cact.guard.os_sr_oprc.Create'
+    'os_sr_cact.guard.os_sr_csh.Create'
 ) | Sort-Object
+$baselineExpectedNames = @($expectedNames + 'os_sr_cact.guard.os_sr_oprc.Create') | Sort-Object
 $script:ApiRoot = $expectedUrl + '/api/data/v9.2/'
 $script:AccessToken = $null
 $script:RequestCounts = @{ GET = 0; PATCH = 0 }
@@ -47,9 +47,9 @@ $expectedPairs = @{
     'os_sr_cact.guard.os_sr_csh.Create' = 'Create|os_sr_csh'
     'os_sr_cact.guard.os_sr_oprc.Create' = 'Create|os_sr_oprc'
 }
-if ($baselineTargets.Count -ne $expectedNames.Count -or
+if ($baselineTargets.Count -ne $baselineExpectedNames.Count -or
     [string]::Join('|', @($baselineTargets | ForEach-Object { [string]$_.Name })) -cne
-    [string]::Join('|', $expectedNames) -or
+    [string]::Join('|', $baselineExpectedNames) -or
     @($baselineTargets | Where-Object {
         [int]$_.StateCode -ne 0 -or [int]$_.StatusCode -ne 1 -or
         $expectedPairs[[string]$_.Name] -cne "$($_.Message)|$($_.EntityFilter)" -or
@@ -58,6 +58,10 @@ if ($baselineTargets.Count -ne $expectedNames.Count -or
         $_.ProtectedPropertiesSha256 -notmatch '^[0-9a-f]{64}$'
     }).Count -ne 0) {
     throw 'Private pre-disable step snapshot does not match the exact authorized registration set.'
+}
+$targetsToChange = @($baselineTargets | Where-Object { $_.Name -in $expectedNames })
+if ($targetsToChange.Count -ne $expectedNames.Count) {
+    throw 'The exact four DEV-required guard registrations were not found in the baseline.'
 }
 
 function Get-Sha256 {
@@ -211,7 +215,7 @@ if ([string]$who.UserId -ine [string]$pac.UserId -or
     throw 'Dataverse WhoAmI does not match the baseline and active PAC caller.'
 }
 
-$initialRows = foreach ($target in $baselineTargets) {
+$initialRows = foreach ($target in $targetsToChange) {
     $row = Get-DataverseStep -StepId ([string]$target.StepId)
     $stepName = [string]$row.name
     $handler = [string]$row._eventhandler_value

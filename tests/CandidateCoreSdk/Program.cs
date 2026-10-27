@@ -103,12 +103,31 @@ internal static class Program
             return error.Message;
         }
     }
+    private static void ConfigureDevHost(Host host)
+    {
+        host.MainValues["MessageName"] = "os_sr_devcs";
+        host.MainValues["PrimaryEntityName"] = null;
+        host.MainValues["OrganizationId"] = Guid.Parse("0706072c-54ea-f011-872b-000d3ab60060");
+        host.Input["CorrelationId"] = Guid.NewGuid().ToString("D");
+    }
+    private static void SetDevRecordCall(Host host, Guid candidateId, int expectedStatus, int outcome)
+    {
+        host.Input.Clear();
+        host.Input["ActionType"] = "RecordCall";
+        host.Input["CorrelationId"] = Guid.NewGuid().ToString("D");
+        host.Input["CandidateId"] = candidateId.ToString("D");
+        host.Input["ExpectedStatus"] = expectedStatus;
+        host.Input["CallOutcome"] = outcome;
+        host.Input["ContactedAt"] = DateTime.UtcNow.ToString("o");
+        host.Input["Notes"] = "Synthetic SDK test";
+    }
     private static Dictionary<string, object?> Context(ParameterCollection input, ParameterCollection shared, ParameterCollection output)
     {
         return new Dictionary<string, object?>
         {
             ["MessageName"] = "os_sr_cact", ["Stage"] = 30, ["Mode"] = 0, ["IsInTransaction"] = true,
             ["Depth"] = 1, ["UserId"] = Actor, ["InitiatingUserId"] = Actor, ["OrganizationId"] = Organization,
+            ["PrimaryEntityName"] = "none",
             ["InputParameters"] = input, ["OutputParameters"] = output, ["SharedVariables"] = shared,
             ["ParentContext"] = null, ["OwningExtension"] = RegisterImplementation()
         };
@@ -120,20 +139,82 @@ internal static class Program
     private static void Main()
     {
         var devCreate = new Host(-1, createCandidate: true);
-        devCreate.MainValues["MessageName"] = "os_sr_devcs";
-        devCreate.Input["CorrelationId"] = Guid.NewGuid().ToString("D");
+        ConfigureDevHost(devCreate);
         devCreate.Input["CandidateName"] = "Synthetic Candidate";
-        Reject(() => new ApplyCandidateAction().Execute(devCreate), "DEV_SYNTHETIC_DATA_REQUIRED");
+        Reject(() => new ApplyCandidateAction().Execute(devCreate),
+            "DEV_SLICE_INPUT_REJECTED:SYNTHETIC_PROFILE");
         Check(devCreate.ServiceOperations.Count == 0 && devCreate.CreatedCandidates == 0,
             "DEV slice rejects non-prefixed candidate before any Dataverse operation");
 
         var devEmail = new Host(-1, createCandidate: true);
-        devEmail.MainValues["MessageName"] = "os_sr_devcs";
-        devEmail.Input["CorrelationId"] = Guid.NewGuid().ToString("D");
+        ConfigureDevHost(devEmail);
+        devEmail.Input["CandidateName"] = "[SYNTHETIC-E2E] Reserved email rejection";
         devEmail.Input["CandidateEmail"] = "synthetic@example.com";
-        Reject(() => new ApplyCandidateAction().Execute(devEmail), "DEV_SYNTHETIC_DATA_REQUIRED");
+        Reject(() => new ApplyCandidateAction().Execute(devEmail),
+            "DEV_SLICE_INPUT_REJECTED:SYNTHETIC_PROFILE");
         Check(devEmail.ServiceOperations.Count == 0 && devEmail.CreatedCandidates == 0,
             "DEV slice rejects non-reserved email before any Dataverse operation");
+
+        var devEnvironment = new Host(-1, createCandidate: true);
+        ConfigureDevHost(devEnvironment);
+        devEnvironment.MainValues["OrganizationId"] = Organization;
+        Reject(() => new ApplyCandidateAction().Execute(devEnvironment), "DEV_SLICE_ENVIRONMENT_REJECTED");
+        Check(devEnvironment.ServiceOperations.Count == 0,
+            "DEV slice rejects a non-target organization before any Dataverse operation");
+
+        var devWorkflow = new Host(-1, createCandidate: true);
+        ConfigureDevHost(devWorkflow);
+        devWorkflow.Input["CandidateName"] = "[SYNTHETIC-E2E] SDK visible workflow";
+        devWorkflow.Input["CandidateEmail"] = "sdk-workflow@example.invalid";
+        devWorkflow.Input["CandidatePhone"] = "555-0100";
+        new ApplyCandidateAction().Execute(devWorkflow);
+        Check((string)devWorkflow.Output["ResultCode"] == "Applied" &&
+            (string)devWorkflow.Output["CandidateId"] == Candidate.ToString("D"),
+            "DEV slice returns the created candidate reference");
+        Check(devWorkflow.CreatedCandidates == 1 && devWorkflow.Calls == 0 &&
+            devWorkflow.Histories == 0 && devWorkflow.Receipt == null &&
+            !devWorkflow.ServiceOperations.Any(operation => operation.Contains("oprc")),
+            "DEV candidate create writes no call, history, or receipt");
+        Check(devWorkflow.CreatedCandidate!.GetAttributeValue<string>("os_sr_cand_nm") ==
+                "[SYNTHETIC-E2E] SDK visible workflow" &&
+            devWorkflow.CreatedCandidate.GetAttributeValue<OptionSetValue>("os_sr_cand_stat")?.Value == 100010000 &&
+            devWorkflow.CreatedCandidate.GetAttributeValue<string>("os_sr_cand_cnum") == "CAND-00000001" &&
+            devWorkflow.CreatedCandidate.GetAttributeValue<EntityReference>("ownerid")?.Id == Actor,
+            "DEV candidate create sets the synthetic profile, initial status, generated number, and caller owner");
+
+        SetDevRecordCall(devWorkflow, Candidate, 100010000, 100010001);
+        new ApplyCandidateAction().Execute(devWorkflow);
+        Check(devWorkflow.Calls == 1 && devWorkflow.Updates == 0 && devWorkflow.Histories == 0 &&
+            devWorkflow.Status == 100010000 && devWorkflow.Receipt == null,
+            "DEV No Answer creates a call without changing status or creating a receipt");
+        var noAnswer = devWorkflow.CreatedCall!;
+        Check(noAnswer.GetAttributeValue<OptionSetValue>("os_sr_call_out")?.Value == 100010001 &&
+            noAnswer.GetAttributeValue<EntityReference>("os_sr_call_cand")?.Id == Candidate &&
+            noAnswer.GetAttributeValue<DateTime>("os_sr_call_ctat") != default(DateTime) &&
+            noAnswer.GetAttributeValue<EntityReference>("os_sr_call_ctby")?.Id == Actor,
+            "DEV No Answer call uses the current Choice and required related fields");
+
+        SetDevRecordCall(devWorkflow, Candidate, 100010000, 100010000);
+        new ApplyCandidateAction().Execute(devWorkflow);
+        Check(devWorkflow.Calls == 2 && devWorkflow.Updates == 1 &&
+            devWorkflow.Histories == 1 && devWorkflow.Status == 100010001 &&
+            devWorkflow.Receipt == null &&
+            !devWorkflow.ServiceOperations.Any(operation => operation.Contains("oprc")),
+            "DEV Answered creates a second call, updates Candidate, creates history, and never uses Receipts");
+        Check(devWorkflow.CreatedHistory!.GetAttributeValue<OptionSetValue>("os_sr_csh_prevstat")?.Value == 100010000 &&
+            devWorkflow.CreatedHistory.GetAttributeValue<OptionSetValue>("os_sr_csh_newstat")?.Value == 100010001 &&
+            devWorkflow.CreatedHistory.GetAttributeValue<string>("os_sr_csh_cact") == "RecordCall",
+            "DEV Answered history captures the status transition");
+
+        var devCreateFault = new Host(-1, createCandidate: true);
+        ConfigureDevHost(devCreateFault);
+        devCreateFault.Input["CandidateName"] = "[SYNTHETIC-E2E] SDK stage fault";
+        devCreateFault.Input["CandidateEmail"] = "stage-fault@example.invalid";
+        devCreateFault.FaultOnCreateTable = "os_sr_cand";
+        Reject(() => new ApplyCandidateAction().Execute(devCreateFault),
+            "DEV_SLICE_CANDIDATE_CREATE_FAILED:0x80040220");
+        Check(!devCreateFault.TraceMessages.Any(message => message.Contains("SENSITIVE_SENTINEL")),
+            "DEV stage diagnostics do not expose service exception payloads");
 
         var actionWriteMatrix = new Dictionary<string, string[]>
         {
@@ -695,7 +776,7 @@ internal static class Program
         public ParameterCollection Input = new ParameterCollection(), Output = new ParameterCollection(), Shared = new ParameterCollection();
         public Dictionary<string, object?> MainValues;
         public IPluginExecutionContext MainContext;
-        public Entity? Receipt, CreatedCandidate;
+        public Entity? Receipt, CreatedCandidate, CreatedCall, CreatedHistory;
         public int Calls, Histories, Updates, CreatedCandidates, OrganizationReads, Status = 100010000;
         public bool OrganizationAuditEnabled = true, TamperTarget;
         public List<Guid?> CallerFactorySelections = new List<Guid?>();
@@ -758,7 +839,18 @@ internal static class Program
                     OrganizationReads++;
                     return new Entity(table, Organization) { ["isauditenabled"] = OrganizationAuditEnabled };
                 }
-                if (table == "os_sr_cand") return new Entity(table, Candidate) { RowVersion = "1", ["os_sr_cand_stat"] = new OptionSetValue(Status) };
+                if (table == "os_sr_cand")
+                {
+                    if (CreatedCandidate != null) return CreatedCandidate;
+                    return new Entity(table, Candidate)
+                    {
+                        RowVersion = "1",
+                        ["os_sr_cand_nm"] = "[SYNTHETIC-E2E] Existing SDK test candidate",
+                        ["os_sr_cand_eml"] = "existing-sdk@example.invalid",
+                        ["os_sr_cand_cnum"] = "CAND-00000001",
+                        ["os_sr_cand_stat"] = new OptionSetValue(Status)
+                    };
+                }
                 throw new Exception("Unexpected Retrieve");
             }
             if (call.MethodName == "RetrieveMultiple")
@@ -773,21 +865,44 @@ internal static class Program
                 ServiceOperations.Add("Create:" + row.LogicalName);
                 if (Shared.TryGetValue(GetGuardIntentKey(), out var marker) && marker is string markerValue)
                     MarkersAtProtectedWrites.Add(markerValue);
+                if (row.Id == Guid.Empty)
+                    row.Id = row.LogicalName == "os_sr_cand" ? Candidate : Guid.NewGuid();
                 row[row.LogicalName + "id"] = row.Id;
                 if (TamperTarget) row["unexpected"] = "synthetic";
-                Guard("Create", row, MainContext);
+                if (MainContext.MessageName != "os_sr_devcs") Guard("Create", row, MainContext);
                 if (row.LogicalName == FaultOnCreateTable)
                     throw new FaultException<OrganizationServiceFault>(
                         new OrganizationServiceFault { ErrorCode = FaultErrorCode, Message = FaultMessage },
                         new FaultReason("Synthetic service fault"));
                 if (row.LogicalName == UnknownFailureOnCreateTable)
                     throw new InvalidOperationException("SENSITIVE_SENTINEL " + Actor.ToString("D"));
-                if (row.LogicalName == "os_sr_call") { Calls++; Check(row.GetAttributeValue<EntityReference>("os_sr_call_ctby").Id == Actor, "SDK Contacted By"); }
-                else if (row.LogicalName == "os_sr_csh") { Histories++; Check(row.GetAttributeValue<EntityReference>("os_sr_csh_actr").Id == Actor, "SDK History Actor"); }
-                else if (row.LogicalName == "os_sr_cand") { CreatedCandidates++; CreatedCandidate = row; }
+                if (row.LogicalName == "os_sr_call") { Calls++; CreatedCall = row; Check(row.GetAttributeValue<EntityReference>("os_sr_call_ctby").Id == Actor, "SDK Contacted By"); }
+                else if (row.LogicalName == "os_sr_csh") { Histories++; CreatedHistory = row; Check(row.GetAttributeValue<EntityReference>("os_sr_csh_actr").Id == Actor, "SDK History Actor"); }
+                else if (row.LogicalName == "os_sr_cand")
+                {
+                    CreatedCandidates++;
+                    CreatedCandidate = row;
+                    row["os_sr_cand_cnum"] = "CAND-00000001";
+                    Status = row.GetAttributeValue<OptionSetValue>("os_sr_cand_stat").Value;
+                }
                 else if (row.LogicalName == "os_sr_oprc") { Receipt = row; Receipt["createdby"] = new EntityReference("systemuser", Actor); }
                 else throw new Exception("Unexpected Create");
                 return row.Id;
+            }
+            if (call.MethodName == "Update")
+            {
+                var target = (Entity)call.Args[0];
+                ServiceOperations.Add("Update:" + target.LogicalName);
+                if (MainContext.MessageName != "os_sr_devcs") Guard("Update", target, MainContext);
+                if (target.LogicalName != "os_sr_cand") throw new Exception("Unexpected direct Update");
+                Updates++;
+                if (target.Contains("os_sr_cand_stat"))
+                {
+                    Status = target.GetAttributeValue<OptionSetValue>("os_sr_cand_stat").Value;
+                    if (CreatedCandidate != null)
+                        CreatedCandidate["os_sr_cand_stat"] = new OptionSetValue(Status);
+                }
+                return null;
             }
             if (call.MethodName == "Execute")
             {

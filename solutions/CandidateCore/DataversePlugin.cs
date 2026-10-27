@@ -57,113 +57,216 @@ namespace os_sr_cact
     internal static class DevCandidateSlice
     {
         public const string MessageName = "os_sr_devcs";
-
-        private static readonly HashSet<string> DeclaredInputs = new HashSet<string>(StringComparer.Ordinal)
-        {
-            "ActionType", "CorrelationId", "CandidateId", "ExpectedStatus", "CandidateName",
-            "CandidateEmail", "CandidatePhone", "PositionId", "CandidateSourceId", "CallOutcome",
-            "ContactedAt", "Notes"
-        };
+        private static readonly Guid DevelopmentOrganizationId = new Guid("0706072c-54ea-f011-872b-000d3ab60060");
+        private const int NeedCallCandidate = 100010000;
+        private const int CandidateAnswered = 100010001;
+        private const int WaitingManualScheduling = 100010002;
+        private const int CallAnswered = 100010000;
+        private const int CallNoAnswer = 100010001;
+        private const int CallBackRequested = 100010002;
 
         public static void Execute(
             IServiceProvider serviceProvider, IPluginExecutionContext context, ITracingService trace)
         {
+            if (context.OrganizationId != DevelopmentOrganizationId)
+                throw new OperationError("DEV_SLICE_ENVIRONMENT_REJECTED");
             if (context.Stage != 30 || context.Mode != 0 || !context.IsInTransaction ||
                 context.UserId != context.InitiatingUserId || context.Depth != 1)
-                throw new OperationError("UNSUPPORTED_EXECUTION_CONTEXT");
+                throw new OperationError("DEV_SLICE_INPUT_REJECTED:CONTEXT");
 
             var action = ReadRequiredString(context.InputParameters, "ActionType");
             if (action != "CreateCandidate" && action != "RecordCall")
-                throw new OperationError("DEV_ACTION_NOT_SUPPORTED");
+                throw new OperationError("DEV_SLICE_INPUT_REJECTED:ACTION");
 
+            var allowedInputs = action == "CreateCandidate"
+                ? new[] { "ActionType", "CorrelationId", "CandidateName", "CandidateEmail", "CandidatePhone", "PositionId", "CandidateSourceId" }
+                : new[] { "ActionType", "CorrelationId", "CandidateId", "ExpectedStatus", "CallOutcome", "ContactedAt", "Notes" };
             foreach (var parameter in context.InputParameters)
-            {
-                if (!DeclaredInputs.Contains(parameter.Key))
-                    throw new OperationError("UNEXPECTED_INPUT:DEV_SLICE");
-                if (!ActionRequest.ApplicableInputNames(action).Contains(parameter.Key) &&
-                    parameter.Value != null)
-                    throw new OperationError("UNEXPECTED_INPUT:DEV_SLICE");
-            }
+                if (!ActionRequest.IsDeclaredInputName(parameter.Key) ||
+                    (!allowedInputs.Contains(parameter.Key, StringComparer.Ordinal) && parameter.Value != null))
+                    throw new OperationError("DEV_SLICE_INPUT_REJECTED:PARAMETER_SHAPE");
 
-            var input = new Dictionary<string, object?>(StringComparer.Ordinal)
-            {
-                ["ActionType"] = action,
-                ["CorrelationId"] = ParseGuid(ReadRequiredString(context.InputParameters, "CorrelationId"),
-                    "INVALID_CORRELATION")
-            };
-
+            var correlationId = ParseGuid(ReadRequiredString(context.InputParameters, "CorrelationId"),
+                "DEV_SLICE_INPUT_REJECTED");
+            var service = GetService(serviceProvider, context.InitiatingUserId, trace);
+            Guid candidateId;
             if (action == "CreateCandidate")
             {
                 var name = ReadRequiredString(context.InputParameters, "CandidateName").Trim();
                 var email = ReadRequiredString(context.InputParameters, "CandidateEmail").Trim();
-                RequireSyntheticProfile(name, email);
-                input["CandidateName"] = name;
-                input["CandidateEmail"] = email;
-                input["CandidatePhone"] = ReadOptionalString(context.InputParameters, "CandidatePhone");
-                input["PositionId"] = ReadOptionalGuid(context.InputParameters, "PositionId");
-                input["CandidateSourceId"] = ReadOptionalGuid(context.InputParameters, "CandidateSourceId");
+                var phone = ReadOptionalString(context.InputParameters, "CandidatePhone");
+                var positionId = ReadOptionalGuid(context.InputParameters, "PositionId");
+                var sourceId = ReadOptionalGuid(context.InputParameters, "CandidateSourceId");
+                if (!IsSyntheticProfile(name, email) || name.Length > 200 || email.Length > 254 ||
+                    (phone != null && phone.Length > 50))
+                    throw new OperationError("DEV_SLICE_INPUT_REJECTED:SYNTHETIC_PROFILE");
+
+                var row = new Entity("os_sr_cand")
+                {
+                    ["os_sr_cand_nm"] = name,
+                    ["os_sr_cand_eml"] = email,
+                    ["os_sr_cand_stat"] = new OptionSetValue(NeedCallCandidate),
+                    ["os_sr_cand_corid"] = correlationId.ToString("D"),
+                    ["ownerid"] = new EntityReference("systemuser", context.InitiatingUserId)
+                };
+                if (phone != null) row["os_sr_cand_phn"] = phone;
+                if (positionId.HasValue) row["os_sr_cand_pos"] = new EntityReference("os_sr_pos", positionId.Value);
+                if (sourceId.HasValue) row["os_sr_cand_csrc"] = new EntityReference("os_sr_csrc", sourceId.Value);
+
+                candidateId = RunStage(trace, "DEV_SLICE_CANDIDATE_CREATE_FAILED", () => service.Create(row));
+                var saved = RunStage(trace, "DEV_SLICE_CANDIDATE_READBACK_FAILED", () =>
+                    service.Retrieve("os_sr_cand", candidateId, new ColumnSet(
+                        "os_sr_cand_nm", "os_sr_cand_eml", "os_sr_cand_phn", "os_sr_cand_stat",
+                        "os_sr_cand_cnum", "os_sr_cand_pos", "os_sr_cand_csrc", "ownerid")));
+                if (saved.Id != candidateId ||
+                    saved.GetAttributeValue<string>("os_sr_cand_nm") != name ||
+                    saved.GetAttributeValue<string>("os_sr_cand_eml") != email ||
+                    saved.GetAttributeValue<OptionSetValue>("os_sr_cand_stat")?.Value != NeedCallCandidate ||
+                    string.IsNullOrWhiteSpace(saved.GetAttributeValue<string>("os_sr_cand_cnum")))
+                    throw new OperationError("DEV_SLICE_CANDIDATE_READBACK_FAILED");
             }
             else
             {
-                var candidateId = ParseGuid(ReadRequiredString(context.InputParameters, "CandidateId"),
-                    "INVALID_CANDIDATE");
-                input["CandidateId"] = candidateId;
-                input["ExpectedStatus"] = ReadRequiredInt(context.InputParameters, "ExpectedStatus");
-                input["CallOutcome"] = ReadRequiredInt(context.InputParameters, "CallOutcome");
-                input["ContactedAt"] = ParseUtcDateTime(
-                    ReadRequiredString(context.InputParameters, "ContactedAt"));
-                input["Notes"] = ReadOptionalString(context.InputParameters, "Notes");
+                candidateId = ParseGuid(ReadRequiredString(context.InputParameters, "CandidateId"),
+                    "DEV_SLICE_INPUT_REJECTED");
+                var expectedStatus = ReadRequiredInt(context.InputParameters, "ExpectedStatus");
+                var outcome = ReadRequiredInt(context.InputParameters, "CallOutcome");
+                var contactedAt = ParseUtcDateTime(ReadRequiredString(context.InputParameters, "ContactedAt"));
+                var notes = ReadOptionalString(context.InputParameters, "Notes");
+                if (!IsSupportedStatus(expectedStatus) ||
+                    (outcome != CallAnswered && outcome != CallNoAnswer && outcome != CallBackRequested) ||
+                    (notes != null && notes.Length > 4000))
+                    throw new OperationError("DEV_SLICE_INPUT_REJECTED:CALL_PARAMETERS");
 
-                var factory = (IOrganizationServiceFactory)serviceProvider.GetService(
-                    typeof(IOrganizationServiceFactory));
-                var service = factory.CreateOrganizationService(context.InitiatingUserId);
-                var candidate = service.Retrieve("os_sr_cand", candidateId,
-                    new ColumnSet("os_sr_cand_nm", "os_sr_cand_eml"));
-                RequireSyntheticProfile(
-                    candidate.GetAttributeValue<string>("os_sr_cand_nm"),
-                    candidate.GetAttributeValue<string>("os_sr_cand_eml"));
+                var candidate = RunStage(trace, "DEV_SLICE_CANDIDATE_READBACK_FAILED", () =>
+                    service.Retrieve("os_sr_cand", candidateId,
+                        new ColumnSet("os_sr_cand_nm", "os_sr_cand_eml", "os_sr_cand_stat")));
+                var currentStatus = candidate.GetAttributeValue<OptionSetValue>("os_sr_cand_stat")?.Value;
+                if (candidate.Id != candidateId ||
+                    !IsSyntheticProfile(candidate.GetAttributeValue<string>("os_sr_cand_nm"),
+                        candidate.GetAttributeValue<string>("os_sr_cand_eml")) ||
+                    !currentStatus.HasValue || currentStatus.Value != expectedStatus)
+                    throw new OperationError("DEV_SLICE_CANDIDATE_READBACK_FAILED");
 
-                var result = CandidateOperation.Execute(
-                    new ActionRequest(context.InitiatingUserId, input, DateTime.UtcNow),
-                    new DataverseStore(service, context, trace));
-                WriteResult(context, result);
-                return;
+                var call = new Entity("os_sr_call")
+                {
+                    ["os_sr_call_cand"] = new EntityReference("os_sr_cand", candidateId),
+                    ["os_sr_call_out"] = new OptionSetValue(outcome),
+                    ["os_sr_call_ctat"] = contactedAt,
+                    ["os_sr_call_ctby"] = new EntityReference("systemuser", context.InitiatingUserId),
+                    ["os_sr_call_corid"] = correlationId.ToString("D"),
+                    ["ownerid"] = new EntityReference("systemuser", context.InitiatingUserId)
+                };
+                if (notes != null) call["os_sr_call_nts"] = notes;
+                RunStage(trace, "DEV_SLICE_CALL_CREATE_FAILED", () => service.Create(call));
+
+                if (outcome == CallAnswered && currentStatus.Value == NeedCallCandidate)
+                {
+                    var update = new Entity("os_sr_cand", candidateId)
+                    {
+                        ["os_sr_cand_stat"] = new OptionSetValue(CandidateAnswered)
+                    };
+                    RunStage(trace, "DEV_SLICE_STATUS_UPDATE_FAILED", () => service.Update(update));
+                    var history = new Entity("os_sr_csh")
+                    {
+                        ["os_sr_csh_cand"] = new EntityReference("os_sr_cand", candidateId),
+                        ["os_sr_csh_prevstat"] = new OptionSetValue(NeedCallCandidate),
+                        ["os_sr_csh_newstat"] = new OptionSetValue(CandidateAnswered),
+                        ["os_sr_csh_actr"] = new EntityReference("systemuser", context.InitiatingUserId),
+                        ["os_sr_csh_chg"] = DateTime.UtcNow,
+                        ["os_sr_csh_corid"] = correlationId.ToString("D"),
+                        ["os_sr_csh_cact"] = "RecordCall",
+                        ["os_sr_csh_rsn"] = "DEV Candidate Slice: RecordCall Answered",
+                        ["ownerid"] = new EntityReference("systemuser", context.InitiatingUserId)
+                    };
+                    RunStage(trace, "DEV_SLICE_HISTORY_CREATE_FAILED", () => service.Create(history));
+                }
             }
 
-            var organizationServiceFactory = (IOrganizationServiceFactory)serviceProvider.GetService(
-                typeof(IOrganizationServiceFactory));
-            var organizationService = organizationServiceFactory.CreateOrganizationService(context.InitiatingUserId);
-            var createResult = CandidateOperation.Execute(
-                new ActionRequest(context.InitiatingUserId, input, DateTime.UtcNow),
-                new DataverseStore(organizationService, context, trace));
-            WriteResult(context, createResult);
+            try
+            {
+                context.OutputParameters["ResultCode"] = "Applied";
+                context.OutputParameters["CandidateId"] = candidateId.ToString("D");
+            }
+            catch (Exception error)
+            {
+                trace.Trace("DEV_SLICE_STAGE:DEV_SLICE_RESPONSE_FAILED");
+                throw new OperationError("DEV_SLICE_RESPONSE_FAILED", error);
+            }
         }
 
-        private static void WriteResult(IPluginExecutionContext context, ActionResult result)
+        private static IOrganizationService GetService(IServiceProvider serviceProvider, Guid actor, ITracingService trace)
         {
-            context.OutputParameters["ResultCode"] = result.Replay ? "DuplicateReplay" : "Applied";
-            context.OutputParameters["CandidateId"] = result.CandidateId.ToString("D");
+            try
+            {
+                var factory = (IOrganizationServiceFactory)serviceProvider.GetService(typeof(IOrganizationServiceFactory));
+                return factory.CreateOrganizationService(actor);
+            }
+            catch (FaultException<OrganizationServiceFault> error)
+            {
+                throw StageError(trace, "DEV_SLICE_RESPONSE_FAILED", error);
+            }
+            catch (Exception error)
+            {
+                throw new OperationError("DEV_SLICE_RESPONSE_FAILED", error);
+            }
+        }
+
+        private static T RunStage<T>(ITracingService trace, string category, Func<T> operation)
+        {
+            trace.Trace("DEV_SLICE_STAGE:{0}", category);
+            try
+            {
+                return operation();
+            }
+            catch (FaultException<OrganizationServiceFault> error)
+            {
+                throw StageError(trace, category, error);
+            }
+            catch (Exception error)
+            {
+                throw new OperationError(category, error);
+            }
+        }
+
+        private static void RunStage(ITracingService trace, string category, Action operation)
+        {
+            RunStage(trace, category, () =>
+            {
+                operation();
+                return true;
+            });
+        }
+
+        private static OperationError StageError(
+            ITracingService trace, string category, FaultException<OrganizationServiceFault> error)
+        {
+            var code = error.Detail == null ? 0 : error.Detail.ErrorCode;
+            var safeCode = code == 0 ? category :
+                category + ":0x" + unchecked((uint)code).ToString("X8", CultureInfo.InvariantCulture);
+            trace.Trace("DEV_SLICE_FAILURE:{0}", safeCode);
+            return new OperationError(safeCode, error);
         }
 
         private static string ReadRequiredString(ParameterCollection parameters, string name)
         {
             if (!parameters.TryGetValue(name, out var value) || !(value is string text) ||
                 string.IsNullOrWhiteSpace(text))
-                throw new OperationError("INVALID_" + name.ToUpperInvariant());
+                throw new OperationError("DEV_SLICE_INPUT_REJECTED:REQUIRED_VALUE");
             return text;
         }
 
         private static string? ReadOptionalString(ParameterCollection parameters, string name)
         {
             if (!parameters.TryGetValue(name, out var value) || value == null) return null;
-            if (!(value is string text)) throw new OperationError("INVALID_TEXT");
+            if (!(value is string text)) throw new OperationError("DEV_SLICE_INPUT_REJECTED:OPTIONAL_TEXT");
             return text;
         }
 
         private static int ReadRequiredInt(ParameterCollection parameters, string name)
         {
             if (!parameters.TryGetValue(name, out var value) || !(value is int number))
-                throw new OperationError("INVALID_" + name.ToUpperInvariant());
+                throw new OperationError("DEV_SLICE_INPUT_REJECTED:REQUIRED_VALUE");
             return number;
         }
 
@@ -178,26 +281,29 @@ namespace os_sr_cact
         {
             var value = ReadOptionalString(parameters, name);
             if (value == null) return null;
-            return ParseGuid(value, "INVALID_GUID_PARAMETER:" + name);
+            return ParseGuid(value, "DEV_SLICE_INPUT_REJECTED:OPTIONAL_LOOKUP");
         }
 
         private static DateTime ParseUtcDateTime(string value)
         {
             if (!DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None,
                 out var timestamp) || timestamp.Offset != TimeSpan.Zero)
-                throw new OperationError("INVALID_CONTACT_TIME");
+                throw new OperationError("DEV_SLICE_INPUT_REJECTED:CONTACTED_AT");
             return timestamp.UtcDateTime;
         }
 
-        private static void RequireSyntheticProfile(string name, string email)
+        private static bool IsSyntheticProfile(string? name, string? email)
         {
+            if (name == null || email == null) return false;
             var at = email.LastIndexOf('@');
-            if (!name.StartsWith("[SYNTHETIC-E2E]", StringComparison.Ordinal) ||
-                at <= 0 || at == email.Length - 1 ||
-                email.IndexOfAny(new[] { ' ', '\t', '\r', '\n' }) >= 0 ||
-                !email.Substring(at + 1).EndsWith(".invalid", StringComparison.OrdinalIgnoreCase))
-                throw new OperationError("DEV_SYNTHETIC_DATA_REQUIRED");
+            return name.StartsWith("[SYNTHETIC-E2E]", StringComparison.Ordinal) &&
+                at > 0 && at < email.Length - 1 &&
+                email.IndexOfAny(new[] { ' ', '\t', '\r', '\n' }) < 0 &&
+                email.Substring(at + 1).EndsWith(".invalid", StringComparison.OrdinalIgnoreCase);
         }
+
+        private static bool IsSupportedStatus(int status) =>
+            status == NeedCallCandidate || status == CandidateAnswered || status == WaitingManualScheduling;
     }
 
     internal static class CandidateActionInputAdapter

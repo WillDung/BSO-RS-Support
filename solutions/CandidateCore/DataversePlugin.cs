@@ -19,6 +19,11 @@ namespace os_sr_cact
             var trace = (ITracingService)serviceProvider.GetService(typeof(ITracingService));
             try
             {
+                if (context.MessageName == DevCandidateSlice.MessageName)
+                {
+                    DevCandidateSlice.Execute(serviceProvider, context, trace);
+                    return;
+                }
                 if (context.MessageName != "os_sr_cact" || context.Stage != 30 || context.Mode != 0 ||
                     !context.IsInTransaction || context.UserId != context.InitiatingUserId || context.Depth != 1)
                     throw new OperationError("UNSUPPORTED_EXECUTION_CONTEXT");
@@ -46,6 +51,152 @@ namespace os_sr_cact
                     error.Detail.ErrorCode == unchecked((int)0x80060882) ? "ROW_VERSION_CONFLICT" : "DATAVERSE_OPERATION_REJECTED";
                 throw new InvalidPluginExecutionException(code);
             }
+        }
+    }
+
+    internal static class DevCandidateSlice
+    {
+        public const string MessageName = "os_sr_devcs";
+
+        private static readonly HashSet<string> DeclaredInputs = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "ActionType", "CorrelationId", "CandidateId", "ExpectedStatus", "CandidateName",
+            "CandidateEmail", "CandidatePhone", "PositionId", "CandidateSourceId", "CallOutcome",
+            "ContactedAt", "Notes"
+        };
+
+        public static void Execute(
+            IServiceProvider serviceProvider, IPluginExecutionContext context, ITracingService trace)
+        {
+            if (context.Stage != 30 || context.Mode != 0 || !context.IsInTransaction ||
+                context.UserId != context.InitiatingUserId || context.Depth != 1)
+                throw new OperationError("UNSUPPORTED_EXECUTION_CONTEXT");
+
+            var action = ReadRequiredString(context.InputParameters, "ActionType");
+            if (action != "CreateCandidate" && action != "RecordCall")
+                throw new OperationError("DEV_ACTION_NOT_SUPPORTED");
+
+            foreach (var parameter in context.InputParameters)
+            {
+                if (!DeclaredInputs.Contains(parameter.Key))
+                    throw new OperationError("UNEXPECTED_INPUT:DEV_SLICE");
+                if (!ActionRequest.ApplicableInputNames(action).Contains(parameter.Key) &&
+                    parameter.Value != null)
+                    throw new OperationError("UNEXPECTED_INPUT:DEV_SLICE");
+            }
+
+            var input = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["ActionType"] = action,
+                ["CorrelationId"] = ParseGuid(ReadRequiredString(context.InputParameters, "CorrelationId"),
+                    "INVALID_CORRELATION")
+            };
+
+            if (action == "CreateCandidate")
+            {
+                var name = ReadRequiredString(context.InputParameters, "CandidateName").Trim();
+                var email = ReadRequiredString(context.InputParameters, "CandidateEmail").Trim();
+                RequireSyntheticProfile(name, email);
+                input["CandidateName"] = name;
+                input["CandidateEmail"] = email;
+                input["CandidatePhone"] = ReadOptionalString(context.InputParameters, "CandidatePhone");
+                input["PositionId"] = ReadOptionalGuid(context.InputParameters, "PositionId");
+                input["CandidateSourceId"] = ReadOptionalGuid(context.InputParameters, "CandidateSourceId");
+            }
+            else
+            {
+                var candidateId = ParseGuid(ReadRequiredString(context.InputParameters, "CandidateId"),
+                    "INVALID_CANDIDATE");
+                input["CandidateId"] = candidateId;
+                input["ExpectedStatus"] = ReadRequiredInt(context.InputParameters, "ExpectedStatus");
+                input["CallOutcome"] = ReadRequiredInt(context.InputParameters, "CallOutcome");
+                input["ContactedAt"] = ParseUtcDateTime(
+                    ReadRequiredString(context.InputParameters, "ContactedAt"));
+                input["Notes"] = ReadOptionalString(context.InputParameters, "Notes");
+
+                var factory = (IOrganizationServiceFactory)serviceProvider.GetService(
+                    typeof(IOrganizationServiceFactory));
+                var service = factory.CreateOrganizationService(context.InitiatingUserId);
+                var candidate = service.Retrieve("os_sr_cand", candidateId,
+                    new ColumnSet("os_sr_cand_nm", "os_sr_cand_eml"));
+                RequireSyntheticProfile(
+                    candidate.GetAttributeValue<string>("os_sr_cand_nm"),
+                    candidate.GetAttributeValue<string>("os_sr_cand_eml"));
+
+                var result = CandidateOperation.Execute(
+                    new ActionRequest(context.InitiatingUserId, input, DateTime.UtcNow),
+                    new DataverseStore(service, context, trace));
+                WriteResult(context, result);
+                return;
+            }
+
+            var organizationServiceFactory = (IOrganizationServiceFactory)serviceProvider.GetService(
+                typeof(IOrganizationServiceFactory));
+            var organizationService = organizationServiceFactory.CreateOrganizationService(context.InitiatingUserId);
+            var createResult = CandidateOperation.Execute(
+                new ActionRequest(context.InitiatingUserId, input, DateTime.UtcNow),
+                new DataverseStore(organizationService, context, trace));
+            WriteResult(context, createResult);
+        }
+
+        private static void WriteResult(IPluginExecutionContext context, ActionResult result)
+        {
+            context.OutputParameters["ResultCode"] = result.Replay ? "DuplicateReplay" : "Applied";
+            context.OutputParameters["CandidateId"] = result.CandidateId.ToString("D");
+        }
+
+        private static string ReadRequiredString(ParameterCollection parameters, string name)
+        {
+            if (!parameters.TryGetValue(name, out var value) || !(value is string text) ||
+                string.IsNullOrWhiteSpace(text))
+                throw new OperationError("INVALID_" + name.ToUpperInvariant());
+            return text;
+        }
+
+        private static string? ReadOptionalString(ParameterCollection parameters, string name)
+        {
+            if (!parameters.TryGetValue(name, out var value) || value == null) return null;
+            if (!(value is string text)) throw new OperationError("INVALID_TEXT");
+            return text;
+        }
+
+        private static int ReadRequiredInt(ParameterCollection parameters, string name)
+        {
+            if (!parameters.TryGetValue(name, out var value) || !(value is int number))
+                throw new OperationError("INVALID_" + name.ToUpperInvariant());
+            return number;
+        }
+
+        private static Guid ParseGuid(string value, string errorCode)
+        {
+            if (!Guid.TryParse(value, out var id) || id == Guid.Empty)
+                throw new OperationError(errorCode);
+            return id;
+        }
+
+        private static Guid? ReadOptionalGuid(ParameterCollection parameters, string name)
+        {
+            var value = ReadOptionalString(parameters, name);
+            if (value == null) return null;
+            return ParseGuid(value, "INVALID_GUID_PARAMETER:" + name);
+        }
+
+        private static DateTime ParseUtcDateTime(string value)
+        {
+            if (!DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None,
+                out var timestamp) || timestamp.Offset != TimeSpan.Zero)
+                throw new OperationError("INVALID_CONTACT_TIME");
+            return timestamp.UtcDateTime;
+        }
+
+        private static void RequireSyntheticProfile(string name, string email)
+        {
+            var at = email.LastIndexOf('@');
+            if (!name.StartsWith("[SYNTHETIC-E2E]", StringComparison.Ordinal) ||
+                at <= 0 || at == email.Length - 1 ||
+                email.IndexOfAny(new[] { ' ', '\t', '\r', '\n' }) >= 0 ||
+                !email.Substring(at + 1).EndsWith(".invalid", StringComparison.OrdinalIgnoreCase))
+                throw new OperationError("DEV_SYNTHETIC_DATA_REQUIRED");
         }
     }
 

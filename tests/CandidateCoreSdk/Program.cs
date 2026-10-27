@@ -119,6 +119,22 @@ internal static class Program
 
     private static void Main()
     {
+        var devCreate = new Host(-1, createCandidate: true);
+        devCreate.MainValues["MessageName"] = "os_sr_devcs";
+        devCreate.Input["CorrelationId"] = Guid.NewGuid().ToString("D");
+        devCreate.Input["CandidateName"] = "Synthetic Candidate";
+        Reject(() => new ApplyCandidateAction().Execute(devCreate), "DEV_SYNTHETIC_DATA_REQUIRED");
+        Check(devCreate.ServiceOperations.Count == 0 && devCreate.CreatedCandidates == 0,
+            "DEV slice rejects non-prefixed candidate before any Dataverse operation");
+
+        var devEmail = new Host(-1, createCandidate: true);
+        devEmail.MainValues["MessageName"] = "os_sr_devcs";
+        devEmail.Input["CorrelationId"] = Guid.NewGuid().ToString("D");
+        devEmail.Input["CandidateEmail"] = "synthetic@example.com";
+        Reject(() => new ApplyCandidateAction().Execute(devEmail), "DEV_SYNTHETIC_DATA_REQUIRED");
+        Check(devEmail.ServiceOperations.Count == 0 && devEmail.CreatedCandidates == 0,
+            "DEV slice rejects non-reserved email before any Dataverse operation");
+
         var actionWriteMatrix = new Dictionary<string, string[]>
         {
             ["CreateCandidate"] = new[] { "CANDIDATE_CREATE", "RECEIPT_CREATE" },

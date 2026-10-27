@@ -10,6 +10,7 @@ param(
     [Parameter(Mandatory)][string]$ExpectedOrganizationId,
     [string]$ExpectedHandlerPackageUniqueName,
     [switch]$RequirePackageGuardSteps,
+    [switch]$DevGuardBypass,
     [int]$ExpectedGuardStepCount,
     [string]$RuntimeEvidencePath
 )
@@ -26,6 +27,10 @@ $serverRegistrationAuthorization = $RuntimeMode -ceq 'R4OServerRegistrationApply
 $mvpVerticalSliceAuthorization = $RuntimeMode -in @(
     'MvpVerticalSlicePreflight', 'MvpVerticalSliceApply'
 )
+$mvpDevGuardBypassAuthorization = $mvpVerticalSliceAuthorization -and $DevGuardBypass
+if ($DevGuardBypass -and ($RuntimeMode -cne 'MvpVerticalSliceApply')) {
+    throw 'The DEV guard bypass is permitted only for the one-shot MVP apply mode.'
+}
 $verifiedAncestorAuthorization = $RuntimeMode -in @(
     'VerifiedAncestorApply', 'R4OWriteContextApply', 'R4OServerRegistrationApply'
 )
@@ -40,7 +45,11 @@ if ($serverRegistrationAuthorization) {
     $runtimeAuthorizationId = 'phase3d-r4o-server-registration-classifier-runtime'
 }
 if ($mvpVerticalSliceAuthorization) {
-    $runtimeAuthorizationId = 'phase3d-mvp-visible-vertical-slice-runtime'
+    $runtimeAuthorizationId = if ($mvpDevGuardBypassAuthorization) {
+        'phase3d-vn-lmv-it-dev-guard-bypass'
+    } else {
+        'phase3d-mvp-visible-vertical-slice-runtime'
+    }
     $verifiedAncestorAuthorization = $true
     $RuntimeMode = if ($RuntimeMode -ceq 'MvpVerticalSlicePreflight') { 'Preflight' } else { 'Apply' }
 }
@@ -320,18 +329,46 @@ function Assert-PackageGuardSteps {
     if ($guardTypes.Count -ne 1 -or [string]$guardTypes[0].typename -cne $script:apiContract.guard) {
         throw 'Runtime package assembly does not resolve exactly one approved guard type.'
     }
-    $steps = @(Get-Rows -Path "sdkmessageprocessingsteps?%24select=sdkmessageprocessingstepid,name,statecode,_eventhandler_value,_sdkmessageid_value,_sdkmessagefilterid_value&%24filter=startswith(name,'os_sr_cact.guard.')")
+    $steps = @(Get-Rows -Path "sdkmessageprocessingsteps?%24select=sdkmessageprocessingstepid,name,statecode,statuscode,stage,mode,_impersonatinguserid_value,_eventhandler_value,_sdkmessageid_value,_sdkmessagefilterid_value&%24filter=startswith(name,'os_sr_cact.guard.')")
     if ($steps.Count -ne $ExpectedCount -or
         @($steps | ForEach-Object { [string]$_.sdkmessageprocessingstepid } | Sort-Object -Unique).Count -ne $ExpectedCount -or
         @($steps | Where-Object { [string]$_._eventhandler_value -ine [string]$guardTypes[0].plugintypeid -or
-            [int]$_.statecode -ne 0 }).Count -ne 0) {
+            [int]$_.stage -ne 10 -or [int]$_.mode -ne 0 -or $_._impersonatinguserid_value }).Count -ne 0) {
         throw 'Candidate Core guard steps are not all mapped to the package-backed guard type.'
     }
     $inventory = Get-GuardRegistrationInventory -Steps $steps
+    $expectedDisabled = @(
+        'os_sr_cact.guard.os_sr_cand.Create',
+        'os_sr_cact.guard.os_sr_call.Create',
+        'os_sr_cact.guard.os_sr_cand.Update',
+        'os_sr_cact.guard.os_sr_csh.Create',
+        'os_sr_cact.guard.os_sr_oprc.Create'
+    ) | Sort-Object
+    $disabled = @($steps | Where-Object { [int]$_.statecode -eq 1 })
+    if ($mvpDevGuardBypassAuthorization) {
+        $disabledNames = @($disabled | ForEach-Object { [string]$_.name } | Sort-Object)
+        $disabledInventory = @($inventory.Rows | Where-Object { $_.StepName -in $expectedDisabled })
+        if ($disabled.Count -ne $expectedDisabled.Count -or
+            [string]::Join('|', $disabledNames) -cne [string]::Join('|', $expectedDisabled) -or
+            @($steps | Where-Object { [int]$_.statecode -notin @(0, 1) }).Count -ne 0 -or
+            @($steps | Where-Object {
+                if ([int]$_.statecode -eq 1) { [int]$_.statuscode -ne 2 }
+                else { [int]$_.statuscode -ne 1 }
+            }).Count -ne 0 -or
+            $disabledInventory.Count -ne $expectedDisabled.Count -or
+            @($disabledInventory | Where-Object { $_.Classification -ne 'CANONICAL_PROTECTED_WRITE' }).Count -ne 0) {
+            throw 'VN_LMV_IT_DEV_GUARD_BYPASS registration state differs from the exact five-step allowlist.'
+        }
+    } elseif ($disabled.Count -ne 0 -or @($steps | Where-Object {
+            [int]$_.statecode -ne 0 -or [int]$_.statuscode -ne 1
+        }).Count -ne 0) {
+        throw 'Candidate Core guard steps are not all enabled outside the explicitly authorized DEV bypass.'
+    }
     [ordered]@{
         PackageGuardType = [string]$guardTypes[0].typename
         GuardStepCount = $steps.Count
-        PackageBackedGuardSteps = $steps.Count
+        PackageBackedGuardSteps = @($steps | Where-Object { [int]$_.statecode -eq 0 }).Count
+        DisabledDevBypassGuardSteps = if ($mvpDevGuardBypassAuthorization) { $expectedDisabled } else { @() }
         GuardRegistrationInventory = $inventory
     }
 }
@@ -806,7 +843,9 @@ try {
 
     Assert-LiveEvidence
     Assert-Counts 'Final reconciliation'
-    $resultClassification = if ($mvpVerticalSliceAuthorization) {
+    $resultClassification = if ($mvpDevGuardBypassAuthorization) {
+        'CANDIDATE_CORE_MVP_RUNTIME_ACCEPTED_DEV_GUARD_BYPASS'
+    } elseif ($mvpVerticalSliceAuthorization) {
         'CANDIDATE_CORE_MVP_RUNTIME_ACCEPTED'
     } else {
         'PHASE_3D_SYNTHETIC_RUNTIME_ACCEPTED'

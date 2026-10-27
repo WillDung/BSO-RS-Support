@@ -1,12 +1,18 @@
 # Candidate UI Implementation Note
 
-**Status:** Not implemented or published. The first-visible vertical-slice acceptance criterion is unmet.
+**Status (27 October 2026):** Implemented, published, and browser-accepted in VN LMV IT as a DEV-only direct-write fallback. Not production-ready.
+
+**Acceptance:** `FIRST_VISIBLE_VERTICAL_SLICE_COMPLETE_DEV_DIRECT_WRITE_FALLBACK`; `CANDIDATE_MANAGEMENT_UI_WORKING`; `CREATE_CANDIDATE_WORKING`; `RECORD_CALL_WORKING`; `STATUS_HISTORY_VISIBLE`; `CANDIDATE_CORE_PRODUCTION_BACKEND_REMAINS_PENDING`.
+
+One synthetic Candidate was created and appeared in the list with a server-generated Candidate Number and `Need Call Candidate` status. No Answer created one Call Log and preserved status. Answered created the second Call Log, changed status to `Candidate Answered`, and created the visible `Need Call Candidate -> Candidate Answered` Status History entry. Final readback: Candidate / Call Log / Status History / Operation Receipt = **1 / 2 / 1 / 0**.
+
+**`VN_LMV_IT_PROTECT_CANDIDATE_CORE_DEV_KILL_SWITCH_ACTIVE`. REAL DATA PROHIBITED. MUST RESTORE GUARDS BEFORE SECURITY/PRODUCTION ACCEPTANCE.** All 50 live registrations handled by `os_sr_cact.ProtectCandidateCore` are inactive in VN LMV IT; both `ApplyCandidateAction` steps remain active. The redacted pre-change restoration baseline and protected-property fingerprints are stored in the private session-state file `vn-lmv-it-protectcandidatecore-baseline-20261027.json`. Do not treat this DEV exception as a production architecture or readiness decision.
 
 ## Intended experience
 
 The approved MVP experience is `srapp` → New Candidate → save → Record Call → see Candidate status, Call Log, and Status History. Candidate creation and call/state changes must use Candidate Core unless an explicitly approved, isolated DEV fallback is available. The app remains caller-context and must not silently impersonate a BSO through a fixed Flow-owner connection.
 
-## Current evidence
+## Historical pre-DEV evidence (26 October 2026)
 
 - One existing unsigned Candidate Core package update was made in VN LMV IT.
 - The single synthetic CreateCandidate acceptance request was rejected at `CC_CREATE_CANDIDATE` with `DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_PROTECTED_WRITE:CC_CREATE_CANDIDATE:0x80040265`.
@@ -18,7 +24,7 @@ The approved MVP experience is `srapp` → New Candidate → save → Record Cal
 - The same authenticated Power Apps Flows page exposed a list/filter-only widget (My flows, Shared with me, All flows) with no flow-create control. The visible My flows list contained only document-automation flows; the earlier environment-wide list had 34 flows and no matching Candidate/DEV names or descriptions. These checks do not exclude an unrelated flow under another name.
 - The Power Automate maker URL opened separately redirects to Microsoft sign-in in this browser context; no interactive sign-in was initiated. A custom-page upload/sitemap tool is available, but creating a page alone would not satisfy the workflow: the production Custom API path is currently rejected, and no working DEV flow exists to handle writes. No unusable page was published.
 
-## DEV fallback blocker
+## Historical DEV fallback blocker (superseded 27 October 2026)
 
 The requested DEV flow cannot presently provide the permitted direct-write fallback while the package guard rejects Candidate, Call Log, and Status History writes without a trusted `os_sr_cact` ancestor. Calling Candidate Core from the flow is also blocked by the observed guard failure. Adding a guard bypass would contradict the still-required direct-write rejection and caller-identity rules; no such bypass, owner impersonation, or second business backend was introduced. The newly shared maker session enables inspection of `srapp` and its flow list, but did not expose a flow-authoring surface.
 

@@ -6,7 +6,7 @@
   <title>Candidate Management</title>
   <link rel="stylesheet" href="candidate-console.css">
   <script src="../../ClientGlobalContext.js.aspx"></script>
-  <script defer src="candidate-console.js"></script>
+  <script defer src="candidate-console.js?v=9b95fec7433f"></script>
 </head>
 <body>
   <main class="shell">
@@ -16,8 +16,8 @@
         <h1>Candidate Management</h1>
       </div>
       <div class="page-badges">
-        <span class="dev-badge">VN LMV IT — DEV</span>
-        <span class="dev-badge">DEV FALLBACK</span>
+        <span class="dev-badge">VN LMV IT — DEV DIRECT WRITE</span>
+        <span class="dev-badge">PROTECTCANDIDATECORE DISABLED — NOT PRODUCTION</span>
       </div>
     </header>
 
@@ -26,7 +26,7 @@
     <section class="panel" aria-labelledby="create-heading">
       <div class="section-heading">
         <div>
-          <p class="eyebrow">Temporary DEV Candidate Slice</p>
+          <p class="eyebrow">DEV direct-write fallback</p>
           <h2 id="create-heading">New Candidate</h2>
         </div>
       </div>
@@ -57,7 +57,7 @@
         </label>
         <div class="form-actions field-wide">
           <button id="create-button" class="button button-primary" type="submit">Create Candidate</button>
-          <span id="create-help" class="muted">DEV fallback only: use a [SYNTHETIC-E2E] name and an .invalid email. The server validates this restriction.</span>
+          <span id="create-help" class="muted">VN LMV IT DEV only. Use a [SYNTHETIC-E2E] name and a reserved .invalid email. Not production.</span>
         </div>
       </form>
     </section>
@@ -127,7 +127,7 @@
     <form id="call-form" method="dialog">
       <div class="section-heading">
         <div>
-          <p class="eyebrow">Temporary DEV Candidate Slice</p>
+          <p class="eyebrow">DEV direct-write fallback</p>
           <h2 id="call-dialog-heading">Record Call</h2>
         </div>
       </div>

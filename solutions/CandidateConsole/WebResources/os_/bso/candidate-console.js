@@ -14,35 +14,57 @@
     100010001: "No Answer",
     100010002: "Call Back Requested"
   };
-  const DEV_FAILURE_PATTERN = /\b(DEV_SLICE_INPUT_REJECTED(?::(?:CONTEXT|ACTION|PARAMETER_SHAPE|SYNTHETIC_PROFILE|CALL_PARAMETERS|REQUIRED_VALUE|OPTIONAL_TEXT|OPTIONAL_LOOKUP|CONTACTED_AT))?|DEV_SLICE_(?:ENVIRONMENT_REJECTED|CANDIDATE_CREATE_FAILED|CANDIDATE_READBACK_FAILED|CALL_CREATE_FAILED|STATUS_UPDATE_FAILED|HISTORY_CREATE_FAILED|RESPONSE_FAILED)|DEV_SLICE_REQUEST_REJECTED_HTTP_[1-5]\d\d)(?::(0x[0-9a-f]{8}))?\b/i;
+  const DEV_ORIGIN = "https://org14938ec2.crm4.dynamics.com";
+  const STATUS = {
+    needCall: 100010000,
+    answered: 100010001
+  };
+  const OUTCOME = {
+    answered: 100010000,
+    noAnswer: 100010001,
+    callBackRequested: 100010002
+  };
   const TABLES = {
     candidate: {
       logicalName: "os_sr_cand",
+      entitySetName: "os_sr_cands",
       id: "",
       number: "os_sr_cand_cnum",
       name: "os_sr_cand_nm",
       email: "os_sr_cand_eml",
       phone: "os_sr_cand_phn",
       status: "os_sr_cand_stat",
-      correlation: "os_sr_cand_corid",
       position: "_os_sr_cand_pos_value",
-      source: "_os_sr_cand_csrc_value"
+      positionNavigation: "os_sr_cand_pos",
+      positionEntitySet: "os_sr_poses",
+      source: "_os_sr_cand_csrc_value",
+      sourceNavigation: "os_sr_cand_csrc",
+      sourceEntitySet: "os_sr_csrcs"
     },
     call: {
       logicalName: "os_sr_call",
+      entitySetName: "os_sr_calls",
       id: "",
       candidate: "_os_sr_call_cand_value",
+      candidateNavigation: "os_sr_call_cand",
+      correlation: "os_sr_call_corid",
       outcome: "os_sr_call_out",
       contactedAt: "os_sr_call_ctat",
+      contactedByNavigation: "os_sr_call_ctby",
       notes: "os_sr_call_nts",
       reference: "os_sr_call_ref"
     },
     history: {
       logicalName: "os_sr_csh",
+      entitySetName: "os_sr_cshs",
       id: "",
       candidate: "_os_sr_csh_cand_value",
+      candidateNavigation: "os_sr_csh_cand",
+      actorNavigation: "os_sr_csh_actr",
+      correlation: "os_sr_csh_corid",
       previous: "os_sr_csh_prevstat",
       current: "os_sr_csh_newstat",
+      action: "os_sr_csh_cact",
       changedAt: "os_sr_csh_chg",
       reason: "os_sr_csh_rsn"
     }
@@ -74,12 +96,53 @@
     notice.hidden = false;
   }
 
-  function safeDevFailure(error, action) {
-    const message = error && typeof error.message === "string" ? error.message : "";
-    const match = DEV_FAILURE_PATTERN.exec(message);
-    if (!match) return `The DEV Candidate Slice could not ${action}.`;
-    const code = match[2] ? `, ${match[2].toUpperCase()}` : "";
-    return `The DEV Candidate Slice could not ${action} (${match[1].toUpperCase()}${code}).`;
+  function isTargetDevEnvironment() {
+    try {
+      return new URL(globalContext().getClientUrl()).origin.toLowerCase() === DEV_ORIGIN;
+    } catch {
+      return false;
+    }
+  }
+
+  function currentUserId() {
+    const userId = globalContext().userSettings.userId;
+    if (typeof userId !== "string" ||
+        !/^\{?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\}?$/i.test(userId)) {
+      throw new Error("DEV_DIRECT_WRITE_USER_CONTEXT_INVALID");
+    }
+    return userId.replace(/[{}]/g, "");
+  }
+
+  function isSyntheticCandidate(candidate) {
+    return Boolean(candidate &&
+      typeof candidate[TABLES.candidate.name] === "string" &&
+      candidate[TABLES.candidate.name].startsWith("[SYNTHETIC-E2E]") &&
+      typeof candidate[TABLES.candidate.email] === "string" &&
+      /^[^@\s]+@[^@\s]+\.invalid$/i.test(candidate[TABLES.candidate.email]));
+  }
+
+  function logSafeFailure(category, error) {
+    const numericCode = Number(error && error.errorCode);
+    const code = Number.isFinite(numericCode) && numericCode !== 0
+      ? `:0x${(numericCode >>> 0).toString(16).padStart(8, "0").toUpperCase()}`
+      : "";
+    console.error(`${category}${code}`);
+  }
+
+  function failureMessage(category, partial = false) {
+    const messages = {
+      CANDIDATE_CREATE_FAILED: "Candidate create failed or its outcome is uncertain. The list was refreshed; verify before trying again.",
+      CANDIDATE_READBACK_FAILED: "Candidate was created, but readback failed. Refresh to reconcile before trying again.",
+      CALL_LOG_CREATE_FAILED: "Call Log create failed or its outcome is uncertain. Current data was refreshed; verify before trying again.",
+      CANDIDATE_STATUS_UPDATE_FAILED: "Candidate status update failed after the Call Log write. Partial DEV data may exist; current data was refreshed.",
+      STATUS_HISTORY_CREATE_FAILED: "Status History create failed after the Candidate status update. Partial DEV data exists; current data was refreshed.",
+      CANDIDATE_READ_FAILED: "Candidate could not be read before the call. Current data was refreshed.",
+      CANDIDATE_LIST_REFRESH_FAILED: "The write completed, but the Candidate list could not be refreshed.",
+      CANDIDATE_DETAIL_READ_FAILED: "The write completed, but Candidate details could not be refreshed.",
+      DEV_DIRECT_WRITE_RECONCILIATION_FAILED: "The write failed and current data could not be fully refreshed."
+    };
+    const message = messages[category] || "The DEV write failed. Current data was refreshed where possible.";
+    return partial ? `${message} Do not retry blindly.` : message;
   }
 
   function hideNotice() {
@@ -125,51 +188,12 @@
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
   }
 
-  const API_PARAMETER_TYPES = {
-    ActionType: { typeName: "Edm.String", structuralProperty: 1 },
-    CorrelationId: { typeName: "Edm.String", structuralProperty: 1 },
-    CandidateId: { typeName: "Edm.String", structuralProperty: 1 },
-    ExpectedStatus: { typeName: "Edm.Int32", structuralProperty: 1 },
-    CandidateName: { typeName: "Edm.String", structuralProperty: 1 },
-    CandidateEmail: { typeName: "Edm.String", structuralProperty: 1 },
-    CandidatePhone: { typeName: "Edm.String", structuralProperty: 1 },
-    PositionId: { typeName: "Edm.String", structuralProperty: 1 },
-    CandidateSourceId: { typeName: "Edm.String", structuralProperty: 1 },
-    CallOutcome: { typeName: "Edm.Int32", structuralProperty: 1 },
-    ContactedAt: { typeName: "Edm.String", structuralProperty: 1 },
-    Notes: { typeName: "Edm.String", structuralProperty: 1 }
-  };
-
-  function CandidateActionRequest(parameters) {
-    Object.assign(this, parameters);
-  }
-
-  CandidateActionRequest.prototype.getMetadata = function () {
-    return {
-      boundParameter: null,
-      parameterTypes: API_PARAMETER_TYPES,
-      operationType: 0,
-      operationName: "os_sr_devcs"
-    };
-  };
-
-  async function executeCandidateAction(parameters) {
-    const request = new CandidateActionRequest(parameters);
-    const response = await xrm().WebApi.online.execute(request);
-    if (!response.ok) {
-      let safeCategory = "";
-      try {
-        const body = await response.text();
-        const match = DEV_FAILURE_PATTERN.exec(body);
-        if (match) {
-          safeCategory = `${match[1].toUpperCase()}${match[2] ? `:${match[2].toUpperCase()}` : ""}`;
-        }
-      } catch {
-        safeCategory = "";
-      }
-      throw new Error(safeCategory || `DEV_SLICE_REQUEST_REJECTED_HTTP_${response.status}`);
+  function normalizeGuid(value) {
+    if (typeof value !== "string" ||
+        !/^\{?[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\}?$/i.test(value)) {
+      throw new Error("DEV_DIRECT_WRITE_INVALID_RECORD_REFERENCE");
     }
-    return response.json();
+    return value.replace(/[{}]/g, "");
   }
 
   async function retrieveAll(tableLogicalName, query) {
@@ -235,9 +259,9 @@
       c.id, c.number, c.name, c.email, c.phone, c.status, c.position, c.source,
       "createdon", "_ownerid_value"
     ].join(",")}&$filter=${encodeURIComponent(
-      `startswith(${c.name},'[SYNTHETIC-E2E]') and endswith(${c.email},'.invalid')`
+      `endswith(${c.email},'.invalid')`
     )}&$orderby=createdon desc&$top=100`;
-    const rows = await retrieveAll(c.logicalName, query);
+    const rows = (await retrieveAll(c.logicalName, query)).filter(isSyntheticCandidate);
     renderCandidateRows(rows);
   }
 
@@ -344,9 +368,25 @@
         renderStatusHistory(candidateId)
       ]);
       $("detail-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+      return true;
     } catch {
+      logSafeFailure("DEV_DIRECT_WRITE_CANDIDATE_DETAIL_READ_FAILED");
       showNotice("Candidate details could not be loaded. Refresh and try again.", true);
+      return false;
     }
+  }
+
+  async function reconcileAfterFailure(candidateId) {
+    let reconciled = true;
+    try {
+      await refreshCandidates();
+    } catch (error) {
+      reconciled = false;
+      logSafeFailure("DEV_DIRECT_WRITE_RECONCILIATION_FAILED", error);
+    }
+    const id = candidateId || (selectedCandidate && selectedCandidate[TABLES.candidate.id]);
+    if (id && !(await openCandidate(id))) reconciled = false;
+    return reconciled;
   }
 
   function addOption(select, value, label) {
@@ -379,6 +419,10 @@
   }
 
   function showCallDialog(candidate) {
+    if (!isSyntheticCandidate(candidate)) {
+      showNotice("DEV direct write is limited to [SYNTHETIC-E2E] candidates with .invalid email addresses.", true);
+      return;
+    }
     selectedCandidate = candidate;
     $("call-candidate-label").textContent =
       `${candidate[TABLES.candidate.number] || ""} ${candidate[TABLES.candidate.name] || ""}`.trim();
@@ -403,34 +447,65 @@
       showNotice("This DEV console accepts only [SYNTHETIC-E2E] names and reserved .invalid email addresses.", true);
       return;
     }
+    if (!isTargetDevEnvironment()) {
+      showNotice("DEV direct writes are available only in VN LMV IT.", true);
+      return;
+    }
     setBusy(true);
+    const c = TABLES.candidate;
+    let category = "CANDIDATE_CREATE_FAILED";
+    let candidateId = null;
+    let candidateCreated = false;
     try {
-      const correlationId = newCorrelationId();
-      const parameters = {
-        ActionType: "CreateCandidate",
-        CorrelationId: correlationId,
-        CandidateName: candidateName,
-        CandidateEmail: candidateEmail
+      const payload = {
+        [c.name]: candidateName,
+        [c.email]: candidateEmail,
+        [c.status]: STATUS.needCall
       };
-      if (candidatePhone) parameters.CandidatePhone = candidatePhone;
-      if ($("candidate-position").value) parameters.PositionId = $("candidate-position").value;
-      if ($("candidate-source").value) parameters.CandidateSourceId = $("candidate-source").value;
-      const result = await executeCandidateAction(parameters);
-      if (result.ResultCode !== "Applied" && result.ResultCode !== "DuplicateReplay") {
-        throw new Error("The DEV Candidate Slice did not confirm candidate creation.");
+      if (candidatePhone) payload[c.phone] = candidatePhone;
+      const positionId = $("candidate-position").value;
+      if (positionId) {
+        payload[`${c.positionNavigation}@odata.bind`] =
+          `/${c.positionEntitySet}(${normalizeGuid(positionId)})`;
       }
-      const c = TABLES.candidate;
-      if (typeof result.CandidateId !== "string" ||
-          !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(result.CandidateId)) {
-        throw new Error("The DEV Candidate Slice returned no valid candidate reference.");
+      const sourceId = $("candidate-source").value;
+      if (sourceId) {
+        payload[`${c.sourceNavigation}@odata.bind`] =
+          `/${c.sourceEntitySet}(${normalizeGuid(sourceId)})`;
       }
-      const candidate = await xrm().WebApi.retrieveRecord(c.logicalName, result.CandidateId);
+      const result = await xrm().WebApi.createRecord(c.logicalName, payload);
+      candidateId = result && typeof result.id === "string" ? normalizeGuid(result.id) : null;
+      candidateCreated = Boolean(candidateId);
+      if (!candidateId) {
+        category = "CANDIDATE_READBACK_FAILED";
+        throw new Error("DEV_DIRECT_WRITE_CANDIDATE_ID_MISSING");
+      }
+
+      category = "CANDIDATE_READBACK_FAILED";
+      const candidate = await xrm().WebApi.retrieveRecord(
+        c.logicalName,
+        candidateId,
+        `?$select=${[c.id, c.number, c.name, c.email, c.phone, c.status, c.position, c.source, "createdon", "_ownerid_value"].join(",")}`
+      );
+      if (!isSyntheticCandidate(candidate) || candidate[c.status] !== STATUS.needCall ||
+          !candidate[c.number]) {
+        throw new Error("DEV_DIRECT_WRITE_CANDIDATE_READBACK_INVALID");
+      }
       $("candidate-form").reset();
+      category = "CANDIDATE_LIST_REFRESH_FAILED";
       await refreshCandidates();
-      await openCandidate(candidate[c.id]);
+      category = "CANDIDATE_DETAIL_READ_FAILED";
+      if (!(await openCandidate(candidate[c.id]))) {
+        throw new Error("DEV_DIRECT_WRITE_CANDIDATE_DETAIL_READ_FAILED");
+      }
       showNotice("Candidate created successfully.");
     } catch (error) {
-      showNotice(safeDevFailure(error, "create the candidate"), true);
+      logSafeFailure(`DEV_DIRECT_WRITE_${category}`, error);
+      const reconciled = await reconcileAfterFailure(candidateId);
+      const message = candidateCreated && category === "CANDIDATE_READBACK_FAILED"
+        ? "Candidate was created, but readback failed. Refresh to reconcile before trying again."
+        : failureMessage(category, candidateCreated);
+      showNotice(reconciled ? message : `${message} Reconciliation did not fully complete.`, true);
     } finally {
       setBusy(false);
     }
@@ -440,32 +515,97 @@
     event.preventDefault();
     if (busy || !selectedCandidate) return;
     hideNotice();
-    const candidateId = selectedCandidate[TABLES.candidate.id];
-    const expectedStatus = selectedCandidate[TABLES.candidate.status];
-    if (expectedStatus == null) {
-      showNotice("The current Candidate status is unavailable; refresh before recording a call.", true);
+    const c = TABLES.candidate;
+    const call = TABLES.call;
+    const history = TABLES.history;
+    let candidateId;
+    try {
+      candidateId = normalizeGuid(selectedCandidate[c.id]);
+    } catch (error) {
+      logSafeFailure("DEV_DIRECT_WRITE_INVALID_CANDIDATE_REFERENCE", error);
+      showNotice("Candidate reference is invalid. Refresh the list and select the Candidate again.", true);
       return;
     }
+    if (!isTargetDevEnvironment()) {
+      showNotice("DEV direct writes are available only in VN LMV IT.", true);
+      return;
+    }
+    if (!isSyntheticCandidate(selectedCandidate)) {
+      showNotice("DEV direct write is limited to [SYNTHETIC-E2E] candidates with .invalid email addresses.", true);
+      return;
+    }
+    const outcome = Number($("call-outcome").value);
+    if (![OUTCOME.noAnswer, OUTCOME.answered, OUTCOME.callBackRequested].includes(outcome)) {
+      showNotice("Choose a supported DEV call outcome.", true);
+      return;
+    }
+    let category = "CANDIDATE_READ_FAILED";
+    let callCreated = false;
+    let statusUpdated = false;
     setBusy(true);
     try {
-      const result = await executeCandidateAction({
-        ActionType: "RecordCall",
-        CorrelationId: newCorrelationId(),
-        CandidateId: candidateId,
-        ExpectedStatus: expectedStatus,
-        CallOutcome: Number($("call-outcome").value),
-        ContactedAt: new Date().toISOString(),
-        ...( $("call-notes").value.trim() ? { Notes: $("call-notes").value.trim() } : {})
-      });
-      if (result.ResultCode !== "Applied" && result.ResultCode !== "DuplicateReplay") {
-        throw new Error("The DEV Candidate Slice did not confirm the call.");
+      const current = await xrm().WebApi.retrieveRecord(
+        c.logicalName,
+        candidateId,
+        `?$select=${[c.id, c.name, c.email, c.status].join(",")}`
+      );
+      if (!isSyntheticCandidate(current)) {
+        showNotice("DEV direct write is limited to [SYNTHETIC-E2E] candidates with .invalid email addresses.", true);
+        return;
+      }
+      const previousStatus = current[c.status];
+      const correlationId = newCorrelationId();
+      category = "CALL_LOG_CREATE_FAILED";
+      const userId = currentUserId();
+      const payload = {
+        [`${call.candidateNavigation}@odata.bind`]: `/${c.entitySetName}(${candidateId})`,
+        [`${call.contactedByNavigation}@odata.bind`]: `/systemusers(${userId})`,
+        [call.outcome]: outcome,
+        [call.contactedAt]: new Date().toISOString(),
+        [call.correlation]: correlationId
+      };
+      const notes = $("call-notes").value.trim();
+      if (notes) payload[call.notes] = notes;
+
+      await xrm().WebApi.createRecord(call.logicalName, payload);
+      callCreated = true;
+
+      if (outcome === OUTCOME.answered && previousStatus === STATUS.needCall) {
+        category = "CANDIDATE_STATUS_UPDATE_FAILED";
+        await xrm().WebApi.updateRecord(c.logicalName, candidateId, {
+          [c.status]: STATUS.answered
+        });
+        statusUpdated = true;
+
+        category = "STATUS_HISTORY_CREATE_FAILED";
+        const historyPayload = {
+          [`${history.candidateNavigation}@odata.bind`]: `/${c.entitySetName}(${candidateId})`,
+          [`${history.actorNavigation}@odata.bind`]: `/systemusers(${userId})`,
+          [history.previous]: STATUS.needCall,
+          [history.current]: STATUS.answered,
+          [history.changedAt]: new Date().toISOString(),
+          [history.correlation]: correlationId,
+          [history.action]: "RecordCall",
+          [history.reason]: "DEV Candidate Management / Record Call"
+        };
+        await xrm().WebApi.createRecord(history.logicalName, historyPayload);
       }
       $("call-dialog").close();
+      category = "CANDIDATE_LIST_REFRESH_FAILED";
       await refreshCandidates();
-      await openCandidate(candidateId);
-      showNotice("Call recorded successfully.");
+      category = "CANDIDATE_DETAIL_READ_FAILED";
+      if (!(await openCandidate(candidateId))) {
+        throw new Error("DEV_DIRECT_WRITE_CANDIDATE_DETAIL_READ_FAILED");
+      }
+      showNotice(outcome === OUTCOME.answered && previousStatus !== STATUS.needCall
+        ? "Call recorded. Candidate status was preserved because it was not Need Call Candidate."
+        : "Call recorded successfully.");
     } catch (error) {
-      showNotice(safeDevFailure(error, "record the call"), true);
+      logSafeFailure(`DEV_DIRECT_WRITE_${category}`, error);
+      const reconciled = await reconcileAfterFailure(candidateId);
+      const partial = callCreated || statusUpdated;
+      const message = failureMessage(category, partial);
+      showNotice(reconciled ? message : `${message} Reconciliation did not fully complete.`, true);
     } finally {
       setBusy(false);
     }
@@ -492,6 +632,12 @@
 
   async function initialize() {
     bindEvents();
+    if (!isTargetDevEnvironment()) {
+      $("create-button").disabled = true;
+      $("refresh-button").disabled = true;
+      showNotice("This DEV direct-write console is available only in VN LMV IT.", true);
+      return;
+    }
     let loadStage = "the model-driven app context";
     try {
       globalContext();

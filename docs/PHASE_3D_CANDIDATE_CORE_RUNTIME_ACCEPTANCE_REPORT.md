@@ -1,10 +1,108 @@
 # Phase 3D - Candidate Core Synthetic Runtime Acceptance
 
-Date: 26 October 2026. This report records the current Phase 3D-R4M package disposition and CreateCandidate runtime failure; earlier assessments are retained as history. Source: owner authorization, current repository contract/source, guarded live reconciliation, local offline validation, and the supported Dataverse plug-in package model.
+Date: 26 October 2026. This report records the R4O server-registration classifier implementation, one existing-package update, and the resulting CreateCandidate rejection; earlier runtime failures remain historical evidence. Source: owner authorization, current repository contract/source, guarded live reconciliation, local offline validation, and the supported Dataverse plug-in package model.
 
-## R4O Continuation: Static Write-Context Reconciliation (2026-10-26)
+## R4O Server-Registration Classifier: Deployment and Runtime Rejection
 
-**Final classification: `CANDIDATE_CORE_WRITE_CONTEXT_FAILURE_UNRESOLVED`.** The single diagnostic CreateCandidate returned `UNSUPPORTED_CORE_WRITE_CONTEXT:CREATE_CANDIDATE:OTHER_PROTECTED_WRITE` during `CC_CREATE_CANDIDATE`. This does not identify an exact supported table/message pair or prove an allowlist correction. No second repair, package update, acceptance call or matrix was executed. The existing R4O work remains incomplete; no new readiness/diagnostic phase was created.
+**Final result for this bounded R4O run:** the registration-backed package was updated once and reconciled, but the single CreateCandidate was rejected with `DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_GUARD_REGISTRATION:CC_CREATE_CANDIDATE:0x80040265`. Runtime acceptance and the matrix were not reached. The prior `OTHER_PROTECTED_WRITE` CreateCandidate result proved the runtime-shape classifier inadequate. Static source reconciliation already showed that Candidate Create and Receipt Create were in the exact ActionType/write allowlist; that allowlist was not broadened. The new safe category does not identify which internal registration metadata check failed; the stop rule was applied without further repair, deployment, or invocation.
+
+`ProtectCandidateCore` now derives a table-bound protected write from the current guard execution context's server-owned `OwningExtension`, which must reference an active `sdkmessageprocessingstep`. The read-only metadata chain must resolve the exact `os_sr_cact.ProtectCandidateCore` PlugInType, assembly `os_sr_cact` v1.0.0.0, existing package `os_sr_cact_pkg` v1.0.0, SDK message, and matching SDK message filter. Only the six exact pairs listed below receive canonical WriteCodes. Associate/Disassociate registrations are handled by the existing relationship guard. Other exact but unsupported message/entity pairs fail closed as `UNSUPPORTED_GUARD_REGISTRATION`. Where runtime `MessageName` or `PrimaryEntityName` is populated, it is only a consistency check; disagreement fails closed as `GUARD_REGISTRATION_CONTEXT_MISMATCH`. No registration ID, payload shape, Target, or request CLR type selects a protected write. The verified API ancestor/action trust model remains a separate required authorization check and was not weakened.
+
+The positive guard-registration cache is process-local, capped at 128 entries, expires after one minute, and is keyed by organization, calling user, and current OwningExtension ID. Negative results are not cached; each uncached or expired decision revalidates the metadata chain. Cache persistence is not required for correctness.
+
+### Live 50-step registration inventory
+
+Fresh GET-only preflight resolved 50/50 package-backed `ProtectCandidateCore` registrations: six canonical protected-write mappings, 42 exact unsupported registrations (fail-closed), two relationship guards, zero unresolved rows, and zero contradictory mappings. The two relationship registrations have no table filter. Empty WriteCode cells below are intentionally unsupported/relationship entries, not missing inventory data.
+
+| Step name | SDK message | `primaryobjecttypecode` | Canonical WriteCode |
+|---|---|---|---|
+| `os_sr_cact.guard.os_sr_call.Assign` | Assign | `os_sr_call` | — |
+| `os_sr_cact.guard.os_sr_call.Create` | Create | `os_sr_call` | `CALL_LOG_CREATE` |
+| `os_sr_cact.guard.os_sr_call.CreateMultiple` | CreateMultiple | `os_sr_call` | — |
+| `os_sr_cact.guard.os_sr_call.Delete` | Delete | `os_sr_call` | — |
+| `os_sr_cact.guard.os_sr_call.DeleteMultiple` | DeleteMultiple | `os_sr_call` | — |
+| `os_sr_cact.guard.os_sr_call.GrantAccess` | GrantAccess | `os_sr_call` | — |
+| `os_sr_cact.guard.os_sr_call.ModifyAccess` | ModifyAccess | `os_sr_call` | — |
+| `os_sr_cact.guard.os_sr_call.RevokeAccess` | RevokeAccess | `os_sr_call` | — |
+| `os_sr_cact.guard.os_sr_call.SetState` | SetState | `os_sr_call` | — |
+| `os_sr_cact.guard.os_sr_call.SetStateDynamicEntity` | SetStateDynamicEntity | `os_sr_call` | — |
+| `os_sr_cact.guard.os_sr_call.Update` | Update | `os_sr_call` | — |
+| `os_sr_cact.guard.os_sr_call.UpdateMultiple` | UpdateMultiple | `os_sr_call` | — |
+| `os_sr_cact.guard.os_sr_cand.Assign` | Assign | `os_sr_cand` | — |
+| `os_sr_cact.guard.os_sr_cand.Create` | Create | `os_sr_cand` | `CANDIDATE_CREATE` |
+| `os_sr_cact.guard.os_sr_cand.CreateMultiple` | CreateMultiple | `os_sr_cand` | — |
+| `os_sr_cact.guard.os_sr_cand.Delete` | Delete | `os_sr_cand` | — |
+| `os_sr_cact.guard.os_sr_cand.DeleteMultiple` | DeleteMultiple | `os_sr_cand` | — |
+| `os_sr_cact.guard.os_sr_cand.GrantAccess` | GrantAccess | `os_sr_cand` | — |
+| `os_sr_cact.guard.os_sr_cand.ModifyAccess` | ModifyAccess | `os_sr_cand` | — |
+| `os_sr_cact.guard.os_sr_cand.RevokeAccess` | RevokeAccess | `os_sr_cand` | — |
+| `os_sr_cact.guard.os_sr_cand.SetState` | SetState | `os_sr_cand` | — |
+| `os_sr_cact.guard.os_sr_cand.SetStateDynamicEntity` | SetStateDynamicEntity | `os_sr_cand` | — |
+| `os_sr_cact.guard.os_sr_cand.Update` | Update | `os_sr_cand` | `CANDIDATE_UPDATE` |
+| `os_sr_cact.guard.os_sr_cand.UpdateMultiple` | UpdateMultiple | `os_sr_cand` | — |
+| `os_sr_cact.guard.os_sr_csh.Assign` | Assign | `os_sr_csh` | — |
+| `os_sr_cact.guard.os_sr_csh.Create` | Create | `os_sr_csh` | `STATUS_HISTORY_CREATE` |
+| `os_sr_cact.guard.os_sr_csh.CreateMultiple` | CreateMultiple | `os_sr_csh` | — |
+| `os_sr_cact.guard.os_sr_csh.Delete` | Delete | `os_sr_csh` | — |
+| `os_sr_cact.guard.os_sr_csh.DeleteMultiple` | DeleteMultiple | `os_sr_csh` | — |
+| `os_sr_cact.guard.os_sr_csh.GrantAccess` | GrantAccess | `os_sr_csh` | — |
+| `os_sr_cact.guard.os_sr_csh.ModifyAccess` | ModifyAccess | `os_sr_csh` | — |
+| `os_sr_cact.guard.os_sr_csh.RevokeAccess` | RevokeAccess | `os_sr_csh` | — |
+| `os_sr_cact.guard.os_sr_csh.SetState` | SetState | `os_sr_csh` | — |
+| `os_sr_cact.guard.os_sr_csh.SetStateDynamicEntity` | SetStateDynamicEntity | `os_sr_csh` | — |
+| `os_sr_cact.guard.os_sr_csh.Update` | Update | `os_sr_csh` | — |
+| `os_sr_cact.guard.os_sr_csh.UpdateMultiple` | UpdateMultiple | `os_sr_csh` | — |
+| `os_sr_cact.guard.os_sr_oprc.Assign` | Assign | `os_sr_oprc` | — |
+| `os_sr_cact.guard.os_sr_oprc.Create` | Create | `os_sr_oprc` | `RECEIPT_CREATE` |
+| `os_sr_cact.guard.os_sr_oprc.CreateMultiple` | CreateMultiple | `os_sr_oprc` | — |
+| `os_sr_cact.guard.os_sr_oprc.Delete` | Delete | `os_sr_oprc` | — |
+| `os_sr_cact.guard.os_sr_oprc.DeleteMultiple` | DeleteMultiple | `os_sr_oprc` | — |
+| `os_sr_cact.guard.os_sr_oprc.GrantAccess` | GrantAccess | `os_sr_oprc` | — |
+| `os_sr_cact.guard.os_sr_oprc.ModifyAccess` | ModifyAccess | `os_sr_oprc` | — |
+| `os_sr_cact.guard.os_sr_oprc.RevokeAccess` | RevokeAccess | `os_sr_oprc` | — |
+| `os_sr_cact.guard.os_sr_oprc.SetState` | SetState | `os_sr_oprc` | — |
+| `os_sr_cact.guard.os_sr_oprc.SetStateDynamicEntity` | SetStateDynamicEntity | `os_sr_oprc` | — |
+| `os_sr_cact.guard.os_sr_oprc.Update` | Update | `os_sr_oprc` | `RECEIPT_UPDATE` |
+| `os_sr_cact.guard.os_sr_oprc.UpdateMultiple` | UpdateMultiple | `os_sr_oprc` | — |
+| `os_sr_cact.guard.relationships.Associate` | Associate | — | — |
+| `os_sr_cact.guard.relationships.Disassociate` | Disassociate | — | — |
+
+Pre-deployment normalized inventory SHA-256: `070a6be1d49d3d0d831df757d470024a37283312749e8b19a1a5615b7ecc7480` (UTF-8 lines sorted by step name as `step|message|entity|writecode`, blank cells preserved, terminal LF).
+
+### Local gates and artifact before deployment
+
+| Gate | Result |
+|---|---|
+| Candidate Core engine harness | PASS, 141 assertions |
+| SDK adapter/guard harness | PASS, 335 assertions; includes registration-backed canonical-pair tests, fail-closed registration cases, context cross-checks, marker-independent trusted Candidate/Receipt creates, and direct-write negatives |
+| PowerShell suites | PASS, all 12 suites / 1,143 assertions |
+| PowerShell parsing | PASS, all 11 scripts under `scripts/` |
+| Unsigned package | Rebuilt and validated; `os_sr_cact_pkg` 1.0.0 / `os_sr_cact` 1.0.0.0; no signing key |
+| DLL SHA-256 | `cda68cd70897d0353650f4f0e0cf34387bbe6b5b0d79892a49a70692dd1740ef` |
+| Package SHA-256 | `8c98e022caf19eda2d7709803c4b0f4dafdfb78a05985223c5eac0bf51cd6c2c` |
+
+The fresh GET-only pre-deployment preflight returned `PHASE_3D_RUNTIME_PREFLIGHT_READY`: VN LMV IT / PAC-WhoAmI agreement; one existing package-backed API handler and guard; unchanged API contract and Candidate Core schema; Active Receipt key; trace setting 0 (Off); zero active Candidate Core Profiler wrappers; 50 package-backed guard registrations and the inventory above; and Candidate / Call / History / Receipt counts 0/0/0/0. It dispatched zero Custom API calls and performed zero writes.
+
+### Existing-package update and one CreateCandidate result
+
+| Gate or operation | Verified result |
+|---|---|
+| Local package submitted | `os_sr_cact_pkg` 1.0.0, unsigned; DLL SHA-256 `cda68cd70897d0353650f4f0e0cf34387bbe6b5b0d79892a49a70692dd1740ef`; `.nupkg` SHA-256 `8c98e022caf19eda2d7709803c4b0f4dafdfb78a05985223c5eac0bf51cd6c2c` |
+| Package update | Exactly one PAC CLI `pac plugin push` targeting the existing package; command exit code 0; retries 0; no package creation |
+| Immediate read-only reconciliation | Same existing package identity/version, package `modifiedon` advanced, package-backed handler/guard and 50-step topology intact; all 50 registration classifications resolved; API contract/schema/Receipt key unchanged; trace Off; no active Candidate Core Profiler wrappers |
+| Package content bytes | Dataverse GET did not expose a content hash; local hashes identify the submitted artifact, not independently verified deployed bytes |
+| CreateCandidate | Exactly one dispatch, synthetic `[SYNTHETIC-E2E]` name and `.invalid` email, no optional inputs; HTTP 400 / `0x80040265` |
+| Exact safe result | `DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_GUARD_REGISTRATION:CC_CREATE_CANDIDATE:0x80040265` |
+| Runtime evidence | `CREATECANDIDATE_RUNTIME_FAILURE`; dispatch state `REJECTED`; candidate ID not captured; automatic retries 0 |
+| Post-call counts | Not re-queried after the failure stop. The last verified counts were the fresh pre-deployment 0/0/0/0; do not infer post-call counts from that earlier read |
+| Runtime matrix / live direct-write canary | Not run. No safe existing live direct-write canary was available; no canary was improvised |
+| Final classification | `CREATECANDIDATE_RUNTIME_FAILURE` / `UNSUPPORTED_GUARD_REGISTRATION`; no runtime acceptance or Phase 3D completion claim |
+
+No second package update, second CreateCandidate, matrix call, trace-setting change, Profiler action, registration/handler PATCH, schema/API/security/app/publication/audit-setting change, legacy signed assembly update, signing-key access, commit, or push occurred. No further backend diagnostic is authorized by this result in the current run.
+
+## Prior R4O Static Write-Context Reconciliation (2026-10-26; superseded by classifier result above)
+
+**Historical classification: `CANDIDATE_CORE_WRITE_CONTEXT_FAILURE_UNRESOLVED`.** The single diagnostic CreateCandidate returned `UNSUPPORTED_CORE_WRITE_CONTEXT:CREATE_CANDIDATE:OTHER_PROTECTED_WRITE` during `CC_CREATE_CANDIDATE`. This did not identify an exact supported table/message pair or prove an allowlist correction. The later R4O implementation and runtime result are reported above.
 
 **Pre-deployment finding: no unique failing CreateCandidate pair is statically proven.** The earlier R4O `UNSUPPORTED_CORE_WRITE_CONTEXT` is the baseline. This continuation uses safe action/write localization, not a new readiness phase and not a return to marker diagnosis. The attachment both describes a possible second diagnostic-branch package update and states a maximum of one; the stricter one-update ceiling is applied. No second speculative repair is authorized by this interpretation.
 
@@ -23,7 +121,7 @@ All allowed cells below still require the full verified package-backed API ances
 | RecordFail | Deny | Deny | Deny | Deny | Deny | Deny |
 | RequestReschedule | Deny | Deny | Deny | Deny | Deny | Deny |
 
-Source locations: [CandidateOperation.Execute and Transition](../solutions/CandidateCore/Operation.cs) determine reachability; [DataverseStore](../solutions/CandidateCore/DataversePlugin.cs) maps business effects to SDK calls, and `ProtectCandidateCore.SafeOperation` / `IsActionForOperation` map exact protected mutations to allowed actions.
+Source locations: [CandidateOperation.Execute and Transition](../solutions/CandidateCore/Operation.cs) determine reachability; [DataverseStore](../solutions/CandidateCore/DataversePlugin.cs) maps business effects to SDK calls, `ProtectCandidateCore.RegisteredWriteCode` maps only the exact server-owned registration pairs, and the action/write authorization remains a separate exact check.
 
 | Action / branch | Exact successful first-execution sequence after transaction validation |
 |---|---|

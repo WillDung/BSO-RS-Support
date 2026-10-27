@@ -12,7 +12,13 @@ Scripts here support reviewed build, validation, migration, and ALM tasks. They 
 
 ## Phase 3D synthetic runtime acceptance
 
-[Test-BsoRsCandidateCoreRuntime.ps1](Test-BsoRsCandidateCoreRuntime.ps1) has a GET-only `Preflight` mode and a bounded R4M `Apply` mode for at most one `[SYNTHETIC-E2E]` Candidate and eight Custom API dispatches; automatic retries are fixed at zero. Apply requires a new empty evidence file, a fresh zero-row gate, and a durable one-shot lock. The earlier note about a consumed lock with no journal describes a prior runtime authorization and is superseded by R4M. The current R4M one-shot was consumed by one rejected CreateCandidate call (`CALLER_MARKER`); its evidence journal is retained, fresh post-rejection counts are 0/0/0/0, and the matrix did not run. Do not remove the lock or rerun Apply. See the [Phase 3D report](../docs/PHASE_3D_CANDIDATE_CORE_RUNTIME_ACCEPTANCE_REPORT.md).
+[Test-BsoRsCandidateCoreRuntime.ps1](Test-BsoRsCandidateCoreRuntime.ps1) has a GET-only `Preflight` mode and separately authorized bounded Apply modes for at most one `[SYNTHETIC-E2E]` Candidate and eight Custom API dispatches; automatic retries are fixed at zero. Apply requires a new empty evidence file, a fresh zero-row gate, and a durable one-shot lock. Historical R4M runtime authorization and its rejected `CALLER_MARKER` CreateCandidate are consumed; they are not current status or reusable. The current R4O server-registration runtime one-shot and its rejected `UNSUPPORTED_GUARD_REGISTRATION` CreateCandidate are documented below. Do not remove consumed locks or rerun any Apply mode. See the [Phase 3D report](../docs/PHASE_3D_CANDIDATE_CORE_RUNTIME_ACCEPTANCE_REPORT.md).
+
+## Existing R4O server-registration classifier
+
+The current source classifies protected table writes from the current guard's server-owned OwningExtension and read-only active step/handler/assembly/package/message/filter metadata. Runtime message/entity values are consistency checks only. The ActionType/write allowlist and verified API ancestor trust remain separate and unchanged. `Get-GuardRegistrationInventory` in the GET-only `Preflight` mode enumerates each package-backed guard's step name, SDK message, table filter and canonical WriteCode; only six exact table/message pairs map, exact unsupported pairs remain fail-closed, and Associate/Disassociate remain relationship guards. Fresh preflight resolved 50/50 registrations (six canonical, 42 unsupported, two relationship) with no unresolved or contradictory rows and counts 0/0/0/0. See the full inventory and local validation in the [Phase 3D report](../docs/PHASE_3D_CANDIDATE_CORE_RUNTIME_ACCEPTANCE_REPORT.md).
+
+The existing `os_sr_cact_pkg` was updated exactly once with PAC CLI `pac plugin push`; the package identity remained stable, its `modifiedon` advanced, and immediate read-only preflight reconciled the package-backed handler/guard and 50-step topology. One `R4OServerRegistrationApply` runtime one-shot dispatched a single CreateCandidate with retries disabled. The safe result was `DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_GUARD_REGISTRATION:CC_CREATE_CANDIDATE:0x80040265`. The guard's exact internal metadata check is not identified by that category. No matrix, direct-write canary, second update/call, or further backend diagnostic ran. The evidence journal is retained; do not rerun or clear its authorization. The last confirmed counts were 0/0/0/0 before deployment; post-call counts were not re-read after the stop.
 
 ## Phase 3D-R4L Candidate Core guard cutover
 
@@ -24,7 +30,7 @@ Only `Apply`, `Continue`, and `Rollback` can PATCH, and only an existing `sdkmes
 
 At that historical R4L stage, the runtime runner required package-backed guard steps and zero-row preflight before its distinct R4L one-shot Apply. That authorization is not reusable. Local static checks were `& .\tests\Phase3DR4LGuardCutover.Tests.ps1`; SDK marker/context checks were `dotnet run --project .\tests\CandidateCoreSdk\CandidateCoreSdk.Tests.csproj -c Release`.
 
-## Existing R4O write-context continuation
+## Consumed R4O write-context continuation
 
 **Consumed outcome:** package updates 1; minimal CreateCandidate calls 1; automatic retries 0. The safe result was `UNSUPPORTED_CORE_WRITE_CONTEXT:CREATE_CANDIDATE:OTHER_PROTECTED_WRITE` during `CC_CREATE_CANDIDATE`, HTTP 400 / `0x80040265`. No deterministic exact pair was proven; `CANDIDATE_CORE_WRITE_CONTEXT_FAILURE_UNRESOLVED`. Final counts remain 0/0/0/0. Do not rerun the continuation mode or remove its lock/journal. No matrix or canary ran.
 

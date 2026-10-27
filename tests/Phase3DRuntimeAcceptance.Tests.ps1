@@ -79,15 +79,34 @@ $parser = @($runtimeAst.EndBlock.Statements | Where-Object {
     $_ -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $_.Name -ceq 'Get-RuntimeErrorCode'
 })[0]
 . ([scriptblock]::Create($parser.Extent.Text))
-$safeGuard = 'DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_CORE_WRITE_CONTEXT:CC_CREATE_CANDIDATE:0x80040265'
+$safeGuard = 'DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_GUARD_REGISTRATION:CC_CREATE_CANDIDATE:0x80040265'
 Assert-Test ((Get-RuntimeErrorCode "HTTP 400; $safeGuard") -ceq $safeGuard) `
-    'Exact live unsupported-core-write guard category is retained without fault text'
-$localizedWrite = 'DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_CORE_WRITE_CONTEXT:CREATE_CANDIDATE:OTHER_PROTECTED_WRITE:CC_CREATE_CANDIDATE:0x80040265'
-Assert-Test ((Get-RuntimeErrorCode "HTTP 400; $localizedWrite") -ceq $localizedWrite) `
-    'R4O action/write rejection localization survives reporting without raw values'
+    'Exact live unsupported-registration category is retained without fault text'
+$registrationMismatch = 'DIRECT_WRITE_GUARD_REJECTED:GUARD_REGISTRATION_CONTEXT_MISMATCH:CC_CREATE_CANDIDATE:0x80040265'
+Assert-Test ((Get-RuntimeErrorCode "HTTP 400; $registrationMismatch") -ceq $registrationMismatch) `
+    'Registration/runtime consistency rejection is retained without raw values'
 Assert-Test ($runtime -match 'R4OWriteContextApply' -and
     $runtime -match 'phase3d-r4o-owner-authorized-write-context-runtime') `
     'R4O continuation cannot reuse consumed marker or verified-ancestor runtime locks'
+Assert-Test ($runtime -match 'R4OServerRegistrationApply' -and
+    $runtime -match 'phase3d-r4o-server-registration-classifier-runtime') `
+    'Registration-backed classifier uses a distinct R4O one-shot authorization'
+Assert-Test ($runtime -match 'function Get-GuardRegistrationInventory' -and
+    $runtime -match 'function Get-RegisteredWriteCode' -and
+    $runtime -match 'GUARD_REGISTRATION_INVENTORY_UNRESOLVED' -and
+    $runtime -match 'ResolvedCount = \$rows.Count' -and
+    $runtime -match 'Create\|os_sr_cand.*CANDIDATE_CREATE' -and
+    $runtime -match 'sdkmessagefilterid' -and
+    $runtime -match 'PackageId = \$packageId\.ToLowerInvariant\(\)' -and
+    $runtime -match 'PackageModifiedOn = \[string\]\$package\.modifiedon') `
+    'Live preflight derives every canonical write from SDK message/filter registration metadata'
+Assert-Test ($plugin -match 'ResolveGuardRegistration' -and
+    $plugin -match 'context\.OwningExtension' -and
+    $plugin -match 'RegisteredWriteCode\(messageName, entityName\)' -and
+    $plugin -match 'UNSUPPORTED_GUARD_REGISTRATION' -and
+    $plugin -match 'GUARD_REGISTRATION_CONTEXT_MISMATCH' -and
+    $plugin -notmatch 'OTHER_PROTECTED_WRITE|SafeOperation\(') `
+    'Protected write classification uses server-owned registration, not runtime shape inference'
 Assert-Test ($runtime -match 'CreateCandidate' -and $runtime -match 'STALE_EXPECTED_STATUS' -and
     $runtime -match 'RecordCall no-answer replay' -and
     $runtime -match 'RecordCall no-answer conflict' -and

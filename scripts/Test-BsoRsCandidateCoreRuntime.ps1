@@ -1,7 +1,8 @@
 #requires -Version 7.4
 [CmdletBinding()]
 param(
-    [ValidateSet('Preflight', 'Apply', 'VerifiedAncestorApply', 'R4OWriteContextApply')][string]$RuntimeMode = 'Preflight',
+    [ValidateSet('Preflight', 'Apply', 'VerifiedAncestorApply', 'R4OWriteContextApply',
+        'R4OServerRegistrationApply')][string]$RuntimeMode = 'Preflight',
     [Parameter(Mandatory)][string]$EnvironmentName,
     [Parameter(Mandatory)][string]$OrganizationUrl,
     [Parameter(Mandatory)][string]$ExpectedEnvironmentId,
@@ -20,13 +21,19 @@ $script:apiContract = Get-Content -LiteralPath $contractPath -Raw | ConvertFrom-
 $expectedManifestHash = '63f56173f61265f539d23d6ceffb5631e23f438e4e254755c1e24c7d17eb1915'
 $runtimeAuthorizationId = 'phase3d-r4m-owner-authorized-marker-propagation-runtime'
 $writeContextAuthorization = $RuntimeMode -ceq 'R4OWriteContextApply'
-$verifiedAncestorAuthorization = $RuntimeMode -in @('VerifiedAncestorApply', 'R4OWriteContextApply')
+$serverRegistrationAuthorization = $RuntimeMode -ceq 'R4OServerRegistrationApply'
+$verifiedAncestorAuthorization = $RuntimeMode -in @(
+    'VerifiedAncestorApply', 'R4OWriteContextApply', 'R4OServerRegistrationApply'
+)
 if ($verifiedAncestorAuthorization) {
     $runtimeAuthorizationId = 'phase3d-owner-authorized-verified-ancestor-runtime'
     $RuntimeMode = 'Apply'
 }
 if ($writeContextAuthorization) {
     $runtimeAuthorizationId = 'phase3d-r4o-owner-authorized-write-context-runtime'
+}
+if ($serverRegistrationAuthorization) {
+    $runtimeAuthorizationId = 'phase3d-r4o-server-registration-classifier-runtime'
 }
 $expectedActionCalls = 8
 $schedulingEvidenceChecks = @(
@@ -73,11 +80,8 @@ function Save-RuntimeJournal {
 
 function Get-RuntimeErrorCode {
     param([string]$Message)
-    $writeContextFailure = [regex]::Match($Message,
-        '(?<![A-Z0-9_])DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_CORE_WRITE_CONTEXT:(CREATE_CANDIDATE|UPDATE_CANDIDATE|RECORD_CALL|PROCEED_TO_SCHEDULING|MARK_ROUND1_SCHEDULED|RECORD_PASS|RECORD_FAIL|REQUEST_RESCHEDULE|UNKNOWN_ACTION):(CANDIDATE_CREATE|CANDIDATE_UPDATE|CALL_LOG_CREATE|STATUS_HISTORY_CREATE|RECEIPT_CREATE|RECEIPT_UPDATE|OTHER_PROTECTED_WRITE)(?::CC_[A-Z_]+)?(?::0x[0-9A-F]{8})?(?![A-Z0-9_])')
-    if ($writeContextFailure.Success) { return $writeContextFailure.Value }
     $coreWriteFailure = [regex]::Match($Message,
-        '(?<![A-Z0-9_])DIRECT_WRITE_GUARD_REJECTED:(UNSUPPORTED_CORE_WRITE_CONTEXT|ASSOCIATION_PROJECT_RELATIONSHIP|ASSOCIATION_PROJECT_TABLE|ASSOCIATION_CONTAINS_PROJECT_TABLE)(?::CC_[A-Z_]+)?(?::0x[0-9A-F]{8})?(?![A-Z0-9_])')
+        '(?<![A-Z0-9_])DIRECT_WRITE_GUARD_REJECTED:(UNSUPPORTED_GUARD_REGISTRATION|GUARD_REGISTRATION_CONTEXT_MISMATCH|ASSOCIATION_PROJECT_RELATIONSHIP|ASSOCIATION_PROJECT_TABLE|ASSOCIATION_CONTAINS_PROJECT_TABLE)(?::CC_[A-Z_]+)?(?::0x[0-9A-F]{8})?(?![A-Z0-9_])')
     if ($coreWriteFailure.Success) { return $coreWriteFailure.Value }
     $trustedParentFailure = [regex]::Match($Message,
         '(?<![A-Z0-9_])DIRECT_WRITE_GUARD_REJECTED:(CANDIDATE_CREATE|CANDIDATE_UPDATE|CALL_LOG_CREATE|STATUS_HISTORY_CREATE|RECEIPT_CREATE):TRUSTED_PARENT:(API_MESSAGE_MISMATCH|STAGE_MISMATCH|MODE_MISMATCH|TRANSACTION_MISMATCH|DEPTH_MISMATCH|USER_CONTEXT_MISMATCH|INITIATING_USER_MISMATCH|ACTIONTYPE_MISSING|ACTIONTYPE_MISMATCH|MARKER_MISSING|MARKER_TYPE_MISMATCH|MARKER_FINGERPRINT_MISMATCH|ANCESTOR_BOUND_EXCEEDED|OWNING_EXTENSION_MISSING|OWNING_EXTENSION_TYPE_MISMATCH|HANDLER_TYPE_MISMATCH|ASSEMBLY_MISMATCH|PACKAGE_MISMATCH|REGISTRATION_READ_FAILED)(?::CC_[A-Z_]+)?(?::0x[0-9A-F]{8})?(?![A-Z0-9_])')
@@ -258,8 +262,8 @@ function Assert-PackageBackedHandler {
         throw 'Runtime handler assembly metadata is not package-backed.'
     }
     $packageId = [string]$assembly.$packageLookup
-    $package = Invoke-RuntimeRequest -Method GET -Path "pluginpackages($packageId)?%24select=pluginpackageid,uniquename,version"
-    $packagesByName = @(Get-Rows -Path "pluginpackages?%24select=pluginpackageid,name,uniquename,version&%24filter=uniquename eq '$PackageUniqueName'")
+    $package = Invoke-RuntimeRequest -Method GET -Path "pluginpackages($packageId)?%24select=pluginpackageid,uniquename,version,modifiedon"
+    $packagesByName = @(Get-Rows -Path "pluginpackages?%24select=pluginpackageid,name,uniquename,version,modifiedon&%24filter=uniquename eq '$PackageUniqueName'")
     if ($packagesByName.Count -ne 1 -or
         [string]$packagesByName[0].pluginpackageid -ine $packageId -or
         $packagesByName[0].name -cne $PackageUniqueName -or
@@ -279,7 +283,9 @@ function Assert-PackageBackedHandler {
         ApiUniqueName = [string]$api[0].uniquename
         HandlerType = [string]$type.typename
         HandlerAssemblyId = $assemblyId.ToLowerInvariant()
+        PackageId = $packageId.ToLowerInvariant()
         PackageUniqueName = [string]$package.uniquename
+        PackageModifiedOn = [string]$package.modifiedon
         PackageCount = $packagesByName.Count
         PackageTypes = $actualPackageTypes
         RequestParameters = @($inputs | Sort-Object uniquename | ForEach-Object {
@@ -300,16 +306,106 @@ function Assert-PackageGuardSteps {
     if ($guardTypes.Count -ne 1 -or [string]$guardTypes[0].typename -cne $script:apiContract.guard) {
         throw 'Runtime package assembly does not resolve exactly one approved guard type.'
     }
-    $steps = @(Get-Rows -Path "sdkmessageprocessingsteps?%24select=sdkmessageprocessingstepid,name,_eventhandler_value&%24filter=startswith(name,'os_sr_cact.guard.')")
+    $steps = @(Get-Rows -Path "sdkmessageprocessingsteps?%24select=sdkmessageprocessingstepid,name,statecode,_eventhandler_value,_sdkmessageid_value,_sdkmessagefilterid_value&%24filter=startswith(name,'os_sr_cact.guard.')")
     if ($steps.Count -ne $ExpectedCount -or
         @($steps | ForEach-Object { [string]$_.sdkmessageprocessingstepid } | Sort-Object -Unique).Count -ne $ExpectedCount -or
-        @($steps | Where-Object { [string]$_._eventhandler_value -ine [string]$guardTypes[0].plugintypeid }).Count -ne 0) {
+        @($steps | Where-Object { [string]$_._eventhandler_value -ine [string]$guardTypes[0].plugintypeid -or
+            [int]$_.statecode -ne 0 }).Count -ne 0) {
         throw 'Candidate Core guard steps are not all mapped to the package-backed guard type.'
     }
+    $inventory = Get-GuardRegistrationInventory -Steps $steps
     [ordered]@{
         PackageGuardType = [string]$guardTypes[0].typename
         GuardStepCount = $steps.Count
         PackageBackedGuardSteps = $steps.Count
+        GuardRegistrationInventory = $inventory
+    }
+}
+
+function Get-RegisteredWriteCode {
+    param([string]$MessageName, [string]$EntityName)
+    switch -CaseSensitive ("$MessageName|$EntityName") {
+        'Create|os_sr_cand' { 'CANDIDATE_CREATE'; break }
+        'Update|os_sr_cand' { 'CANDIDATE_UPDATE'; break }
+        'Create|os_sr_call' { 'CALL_LOG_CREATE'; break }
+        'Create|os_sr_csh' { 'STATUS_HISTORY_CREATE'; break }
+        'Create|os_sr_oprc' { 'RECEIPT_CREATE'; break }
+        'Update|os_sr_oprc' { 'RECEIPT_UPDATE'; break }
+        default { $null }
+    }
+}
+
+function Get-GuardRegistrationInventory {
+    param([object[]]$Steps)
+    $messageIds = @($Steps | ForEach-Object { [string]$_._sdkmessageid_value } |
+        Where-Object { $_ -match '^[0-9a-fA-F-]{36}$' } | Sort-Object -Unique)
+    if ($messageIds.Count -eq 0) { throw 'GUARD_REGISTRATION_INVENTORY_UNRESOLVED' }
+    $messageFilter = [string]::Join(' or ', @($messageIds | ForEach-Object {
+        "sdkmessageid eq $_"
+    }))
+    $messages = @(Get-Rows -Path ("sdkmessages?%24select=sdkmessageid,name&%24filter=" +
+        [Uri]::EscapeDataString($messageFilter)))
+    $filterIds = @($Steps | ForEach-Object { [string]$_._sdkmessagefilterid_value } |
+        Where-Object { $_ -match '^[0-9a-fA-F-]{36}$' } | Sort-Object -Unique)
+    $filters = @()
+    if ($filterIds.Count -gt 0) {
+        $filterExpression = [string]::Join(' or ', @($filterIds | ForEach-Object {
+            "sdkmessagefilterid eq $_"
+        }))
+        $filters = @(Get-Rows -Path ("sdkmessagefilters?%24select=sdkmessagefilterid,primaryobjecttypecode,_sdkmessageid_value&%24filter=" +
+            [Uri]::EscapeDataString($filterExpression)))
+    }
+    $rows = [System.Collections.Generic.List[object]]::new()
+    foreach ($step in $Steps) {
+        $stepMessage = @($messages | Where-Object { [string]$_.sdkmessageid -ieq [string]$step._sdkmessageid_value })
+        if ($stepMessage.Count -ne 1 -or [string]::IsNullOrWhiteSpace([string]$stepMessage[0].name)) {
+            throw 'GUARD_REGISTRATION_INVENTORY_UNRESOLVED'
+        }
+        $messageName = [string]$stepMessage[0].name
+        $filterId = [string]$step._sdkmessagefilterid_value
+        if ($messageName -in @('Associate', 'Disassociate') -and [string]::IsNullOrWhiteSpace($filterId)) {
+            $rows.Add([pscustomobject][ordered]@{
+                StepName = [string]$step.name
+                SdkMessage = $messageName
+                PrimaryObjectTypeCode = $null
+                WriteCode = $null
+                Classification = 'RELATIONSHIP_GUARD'
+            })
+            continue
+        }
+        $filter = @($filters | Where-Object { [string]$_.sdkmessagefilterid -ieq $filterId })
+        if ($filter.Count -ne 1 -or
+            [string]$filter[0]._sdkmessageid_value -ine [string]$step._sdkmessageid_value -or
+            [string]::IsNullOrWhiteSpace([string]$filter[0].primaryobjecttypecode)) {
+            throw 'GUARD_REGISTRATION_INVENTORY_UNRESOLVED'
+        }
+        $entityName = [string]$filter[0].primaryobjecttypecode
+        $writeCode = Get-RegisteredWriteCode -MessageName $messageName -EntityName $entityName
+        $rows.Add([pscustomobject][ordered]@{
+            StepName = [string]$step.name
+            SdkMessage = $messageName
+            PrimaryObjectTypeCode = $entityName
+            WriteCode = $writeCode
+            Classification = if ($writeCode) { 'CANONICAL_PROTECTED_WRITE' } else { 'UNSUPPORTED_GUARD_REGISTRATION' }
+        })
+    }
+    $contradictory = @($rows | Where-Object PrimaryObjectTypeCode | Group-Object {
+        "$($_.SdkMessage)|$($_.PrimaryObjectTypeCode)"
+    } | Where-Object {
+        @($_.Group | Select-Object -ExpandProperty WriteCode -Unique).Count -gt 1
+    })
+    if ($rows.Count -ne $Steps.Count -or $rows.Count -ne 50 -or $contradictory.Count -ne 0) {
+        throw 'GUARD_REGISTRATION_INVENTORY_UNRESOLVED'
+    }
+    [ordered]@{
+        StepCount = $rows.Count
+        ResolvedCount = $rows.Count
+        UnresolvedCount = 0
+        ContradictoryMappingCount = $contradictory.Count
+        CanonicalWriteCount = @($rows | Where-Object WriteCode).Count
+        UnsupportedRegistrationCount = @($rows | Where-Object { $_.Classification -eq 'UNSUPPORTED_GUARD_REGISTRATION' }).Count
+        RelationshipGuardCount = @($rows | Where-Object { $_.Classification -eq 'RELATIONSHIP_GUARD' }).Count
+        Rows = @($rows)
     }
 }
 

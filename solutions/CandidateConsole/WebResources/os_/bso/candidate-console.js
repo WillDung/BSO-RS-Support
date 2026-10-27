@@ -158,8 +158,12 @@
     busy = value;
     document.querySelectorAll("button[data-action]").forEach((button) => {
       button.disabled = value ||
+        button.id === "save-schedule" ||
         (button.id === "submit-call" && !selectedCandidate) ||
-        (button.id === "waiting-status-button" && button.hidden);
+        (button.id === "waiting-status-button" && button.hidden) ||
+        (button.id === "schedule-round1-button" &&
+          (button.hidden || !selectedCandidate ||
+            selectedCandidate[TABLES.candidate.status] !== STATUS.waitingManualScheduling));
     });
   }
 
@@ -403,6 +407,7 @@
       const candidate = currentRows.find((row) => row[TABLES.candidate.id] === candidateId) ||
         await xrm().WebApi.retrieveRecord(TABLES.candidate.logicalName, candidateId);
       selectedCandidate = candidate;
+      $("scheduling-panel").hidden = true;
       $("detail-heading").textContent = candidate[TABLES.candidate.name] || "Candidate";
       $("detail-panel").hidden = false;
       $("call-entry-panel").hidden = false;
@@ -410,8 +415,12 @@
         `${candidate[TABLES.candidate.number] || ""} ${candidate[TABLES.candidate.name] || ""}`.trim();
       $("submit-call").disabled = busy;
       const canMoveToWaiting = candidate[TABLES.candidate.status] === STATUS.answered;
+      const canSchedule = candidate[TABLES.candidate.status] === STATUS.waitingManualScheduling &&
+        isSyntheticCandidate(candidate);
       $("waiting-status-button").hidden = !canMoveToWaiting;
       $("waiting-status-button").disabled = busy || !canMoveToWaiting;
+      $("schedule-round1-button").hidden = !canSchedule;
+      $("schedule-round1-button").disabled = busy || !canSchedule;
       renderCandidateRows(currentRows);
       await Promise.all([
         renderCandidateDetails(candidate),
@@ -452,15 +461,38 @@
     const metadata = await xrm().Utility.getEntityMetadata(tableName);
     const primaryName = metadata.PrimaryNameAttribute;
     const rows = await retrieveAll(tableName,
-      `?$select=${metadata.PrimaryIdAttribute},${primaryName}&$orderby=${primaryName} asc`);
+      `?$select=${metadata.PrimaryIdAttribute},${primaryName},statecode&$filter=statecode eq 0&$orderby=${primaryName} asc`);
     select.replaceChildren();
     addOption(select, "", emptyLabel);
     for (const row of rows) {
       const id = row[metadata.PrimaryIdAttribute];
       const label = row[primaryName];
-      if (!id || !label) continue;
+      if (!id || typeof label !== "string" || !label.startsWith("[DEV]")) continue;
       addOption(select, id, label);
     }
+  }
+
+  function showSchedulingPanel() {
+    if (busy || !selectedCandidate) return;
+    if (selectedCandidate[TABLES.candidate.status] !== STATUS.waitingManualScheduling ||
+        !isSyntheticCandidate(selectedCandidate)) {
+      showNotice("Schedule Round 1 is available only for synthetic candidates in Waiting Manual Scheduling.", true);
+      return;
+    }
+    $("scheduling-form").reset();
+    $("scheduling-candidate").value =
+      `${selectedCandidate[TABLES.candidate.number] || ""} ${selectedCandidate[TABLES.candidate.name] || ""}`.trim();
+    $("scheduling-panel").hidden = false;
+    $("scheduling-panel").scrollIntoView({ behavior: "smooth", block: "center" });
+    $("scheduling-ta").focus();
+  }
+
+  function rejectScheduleWithoutStorage(event) {
+    event.preventDefault();
+    showNotice(
+      "SCHEDULING_STORAGE_NOT_PROVISIONED. No schedule was saved and Candidate status remains Waiting Manual Scheduling.",
+      true
+    );
   }
 
   async function loadTableMetadata(table) {
@@ -745,6 +777,7 @@
   function bindEvents() {
     $("candidate-form").addEventListener("submit", createCandidate);
     $("call-form").addEventListener("submit", recordCall);
+    $("scheduling-form").addEventListener("submit", rejectScheduleWithoutStorage);
     $("candidate-search").addEventListener("input", () => renderCandidateRows(currentRows));
     $("candidate-status-filter").addEventListener("change", () => renderCandidateRows(currentRows));
     $("refresh-button").addEventListener("click", async () => {
@@ -760,10 +793,13 @@
       $("detail-panel").hidden = true;
       $("call-entry-panel").hidden = true;
       $("waiting-status-button").hidden = true;
+      $("schedule-round1-button").hidden = true;
+      $("scheduling-panel").hidden = true;
       selectedCandidate = null;
       renderCandidateRows(currentRows);
     });
     $("waiting-status-button").addEventListener("click", moveToWaitingManualScheduling);
+    $("schedule-round1-button").addEventListener("click", showSchedulingPanel);
   }
 
   async function initialize() {
@@ -786,7 +822,9 @@
       loadStage = "Position and Candidate Source options";
       await Promise.all([
         loadLookupOptions("os_sr_pos", "candidate-position", "No position selected"),
-        loadLookupOptions("os_sr_csrc", "candidate-source", "No source selected")
+        loadLookupOptions("os_sr_csrc", "candidate-source", "No source selected"),
+        loadLookupOptions("os_sr_ta", "scheduling-ta", "Select interviewer"),
+        loadLookupOptions("os_sr_loc", "scheduling-location", "Select location")
       ]);
       loadStage = "the Candidate list";
       const statusFilter = $("candidate-status-filter");

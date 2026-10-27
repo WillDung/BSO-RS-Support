@@ -18,6 +18,14 @@ No Operation Receipt privilege was added. Candidate, Call Log, and Candidate Sta
 
 This role baseline does not make the DEV direct-write UI or disabled-guard state a production architecture. The Candidate Core production backend remains pending; real candidate data remains prohibited until the required backend, guard restoration, audit, and security acceptance gates are met. See [Current State](CURRENT_STATE.md) and the [Candidate UI implementation note](CANDIDATE_UI_IMPLEMENTATION_NOTE.md).
 
+## Phase 4B role validation (27 October 2026)
+
+The BSO role was re-read after the synthetic reference and scheduling-entry acceptance. The 17 business privileges remain unchanged: Candidate Create/Read/Write/Append/Append To at User depth; Call Log and Candidate Status History Create/Read/Append/Append To at User depth; and Read on TA Directory, Position, Candidate Source, and Location at Organization depth. No Operation Receipt, Delete, Customize, Publish, solution-administration, or environment-administration privilege was added. The role remains unassigned; no user or team role assignments were changed.
+
+The role editor showed five Organization-depth Read defaults for Plug-in Assembly, Plug-in Type, Sdk Message, Sdk Message Processing Step, and Sdk Message Processing Step Image. A prior readback identified four additional SharePoint-related platform defaults that are not exposed as direct controls in the role editor. All nine are classified **REVIEW BEFORE PRODUCTION**: they are not required by the current DEV Candidate Management UI, but were not removed because their full privilege details and a safe supported removal path were not established in this validation. Reconcile their exact rights and platform dependencies before any production assignment. No role privileges were changed.
+
+The app's scheduling draft uses existing TA Directory and Location rows only. Since no scheduling storage exists, no scheduling-table privilege is included in this role validation. Revalidate least privilege if an approved scheduling table is provisioned. The role remains unassigned pending a separately approved test-user target.
+
 ## Current Candidate Core trust contract (26 October 2026)
 
 ### R4O server-registration-backed protected-write classification

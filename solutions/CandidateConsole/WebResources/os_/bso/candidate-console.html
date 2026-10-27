@@ -6,7 +6,7 @@
   <title>Candidate Management</title>
   <link rel="stylesheet" href="candidate-console.css">
   <script src="../../ClientGlobalContext.js.aspx"></script>
-  <script defer src="candidate-console.js?v=0f82b12d0538"></script>
+  <script defer src="candidate-console.js?v=f8de2459ad4c"></script>
 </head>
 <body>
   <main class="shell">
@@ -164,7 +164,56 @@
         <button id="waiting-status-button" class="button button-primary" type="button" data-action hidden>
           Move to Waiting Manual Scheduling
         </button>
+        <button id="schedule-round1-button" class="button button-primary" type="button" data-action hidden>
+          Schedule Round 1
+        </button>
       </div>
+      <section id="scheduling-panel" class="call-entry-panel" aria-labelledby="scheduling-heading" hidden>
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">DEV scheduling entry</p>
+            <h3 id="scheduling-heading">Schedule Round 1</h3>
+          </div>
+        </div>
+        <form id="scheduling-form" class="form-grid">
+          <label class="field">
+            <span>Candidate</span>
+            <input id="scheduling-candidate" readonly>
+          </label>
+          <label class="field">
+            <span>Interviewer / TA <b aria-hidden="true">*</b></span>
+            <select id="scheduling-ta" required>
+              <option value="">Select interviewer</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Interview Date <b aria-hidden="true">*</b></span>
+            <input id="scheduling-date" type="date" required>
+          </label>
+          <label class="field">
+            <span>Start Time <b aria-hidden="true">*</b></span>
+            <input id="scheduling-time" type="time" required>
+          </label>
+          <label class="field">
+            <span>Location <b aria-hidden="true">*</b></span>
+            <select id="scheduling-location" required>
+              <option value="">Select location</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Notes</span>
+            <textarea id="scheduling-notes" maxlength="1000" rows="3"></textarea>
+          </label>
+          <div class="form-actions field-wide">
+            <button id="save-schedule" class="button button-primary" type="submit" data-action disabled>
+              Save Schedule
+            </button>
+            <span id="scheduling-storage-warning" class="storage-warning" role="status">
+              SCHEDULING_STORAGE_NOT_PROVISIONED — saving and status advancement are disabled.
+            </span>
+          </div>
+        </form>
+      </section>
     </section>
   </main>
 

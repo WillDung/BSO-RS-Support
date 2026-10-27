@@ -49,6 +49,24 @@ Assert-Test ($script.Contains('waitingManualScheduling: 100010002') -and
     $script.Contains('[c.status]: STATUS.waitingManualScheduling')) 'Gate the explicit Answered-to-Waiting transition'
 Assert-Test ($script.Contains('[history.previous]: STATUS.answered') -and
     $script.Contains('[history.current]: STATUS.waitingManualScheduling')) 'Record the Waiting transition in Status History'
+Assert-Test ($html.Contains('id="schedule-round1-button"') -and
+    $script.Contains('candidate[TABLES.candidate.status] === STATUS.waitingManualScheduling') -and
+    $script.Contains('$("scheduling-panel").hidden = true;')) 'Expose Schedule Round 1 only from Waiting Manual Scheduling and close stale drafts on selection changes'
+Assert-Test ($html.Contains('id="scheduling-candidate"') -and
+    $html.Contains('id="scheduling-ta"') -and
+    $html.Contains('id="scheduling-date"') -and
+    $html.Contains('id="scheduling-time"') -and
+    $html.Contains('id="scheduling-location"') -and
+    $html.Contains('id="scheduling-notes"')) 'Provide the compact Round 1 scheduling draft fields'
+Assert-Test ($html.Contains('id="save-schedule"') -and
+    $html.Contains('type="submit" data-action disabled') -and
+    $html.Contains('SCHEDULING_STORAGE_NOT_PROVISIONED') -and
+    $script.Contains('SCHEDULING_STORAGE_NOT_PROVISIONED. No schedule was saved') -and
+    $script.Contains('button.id === "save-schedule"')) 'Keep scheduling persistence and status advancement fail-closed without storage'
+Assert-Test ($script.Contains('loadLookupOptions("os_sr_ta", "scheduling-ta"') -and
+    $script.Contains('loadLookupOptions("os_sr_loc", "scheduling-location"') -and
+    $script.Contains('label.startsWith("[DEV]")')) 'Load only active synthetic TA and Location lookup choices'
+Assert-Test (-not $script.Contains('[c.status]: STATUS.round1Scheduled')) 'Do not advance Candidate status without durable schedule evidence'
 Assert-Test (-not $html.Contains('id="candidate-status"') -and
     -not $html.Contains('<dialog') -and
     -not $html.Contains('call-dialog')) 'Expose no arbitrary status editor or call debug dialog'

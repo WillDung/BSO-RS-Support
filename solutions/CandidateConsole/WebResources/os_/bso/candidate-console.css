@@ -47,6 +47,7 @@ input:focus, select:focus, textarea:focus, button:focus-visible { outline: 3px s
 .button-secondary:hover:not(:disabled) { background: #f0f3f6; }
 .button-small { min-height: 32px; padding: 5px 9px; }
 .muted { color: #65717d; font-size: 12px; font-weight: 400; }
+.storage-warning { max-width: 720px; padding: 9px 12px; border: 1px solid #e6a23c; border-radius: 6px; color: #704300; background: #fff4d6; font-size: 12px; font-weight: 600; }
 .form-actions { justify-content: flex-start; flex-wrap: wrap; margin-top: 2px; }
 
 .notice { margin: 0 0 18px; padding: 12px 14px; border: 1px solid #b7d9c2; border-radius: 7px; color: #164b2b; background: #eaf6ed; font-size: 14px; }

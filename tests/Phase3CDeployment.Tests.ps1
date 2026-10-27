@@ -49,9 +49,11 @@ $plugin = Get-Content -Raw (Join-Path $root 'solutions\CandidateCore\DataversePl
 Assert-Test ($plugin -match 'context.UserId != context.InitiatingUserId' -and $plugin -match 'CreateOrganizationService\(context.InitiatingUserId\)') 'No implicit execution-user elevation'
 Assert-Test ($plugin -match 'IfRowVersionMatches' -and $plugin -match 'RequireTransaction' -and
     $plugin -notmatch 'isauditenabled|AUDIT_ACTIVATION_PENDING') 'Conditional writes retain transaction gate without organization-audit runtime blocker'
-Assert-Test ($plugin -match 'RegistrationFailure' -and $plugin -match 'ancestor.OwningExtension' -and
-    $plugin -match 'MaximumParentContexts = 8' -and
-    $plugin -match 'DIRECT_WRITE_GUARD_REJECTED:' -and $plugin -match 'CC_GUARD_REJECTED:') 'Server guard checks validated parent intent and emits sanitized rejection categories'
+Assert-Test ($plugin -match 'HasTrustedAncestor' -and $plugin -match 'MaximumParentContexts = 8' -and
+    $plugin -match 'RegisteredWriteCode\(context\.MessageName, context\.PrimaryEntityName\)' -and
+    $plugin -match 'DIRECT_WRITE_GUARD_REJECTED:' -and $plugin -match 'CC_GUARD_REJECTED:' -and
+    $plugin -notmatch 'SharedVariables|IntentKey|RegistrationFailure|ResolveGuardRegistration|OwningExtension') `
+    'MVP server guard authorizes exact writes through bounded server-owned API context without markers or runtime registration reads'
 Assert-Test ($plugin -notmatch 'trace.Trace\([^;]*(Fingerprint|CandidateName|CandidateEmail|InputParameters)') 'No raw input/PII fingerprint tracing'
 Assert-Test ($source -notmatch "PublishAllXml|PublishXml -|roles\?.*POST") 'No publication or role-write path'
 "PASS: $script:Passed synthetic Phase 3C deployment/contract assertions; source/contract checks, no authentication/network."

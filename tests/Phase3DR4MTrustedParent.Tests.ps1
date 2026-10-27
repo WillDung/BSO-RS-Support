@@ -11,9 +11,9 @@ function Assert-Test([bool]$Condition, [string]$Name) {
     $script:Passed++
 }
 
-$search = [regex]::Match($plugin, '(?s)FindTrustedParent\(.*?\n\s*private static bool IsActionForOperation')
-Assert-Test ($plugin -match 'IntentKey = "os_sr_cact\.validated_intent"' -and
-    $plugin -match 'MaximumParentContexts = 8') 'Private marker key and bounded ancestor limit are stable'
+$search = [regex]::Match($plugin, '(?s)HasTrustedAncestor\(.*?\n\s*private static bool IsActionForOperation')
+Assert-Test ($plugin -notmatch 'IntentKey|SharedVariables' -and
+    $plugin -match 'MaximumParentContexts = 8') 'MVP omits mutation markers and retains a bounded ancestor limit'
 Assert-Test ($search.Success -and $search.Value -match 'context\.ParentContext' -and
     $search.Value -match 'searched < MaximumParentContexts' -and
     $search.Value -match 'ancestor\.ParentContext') 'Guard traverses only the bounded ParentContext chain'
@@ -24,23 +24,22 @@ Assert-Test ($search.Value -match 'ancestor\.MessageName != "os_sr_cact"' -and
     $search.Value -match 'ancestor\.UserId != context\.UserId' -and
     $search.Value -match 'ancestor\.InitiatingUserId != context\.InitiatingUserId') `
     'Trusted ancestor requires approved API, synchronous transaction, nested depth, and caller identity'
-Assert-Test ($search.Value -notmatch 'ancestor\.SharedVariables|expectedIntent' -and
-    $search.Value -match 'RegistrationFailure\(ancestor, context, factory\)') `
-    'SharedVariables marker is superseded by server-owned registration verification'
+Assert-Test ($search.Value -notmatch 'ancestor\.SharedVariables|expectedIntent|RegistrationFailure|OwningExtension' -and
+    $plugin -notmatch 'ResolveGuardRegistration|CreateOrganizationService\(context\.UserId\)|CreateOrganizationService\(null\)') `
+    'MVP authorization uses server-owned ParentContext predicates without runtime registration metadata reads'
 Assert-Test ($search.Value -match 'IsActionForOperation\(ancestor, operation\)' -and
     $plugin -match 'action == "CreateCandidate"' -and $plugin -match 'action == "RecordCall"' -and
     $plugin -match 'action == "ProceedToScheduling"') 'Trusted Custom API actions are constrained to the protected mutation category'
-Assert-Test ($plugin -match 'context\.SharedVariables\[ProtectCandidateCore\.IntentKey\] = ProtectCandidateCore\.Intent\(message, row\)' -and
-    $plugin -match 'Authorize\("Create", row\);' -and $plugin -match 'Authorize\("Update", row\);' -and
-    $plugin -match 'finally \{ context\.SharedVariables\.Remove\(ProtectCandidateCore\.IntentKey\); \}') `
-    'ApplyCandidateAction creates the transaction-scoped intent before protected writes and removes it afterward'
+Assert-Test ($plugin -notmatch 'SharedVariables|IntentKey|Authorize\(' -and
+    $plugin -match 'CreateOrganizationService\(context\.InitiatingUserId\)') `
+    'Business operations remain caller-context and create no mutation marker'
 Assert-Test ($plugin -match 'CC_GUARD_TRUSTED_PARENT_FOUND:ANCESTOR_HOPS' -and
     $plugin -match 'CC_GUARD_TRUSTED_PARENT_NOT_FOUND:ANCESTOR_HOPS' -and
     $plugin -notmatch 'Trace\(.*IntentKey|Trace\(.*expectedIntent|Trace\(.*marker') `
     'Tracing reports safe parent status and hop category without marker values'
 Assert-Test ($contract -notmatch 'validated_intent|IntentKey|ParentContext') `
     'The private marker is absent from Custom API metadata contract'
-Assert-Test ($sdk -match 'Trusted Candidate Create marker one ancestor up is accepted' -and
+Assert-Test ($sdk -match 'Trusted Candidate Create is accepted without marker or registration cache' -and
     $sdk -match 'Trusted Candidate Create marker two ancestors up is accepted' -and
     $sdk -match 'eight contexts and fails closed beyond the bound') 'SDK tests cover variable ancestor distance and fail-closed traversal bound'
 Assert-Test ($sdk -match 'externalTag' -and $sdk -match 'injectedPrivateKey' -and
@@ -49,17 +48,11 @@ Assert-Test ($sdk -match 'externalTag' -and $sdk -match 'injectedPrivateKey' -an
 Assert-Test ($sdk -match 'Operation Receipt child write' -and $sdk -match 'Call Log child write' -and
     $sdk -match 'Status History child write' -and $sdk -match 'Candidate Answered update') `
     'SDK tests accept legitimate Candidate, Call Log, History, and Receipt child writes by action'
-Assert-Test ($sdk -match 'Private mutation marker is removed and never persisted, returned, or traced' -and
-    $sdk -match 'TRUSTED_PARENT_FOUND:ANCESTOR_HOPS') 'SDK tests verify marker lifetime and safe trace category'
-Assert-Test ($plugin -match 'extension\.LogicalName != "sdkmessageprocessingstep"' -and
-    $plugin -match 'Retrieve\("sdkmessageprocessingstep", extension\.Id' -and
-    $plugin -match 'Retrieve\("plugintype", handler\.Id' -and
-    $plugin -match 'Retrieve\("pluginassembly", assemblyReference\.Id' -and
-    $plugin -match 'Retrieve\("pluginpackage", packageReference\.Id') `
-    'Trust follows the server-owned step type assembly package chain without fixed registration IDs'
-Assert-Test ($plugin -match 'CreateOrganizationService\(context\.UserId\)' -and
-    $plugin -match 'Tuple.Create\(context.OrganizationId, context.UserId, extension.Id\)' -and
-    $plugin -match 'RegistrationCache.Count >= 128' -and $plugin -match 'AddMinutes\(1\)' -and
-    $plugin -match 'return "REGISTRATION_READ_FAILED"') 'Calling-user positive cache is bounded, expiring and fail closed'
+Assert-Test ($sdk -match 'MVP operation does not create, persist, return, trace, or require the superseded marker' -and
+    $sdk -match 'TRUSTED_PARENT_FOUND:ANCESTOR_HOPS') 'SDK tests verify marker independence and safe trace category'
+Assert-Test ($plugin -match 'RegisteredWriteCode\(context\.MessageName, context\.PrimaryEntityName\)' -and
+    $plugin -match 'context\.MessageName == "Associate"' -and
+    $plugin -notmatch 'sdkmessageprocessingstep|pluginpackage|OwningExtension') `
+    'MVP child write mapping is package-known and contains no runtime registration lookup'
 
 "PASS: $script:Passed Phase 3D-R4M trusted-parent source assertions; no authentication/network."

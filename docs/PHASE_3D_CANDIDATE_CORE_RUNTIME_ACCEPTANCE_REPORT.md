@@ -2,7 +2,50 @@
 
 Date: 26 October 2026. This report records the R4O server-registration classifier implementation, one existing-package update, and the resulting CreateCandidate rejection; earlier runtime failures remain historical evidence. Source: owner authorization, current repository contract/source, guarded live reconciliation, local offline validation, and the supported Dataverse plug-in package model.
 
-## R4O Server-Registration Classifier: Deployment and Runtime Rejection
+## Fast Track MVP: Package Update and CreateCandidate Runtime Stop
+
+**Result:** `CREATECANDIDATE_RUNTIME_FAILURE`; exact safe rejection `DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_PROTECTED_WRITE:CC_CREATE_CANDIDATE:0x80040265`. This run stops Candidate Core hardening as directed. The earlier marker and server-registration metadata mechanisms are superseded for MVP authorization. `ProtectCandidateCore` uses the source-known child message/entity mapping and a bounded trusted `os_sr_cact` ParentContext ancestor; direct writes without that ancestor remain rejected. The exact ActionType/write matrix was not broadened.
+
+### Package update and preflight
+
+The local unsigned `os_sr_cact_pkg` 1.0.0 artifact was pushed once to the already-existing package in VN LMV IT. No new package, registration PATCH, handler PATCH, API/schema change, trace/profiler change, security change, or signing-key access occurred. Immediate GET-only reconciliation confirmed the existing package ID/unique name, package-backed `os_sr_cact.ApplyCandidateAction`, 50 package-backed `os_sr_cact.ProtectCandidateCore` guard steps, unchanged API/schema contract, trace setting Off, and no active Candidate Core Profiler wrappers.
+
+Fresh pre-dispatch inventory resolved 50/50 registrations: six exact canonical message/entity pairs, 42 fail-closed unsupported pairs, and two relationship guards; zero unresolved and zero contradictory mappings. This is a registration-topology inventory and is **not** used by the MVP runtime classifier. Normalized inventory SHA-256: `070a6be1d49d3d0d831df757d470024a37283312749e8b19a1a5615b7ecc7480`.
+
+Local artifact hashes:
+
+| Artifact | SHA-256 |
+|---|---|
+| Unsigned `os_sr_cact.dll` | `62d8b4426a3060b3cd473a440ae9df70ff6543c74064a6b0c610815882f41425` |
+| Unsigned `os_sr_cact_pkg.1.0.0.nupkg` | `277f02e13a2e223698eb1899aa5703231447062d45d7a93c0476148577b10f4b` |
+
+These are local build-artifact hashes. Dataverse did not expose package bytes for independent byte-for-byte server reconciliation; package identity/topology, not uploaded-byte equality, was verified.
+
+### One-shot runtime result
+
+Exactly one synthetic CreateCandidate was dispatched with the minimal request, one fresh correlation ID, and a reserved `.invalid` email. The runner made one Custom API invocation, performed no automatic retry, and stopped immediately at `CC_CREATE_CANDIDATE` with the exact guard rejection above. The subsequent GET-only reconciliation confirmed Candidate / Call Log / Status History / Operation Receipt counts of **0 / 0 / 0 / 0**. The one-shot lock and sanitized local evidence journal are retained.
+
+No RecordCall, replay, Answered transition, Waiting Manual Scheduling transition, direct-write canary, second CreateCandidate, or further package update was attempted. The MVP backend workflow therefore remains unaccepted; no result should be inferred for call/history behavior from offline tests.
+
+### UI fallback disposition
+
+The owner-requested DEV-flow fallback was not created or deployed. A flow's direct Candidate/Call/History writes would still enter `ProtectCandidateCore` without the required trusted `os_sr_cact` ancestor, while invoking `os_sr_cact` is blocked by the same runtime failure. No guard exception or direct-write bypass was introduced. Read-only inspection listed 34 cloud flows; no name or description matched Candidate, Record Call, Status History, DEV/TEMP, BSO-RS, or `os_sr`. This does not rule out a relevant flow under another name. The available Power Platform tooling exposed flow listing but no supported flow-creation operation. No `srapp` navigation, page, form, command, or publication change was made; no generated custom pages were found for `srapp`. The first-visible vertical-slice criterion is unmet; see [Candidate UI implementation note](CANDIDATE_UI_IMPLEMENTATION_NOTE.md).
+
+### Local validation
+
+| Gate | Result |
+|---|---|
+| Candidate Core engine harness | PASS, 141 assertions |
+| SDK adapter/guard harness | PASS, 303 assertions |
+| PowerShell suites | PASS, all 12 suites |
+| PowerShell script parsing | PASS, all 11 scripts |
+| Unsigned package build | PASS, 0 warnings and 0 errors |
+| Unsigned package validation | PASS, 12 assertions |
+| `git diff --check` | PASS |
+
+No browser/app acceptance, published UI, DEV flow, or visible Candidate workflow is claimed.
+
+## Historical R4O Server-Registration Classifier: Deployment and Runtime Rejection
 
 **Final result for this bounded R4O run:** the registration-backed package was updated once and reconciled, but the single CreateCandidate was rejected with `DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_GUARD_REGISTRATION:CC_CREATE_CANDIDATE:0x80040265`. Runtime acceptance and the matrix were not reached. The prior `OTHER_PROTECTED_WRITE` CreateCandidate result proved the runtime-shape classifier inadequate. Static source reconciliation already showed that Candidate Create and Receipt Create were in the exact ActionType/write allowlist; that allowlist was not broadened. The new safe category does not identify which internal registration metadata check failed; the stop rule was applied without further repair, deployment, or invocation.
 

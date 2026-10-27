@@ -24,7 +24,9 @@ $errors = $null
 Assert-Test ($errors.Count -eq 0) 'Synthetic runtime runner parses'
 Assert-Test ($runtime -match "ValidateSet\('GET', 'POST'\)" -and
     $runtime -match "Path -cne 'os_sr_cact'" -and $runtime -match 'MaximumRetryCount = 0' -and
-    $runtime -match 'MaximumRedirection = 0' -and $runtime -match 'expectedActionCalls = 8') 'Only bounded Custom API calls with zero retries'
+    $runtime -match 'MaximumRedirection = 0' -and
+    $runtime.Contains('$expectedActionCalls = if ($mvpVerticalSliceAuthorization) { 5 } else { 8 }')) `
+    'Only bounded Custom API calls with zero retries'
 Assert-Test ($runtime -match 'FileMode\]::CreateNew' -and $runtime -match 'phase3d-r-runtime-' -and
     $runtime -match 'phase3d-r4m-owner-authorized-marker-propagation-runtime' -and
     $runtime -notmatch 'phase3d-r4k-owner-authorized-package-runtime' -and
@@ -100,13 +102,12 @@ Assert-Test ($runtime -match 'function Get-GuardRegistrationInventory' -and
     $runtime -match 'PackageId = \$packageId\.ToLowerInvariant\(\)' -and
     $runtime -match 'PackageModifiedOn = \[string\]\$package\.modifiedon') `
     'Live preflight derives every canonical write from SDK message/filter registration metadata'
-Assert-Test ($plugin -match 'ResolveGuardRegistration' -and
-    $plugin -match 'context\.OwningExtension' -and
-    $plugin -match 'RegisteredWriteCode\(messageName, entityName\)' -and
-    $plugin -match 'UNSUPPORTED_GUARD_REGISTRATION' -and
-    $plugin -match 'GUARD_REGISTRATION_CONTEXT_MISMATCH' -and
-    $plugin -notmatch 'OTHER_PROTECTED_WRITE|SafeOperation\(') `
-    'Protected write classification uses server-owned registration, not runtime shape inference'
+Assert-Test ($plugin -match 'RegisteredWriteCode\(context\.MessageName, context\.PrimaryEntityName\)' -and
+    $plugin -match 'ancestor\.MessageName != "os_sr_cact"' -and
+    $plugin -match 'ancestor\.Stage != 30' -and $plugin -match 'ancestor\.Mode != 0' -and
+    $plugin -match 'ancestor\.IsInTransaction' -and
+    $plugin -notmatch 'ResolveGuardRegistration|RegistrationFailure|context\.OwningExtension|SharedVariables|UNSUPPORTED_GUARD_REGISTRATION|GUARD_REGISTRATION_CONTEXT_MISMATCH') `
+    'MVP protected-write classification uses the source-known child message/entity pair and bounded API ancestor'
 Assert-Test ($runtime -match 'CreateCandidate' -and $runtime -match 'STALE_EXPECTED_STATUS' -and
     $runtime -match 'RecordCall no-answer replay' -and
     $runtime -match 'RecordCall no-answer conflict' -and
@@ -168,5 +169,11 @@ Assert-Test ($operation -match 'Action == "CreateCandidate" && input\.TryGetValu
 Assert-Test ($runtime -match 'function Assert-NoEffect \{\s*param\(\[string\]\$Checkpoint, \[int\]\$ExpectedStatus\)' -and
     $runtime -notmatch 'script:expectedStatus' -and
     $runtime -match 'SchedulingEvidenceChecks = \$schedulingEvidenceChecks') 'No-effect checks receive explicit state and scheduling evidence is reported'
+Assert-Test ($runtime.Contains('$expectedActionCalls = if ($mvpVerticalSliceAuthorization) { 5 } else { 8 }') -and
+    $runtime -match 'if \(-not \$mvpVerticalSliceAuthorization\) \{\s*\$noAnswerConflict' -and
+    $runtime -match 'if \(-not \$mvpVerticalSliceAuthorization\) \{\s*\$stale' -and
+    $runtime -match "'CANDIDATE_CORE_MVP_RUNTIME_ACCEPTED'" -and
+    $runtime -match "LiveResult = 'NOT_RUN_MVP_SCOPE'") `
+    'MVP runtime executes only create, no-answer/replay, answered, and waiting-transition actions'
 
 "PASS: $script:Passed synthetic Phase 3D runtime-runner contract assertions; no authentication/network."

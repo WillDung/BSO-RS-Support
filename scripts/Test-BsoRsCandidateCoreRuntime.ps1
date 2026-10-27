@@ -2,7 +2,8 @@
 [CmdletBinding()]
 param(
     [ValidateSet('Preflight', 'Apply', 'VerifiedAncestorApply', 'R4OWriteContextApply',
-        'R4OServerRegistrationApply')][string]$RuntimeMode = 'Preflight',
+        'R4OServerRegistrationApply', 'MvpVerticalSlicePreflight',
+        'MvpVerticalSliceApply')][string]$RuntimeMode = 'Preflight',
     [Parameter(Mandatory)][string]$EnvironmentName,
     [Parameter(Mandatory)][string]$OrganizationUrl,
     [Parameter(Mandatory)][string]$ExpectedEnvironmentId,
@@ -22,6 +23,9 @@ $expectedManifestHash = '63f56173f61265f539d23d6ceffb5631e23f438e4e254755c1e24c7
 $runtimeAuthorizationId = 'phase3d-r4m-owner-authorized-marker-propagation-runtime'
 $writeContextAuthorization = $RuntimeMode -ceq 'R4OWriteContextApply'
 $serverRegistrationAuthorization = $RuntimeMode -ceq 'R4OServerRegistrationApply'
+$mvpVerticalSliceAuthorization = $RuntimeMode -in @(
+    'MvpVerticalSlicePreflight', 'MvpVerticalSliceApply'
+)
 $verifiedAncestorAuthorization = $RuntimeMode -in @(
     'VerifiedAncestorApply', 'R4OWriteContextApply', 'R4OServerRegistrationApply'
 )
@@ -35,7 +39,12 @@ if ($writeContextAuthorization) {
 if ($serverRegistrationAuthorization) {
     $runtimeAuthorizationId = 'phase3d-r4o-server-registration-classifier-runtime'
 }
-$expectedActionCalls = 8
+if ($mvpVerticalSliceAuthorization) {
+    $runtimeAuthorizationId = 'phase3d-mvp-visible-vertical-slice-runtime'
+    $verifiedAncestorAuthorization = $true
+    $RuntimeMode = if ($RuntimeMode -ceq 'MvpVerticalSlicePreflight') { 'Preflight' } else { 'Apply' }
+}
+$expectedActionCalls = if ($mvpVerticalSliceAuthorization) { 5 } else { 8 }
 $schedulingEvidenceChecks = @(
     [ordered]@{
         Action = 'MarkRound1Scheduled'; LiveResult = 'VERIFIED_FAIL_CLOSED_LIVE'
@@ -54,6 +63,11 @@ $schedulingEvidenceChecks = @(
         CurrentStatus = 'Waiting Manual Scheduling'; OfflineMissingEvidenceResult = 'RESULT_OR_CANCELLATION_DEPENDENCY_UNAVAILABLE'
     }
 )
+if ($mvpVerticalSliceAuthorization) {
+    $schedulingEvidenceChecks = @(
+        [ordered]@{ Action = 'Scheduling-dependent operations'; LiveResult = 'NOT_RUN_MVP_SCOPE' }
+    )
+}
 $script:runtimeRequestCounts = @{ GET = 0; POST = 0 }
 $script:apiCalls = 0
 $script:runtimeFailureClassification = $null
@@ -81,7 +95,7 @@ function Save-RuntimeJournal {
 function Get-RuntimeErrorCode {
     param([string]$Message)
     $coreWriteFailure = [regex]::Match($Message,
-        '(?<![A-Z0-9_])DIRECT_WRITE_GUARD_REJECTED:(UNSUPPORTED_GUARD_REGISTRATION|GUARD_REGISTRATION_CONTEXT_MISMATCH|ASSOCIATION_PROJECT_RELATIONSHIP|ASSOCIATION_PROJECT_TABLE|ASSOCIATION_CONTAINS_PROJECT_TABLE)(?::CC_[A-Z_]+)?(?::0x[0-9A-F]{8})?(?![A-Z0-9_])')
+        '(?<![A-Z0-9_])DIRECT_WRITE_GUARD_REJECTED:(UNSUPPORTED_PROTECTED_WRITE|UNSUPPORTED_GUARD_REGISTRATION|GUARD_REGISTRATION_CONTEXT_MISMATCH|ASSOCIATION_PROJECT_RELATIONSHIP|ASSOCIATION_PROJECT_TABLE|ASSOCIATION_CONTAINS_PROJECT_TABLE)(?::CC_[A-Z_]+)?(?::0x[0-9A-F]{8})?(?![A-Z0-9_])')
     if ($coreWriteFailure.Success) { return $coreWriteFailure.Value }
     $trustedParentFailure = [regex]::Match($Message,
         '(?<![A-Z0-9_])DIRECT_WRITE_GUARD_REJECTED:(CANDIDATE_CREATE|CANDIDATE_UPDATE|CALL_LOG_CREATE|STATUS_HISTORY_CREATE|RECEIPT_CREATE):TRUSTED_PARENT:(API_MESSAGE_MISMATCH|STAGE_MISMATCH|MODE_MISMATCH|TRANSACTION_MISMATCH|DEPTH_MISMATCH|USER_CONTEXT_MISMATCH|INITIATING_USER_MISMATCH|ACTIONTYPE_MISSING|ACTIONTYPE_MISMATCH|MARKER_MISSING|MARKER_TYPE_MISMATCH|MARKER_FINGERPRINT_MISMATCH|ANCESTOR_BOUND_EXCEEDED|OWNING_EXTENSION_MISSING|OWNING_EXTENSION_TYPE_MISMATCH|HANDLER_TYPE_MISMATCH|ASSEMBLY_MISMATCH|PACKAGE_MISMATCH|REGISTRATION_READ_FAILED)(?::CC_[A-Z_]+)?(?::0x[0-9A-F]{8})?(?![A-Z0-9_])')
@@ -733,10 +747,12 @@ try {
         throw 'No-answer replay did not return original Call Log evidence.'
     }
     Assert-Counts 'RecordCall no-answer replay'
-    $noAnswerConflict = $noAnswer.Clone()
-    $noAnswerConflict.CallOutcome = 100010002
-    $null = Invoke-Action -Body $noAnswerConflict -ExpectedFailure 'CORRELATION_CONFLICT'
-    Assert-Counts 'RecordCall no-answer conflict'
+    if (-not $mvpVerticalSliceAuthorization) {
+        $noAnswerConflict = $noAnswer.Clone()
+        $noAnswerConflict.CallOutcome = 100010002
+        $null = Invoke-Action -Body $noAnswerConflict -ExpectedFailure 'CORRELATION_CONFLICT'
+        Assert-Counts 'RecordCall no-answer conflict'
+    }
 
     $answered = [ordered]@{
         ActionType = 'RecordCall'; CorrelationId = (New-Correlation); CandidateId = $script:candidateId
@@ -772,23 +788,30 @@ try {
     Assert-Counts 'ProceedToScheduling'
     Assert-Status 100010002
 
-    $stale = [ordered]@{
-        ActionType = 'RecordCall'; CorrelationId = (New-Correlation); CandidateId = $script:candidateId
-        ExpectedStatus = 100010001; CallOutcome = 100010001; ContactedAt = [DateTime]::UtcNow.ToString('o')
-    }
-    $null = Invoke-Action -Body $stale -ExpectedFailure 'STALE_EXPECTED_STATUS'
-    Assert-NoEffect 'Stale-state rejection' 100010002
+    if (-not $mvpVerticalSliceAuthorization) {
+        $stale = [ordered]@{
+            ActionType = 'RecordCall'; CorrelationId = (New-Correlation); CandidateId = $script:candidateId
+            ExpectedStatus = 100010001; CallOutcome = 100010001; ContactedAt = [DateTime]::UtcNow.ToString('o')
+        }
+        $null = Invoke-Action -Body $stale -ExpectedFailure 'STALE_EXPECTED_STATUS'
+        Assert-NoEffect 'Stale-state rejection' 100010002
 
-    $markScheduled = [ordered]@{
-        ActionType = 'MarkRound1Scheduled'; CorrelationId = (New-Correlation)
-        CandidateId = $script:candidateId; ExpectedStatus = 100010002
+        $markScheduled = [ordered]@{
+            ActionType = 'MarkRound1Scheduled'; CorrelationId = (New-Correlation)
+            CandidateId = $script:candidateId; ExpectedStatus = 100010002
+        }
+        $null = Invoke-Action -Body $markScheduled -ExpectedFailure 'SCHEDULER_DEPENDENCY_UNAVAILABLE'
+        Assert-NoEffect 'MarkRound1Scheduled without trusted scheduler evidence' 100010002
     }
-    $null = Invoke-Action -Body $markScheduled -ExpectedFailure 'SCHEDULER_DEPENDENCY_UNAVAILABLE'
-    Assert-NoEffect 'MarkRound1Scheduled without trusted scheduler evidence' 100010002
 
     Assert-LiveEvidence
     Assert-Counts 'Final reconciliation'
-    $script:journal.Result = 'PHASE_3D_SYNTHETIC_RUNTIME_ACCEPTED'
+    $resultClassification = if ($mvpVerticalSliceAuthorization) {
+        'CANDIDATE_CORE_MVP_RUNTIME_ACCEPTED'
+    } else {
+        'PHASE_3D_SYNTHETIC_RUNTIME_ACCEPTED'
+    }
+    $script:journal.Result = $resultClassification
     $script:journal.Dispatches = @($script:journal.Dispatches | ForEach-Object {
         [ordered]@{
             Index = $_.Index; Action = $_.Action; PayloadSha256 = $_.PayloadSha256
@@ -800,7 +823,7 @@ try {
     $script:journal.FinalCounts = Get-ScopedCounts
     Save-RuntimeJournal
     [ordered]@{
-        Result = 'PHASE_3D_SYNTHETIC_RUNTIME_ACCEPTED'
+        Result = $resultClassification
         AuthorizationId = $runtimeAuthorizationId
         CandidateFixtureCount = 1
         SyntheticName = '[SYNTHETIC-E2E] Candidate Core Acceptance'
@@ -811,7 +834,9 @@ try {
         CustomAPIInvocations = $script:apiCalls
         CandidateWrites = 1; CallLogWrites = 2; StatusHistoryWrites = 2; ReceiptWrites = 4
         TotalBusinessRecordWrites = 9
-        Replays = 1; Conflicts = 1; ExpectedRejections = 2
+        Replays = 1
+        Conflicts = if ($mvpVerticalSliceAuthorization) { 0 } else { 1 }
+        ExpectedRejections = if ($mvpVerticalSliceAuthorization) { 0 } else { 2 }
         SchedulingEvidenceChecks = $schedulingEvidenceChecks
         PackageGuard = $packageGuard
         FinalCounts = $script:journal.FinalCounts

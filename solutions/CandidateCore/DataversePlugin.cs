@@ -91,21 +91,15 @@ namespace os_sr_cact
         {
             "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:PARENT_CONTEXT",
             "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:CALLER_CONTEXT",
-            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:CALLER_MARKER",
             "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_UPDATE:PARENT_CONTEXT",
             "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_UPDATE:CALLER_CONTEXT",
-            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_UPDATE:CALLER_MARKER",
             "DIRECT_WRITE_GUARD_REJECTED:CALL_LOG_CREATE:PARENT_CONTEXT",
             "DIRECT_WRITE_GUARD_REJECTED:CALL_LOG_CREATE:CALLER_CONTEXT",
-            "DIRECT_WRITE_GUARD_REJECTED:CALL_LOG_CREATE:CALLER_MARKER",
             "DIRECT_WRITE_GUARD_REJECTED:STATUS_HISTORY_CREATE:PARENT_CONTEXT",
             "DIRECT_WRITE_GUARD_REJECTED:STATUS_HISTORY_CREATE:CALLER_CONTEXT",
-            "DIRECT_WRITE_GUARD_REJECTED:STATUS_HISTORY_CREATE:CALLER_MARKER",
             "DIRECT_WRITE_GUARD_REJECTED:RECEIPT_CREATE:PARENT_CONTEXT",
             "DIRECT_WRITE_GUARD_REJECTED:RECEIPT_CREATE:CALLER_CONTEXT",
-            "DIRECT_WRITE_GUARD_REJECTED:RECEIPT_CREATE:CALLER_MARKER",
-            "DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_GUARD_REGISTRATION",
-            "DIRECT_WRITE_GUARD_REJECTED:GUARD_REGISTRATION_CONTEXT_MISMATCH",
+            "DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_PROTECTED_WRITE",
             "DIRECT_WRITE_GUARD_REJECTED:LEGACY_GENERIC_GUARD"
         };
 
@@ -176,9 +170,7 @@ namespace os_sr_cact
         private Guid Create(Entity row, string stage)
         {
             if (row.Id == Guid.Empty) row.Id = Guid.NewGuid();
-            Authorize("Create", row);
-            try { return ExecuteAtStage(stage, () => service.Create(row)); }
-            finally { context.SharedVariables.Remove(ProtectCandidateCore.IntentKey); }
+            return ExecuteAtStage(stage, () => service.Create(row));
         }
 
         private T ExecuteAtStage<T>(string stage, Func<T> operation)
@@ -216,9 +208,7 @@ namespace os_sr_cact
             var normalized = message.Trim();
             var predicates = new[] { "API_MESSAGE_MISMATCH", "STAGE_MISMATCH", "MODE_MISMATCH",
                 "TRANSACTION_MISMATCH", "DEPTH_MISMATCH", "USER_CONTEXT_MISMATCH", "INITIATING_USER_MISMATCH",
-                "ACTIONTYPE_MISSING", "ACTIONTYPE_MISMATCH", "ANCESTOR_BOUND_EXCEEDED",
-                "OWNING_EXTENSION_MISSING", "OWNING_EXTENSION_TYPE_MISMATCH", "HANDLER_TYPE_MISMATCH", "ASSEMBLY_MISMATCH",
-                "PACKAGE_MISMATCH", "REGISTRATION_READ_FAILED" };
+                "ACTIONTYPE_MISSING", "ACTIONTYPE_MISMATCH", "ANCESTOR_BOUND_EXCEEDED" };
             foreach (var operation in ProtectCandidateCore.DiagnosticWriteCodes)
                 foreach (var predicate in predicates)
                 {
@@ -240,12 +230,6 @@ namespace os_sr_cact
             if (error is InvalidOperationException) return "INVALID_OPERATION";
             if (error is FaultException) return "SERVICE_FAULT";
             return "OTHER";
-        }
-
-        private void Authorize(string message, Entity row)
-        {
-            // Retained as non-authoritative evidence only; nested writes use verified server registration.
-            context.SharedVariables[ProtectCandidateCore.IntentKey] = ProtectCandidateCore.Intent(message, row);
         }
 
         private static void SetProfile(Entity row, ActionRequest request)
@@ -279,10 +263,8 @@ namespace os_sr_cact
             var row = new Entity("os_sr_cand", candidate.Id) { RowVersion = candidate.RowVersion };
             if (request.Action == "UpdateCandidate") SetProfile(row, request);
             else row["os_sr_cand_stat"] = new OptionSetValue(status);
-            Authorize("Update", row);
-            try { ExecuteAtStage("CC_UPDATE_CANDIDATE",
-                () => service.Execute(new UpdateRequest { Target = row, ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches })); }
-            finally { context.SharedVariables.Remove(ProtectCandidateCore.IntentKey); }
+            ExecuteAtStage("CC_UPDATE_CANDIDATE",
+                () => service.Execute(new UpdateRequest { Target = row, ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches }));
         }
 
         public Guid CreateCall(ActionRequest request, Guid candidateId)
@@ -333,15 +315,9 @@ namespace os_sr_cact
 
     public sealed class ProtectCandidateCore : IPlugin
     {
-        internal const string IntentKey = "os_sr_cact.validated_intent";
         private const int MaximumParentContexts = 8;
         internal static readonly string[] DiagnosticWriteCodes = { "CANDIDATE_CREATE", "CANDIDATE_UPDATE",
-            "CALL_LOG_CREATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE", "RECEIPT_UPDATE" };
-        private static readonly object RegistrationCacheLock = new object();
-        private static readonly Dictionary<Tuple<Guid, Guid, Guid>, DateTime> RegistrationCache =
-            new Dictionary<Tuple<Guid, Guid, Guid>, DateTime>();
-        private static readonly Dictionary<Tuple<Guid, Guid, Guid>, GuardWriteRegistration> GuardWriteCache =
-            new Dictionary<Tuple<Guid, Guid, Guid>, GuardWriteRegistration>();
+            "CALL_LOG_CREATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE" };
         private static readonly string[] ProjectTables = { "os_sr_cand", "os_sr_call", "os_sr_csh", "os_sr_oprc" };
         private static readonly string[] ProjectRelationships = { "os_sr_pos_cand", "os_sr_csrc_cand", "os_sr_ta_cand",
             "os_sr_cand_call", "os_sr_cand_csh", "os_sr_usr_call_ctby", "os_sr_usr_csh_actr", "os_sr_cand_oprc" };
@@ -350,11 +326,7 @@ namespace os_sr_cact
         {
             var context = (IPluginExecutionContext)serviceProvider.GetService(typeof(IPluginExecutionContext));
             var trace = (ITracingService)serviceProvider.GetService(typeof(ITracingService));
-            var factory = (IOrganizationServiceFactory)serviceProvider.GetService(typeof(IOrganizationServiceFactory));
-            var registration = ResolveGuardRegistration(context, factory);
-            if (registration.Failure != null)
-                throw Rejection(trace, registration.Failure);
-            if (registration.IsRelationship)
+            if (context.MessageName == "Associate" || context.MessageName == "Disassociate")
             {
                 var relationship = context.InputParameters.Contains("Relationship") ? context.InputParameters["Relationship"] as Relationship : null;
                 var targetReference = context.InputParameters.Contains("Target") ? context.InputParameters["Target"] as EntityReference : null;
@@ -367,149 +339,21 @@ namespace os_sr_cact
                     throw Rejection(trace, "ASSOCIATION_CONTAINS_PROJECT_TABLE");
                 return;
             }
-            var operation = registration.WriteCode!;
+            var operation = RegisteredWriteCode(context.MessageName, context.PrimaryEntityName);
+            if (operation == null)
+                throw Rejection(trace, "UNSUPPORTED_PROTECTED_WRITE");
             if (context.Stage != 10 || context.Mode != 0 || !context.IsInTransaction ||
                 context.Depth <= 1 || context.ParentContext == null)
                 throw Rejection(trace, operation + ":PARENT_CONTEXT");
             if (context.UserId != context.InitiatingUserId)
                 throw Rejection(trace, operation + ":CALLER_CONTEXT");
-            var trustedParent = FindTrustedParent(context, operation, factory, trace, out var searched, out var failure);
-            if (trustedParent == null)
+            if (!HasTrustedAncestor(context, operation, trace, out var searched, out var failure))
             {
                 trace.Trace("CC_GUARD_TRUSTED_PARENT_NOT_FOUND:ANCESTOR_HOPS:{0}", searched);
                 throw Rejection(trace, operation + ":TRUSTED_PARENT:" + failure);
             }
             trace.Trace("CC_GUARD_TRUSTED_PARENT_FOUND:ANCESTOR_HOPS:{0}", searched);
             trace.Trace("CC_GUARD_ALLOWED:{0}", operation);
-        }
-
-        private sealed class GuardWriteRegistration
-        {
-            public string? MessageName { get; set; }
-            public string? EntityName { get; set; }
-            public string? WriteCode { get; set; }
-            public bool IsRelationship { get; set; }
-            public string? Failure { get; set; }
-            public DateTime ExpiresUtc { get; set; }
-        }
-
-        private static GuardWriteRegistration ResolveGuardRegistration(
-            IPluginExecutionContext context, IOrganizationServiceFactory factory)
-        {
-            var extension = context.OwningExtension;
-            if (extension == null || extension.Id == Guid.Empty ||
-                extension.LogicalName != "sdkmessageprocessingstep")
-                return new GuardWriteRegistration { Failure = "UNSUPPORTED_GUARD_REGISTRATION" };
-
-            var key = Tuple.Create(context.OrganizationId, context.UserId, extension.Id);
-            lock (RegistrationCacheLock)
-            {
-                if (GuardWriteCache.TryGetValue(key, out var cached) &&
-                    cached.ExpiresUtc > DateTime.UtcNow)
-                    return ValidateRuntimeRegistration(context, cached);
-            }
-
-            GuardWriteRegistration resolved;
-            try
-            {
-                var service = factory.CreateOrganizationService(context.UserId);
-                var step = service.Retrieve("sdkmessageprocessingstep", extension.Id,
-                    new ColumnSet("statecode", "eventhandler", "sdkmessageid", "sdkmessagefilterid"));
-                var state = step.GetAttributeValue<OptionSetValue>("statecode");
-                var handler = step.GetAttributeValue<EntityReference>("eventhandler");
-                var messageReference = step.GetAttributeValue<EntityReference>("sdkmessageid");
-                var filterReference = step.GetAttributeValue<EntityReference>("sdkmessagefilterid");
-                if (state == null || state.Value != 0 || handler == null ||
-                    handler.LogicalName != "plugintype" || handler.Id == Guid.Empty ||
-                    messageReference == null || messageReference.LogicalName != "sdkmessage" ||
-                    messageReference.Id == Guid.Empty)
-                    return new GuardWriteRegistration { Failure = "UNSUPPORTED_GUARD_REGISTRATION" };
-
-                var type = service.Retrieve("plugintype", handler.Id, new ColumnSet("typename", "pluginassemblyid"));
-                if (type.GetAttributeValue<string>("typename") != "os_sr_cact.ProtectCandidateCore")
-                    return new GuardWriteRegistration { Failure = "UNSUPPORTED_GUARD_REGISTRATION" };
-                var assemblyReference = type.GetAttributeValue<EntityReference>("pluginassemblyid");
-                if (assemblyReference == null || assemblyReference.LogicalName != "pluginassembly" ||
-                    assemblyReference.Id == Guid.Empty)
-                    return new GuardWriteRegistration { Failure = "UNSUPPORTED_GUARD_REGISTRATION" };
-                var assembly = service.Retrieve("pluginassembly", assemblyReference.Id,
-                    new ColumnSet("name", "version", "packageid"));
-                if (assembly.GetAttributeValue<string>("name") != "os_sr_cact" ||
-                    assembly.GetAttributeValue<string>("version") != "1.0.0.0")
-                    return new GuardWriteRegistration { Failure = "UNSUPPORTED_GUARD_REGISTRATION" };
-                var packageReference = assembly.GetAttributeValue<EntityReference>("packageid");
-                if (packageReference == null || packageReference.LogicalName != "pluginpackage" ||
-                    packageReference.Id == Guid.Empty)
-                    return new GuardWriteRegistration { Failure = "UNSUPPORTED_GUARD_REGISTRATION" };
-                var package = service.Retrieve("pluginpackage", packageReference.Id,
-                    new ColumnSet("name", "uniquename", "version"));
-                if (package.GetAttributeValue<string>("name") != "os_sr_cact_pkg" ||
-                    package.GetAttributeValue<string>("uniquename") != "os_sr_cact_pkg" ||
-                    package.GetAttributeValue<string>("version") != "1.0.0")
-                    return new GuardWriteRegistration { Failure = "UNSUPPORTED_GUARD_REGISTRATION" };
-
-                var message = service.Retrieve("sdkmessage", messageReference.Id, new ColumnSet("name"));
-                var messageName = message.GetAttributeValue<string>("name");
-                if (string.IsNullOrWhiteSpace(messageName))
-                    return new GuardWriteRegistration { Failure = "UNSUPPORTED_GUARD_REGISTRATION" };
-
-                if (messageName == "Associate" || messageName == "Disassociate")
-                {
-                    if (filterReference != null)
-                        return new GuardWriteRegistration { Failure = "UNSUPPORTED_GUARD_REGISTRATION" };
-                    resolved = new GuardWriteRegistration
-                    {
-                        MessageName = messageName,
-                        IsRelationship = true,
-                        ExpiresUtc = DateTime.UtcNow.AddMinutes(1)
-                    };
-                }
-                else
-                {
-                    if (filterReference == null || filterReference.LogicalName != "sdkmessagefilter" ||
-                        filterReference.Id == Guid.Empty)
-                        return new GuardWriteRegistration { Failure = "UNSUPPORTED_GUARD_REGISTRATION" };
-                    var filter = service.Retrieve("sdkmessagefilter", filterReference.Id,
-                        new ColumnSet("primaryobjecttypecode", "sdkmessageid"));
-                    var filterMessage = filter.GetAttributeValue<EntityReference>("sdkmessageid");
-                    var entityName = filter.GetAttributeValue<string>("primaryobjecttypecode");
-                    if (filterMessage == null || filterMessage.LogicalName != "sdkmessage" ||
-                        filterMessage.Id != messageReference.Id || string.IsNullOrWhiteSpace(entityName))
-                        return new GuardWriteRegistration { Failure = "UNSUPPORTED_GUARD_REGISTRATION" };
-                    var writeCode = RegisteredWriteCode(messageName, entityName);
-                    if (writeCode == null)
-                        return new GuardWriteRegistration { Failure = "UNSUPPORTED_GUARD_REGISTRATION" };
-                    resolved = new GuardWriteRegistration
-                    {
-                        MessageName = messageName,
-                        EntityName = entityName,
-                        WriteCode = writeCode,
-                        ExpiresUtc = DateTime.UtcNow.AddMinutes(1)
-                    };
-                }
-            }
-            catch (FaultException<OrganizationServiceFault>)
-            {
-                return new GuardWriteRegistration { Failure = "UNSUPPORTED_GUARD_REGISTRATION" };
-            }
-
-            lock (RegistrationCacheLock)
-            {
-                if (GuardWriteCache.Count >= 128) GuardWriteCache.Clear();
-                GuardWriteCache[key] = resolved;
-            }
-            return ValidateRuntimeRegistration(context, resolved);
-        }
-
-        private static GuardWriteRegistration ValidateRuntimeRegistration(
-            IPluginExecutionContext context, GuardWriteRegistration registration)
-        {
-            if ((!string.IsNullOrWhiteSpace(context.MessageName) &&
-                 !string.Equals(context.MessageName, registration.MessageName, StringComparison.Ordinal)) ||
-                (!registration.IsRelationship && !string.IsNullOrWhiteSpace(context.PrimaryEntityName) &&
-                 !string.Equals(context.PrimaryEntityName, registration.EntityName, StringComparison.OrdinalIgnoreCase)))
-                return new GuardWriteRegistration { Failure = "GUARD_REGISTRATION_CONTEXT_MISMATCH" };
-            return registration;
         }
 
         private static string? RegisteredWriteCode(string messageName, string entityName)
@@ -523,8 +367,8 @@ namespace os_sr_cact
             return null;
         }
 
-        private static IPluginExecutionContext? FindTrustedParent(
-            IPluginExecutionContext context, string operation, IOrganizationServiceFactory factory, ITracingService trace,
+        private static bool HasTrustedAncestor(
+            IPluginExecutionContext context, string operation, ITracingService trace,
             out int searched, out string failure)
         {
             var ancestor = context.ParentContext;
@@ -534,19 +378,13 @@ namespace os_sr_cact
             {
                 searched++;
                 var predicate = TrustedParentFailure(ancestor, context, operation);
-                if (predicate == null) predicate = RegistrationFailure(ancestor, context, factory);
                 trace.Trace("CC_GUARD_ANCESTOR:HOP:{0}:PREDICATE:{1}", searched, predicate ?? "TRUSTED");
-                if (predicate == null) return ancestor;
-                if (predicate == "REGISTRATION_READ_FAILED")
-                {
-                    failure = predicate;
-                    return null;
-                }
+                if (predicate == null) return true;
                 if (searched == 1) failure = predicate;
                 ancestor = ancestor.ParentContext;
             }
             if (ancestor != null) failure = "ANCESTOR_BOUND_EXCEEDED";
-            return null;
+            return false;
         }
 
         private static string? TrustedParentFailure(
@@ -562,56 +400,6 @@ namespace os_sr_cact
             if (!ancestor.InputParameters.TryGetValue("ActionType", out var action) || action == null)
                 return "ACTIONTYPE_MISSING";
             if (!IsActionForOperation(ancestor, operation)) return "ACTIONTYPE_MISMATCH";
-            return null;
-        }
-
-        private static string? RegistrationFailure(IPluginExecutionContext ancestor,
-            IPluginExecutionContext context, IOrganizationServiceFactory factory)
-        {
-            var extension = ancestor.OwningExtension;
-            if (extension == null || extension.Id == Guid.Empty) return "OWNING_EXTENSION_MISSING";
-            if (extension.LogicalName != "sdkmessageprocessingstep") return "OWNING_EXTENSION_TYPE_MISMATCH";
-            var key = Tuple.Create(context.OrganizationId, context.UserId, extension.Id);
-            lock (RegistrationCacheLock)
-            {
-                if (RegistrationCache.TryGetValue(key, out var expires) && expires > DateTime.UtcNow) return null;
-            }
-            // Calling-user reads only. Cache misses, unreadable metadata and negative results fail closed.
-            var service = factory.CreateOrganizationService(context.UserId);
-            try
-            {
-                var step = service.Retrieve("sdkmessageprocessingstep", extension.Id, new ColumnSet("eventhandler"));
-                var handler = step.GetAttributeValue<EntityReference>("eventhandler");
-                if (handler == null || handler.LogicalName != "plugintype" || handler.Id == Guid.Empty)
-                    return "HANDLER_TYPE_MISMATCH";
-                var type = service.Retrieve("plugintype", handler.Id, new ColumnSet("typename", "pluginassemblyid"));
-                if (type.GetAttributeValue<string>("typename") != "os_sr_cact.ApplyCandidateAction")
-                    return "HANDLER_TYPE_MISMATCH";
-                var assemblyReference = type.GetAttributeValue<EntityReference>("pluginassemblyid");
-                if (assemblyReference == null || assemblyReference.LogicalName != "pluginassembly" ||
-                    assemblyReference.Id == Guid.Empty) return "ASSEMBLY_MISMATCH";
-                var assembly = service.Retrieve("pluginassembly", assemblyReference.Id,
-                    new ColumnSet("name", "version", "packageid"));
-                if (assembly.GetAttributeValue<string>("name") != "os_sr_cact" ||
-                    assembly.GetAttributeValue<string>("version") != "1.0.0.0") return "ASSEMBLY_MISMATCH";
-                var packageReference = assembly.GetAttributeValue<EntityReference>("packageid");
-                if (packageReference == null || packageReference.LogicalName != "pluginpackage" ||
-                    packageReference.Id == Guid.Empty) return "PACKAGE_MISMATCH";
-                var package = service.Retrieve("pluginpackage", packageReference.Id,
-                    new ColumnSet("name", "uniquename", "version"));
-                if (package.GetAttributeValue<string>("name") != "os_sr_cact_pkg" ||
-                    package.GetAttributeValue<string>("uniquename") != "os_sr_cact_pkg" ||
-                    package.GetAttributeValue<string>("version") != "1.0.0") return "PACKAGE_MISMATCH";
-            }
-            catch (FaultException<OrganizationServiceFault>)
-            {
-                return "REGISTRATION_READ_FAILED";
-            }
-            lock (RegistrationCacheLock)
-            {
-                if (RegistrationCache.Count >= 128) RegistrationCache.Clear();
-                RegistrationCache[key] = DateTime.UtcNow.AddMinutes(1);
-            }
             return null;
         }
 
@@ -638,27 +426,5 @@ namespace os_sr_cact
             return new InvalidPluginExecutionException(diagnostic);
         }
 
-        internal static string Intent(string message, Entity target)
-        {
-            var builder = new StringBuilder(message).Append('|').Append(target.LogicalName).Append('|')
-                .Append(target.Id.ToString("D"));
-            foreach (var attribute in target.Attributes.OrderBy(pair => pair.Key, StringComparer.Ordinal))
-            {
-                // Dataverse can materialize the primary ID in Target.Attributes during Create.
-                if (attribute.Key == target.LogicalName + "id" && attribute.Value is Guid primary && primary == target.Id) continue;
-                string value;
-                if (attribute.Value == null) value = "null";
-                else if (attribute.Value is EntityReference reference) value = "r:" + reference.LogicalName + ":" + reference.Id.ToString("D");
-                else if (attribute.Value is OptionSetValue option) value = "o:" + option.Value.ToString(CultureInfo.InvariantCulture);
-                else if (attribute.Value is DateTime date) value = "d:" + date.ToString("O", CultureInfo.InvariantCulture);
-                else if (attribute.Value is string text) value = "s:" + text;
-                else if (attribute.Value is int integer) value = "i:" + integer.ToString(CultureInfo.InvariantCulture);
-                else throw new InvalidPluginExecutionException("UNSUPPORTED_MUTATION_VALUE");
-                builder.Append('|').Append(attribute.Key.Length).Append(':').Append(attribute.Key)
-                    .Append('|').Append(value.Length).Append(':').Append(value);
-            }
-            using (var hash = SHA256.Create())
-                return BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(builder.ToString()))).Replace("-", "");
-        }
     }
 }

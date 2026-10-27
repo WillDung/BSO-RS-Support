@@ -1,5 +1,23 @@
 # Security Model
 
+## Phase 4A BSO role baseline (27 October 2026)
+
+The DEV environment contains the unassigned `BSO-RS Support - BSO` security role in the root Business Unit. Its solution membership in the unmanaged `os_sr_bso_rs_support` solution was verified by a read-only `solutioncomponent` check (component type Role). The 17 requested business privileges were saved and verified after reloading the role editor:
+
+| Table | Privileges | Depth |
+|---|---|---|
+| Candidate | Create, Read, Write, Append, Append To | User (Basic) |
+| Call Log | Create, Read, Append, Append To | User (Basic) |
+| Candidate Status History | Create, Read, Append, Append To | User (Basic) |
+| TA Directory | Read | Organization |
+| Position | Read | Organization |
+| Candidate Source | Read | Organization |
+| Location | Read | Organization |
+
+No Operation Receipt privilege was added. Candidate, Call Log, and Candidate Status History Delete privileges were not enabled; no Customize, Publish, solution-administration, or environment-administration privilege was enabled in the role editor. The role editor shows five platform metadata Read defaults (Plug-in Assembly, Plug-in Type, Sdk Message, Sdk Message Processing Step, and Sdk Message Processing Step Image). A prior role readback also identified four SharePoint-related platform defaults that were not exposed as direct controls in the role editor. Those defaults were not changed and must be reviewed before any role assignment. **The role has not been assigned to any user.** Its privileges have not been independently tested as an effective access profile, and the role has not been exported into an unpacked repository solution snapshot. Any assignment requires separate explicit approval and verification against the target user's Business Unit.
+
+This role baseline does not make the DEV direct-write UI or disabled-guard state a production architecture. The Candidate Core production backend remains pending; real candidate data remains prohibited until the required backend, guard restoration, audit, and security acceptance gates are met. See [Current State](CURRENT_STATE.md) and the [Candidate UI implementation note](CANDIDATE_UI_IMPLEMENTATION_NOTE.md).
+
 ## Current Candidate Core trust contract (26 October 2026)
 
 ### R4O server-registration-backed protected-write classification

@@ -17,7 +17,8 @@
   const DEV_ORIGIN = "https://org14938ec2.crm4.dynamics.com";
   const STATUS = {
     needCall: 100010000,
-    answered: 100010001
+    answered: 100010001,
+    waitingManualScheduling: 100010002
   };
   const OUTCOME = {
     answered: 100010000,
@@ -139,6 +140,8 @@
       CANDIDATE_READ_FAILED: "Candidate could not be read before the call. Current data was refreshed.",
       CANDIDATE_LIST_REFRESH_FAILED: "The write completed, but the Candidate list could not be refreshed.",
       CANDIDATE_DETAIL_READ_FAILED: "The write completed, but Candidate details could not be refreshed.",
+      WAITING_STATUS_UPDATE_FAILED: "Candidate status update failed.",
+      WAITING_STATUS_HISTORY_CREATE_FAILED: "Status History create failed after the Candidate status update.",
       DEV_DIRECT_WRITE_RECONCILIATION_FAILED: "The write failed and current data could not be fully refreshed."
     };
     const message = messages[category] || "The DEV write failed. Current data was refreshed where possible.";
@@ -153,8 +156,10 @@
 
   function setBusy(value) {
     busy = value;
-    document.querySelectorAll("button").forEach((button) => {
-      button.disabled = value;
+    document.querySelectorAll("button[data-action]").forEach((button) => {
+      button.disabled = value ||
+        (button.id === "submit-call" && !selectedCandidate) ||
+        (button.id === "waiting-status-button" && button.hidden);
     });
   }
 
@@ -216,22 +221,49 @@
 
   function renderCandidateRows(rows) {
     currentRows = rows;
+    const search = $("candidate-search").value.trim().toLocaleLowerCase();
+    const status = $("candidate-status-filter").value;
+    const visibleRows = rows.filter((candidate) => {
+      const searchMatches = !search || [
+        candidate[TABLES.candidate.number],
+        candidate[TABLES.candidate.name],
+        candidate[TABLES.candidate.email]
+      ].some((value) => String(value || "").toLocaleLowerCase().includes(search));
+      const statusMatches = !status || String(candidate[TABLES.candidate.status]) === status;
+      return searchMatches && statusMatches;
+    });
     const body = $("candidate-rows");
     body.replaceChildren();
-    if (!rows.length) {
+    if (!visibleRows.length) {
       const row = document.createElement("tr");
-      const cell = appendCell(row, "No candidates found.");
-      cell.colSpan = 8;
+      const cell = appendCell(row, rows.length ? "No candidates match the current search and status filter." : "No synthetic candidates found. Create one to get started.");
+      cell.colSpan = 10;
       cell.className = "empty";
       body.appendChild(row);
       return;
     }
-    for (const candidate of rows) {
+    for (const candidate of visibleRows) {
       const row = document.createElement("tr");
+      row.className = "candidate-row";
+      row.tabIndex = 0;
+      if (selectedCandidate && selectedCandidate[TABLES.candidate.id] === candidate[TABLES.candidate.id]) {
+        row.classList.add("selected");
+      }
+      row.addEventListener("click", () => {
+        if (!busy) openCandidate(candidate[TABLES.candidate.id]);
+      });
+      row.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          if (!busy) openCandidate(candidate[TABLES.candidate.id]);
+        }
+      });
       appendCell(row, candidate[TABLES.candidate.number]);
       appendCell(row, candidate[TABLES.candidate.name]);
       appendCell(row, candidate[TABLES.candidate.email]);
       appendCell(row, candidate[TABLES.candidate.phone]);
+      appendCell(row, formatted(candidate, TABLES.candidate.position));
+      appendCell(row, formatted(candidate, TABLES.candidate.source));
       appendCell(row, choiceLabel(candidate, TABLES.candidate.status, STATUS_LABELS));
       appendCell(row, formatted(candidate, "_ownerid_value"));
       appendCell(row, formatDate(candidate.createdon));
@@ -240,13 +272,23 @@
       const open = document.createElement("button");
       open.type = "button";
       open.className = "button button-secondary button-small";
+      open.dataset.action = "";
       open.textContent = "Open";
-      open.addEventListener("click", () => openCandidate(candidate[TABLES.candidate.id]));
+      open.disabled = busy;
+      open.addEventListener("click", (event) => {
+        event.stopPropagation();
+        openCandidate(candidate[TABLES.candidate.id]);
+      });
       const call = document.createElement("button");
       call.type = "button";
       call.className = "button button-primary button-small";
+      call.dataset.action = "";
       call.textContent = "Record Call";
-      call.addEventListener("click", () => showCallDialog(candidate));
+      call.disabled = busy;
+      call.addEventListener("click", (event) => {
+        event.stopPropagation();
+        showCallPanel(candidate);
+      });
       actions.append(open, call);
       row.appendChild(actions);
       body.appendChild(row);
@@ -260,7 +302,7 @@
       "createdon", "_ownerid_value"
     ].join(",")}&$filter=${encodeURIComponent(
       `endswith(${c.email},'.invalid')`
-    )}&$orderby=createdon desc&$top=100`;
+    )}&$orderby=createdon desc`;
     const rows = (await retrieveAll(c.logicalName, query)).filter(isSyntheticCandidate);
     renderCandidateRows(rows);
   }
@@ -303,13 +345,14 @@
     addDetailItem(details, "Position", lookups[0]);
     addDetailItem(details, "Candidate Source", lookups[1]);
     addDetailItem(details, "Owner", formatted(candidate, "_ownerid_value"));
+    addDetailItem(details, "Created On", formatDate(candidate.createdon));
   }
 
   async function renderCallHistory(candidateId) {
     const c = TABLES.call;
     const rows = await retrieveAll(c.logicalName,
       `?$select=${[c.id, c.outcome, c.contactedAt, c.notes, c.reference].join(",")}` +
-      `&$filter=${c.candidate} eq ${candidateId}&$orderby=${c.contactedAt} desc&$top=100`);
+      `&$filter=${c.candidate} eq ${candidateId}&$orderby=${c.contactedAt} desc`);
     const body = $("call-history-rows");
     body.replaceChildren();
     if (!rows.length) {
@@ -332,8 +375,8 @@
   async function renderStatusHistory(candidateId) {
     const h = TABLES.history;
     const rows = await retrieveAll(h.logicalName,
-      `?$select=${[h.id, h.previous, h.current, h.changedAt, h.reason].join(",")}` +
-      `&$filter=${h.candidate} eq ${candidateId}&$orderby=${h.changedAt} desc&$top=100`);
+      `?$select=${[h.id, h.previous, h.current, h.changedAt, h.reason, "createdon"].join(",")}` +
+      `&$filter=${h.candidate} eq ${candidateId}&$orderby=${h.changedAt} desc`);
     const body = $("status-history-rows");
     body.replaceChildren();
     if (!rows.length) {
@@ -362,6 +405,14 @@
       selectedCandidate = candidate;
       $("detail-heading").textContent = candidate[TABLES.candidate.name] || "Candidate";
       $("detail-panel").hidden = false;
+      $("call-entry-panel").hidden = false;
+      $("call-candidate-label").textContent =
+        `${candidate[TABLES.candidate.number] || ""} ${candidate[TABLES.candidate.name] || ""}`.trim();
+      $("submit-call").disabled = busy;
+      const canMoveToWaiting = candidate[TABLES.candidate.status] === STATUS.answered;
+      $("waiting-status-button").hidden = !canMoveToWaiting;
+      $("waiting-status-button").disabled = busy || !canMoveToWaiting;
+      renderCandidateRows(currentRows);
       await Promise.all([
         renderCandidateDetails(candidate),
         renderCallHistory(candidateId),
@@ -401,7 +452,7 @@
     const metadata = await xrm().Utility.getEntityMetadata(tableName);
     const primaryName = metadata.PrimaryNameAttribute;
     const rows = await retrieveAll(tableName,
-      `?$select=${metadata.PrimaryIdAttribute},${primaryName}&$orderby=${primaryName} asc&$top=250`);
+      `?$select=${metadata.PrimaryIdAttribute},${primaryName}&$orderby=${primaryName} asc`);
     select.replaceChildren();
     addOption(select, "", emptyLabel);
     for (const row of rows) {
@@ -418,17 +469,15 @@
     if (!table.id) throw new Error("Table metadata is incomplete.");
   }
 
-  function showCallDialog(candidate) {
+  async function showCallPanel(candidate) {
     if (!isSyntheticCandidate(candidate)) {
       showNotice("DEV direct write is limited to [SYNTHETIC-E2E] candidates with .invalid email addresses.", true);
       return;
     }
-    selectedCandidate = candidate;
-    $("call-candidate-label").textContent =
-      `${candidate[TABLES.candidate.number] || ""} ${candidate[TABLES.candidate.name] || ""}`.trim();
-    $("call-notes").value = "";
-    $("call-outcome").value = "100010001";
-    $("call-dialog").showModal();
+    if (await openCandidate(candidate[TABLES.candidate.id])) {
+      $("call-entry-panel").scrollIntoView({ behavior: "smooth", block: "center" });
+      $("call-outcome").focus();
+    }
   }
 
   async function createCandidate(event) {
@@ -492,6 +541,8 @@
         throw new Error("DEV_DIRECT_WRITE_CANDIDATE_READBACK_INVALID");
       }
       $("candidate-form").reset();
+      $("candidate-search").value = "";
+      $("candidate-status-filter").value = "";
       category = "CANDIDATE_LIST_REFRESH_FAILED";
       await refreshCandidates();
       category = "CANDIDATE_DETAIL_READ_FAILED";
@@ -590,7 +641,7 @@
         };
         await xrm().WebApi.createRecord(history.logicalName, historyPayload);
       }
-      $("call-dialog").close();
+      $("call-notes").value = "";
       category = "CANDIDATE_LIST_REFRESH_FAILED";
       await refreshCandidates();
       category = "CANDIDATE_DETAIL_READ_FAILED";
@@ -611,9 +662,91 @@
     }
   }
 
+  async function moveToWaitingManualScheduling() {
+    if (busy || !selectedCandidate) return;
+    hideNotice();
+    const c = TABLES.candidate;
+    const history = TABLES.history;
+    let candidateId;
+    try {
+      candidateId = normalizeGuid(selectedCandidate[c.id]);
+    } catch (error) {
+      logSafeFailure("DEV_DIRECT_WRITE_INVALID_CANDIDATE_REFERENCE", error);
+      showNotice("Candidate reference is invalid. Refresh the list and select the Candidate again.", true);
+      return;
+    }
+    if (!isTargetDevEnvironment() || !isSyntheticCandidate(selectedCandidate)) {
+      showNotice("This transition is available only for synthetic candidates in VN LMV IT.", true);
+      return;
+    }
+
+    setBusy(true);
+    let category = "CANDIDATE_READ_FAILED";
+    let statusUpdated = false;
+    try {
+      const current = await xrm().WebApi.retrieveRecord(
+        c.logicalName,
+        candidateId,
+        `?$select=${[c.id, c.name, c.email, c.status].join(",")}`
+      );
+      if (!isSyntheticCandidate(current)) {
+        showNotice("This transition is limited to [SYNTHETIC-E2E] candidates with .invalid email addresses.", true);
+        return;
+      }
+      if (current[c.status] !== STATUS.answered) {
+        const reconciled = await reconcileAfterFailure(candidateId);
+        showNotice(
+          reconciled
+            ? "Move to Waiting Manual Scheduling is available only from Candidate Answered."
+            : "Candidate status changed; reconciliation did not fully complete.",
+          true
+        );
+        return;
+      }
+
+      const correlationId = newCorrelationId();
+      const userId = currentUserId();
+      category = "WAITING_STATUS_UPDATE_FAILED";
+      await xrm().WebApi.updateRecord(c.logicalName, candidateId, {
+        [c.status]: STATUS.waitingManualScheduling
+      });
+      statusUpdated = true;
+
+      category = "WAITING_STATUS_HISTORY_CREATE_FAILED";
+      await xrm().WebApi.createRecord(history.logicalName, {
+        [`${history.candidateNavigation}@odata.bind`]: `/${c.entitySetName}(${candidateId})`,
+        [`${history.actorNavigation}@odata.bind`]: `/systemusers(${userId})`,
+        [history.previous]: STATUS.answered,
+        [history.current]: STATUS.waitingManualScheduling,
+        [history.changedAt]: new Date().toISOString(),
+        [history.correlation]: correlationId,
+        [history.action]: "MoveToWaitingManualScheduling",
+        [history.reason]: "DEV Candidate Management / Move to Waiting Manual Scheduling"
+      });
+
+      category = "CANDIDATE_LIST_REFRESH_FAILED";
+      await refreshCandidates();
+      category = "CANDIDATE_DETAIL_READ_FAILED";
+      if (!(await openCandidate(candidateId))) {
+        throw new Error("DEV_DIRECT_WRITE_CANDIDATE_DETAIL_READ_FAILED");
+      }
+      showNotice("Candidate moved to Waiting Manual Scheduling.");
+    } catch (error) {
+      logSafeFailure(`DEV_DIRECT_WRITE_${category}`, error);
+      const reconciled = await reconcileAfterFailure(candidateId);
+      const partial = statusUpdated;
+      const message = failureMessage(category, partial);
+      showNotice(reconciled ? message : `${message} Reconciliation did not fully complete.`, true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function bindEvents() {
     $("candidate-form").addEventListener("submit", createCandidate);
     $("call-form").addEventListener("submit", recordCall);
+    $("candidate-search").addEventListener("input", () => renderCandidateRows(currentRows));
+    $("candidate-status-filter").addEventListener("change", () => renderCandidateRows(currentRows));
     $("refresh-button").addEventListener("click", async () => {
       hideNotice();
       try {
@@ -625,9 +758,12 @@
     });
     $("close-detail").addEventListener("click", () => {
       $("detail-panel").hidden = true;
+      $("call-entry-panel").hidden = true;
+      $("waiting-status-button").hidden = true;
       selectedCandidate = null;
+      renderCandidateRows(currentRows);
     });
-    $("cancel-call").addEventListener("click", () => $("call-dialog").close());
+    $("waiting-status-button").addEventListener("click", moveToWaitingManualScheduling);
   }
 
   async function initialize() {
@@ -653,12 +789,19 @@
         loadLookupOptions("os_sr_csrc", "candidate-source", "No source selected")
       ]);
       loadStage = "the Candidate list";
+      const statusFilter = $("candidate-status-filter");
+      for (const [value, label] of Object.entries(STATUS_LABELS)) {
+        addOption(statusFilter, value, label);
+      }
       await refreshCandidates();
     } catch {
       showNotice(`Candidate Management could not load ${loadStage}. Confirm app access and try again.`, true);
+      document.querySelectorAll("button[data-action]").forEach((button) => {
+        button.disabled = true;
+      });
       const row = document.createElement("tr");
       const cell = appendCell(row, "Candidate data is unavailable.");
-      cell.colSpan = 8;
+      cell.colSpan = 10;
       cell.className = "empty";
       $("candidate-rows").replaceChildren(row);
     }

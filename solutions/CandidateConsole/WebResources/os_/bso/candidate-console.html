@@ -6,7 +6,7 @@
   <title>Candidate Management</title>
   <link rel="stylesheet" href="candidate-console.css">
   <script src="../../ClientGlobalContext.js.aspx"></script>
-  <script defer src="candidate-console.js?v=9b95fec7433f"></script>
+  <script defer src="candidate-console.js?v=0f82b12d0538"></script>
 </head>
 <body>
   <main class="shell">
@@ -56,7 +56,7 @@
           </select>
         </label>
         <div class="form-actions field-wide">
-          <button id="create-button" class="button button-primary" type="submit">Create Candidate</button>
+          <button id="create-button" class="button button-primary" type="submit" data-action>Create Candidate</button>
           <span id="create-help" class="muted">VN LMV IT DEV only. Use a [SYNTHETIC-E2E] name and a reserved .invalid email. Not production.</span>
         </div>
       </form>
@@ -68,7 +68,19 @@
           <p class="eyebrow">Recently created first</p>
           <h2 id="list-heading">Candidates</h2>
         </div>
-        <button id="refresh-button" class="button button-secondary" type="button">Refresh</button>
+        <button id="refresh-button" class="button button-secondary" type="button" data-action>Refresh</button>
+      </div>
+      <div class="list-filters">
+        <label class="field">
+          <span>Search Candidate Number, Name, or Email</span>
+          <input id="candidate-search" type="search" autocomplete="off">
+        </label>
+        <label class="field">
+          <span>Status</span>
+          <select id="candidate-status-filter">
+            <option value="">All statuses</option>
+          </select>
+        </label>
       </div>
       <div class="table-wrap">
         <table>
@@ -78,6 +90,8 @@
               <th scope="col">Candidate Name</th>
               <th scope="col">Email</th>
               <th scope="col">Phone</th>
+              <th scope="col">Position</th>
+              <th scope="col">Candidate Source</th>
               <th scope="col">Status</th>
               <th scope="col">Owner</th>
               <th scope="col">Created On</th>
@@ -85,7 +99,7 @@
             </tr>
           </thead>
           <tbody id="candidate-rows">
-            <tr><td class="empty" colspan="8">Loading candidates…</td></tr>
+            <tr><td class="empty" colspan="10">Loading candidates…</td></tr>
           </tbody>
         </table>
       </div>
@@ -97,7 +111,7 @@
           <p class="eyebrow">Candidate details</p>
           <h2 id="detail-heading">Candidate</h2>
         </div>
-        <button id="close-detail" class="button button-secondary" type="button">Close</button>
+        <button id="close-detail" class="button button-secondary" type="button" data-action>Close</button>
       </div>
       <dl id="candidate-details" class="detail-grid"></dl>
       <div class="history-grid">
@@ -114,41 +128,45 @@
           <h3 id="status-history-heading">Status History</h3>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>Previous Status</th><th>New Status</th><th>Changed On</th><th>Reason</th></tr></thead>
+              <thead><tr><th>Previous Status</th><th>New Status</th><th>Changed On / Created On</th><th>Reason</th></tr></thead>
               <tbody id="status-history-rows"><tr><td class="empty" colspan="4">Select a candidate.</td></tr></tbody>
             </table>
           </div>
         </section>
       </div>
+      <section id="call-entry-panel" class="call-entry-panel" aria-labelledby="call-entry-heading" hidden>
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">DEV direct-write fallback</p>
+            <h3 id="call-entry-heading">Record Call</h3>
+          </div>
+        </div>
+        <p id="call-candidate-label" class="muted"></p>
+        <form id="call-form" class="form-grid">
+          <label class="field">
+            <span>Call Outcome <b aria-hidden="true">*</b></span>
+            <select id="call-outcome" required>
+              <option value="100010001">No Answer</option>
+              <option value="100010000">Answered</option>
+              <option value="100010002">Call Back Requested</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Notes</span>
+            <textarea id="call-notes" maxlength="4000" rows="3"></textarea>
+          </label>
+          <div class="form-actions field-wide">
+            <button id="submit-call" class="button button-primary" type="submit" data-action disabled>Save Call</button>
+          </div>
+        </form>
+      </section>
+      <div class="form-actions transition-actions">
+        <button id="waiting-status-button" class="button button-primary" type="button" data-action hidden>
+          Move to Waiting Manual Scheduling
+        </button>
+      </div>
     </section>
   </main>
 
-  <dialog id="call-dialog" aria-labelledby="call-dialog-heading">
-    <form id="call-form" method="dialog">
-      <div class="section-heading">
-        <div>
-          <p class="eyebrow">DEV direct-write fallback</p>
-          <h2 id="call-dialog-heading">Record Call</h2>
-        </div>
-      </div>
-      <p id="call-candidate-label" class="muted"></p>
-      <label class="field">
-        <span>Call Outcome <b aria-hidden="true">*</b></span>
-        <select id="call-outcome" required>
-          <option value="100010001">No Answer</option>
-          <option value="100010000">Answered</option>
-          <option value="100010002">Call Back Requested</option>
-        </select>
-      </label>
-      <label class="field">
-        <span>Notes</span>
-        <textarea id="call-notes" maxlength="4000" rows="3"></textarea>
-      </label>
-      <div class="form-actions">
-        <button id="submit-call" class="button button-primary" type="submit">Save Call</button>
-        <button id="cancel-call" class="button button-secondary" type="button">Cancel</button>
-      </div>
-    </form>
-  </dialog>
 </body>
 </html>

@@ -21,6 +21,11 @@ $script:PacUserEmail = $null
 $script:Journal = $null
 $script:allCorrelations = [Collections.Generic.List[string]]::new()
 $script:CurrentStage = 'INITIALIZATION'
+$script:ApiContractPath = Join-Path (Split-Path $PSScriptRoot) 'docs\PHASE_3C_API_CONTRACT.json'
+if (-not (Test-Path -LiteralPath $script:ApiContractPath -PathType Leaf)) {
+    throw 'The approved Candidate Core API contract is unavailable.'
+}
+$script:ApiContract = Get-Content -LiteralPath $script:ApiContractPath -Raw | ConvertFrom-Json
 
 if ($EnvironmentName -cne 'VN LMV IT' -or
     $OrganizationUrl.TrimEnd('/') -cne 'https://org14938ec2.crm4.dynamics.com' -or
@@ -89,13 +94,17 @@ function Get-Phase5ARows {
     if ([int]$readStatus -lt 200 -or [int]$readStatus -ge 300) {
         $detail = if ($response.error -and $response.error.message) {
             [string]$response.error.message
+        } elseif ($response -is [string] -and -not [string]::IsNullOrWhiteSpace($response)) {
+            [string]$response
         } else { 'Dataverse returned no readable diagnostic.' }
         $detail = $detail -replace '(?i)https?://\S+', '[URL]'
         $detail = $detail -replace '(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b', '[EMAIL]'
         $detail = $detail -replace '\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b', '[ID]'
         $detail = $detail -replace '(?i)\bBearer\s+\S+', '******'
         if ($detail.Length -gt 300) { $detail = $detail.Substring(0, 300) }
-        throw "Dataverse GET failed at $($script:CurrentStage) with HTTP $readStatus; $detail"
+        $safeUri = $uri.AbsoluteUri -replace '\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b', '[ID]'
+        $safeUri = $safeUri -replace '(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b', '[EMAIL]'
+        throw "Dataverse GET failed at $($script:CurrentStage) with HTTP $readStatus; request=$safeUri; $detail"
     }
     $collection = $response.PSObject.Properties['value']
     if ($null -ne $collection) { return @($collection.Value) }
@@ -113,7 +122,11 @@ function Get-Phase5AErrorCode {
             $parsed = $Response | ConvertFrom-Json -ErrorAction Stop
             if ($parsed.error) { $message = [string]$parsed.error.message }
         }
-        catch { $message = '' }
+        catch {
+            $message = [Net.WebUtility]::HtmlDecode(
+                ([string]$Response -replace '<[^>]+>', ' ')
+            )
+        }
     }
     foreach ($code in @('CORRELATION_CONFLICT', 'STALE_EXPECTED_STATUS')) {
         if ($message -match "(?<![A-Z0-9_])$([regex]::Escape($code))(?![A-Z0-9_])") {
@@ -124,6 +137,28 @@ function Get-Phase5AErrorCode {
         '(?<![A-Z0-9_])DATAVERSE_OPERATION_REJECTED:(CC_[A-Z_]+):0x[0-9A-Fa-f]{8}(?![A-Z0-9_])')
     if ($match.Success) { return $match.Value }
     $null
+}
+
+function Get-Phase5AErrorSummary {
+    param(
+        [AllowEmptyString()][string]$ResponseText,
+        [System.Collections.IDictionary]$RequestBody
+    )
+    $cleanHtml = $ResponseText -replace '(?is)<style\b[^>]*>.*?</style>|<script\b[^>]*>.*?</script>', ' '
+    $summary = [Net.WebUtility]::HtmlDecode(($cleanHtml -replace '<[^>]+>', ' '))
+    $summary = $summary -replace '(?i)https?://\S+', '[URL]'
+    $summary = $summary -replace '(?i)\bBearer\s+\S+', '[TOKEN]'
+    foreach ($field in @('CandidateName', 'CandidateEmail')) {
+        if ($RequestBody.Contains($field) -and $RequestBody[$field]) {
+            $replacement = if ($field -ceq 'CandidateName') { '[SYNTHETIC_NAME]' } else { '[SYNTHETIC_EMAIL]' }
+            $summary = $summary.Replace([string]$RequestBody[$field], $replacement)
+        }
+    }
+    $summary = $summary -replace '(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b', '[EMAIL]'
+    $summary = $summary -replace '\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b', '[ID]'
+    $summary = ($summary -replace '\s+', ' ').Trim()
+    if ($summary.Length -gt 300) { $summary = $summary.Substring(0, 300) }
+    $summary
 }
 
 function Invoke-Phase5AOperation {
@@ -141,6 +176,7 @@ function Invoke-Phase5AOperation {
     )) {
         throw 'Action is outside the fixed Phase 5A runtime acceptance matrix.'
     }
+    $script:CurrentStage = "CUSTOM_API_$action"
     $correlation = [string]$Body.CorrelationId
     if ($correlation -notmatch '^[0-9a-fA-F-]{36}$') {
         throw 'Runtime operation lacks a valid correlation identifier.'
@@ -162,6 +198,7 @@ function Invoke-Phase5AOperation {
         CurrentStatus = $null
         ExpectedFailure = $ExpectedFailure
         ErrorCode = $null
+        ErrorSummary = $null
     }
     $script:Journal.Dispatches.Add($entry)
     Save-Phase5ARuntimeJournal
@@ -174,22 +211,30 @@ function Invoke-Phase5AOperation {
         throw 'Custom API target is outside the verified VN LMV IT organization.'
     }
     try {
-        $response = Invoke-RestMethod -Uri $uri.AbsoluteUri -Method POST -Headers @{
+        $httpResponse = Invoke-WebRequest -Uri $uri.AbsoluteUri -Method POST -Headers @{
             Authorization = 'Bearer ' + $script:AccessToken
             Accept = 'application/json'
             'OData-Version' = '4.0'
             'OData-MaxVersion' = '4.0'
         } -ContentType 'application/json; charset=utf-8' -Body $payload `
             -MaximumRetryCount 0 -MaximumRedirection 0 -TimeoutSec 120 `
-            -SkipHttpErrorCheck -StatusCodeVariable httpStatus -ErrorAction Stop
+            -SkipHttpErrorCheck -ErrorAction Stop
     }
     catch {
         $entry.State = 'UNCERTAIN_OUTCOME_NO_RETRY'
         Save-Phase5ARuntimeJournal
         throw 'Custom API transport outcome is uncertain; the operation was not retried.'
     }
-    $entry.HttpStatus = [int]$httpStatus
-    if ([int]$httpStatus -ge 200 -and [int]$httpStatus -lt 300) {
+    $entry.HttpStatus = [int]$httpResponse.StatusCode
+    if ([int]$httpResponse.StatusCode -ge 200 -and [int]$httpResponse.StatusCode -lt 300) {
+        try {
+            $response = [string]$httpResponse.Content | ConvertFrom-Json -ErrorAction Stop
+        }
+        catch {
+            $entry.State = 'SUCCESS_RESPONSE_UNREADABLE_NO_RETRY'
+            Save-Phase5ARuntimeJournal
+            throw "Custom API returned HTTP success but an unreadable response for $action; no retry was attempted."
+        }
         $entry.ResultCode = [string]$response.ResultCode
         $entry.CurrentStatus = if ($null -ne $response.CurrentStatus) {
             [int]$response.CurrentStatus
@@ -209,7 +254,8 @@ function Invoke-Phase5AOperation {
         return $response
     }
 
-    $entry.ErrorCode = Get-Phase5AErrorCode -Response $response
+    $entry.ErrorCode = Get-Phase5AErrorCode -Response ([string]$httpResponse.Content)
+    $entry.ErrorSummary = Get-Phase5AErrorSummary -ResponseText ([string]$httpResponse.Content) -RequestBody $Body
     if ($ExpectedFailure -and $entry.ErrorCode -ceq $ExpectedFailure) {
         $entry.State = 'EXPECTED_REJECTION'
         Save-Phase5ARuntimeJournal
@@ -220,7 +266,7 @@ function Invoke-Phase5AOperation {
     if ($entry.ErrorCode) {
         throw "Custom API rejected $action with $($entry.ErrorCode); no retry was attempted."
     }
-    throw "Custom API rejected $action with HTTP $httpStatus; response details suppressed and no retry was attempted."
+    throw "Custom API rejected $action with HTTP $($httpResponse.StatusCode); $($entry.ErrorSummary); no retry was attempted."
 }
 
 function New-Phase5ACorrelation {
@@ -265,7 +311,7 @@ function Assert-Phase5AResult {
 function Get-Phase5ACandidateId {
     param([string]$CandidateSet, [string]$CreationCorrelation)
     $filter = "os_sr_cand_corid eq '$CreationCorrelation'"
-    $rows = @(Get-Phase5ARows -Path "$CandidateSet?%24select=os_sr_candid,os_sr_cand_corid,os_sr_cand_stat&%24filter=$([Uri]::EscapeDataString($filter))&%24top=2")
+    $rows = @(Get-Phase5ARows -Path "${CandidateSet}?%24select=os_sr_candid,os_sr_cand_corid,os_sr_cand_stat&%24filter=$([Uri]::EscapeDataString($filter))&%24top=2")
     if ($rows.Count -ne 1 -or [string]$rows[0].os_sr_candid -notmatch '^[0-9a-fA-F-]{36}$') {
         throw 'Candidate created through Candidate Core did not reconcile by its unique operation correlation.'
     }
@@ -295,7 +341,7 @@ function Get-Phase5ARelatedRows {
         [Parameter(Mandatory)][string]$CandidateId
     )
     $filter = "$Lookup eq $CandidateId"
-    @(Get-Phase5ARows -Path "$EntitySet?%24select=$Select&%24filter=$([Uri]::EscapeDataString($filter))&%24top=20")
+    @(Get-Phase5ARows -Path "${EntitySet}?%24select=$Select&%24filter=$([Uri]::EscapeDataString($filter))&%24top=20")
 }
 
 function Assert-Phase5ACount {
@@ -312,6 +358,11 @@ function Get-Phase5AEntityInfo {
         throw "Required Dataverse entity metadata is unavailable for $LogicalName."
     }
     $rows[0]
+}
+
+function ConvertTo-Phase5AFilterQuery {
+    param([Parameter(Mandatory)][string]$Filter)
+    [Uri]::EscapeDataString($Filter).Replace('%27', [string][char]39)
 }
 
 function Get-Phase5ASyntheticReference {
@@ -344,12 +395,30 @@ try {
     Get-ValidatedToken
 
     $script:CurrentStage = 'CUSTOM_API_METADATA'
-    $apis = @(Get-Phase5ARows -Path "customapis?%24select=uniquename,executeprivilegename,isprivate,isfunction,bindingtype&%24filter=uniquename eq 'os_sr_cact'&%24top=2")
+    $apis = @(Get-Phase5ARows -Path "customapis?%24select=customapiid,uniquename,executeprivilegename,isprivate,isfunction,bindingtype&%24filter=uniquename eq 'os_sr_cact'&%24top=2")
     if ($apis.Count -ne 1 -or [string]$apis[0].uniquename -cne 'os_sr_cact' -or
         [string]$apis[0].executeprivilegename -cne 'prvReados_sr_cand' -or
         [bool]$apis[0].isprivate -ne $true -or
         [bool]$apis[0].isfunction -or [int]$apis[0].bindingtype -ne 0) {
         throw 'Live os_sr_cact metadata differs from the approved Phase 5A unbound operation contract.'
+    }
+    $script:CurrentStage = 'CUSTOM_API_REQUEST_PARAMETERS'
+    $apiInputs = @(Get-Phase5ARows -Path "customapirequestparameters?%24select=uniquename,type,isoptional&%24filter=_customapiid_value eq $($apis[0].customapiid)&%24top=100")
+    $expectedApiInputs = @($script:ApiContract.inputs | ForEach-Object {
+        '{0}|{1}|{2}' -f $_.name, [int]$_.type, [bool]$_.optional
+    } | Sort-Object -CaseSensitive)
+    $actualApiInputs = @($apiInputs | ForEach-Object {
+        '{0}|{1}|{2}' -f $_.uniquename, [int]$_.type, [bool]$_.isoptional
+    } | Sort-Object -CaseSensitive)
+    $expectedInputNames = @($script:ApiContract.inputs | ForEach-Object { [string]$_.name })
+    $actualInputNames = @($apiInputs | ForEach-Object { [string]$_.uniquename })
+    $missingApiInputs = @($expectedInputNames | Where-Object { $_ -cnotin $actualInputNames })
+    $unexpectedApiInputs = @($actualInputNames | Where-Object { $_ -cnotin $expectedInputNames })
+    if ($apiInputs.Count -ne $script:ApiContract.inputs.Count -or
+        [string]::Join(';', $actualApiInputs) -cne [string]::Join(';', $expectedApiInputs)) {
+        $missingText = if ($missingApiInputs.Count) { [string]::Join(',', $missingApiInputs) } else { 'none' }
+        $unexpectedText = if ($unexpectedApiInputs.Count) { [string]::Join(',', $unexpectedApiInputs) } else { 'none' }
+        throw "Live os_sr_cact request parameters differ from the approved contract; missing=$missingText; unexpected=$unexpectedText."
     }
 
     $script:CurrentStage = 'CANDIDATE_ENTITY_METADATA'
@@ -436,7 +505,7 @@ try {
         $gateIndex++
         $script:CurrentStage = "CANDIDATE_CORRELATION_COLLISION_$gateIndex"
         $filter = "os_sr_cand_corid eq '$($case.Create)'"
-        foreach ($row in @(Get-Phase5ARows -Path "$candidateSet?%24select=$($candidateInfo.PrimaryIdAttribute)&%24filter=$([Uri]::EscapeDataString($filter))&%24top=2")) {
+        foreach ($row in @(Get-Phase5ARows -Path "${candidateSet}?%24select=$($candidateInfo.PrimaryIdAttribute)&%24filter=$(ConvertTo-Phase5AFilterQuery $filter)&%24top=2")) {
             $candidateCollisions.Add($row)
         }
     }
@@ -444,7 +513,7 @@ try {
     $emailCollisions = [Collections.Generic.List[object]]::new()
     foreach ($email in $emailsToCheck) {
         $filter = "os_sr_cand_eml eq '$email'"
-        foreach ($row in @(Get-Phase5ARows -Path "$candidateSet?%24select=$($candidateInfo.PrimaryIdAttribute)&%24filter=$([Uri]::EscapeDataString($filter))&%24top=2")) {
+        foreach ($row in @(Get-Phase5ARows -Path "${candidateSet}?%24select=$($candidateInfo.PrimaryIdAttribute)&%24filter=$(ConvertTo-Phase5AFilterQuery $filter)&%24top=2")) {
             $emailCollisions.Add($row)
         }
     }
@@ -452,7 +521,7 @@ try {
     $receiptCollisions = [Collections.Generic.List[object]]::new()
     foreach ($correlation in $script:allCorrelations) {
         $filter = "os_sr_oprc_corid eq '$correlation'"
-        foreach ($row in @(Get-Phase5ARows -Path "$receiptSet?%24select=$($receiptInfo.PrimaryIdAttribute)&%24filter=$([Uri]::EscapeDataString($filter))&%24top=2")) {
+        foreach ($row in @(Get-Phase5ARows -Path "${receiptSet}?%24select=$($receiptInfo.PrimaryIdAttribute)&%24filter=$(ConvertTo-Phase5AFilterQuery $filter)&%24top=2")) {
             $receiptCollisions.Add($row)
         }
     }
@@ -467,6 +536,7 @@ try {
             Organization = $OrganizationUrl.TrimEnd('/')
             ApiUniqueName = 'os_sr_cact'
             ExecutePrivilegeName = [string]$apis[0].executeprivilegename
+            ApiRequestParameters = @($apiInputs | Sort-Object uniquename -CaseSensitive | ForEach-Object { [string]$_.uniquename })
             SyntheticCandidates = $cases.Count
             PlannedApiDispatches = $script:ExpectedDispatches
             PlannedDistinctCorrelations = $script:allCorrelations.Count
@@ -648,7 +718,9 @@ try {
     $allSchedules = [Collections.Generic.List[object]]::new()
     $allReceipts = [Collections.Generic.List[object]]::new()
     $finalStates = [ordered]@{}
+    $script:CurrentStage = 'DURABLE_STATE_RECONCILIATION'
     foreach ($case in $cases) {
+        $script:CurrentStage = "RECONCILE_CANDIDATE_$($case.Key)"
         $candidateId = $candidateIds[$case.Key]
         $expected = $expectedCounts[$case.Key]
         $calls = Get-Phase5ARelatedRows -EntitySet ([string]$callInfo.EntitySetName) `
@@ -657,7 +729,7 @@ try {
             -Select 'os_sr_csh_corid,os_sr_csh_cact,os_sr_csh_prevstat,os_sr_csh_newstat,os_sr_csh_rsn' `
             -Lookup '_os_sr_csh_cand_value' -CandidateId $candidateId
         $schedules = Get-Phase5ARelatedRows -EntitySet ([string]$scheduleInfo.EntitySetName) `
-            -Select 'os_sr_intv_rnd,os_sr_intv_stat,os_sr_intv_res,os_sr_intv_rsn,os_sr_intv_chg,os_sr_intv_recat,os_sr_intv_rnts' `
+            -Select 'os_sr_intv_rnd,os_sr_intv_stat,os_sr_intv_res,os_sr_intv_rsn,os_sr_intv_chg,os_sr_intv_recat,os_sr_intv_rnts,_os_sr_intv_ta_value,_os_sr_intv_loc_value,os_sr_intv_strt,os_sr_intv_end' `
             -Lookup '_os_sr_intv_cand_value' -CandidateId $candidateId
         $receipts = Get-Phase5ARelatedRows -EntitySet ([string]$receiptInfo.EntitySetName) `
             -Select 'os_sr_oprc_corid,os_sr_oprc_cact,os_sr_oprc_newstat,os_sr_oprc_prevstat' `
@@ -670,9 +742,31 @@ try {
             throw "Operation Receipt correlations were duplicated for Candidate $($case.Key)."
         }
         if (@($history | Where-Object {
-            [int]$_.os_sr_csh_newstat -notin @(100010001, 100010002, 100010003, 100010004, 100010005)
+            [int]$_.os_sr_csh_newstat -notin @(100010000, 100010001, 100010002, 100010003, 100010004, 100010005)
         }).Count -ne 0) {
             throw "Unexpected Status History values were found for Candidate $($case.Key)."
+        }
+        $expectedTransitions = @(
+            '100010000>100010001',
+            '100010001>100010002',
+            '100010002>100010003'
+        )
+        if ($case.Key -ceq 'A') { $expectedTransitions += '100010003>100010004' }
+        elseif ($case.Key -ceq 'B') { $expectedTransitions += '100010003>100010005' }
+        else { $expectedTransitions += '100010003>100010000' }
+        $actualTransitions = @($history | ForEach-Object {
+            '{0}>{1}' -f [int]$_.os_sr_csh_prevstat, [int]$_.os_sr_csh_newstat
+        } | Sort-Object)
+        if ([string]::Join('|', $actualTransitions) -cne
+            [string]::Join('|', @($expectedTransitions | Sort-Object))) {
+            throw "Status History transitions did not match the canonical workflow for Candidate $($case.Key)."
+        }
+        if (@($schedules | Where-Object {
+            [int]$_.os_sr_intv_rnd -ne 100000000 -or
+            -not $_._os_sr_intv_ta_value -or -not $_._os_sr_intv_loc_value -or
+            -not $_.os_sr_intv_strt -or -not $_.os_sr_intv_end
+        }).Count -ne 0) {
+            throw "Interview Schedule reference/time evidence is incomplete for Candidate $($case.Key)."
         }
         if ($case.Key -ceq 'A' -or $case.Key -ceq 'B') {
             $resultCode = if ($case.Key -ceq 'A') { 100000001 } else { 100000002 }
@@ -715,6 +809,17 @@ try {
         $allSchedules.Count -ne 5 -or $allReceipts.Count -ne 22) {
         throw 'Aggregate Candidate Core persistence counts differ from the expected runtime matrix.'
     }
+    $callOutcomeCounts = @{}
+    foreach ($row in $allCalls) {
+        $outcome = [string]$row.os_sr_call_out
+        if (-not $callOutcomeCounts.ContainsKey($outcome)) { $callOutcomeCounts[$outcome] = 0 }
+        $callOutcomeCounts[$outcome]++
+    }
+    if ([int]$callOutcomeCounts['100010000'] -ne 4 -or
+        [int]$callOutcomeCounts['100010001'] -ne 1 -or
+        [int]$callOutcomeCounts['100010002'] -ne 1) {
+        throw 'Persisted Call Log outcomes did not match Answered / No Answer / Call Back Requested coverage.'
+    }
     $receiptActionCounts = @{}
     foreach ($row in $allReceipts) {
         $action = [string]$row.os_sr_oprc_cact
@@ -741,6 +846,7 @@ try {
     $script:Journal.FinalCounts = [ordered]@{
         Candidates = $cases.Count
         CallLogs = $allCalls.Count
+        CallOutcomes = $callOutcomeCounts
         StatusHistories = $allHistory.Count
         InterviewSchedules = $allSchedules.Count
         OperationReceipts = $allReceipts.Count
@@ -768,6 +874,7 @@ catch {
     if ($script:Journal) {
         $script:Journal.Outcome = 'STOPPED_WITHOUT_RETRY'
         $script:Journal.StoppedAtUtc = [DateTime]::UtcNow.ToString('o')
+        $script:Journal.StopStage = $script:CurrentStage
         $script:Journal.RequestCounters = @{ GET = $script:ReadCount; POST = $script:DispatchCount }
         Save-Phase5ARuntimeJournal
     }

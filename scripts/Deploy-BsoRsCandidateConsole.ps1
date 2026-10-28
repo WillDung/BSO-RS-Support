@@ -167,6 +167,34 @@ function Get-EffectiveWebResource {
     [pscustomobject]@{ Source = 'Published'; Row = $published }
 }
 
+function Assert-PublishedWebResourceReadback {
+    foreach ($resource in $resources) {
+        $entries = @($script:Journal.Dispatches | Where-Object Name -CEQ $resource.Name)
+        if ($entries.Count -ne 1 -or
+            [string]$entries[0].WebResourceId -notmatch '^[0-9a-fA-F-]{36}$') {
+            throw "Published Candidate Console resource identity is missing or ambiguous: $($resource.Name)"
+        }
+        $resourceId = [string]$entries[0].WebResourceId
+        $readback = Get-DataverseJson -Path (
+            "$($target.WebResourceEntitySet)($resourceId)?" +
+            "%24select=webresourceid,name,displayname,webresourcetype,content"
+        )
+        $expectedContent = [Convert]::ToBase64String([IO.File]::ReadAllBytes($resource.Path))
+        if ([string]$readback.webresourceid -ine $resourceId -or
+            [string]$readback.name -cne $resource.Name -or
+            [string]$readback.displayname -cne $resource.DisplayName -or
+            [int]$readback.webresourcetype -ne $resource.Type -or
+            [string]$readback.content -cne $expectedContent) {
+            $entries[0].State = 'PUBLISHED_GET_RECONCILIATION_FAILED'
+            $script:Journal.Result = 'PUBLISH_ACCEPTED_RECONCILIATION_FAILED'
+            Save-Journal
+            throw "Scoped publication was accepted but published web resource readback differs: $($resource.Name)"
+        }
+        $entries[0].State = 'PUBLISHED_GET_RECONCILED'
+        Save-Journal
+    }
+}
+
 function Assert-PacTarget {
     $output = @(& pac org who --json 2>&1)
     if ($LASTEXITCODE -ne 0) { throw 'PAC identity check failed; no sign-in or environment switch was attempted.' }
@@ -599,6 +627,7 @@ try {
         }
         $publishEntry.State = "ACCEPTED:$($publish.StatusCode)"
         $script:Journal.PublishXml = "ACCEPTED:$($publish.StatusCode)"
+        Assert-PublishedWebResourceReadback
         $script:Journal.Result = 'CANDIDATE_CONSOLE_REFRESHED'
         Save-Journal
         [ordered]@{
@@ -611,6 +640,7 @@ try {
             SitemapPatchCount = 0
             PublishXmlCount = 1
             PublishXmlScope = 'srapp + three exact web resources'
+            PublishedWebResourceReadback = 'GET_RECONCILED'
             AutomaticRetries = 0
             EvidencePath = $EvidencePath
         } | ConvertTo-Json -Depth 8
@@ -819,6 +849,7 @@ try {
         Save-Journal
         throw 'Scoped publication returned success but the srapp sitemap readback differs.'
     }
+    Assert-PublishedWebResourceReadback
     $lastEntry.State = 'GET_RECONCILED'
     $lastEntry.HttpStatus = [int]$publish.StatusCode
     $script:Journal.Result = 'CANDIDATE_CONSOLE_SCOPED_PUBLISH_RECONCILED'
@@ -834,6 +865,7 @@ try {
         SiteMapPatchCount = $script:Counts.PATCH
         PublishXmlCount = 1
         PublishXmlIncludesOnlyTargetAppAndThreeWebResources = $true
+        PublishedWebResourceReadback = 'GET_RECONCILED'
         PublishAllXml = 0
         AutomaticRetries = 0
         RequestCounts = $script:Counts

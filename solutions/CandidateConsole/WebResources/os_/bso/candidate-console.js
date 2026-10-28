@@ -55,6 +55,7 @@
       logicalName: "os_sr_cand",
       entitySetName: "os_sr_cands",
       id: "",
+      correlation: "os_sr_cand_corid",
       number: "os_sr_cand_cnum",
       name: "os_sr_cand_nm",
       email: "os_sr_cand_eml",
@@ -127,6 +128,26 @@
   let resultRetryBlockedCandidateId = null;
   let currentRows = [];
   let busy = false;
+  const CORE_API_PARAMETER_TYPES = Object.freeze({
+    ActionType: { typeName: "Edm.String", structuralProperty: 1 },
+    CandidateId: { typeName: "Edm.Guid", structuralProperty: 1 },
+    ExpectedStatus: { typeName: "Edm.Int32", structuralProperty: 1 },
+    CorrelationId: { typeName: "Edm.Guid", structuralProperty: 1 },
+    CandidateName: { typeName: "Edm.String", structuralProperty: 1 },
+    CandidateEmail: { typeName: "Edm.String", structuralProperty: 1 },
+    CandidatePhone: { typeName: "Edm.String", structuralProperty: 1 },
+    PositionId: { typeName: "Edm.Guid", structuralProperty: 1 },
+    CandidateSourceId: { typeName: "Edm.Guid", structuralProperty: 1 },
+    Reason: { typeName: "Edm.String", structuralProperty: 1 },
+    CallOutcome: { typeName: "Edm.Int32", structuralProperty: 1 },
+    ContactedAt: { typeName: "Edm.DateTimeOffset", structuralProperty: 1 },
+    Notes: { typeName: "Edm.String", structuralProperty: 1 },
+    InterviewerId: { typeName: "Edm.Guid", structuralProperty: 1 },
+    LocationId: { typeName: "Edm.Guid", structuralProperty: 1 },
+    StartAt: { typeName: "Edm.DateTimeOffset", structuralProperty: 1 },
+    EndAt: { typeName: "Edm.DateTimeOffset", structuralProperty: 1 },
+    ResultNotes: { typeName: "Edm.String", structuralProperty: 1 }
+  });
 
   const $ = (id) => document.getElementById(id);
   const globalContext = () => {
@@ -156,6 +177,27 @@
     } catch {
       return false;
     }
+  }
+
+  function isDevFallbackEnabled() {
+    return isTargetDevEnvironment() && $("dev-fallback-toggle").checked;
+  }
+
+  function updateWorkflowPathLabel() {
+    const supportedEnvironment = isTargetDevEnvironment();
+    const fallback = isDevFallbackEnabled();
+    $("workflow-path-badge").textContent = !supportedEnvironment
+      ? "UNSUPPORTED ENVIRONMENT"
+      : fallback
+      ? "DEV DIRECT-WRITE FALLBACK"
+      : "CANDIDATE CORE PATH";
+    document.querySelectorAll("[data-workflow-label]").forEach((label) => {
+      label.textContent = !supportedEnvironment
+        ? "Unavailable outside VN LMV IT"
+        : fallback ? "DEV direct-write fallback" : "Candidate Core / os_sr_cact";
+    });
+    $("dev-fallback-control").hidden = !supportedEnvironment;
+    $("dev-fallback-toggle").disabled = busy || !supportedEnvironment;
   }
 
   function currentUserId() {
@@ -209,6 +251,7 @@
 
   function setBusy(value) {
     busy = value;
+    $("dev-fallback-toggle").disabled = value || !isTargetDevEnvironment();
     document.querySelectorAll("button[data-action]").forEach((button) => {
       button.disabled = value ||
         (button.id === "submit-call" && !selectedCandidate) ||
@@ -271,6 +314,77 @@
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
     const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
+  async function invokeCandidateCore(action, values = {}, correlationId = newCorrelationId()) {
+    if (!isTargetDevEnvironment()) throw new Error("CANDIDATE_CORE_ENVIRONMENT_REJECTED");
+    const request = Object.fromEntries(
+      Object.keys(CORE_API_PARAMETER_TYPES).map((name) => [name, null])
+    );
+    Object.assign(request, {
+      ActionType: action,
+      CorrelationId: correlationId,
+      ...values
+    });
+    if (request.CandidateId) request.CandidateId = normalizeGuid(request.CandidateId);
+    request.getMetadata = () => ({
+      boundParameter: null,
+      operationName: "os_sr_cact",
+      operationType: 0,
+      parameterTypes: CORE_API_PARAMETER_TYPES
+    });
+    const response = await xrm().WebApi.online.execute(request);
+    if (!response || response.ok !== true) throw new Error("CANDIDATE_CORE_RESPONSE_INVALID");
+    const result = await response.json();
+    if (!result || !["Applied", "DuplicateReplay"].includes(result.ResultCode)) {
+      throw new Error("CANDIDATE_CORE_RESULT_INVALID");
+    }
+    return { correlationId, result };
+  }
+
+  async function resolveCreatedCandidate(correlationId, expectedName, expectedEmail) {
+    const c = TABLES.candidate;
+    const rows = await retrieveAll(c.logicalName, `?$select=${[
+      c.id, c.number, c.name, c.email, c.phone, c.status, c.position, c.source,
+      c.correlation, "createdon", "_ownerid_value"
+    ].join(",")}&$filter=${encodeURIComponent(`${c.correlation} eq '${correlationId}'`)}&$top=2`);
+    const matches = rows.filter((candidate) =>
+      candidate[c.correlation] === correlationId &&
+      candidate[c.name] === expectedName &&
+      candidate[c.email] === expectedEmail &&
+      isSyntheticCandidate(candidate)
+    );
+    if (matches.length !== 1 || matches[0][c.status] !== STATUS.needCall ||
+        !matches[0][c.number]) {
+      throw new Error("CANDIDATE_CORE_CREATE_READBACK_INVALID");
+    }
+    return matches[0];
+  }
+
+  async function refreshCoreCandidate(candidateId) {
+    await refreshCandidates();
+    if (!(await openCandidate(candidateId))) {
+      throw new Error("CANDIDATE_CORE_DETAIL_REFRESH_FAILED");
+    }
+  }
+
+  async function reportCandidateCoreFailure(action, candidateId, error) {
+    logSafeFailure(`CANDIDATE_CORE_${action}_FAILED`, error);
+    try {
+      await refreshCandidates();
+      if (candidateId) await openCandidate(candidateId);
+    } catch (reconcileError) {
+      logSafeFailure("CANDIDATE_CORE_RECONCILIATION_FAILED", reconcileError);
+      showNotice(`${action} failed or its outcome is uncertain. Current server state could not be fully refreshed; do not retry until it is reconciled.`, true);
+      return;
+    }
+    showNotice(`${action} failed or its outcome is uncertain. Current server state was refreshed; verify it before retrying.`, true);
+  }
+
+  function assertCandidateCoreStatus(result, expectedStatus) {
+    if (Number(result.CurrentStatus) !== expectedStatus) {
+      throw new Error("CANDIDATE_CORE_STATUS_RESULT_MISMATCH");
+    }
   }
 
   function normalizeGuid(value) {
@@ -800,7 +914,49 @@
     $("interview-result-choice").focus();
   }
 
+  async function recordInterviewResultThroughCore(event) {
+    event.preventDefault();
+    if (busy || !selectedCandidate || !canRecordInterviewResult()) return;
+    hideNotice();
+    const c = TABLES.candidate;
+    const candidateId = normalizeGuid(selectedCandidate[c.id]);
+    const result = Number($("interview-result-choice").value);
+    if (!isTargetDevEnvironment() || !isSyntheticCandidate(selectedCandidate)) {
+      showNotice("Interview results are limited to synthetic candidates in VN LMV IT.", true);
+      return;
+    }
+    if (![INTERVIEW_RESULT.pass, INTERVIEW_RESULT.fail].includes(result)) {
+      showNotice("Choose Pass or Fail.", true);
+      return;
+    }
+
+    const action = result === INTERVIEW_RESULT.pass ? "RecordPass" : "RecordFail";
+    const expectedStatus = result === INTERVIEW_RESULT.pass
+      ? STATUS.offerExtended
+      : STATUS.candidateFailed;
+    setBusy(true);
+    try {
+      const { result: response } = await invokeCandidateCore(action, {
+        CandidateId: candidateId,
+        ExpectedStatus: STATUS.round1Scheduled,
+        ResultNotes: $("interview-result-notes").value.trim() || undefined
+      });
+      assertCandidateCoreStatus(response, expectedStatus);
+      $("interview-result-form").reset();
+      $("interview-result-panel").hidden = true;
+      await refreshCoreCandidate(candidateId);
+      showNotice(result === INTERVIEW_RESULT.pass
+        ? "Round 1 result saved: Pass. Candidate moved to Offer Extended."
+        : "Round 1 result saved: Fail. Candidate moved to Candidate Failed.");
+    } catch (error) {
+      await reportCandidateCoreFailure(action, candidateId, error);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function recordInterviewResult(event) {
+    if (!isDevFallbackEnabled()) return recordInterviewResultThroughCore(event);
     event.preventDefault();
     if (busy || !selectedCandidate || !canRecordInterviewResult()) return;
     hideNotice();
@@ -953,7 +1109,71 @@
     }
   }
 
+  async function createScheduleThroughCore(event) {
+    event.preventDefault();
+    if (busy || !selectedCandidate) return;
+    if (scheduleMode === "reschedule" && !canManageSchedule()) return;
+    hideNotice();
+    const c = TABLES.candidate;
+    const candidateId = normalizeGuid(selectedCandidate[c.id]);
+    if (!isTargetDevEnvironment() || !isSyntheticCandidate(selectedCandidate)) {
+      showNotice("Scheduling is limited to synthetic candidates in VN LMV IT.", true);
+      return;
+    }
+    const start = localDateTime($("scheduling-date").value, $("scheduling-time").value);
+    const end = localDateTime($("scheduling-date").value, $("scheduling-end-time").value);
+    if (!start || !end || start.getTime() <= Date.now() || end <= start) {
+      showNotice("Choose a future date and an End Time later than the Start Time on the same date.", true);
+      return;
+    }
+    let action = "MarkRound1Scheduled";
+    let expectedStatus = STATUS.round1Scheduled;
+    const inputs = {};
+    if (scheduleMode === "reschedule") {
+      const reason = $("scheduling-reason").value.trim();
+      if (!reason) {
+        showNotice("Enter a Reschedule Reason.", true);
+        return;
+      }
+      action = "RequestReschedule";
+      expectedStatus = STATUS.needCall;
+      inputs.Reason = reason;
+    } else if (selectedCandidate[c.status] !== STATUS.waitingManualScheduling) {
+      showNotice("Round 1 can be scheduled only from Waiting Manual Scheduling.", true);
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const ta = await getActiveSyntheticReference("os_sr_ta", $("scheduling-ta").value);
+      const location = await getActiveSyntheticReference("os_sr_loc", $("scheduling-location").value);
+      inputs.InterviewerId = ta.id;
+      inputs.LocationId = location.id;
+      inputs.StartAt = start.toISOString();
+      inputs.EndAt = end.toISOString();
+      inputs.Notes = $("scheduling-notes").value.trim() || undefined;
+      const { result } = await invokeCandidateCore(action, {
+        CandidateId: candidateId,
+        ExpectedStatus: selectedCandidate[c.status],
+        ...inputs
+      });
+      assertCandidateCoreStatus(result, expectedStatus);
+      $("scheduling-form").reset();
+      $("scheduling-panel").hidden = true;
+      scheduleMode = "new";
+      await refreshCoreCandidate(candidateId);
+      showNotice(action === "RequestReschedule"
+        ? "Round 1 rescheduled. The previous schedule is preserved as Superseded, the replacement is Proposed, and the Candidate returned to Need Call Candidate."
+        : "Round 1 schedule saved and Candidate moved to Round 1 Scheduled.");
+    } catch (error) {
+      await reportCandidateCoreFailure(action, candidateId, error);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function createSchedule(event) {
+    if (!isDevFallbackEnabled()) return createScheduleThroughCore(event);
     event.preventDefault();
     if (busy || !selectedCandidate) return;
     if (scheduleMode === "reschedule") {
@@ -1328,7 +1548,42 @@
     }
   }
 
+  async function cancelRound1ThroughCore(event) {
+    event.preventDefault();
+    if (busy || !selectedCandidate || !canManageSchedule()) return;
+    hideNotice();
+    const c = TABLES.candidate;
+    const candidateId = normalizeGuid(selectedCandidate[c.id]);
+    const reason = $("cancellation-reason").value.trim();
+    if (!reason) {
+      showNotice("Enter a Cancellation Reason.", true);
+      return;
+    }
+    if (!isTargetDevEnvironment() || !isSyntheticCandidate(selectedCandidate)) {
+      showNotice("Cancellation is limited to synthetic candidates in VN LMV IT.", true);
+      return;
+    }
+    setBusy(true);
+    try {
+      const { result } = await invokeCandidateCore("CancelRound1", {
+        CandidateId: candidateId,
+        ExpectedStatus: STATUS.round1Scheduled,
+        Reason: reason
+      });
+      assertCandidateCoreStatus(result, STATUS.needCall);
+      $("cancellation-form").reset();
+      $("cancellation-panel").hidden = true;
+      await refreshCoreCandidate(candidateId);
+      showNotice("Round 1 schedule cancelled and preserved. Candidate returned to Need Call Candidate.");
+    } catch (error) {
+      await reportCandidateCoreFailure("CancelRound1", candidateId, error);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function cancelRound1(event) {
+    if (!isDevFallbackEnabled()) return cancelRound1ThroughCore(event);
     event.preventDefault();
     if (busy || !selectedCandidate || !canManageSchedule()) return;
     hideNotice();
@@ -1486,7 +1741,58 @@
     }
   }
 
+  async function createCandidateThroughCore(event) {
+    event.preventDefault();
+    if (busy) return;
+    hideNotice();
+    const candidateName = $("candidate-name").value.trim();
+    const candidateEmail = $("candidate-email").value.trim();
+    const candidatePhone = $("candidate-phone").value.trim();
+    if (!candidateName || !candidateEmail) {
+      showNotice("Candidate Name and Email are required.", true);
+      return;
+    }
+    if (!candidateName.startsWith("[SYNTHETIC-E2E]") ||
+        !/^[^@\s]+@[^@\s]+\.invalid$/i.test(candidateEmail)) {
+      showNotice("Candidate Core accepts only [SYNTHETIC-E2E] names and reserved .invalid email addresses.", true);
+      return;
+    }
+    if (!isTargetDevEnvironment()) {
+      showNotice("Candidate Core is available only in VN LMV IT.", true);
+      return;
+    }
+
+    setBusy(true);
+    let candidateId = null;
+    try {
+      const c = TABLES.candidate;
+      const correlationId = newCorrelationId();
+      const inputs = {
+        CandidateName: candidateName,
+        CandidateEmail: candidateEmail
+      };
+      if (candidatePhone) inputs.CandidatePhone = candidatePhone;
+      const positionId = $("candidate-position").value;
+      if (positionId) inputs.PositionId = normalizeGuid(positionId);
+      const sourceId = $("candidate-source").value;
+      if (sourceId) inputs.CandidateSourceId = normalizeGuid(sourceId);
+      await invokeCandidateCore("CreateCandidate", inputs, correlationId);
+      const candidate = await resolveCreatedCandidate(correlationId, candidateName, candidateEmail);
+      candidateId = normalizeGuid(candidate[c.id]);
+      $("candidate-form").reset();
+      $("candidate-search").value = "";
+      $("candidate-status-filter").value = "";
+      await refreshCoreCandidate(candidateId);
+      showNotice("Candidate created successfully through Candidate Core.");
+    } catch (error) {
+      await reportCandidateCoreFailure("CreateCandidate", candidateId, error);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function createCandidate(event) {
+    if (!isDevFallbackEnabled()) return createCandidateThroughCore(event);
     event.preventDefault();
     if (busy) return;
     hideNotice();
@@ -1568,7 +1874,54 @@
     }
   }
 
+  async function recordCallThroughCore(event) {
+    event.preventDefault();
+    if (busy || !selectedCandidate) return;
+    hideNotice();
+    const c = TABLES.candidate;
+    let candidateId;
+    try {
+      candidateId = normalizeGuid(selectedCandidate[c.id]);
+    } catch (error) {
+      logSafeFailure("CANDIDATE_CORE_INVALID_CANDIDATE_REFERENCE", error);
+      showNotice("Candidate reference is invalid. Refresh the list and select the Candidate again.", true);
+      return;
+    }
+    if (!isTargetDevEnvironment() || !isSyntheticCandidate(selectedCandidate)) {
+      showNotice("Candidate Core calls are limited to synthetic candidates in VN LMV IT.", true);
+      return;
+    }
+    const outcome = Number($("call-outcome").value);
+    if (![OUTCOME.noAnswer, OUTCOME.answered, OUTCOME.callBackRequested].includes(outcome)) {
+      showNotice("Choose a supported call outcome.", true);
+      return;
+    }
+    const currentStatus = selectedCandidate[c.status];
+    const expectedStatus = outcome === OUTCOME.answered && currentStatus === STATUS.needCall
+      ? STATUS.answered
+      : currentStatus;
+    setBusy(true);
+    try {
+      const { result } = await invokeCandidateCore("RecordCall", {
+        CandidateId: candidateId,
+        ExpectedStatus: currentStatus,
+        CallOutcome: outcome,
+        ContactedAt: new Date().toISOString(),
+        Notes: $("call-notes").value.trim() || undefined
+      });
+      assertCandidateCoreStatus(result, expectedStatus);
+      $("call-form").reset();
+      await refreshCoreCandidate(candidateId);
+      showNotice("Call recorded through Candidate Core.");
+    } catch (error) {
+      await reportCandidateCoreFailure("RecordCall", candidateId, error);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function recordCall(event) {
+    if (!isDevFallbackEnabled()) return recordCallThroughCore(event);
     event.preventDefault();
     if (busy || !selectedCandidate) return;
     hideNotice();
@@ -1672,7 +2025,37 @@
     }
   }
 
+  async function moveToWaitingManualSchedulingThroughCore() {
+    if (busy || !selectedCandidate) return;
+    hideNotice();
+    const c = TABLES.candidate;
+    const candidateId = normalizeGuid(selectedCandidate[c.id]);
+    if (!isTargetDevEnvironment() || !isSyntheticCandidate(selectedCandidate)) {
+      showNotice("Candidate Core transitions are limited to synthetic candidates in VN LMV IT.", true);
+      return;
+    }
+    if (selectedCandidate[c.status] !== STATUS.answered) {
+      showNotice("Only a Candidate Answered record can move to Waiting Manual Scheduling.", true);
+      return;
+    }
+    setBusy(true);
+    try {
+      const { result } = await invokeCandidateCore("ProceedToScheduling", {
+        CandidateId: candidateId,
+        ExpectedStatus: STATUS.answered
+      });
+      assertCandidateCoreStatus(result, STATUS.waitingManualScheduling);
+      await refreshCoreCandidate(candidateId);
+      showNotice("Candidate moved to Waiting Manual Scheduling through Candidate Core.");
+    } catch (error) {
+      await reportCandidateCoreFailure("ProceedToScheduling", candidateId, error);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function moveToWaitingManualScheduling() {
+    if (!isDevFallbackEnabled()) return moveToWaitingManualSchedulingThroughCore();
     if (busy || !selectedCandidate) return;
     hideNotice();
     const c = TABLES.candidate;
@@ -1760,6 +2143,7 @@
     $("interview-result-form").addEventListener("submit", recordInterviewResult);
     $("candidate-search").addEventListener("input", () => renderCandidateRows(currentRows));
     $("candidate-status-filter").addEventListener("change", () => renderCandidateRows(currentRows));
+    $("dev-fallback-toggle").addEventListener("change", updateWorkflowPathLabel);
     $("refresh-button").addEventListener("click", async () => {
       hideNotice();
       try {
@@ -1793,10 +2177,11 @@
 
   async function initialize() {
     bindEvents();
+    updateWorkflowPathLabel();
     if (!isTargetDevEnvironment()) {
       $("create-button").disabled = true;
       $("refresh-button").disabled = true;
-      showNotice("This DEV direct-write console is available only in VN LMV IT.", true);
+      showNotice("Candidate Management is available only in VN LMV IT.", true);
       return;
     }
     let loadStage = "the model-driven app context";

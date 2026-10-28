@@ -19,9 +19,38 @@ function Assert-Test {
     $script:passed++
 }
 
-Assert-Test ($html.Contains('VN LMV IT — DEV DIRECT WRITE') -and
-    $html.Contains('PROTECTCANDIDATECORE DISABLED — NOT PRODUCTION') -and
-    $html.Contains('REAL DATA PROHIBITED')) 'Keep prominent DEV safety and synthetic-only warnings'
+Assert-Test ($html.Contains('id="workflow-path-badge"') -and
+    $html.Contains('CANDIDATE CORE PATH') -and
+    $html.Contains('PROTECTCANDIDATECORE INACTIVE — NOT PRODUCTION') -and
+    $html.Contains('REAL DATA PROHIBITED')) 'Default to the Candidate Core path and retain DEV safety warnings'
+Assert-Test ($html.Contains('id="dev-fallback-toggle"') -and
+    $html.Contains('Enable DEV direct-write fallback for this browser session') -and
+    -not $html.Contains('id="dev-fallback-toggle" type="checkbox" checked')) 'Keep direct writes behind an explicit unchecked session switch'
+Assert-Test ($script -match 'function isTargetDevEnvironment\(\) \{(?s:.*?)catch \{\r?\n\s+return false;\r?\n\s+\}\r?\n\s+\}\r?\n\s+function isDevFallbackEnabled\(\)') `
+    'Keep workflow path selection in the outer console scope'
+Assert-Test ($script.Contains('operationName: "os_sr_cact"') -and
+    $script.Contains('xrm().WebApi.online.execute(request)') -and
+    $script.Contains('parameterTypes: CORE_API_PARAMETER_TYPES') -and
+    $script.Contains('c.correlation')) 'Call Candidate Core through the typed Custom API and resolve CreateCandidate by its correlation'
+$coreInvokeStart = $script.IndexOf('async function invokeCandidateCore')
+$coreInvokeEnd = $script.IndexOf('async function resolveCreatedCandidate', $coreInvokeStart)
+$coreInvoke = $script.Substring($coreInvokeStart, $coreInvokeEnd - $coreInvokeStart)
+Assert-Test ($coreInvoke.Contains('Object.keys(CORE_API_PARAMETER_TYPES).map((name) => [name, null])') -and
+    $coreInvoke.Contains('Object.assign(request, {') -and
+    $coreInvoke.Contains('...values')) 'Serialize absent optional Custom API inputs as null before applying action-specific values'
+foreach ($action in @(
+    'CreateCandidate', 'RecordCall', 'ProceedToScheduling', 'MarkRound1Scheduled',
+    'RecordPass', 'RecordFail', 'RequestReschedule', 'CancelRound1'
+)) {
+    Assert-Test ($script.Contains("invokeCandidateCore(`"$action`"") -or
+        $script.Contains("invokeCandidateCore(action")) "Route $action through Candidate Core"
+}
+Assert-Test ($script.Contains('if (!isDevFallbackEnabled()) return createCandidateThroughCore(event);') -and
+    $script.Contains('if (!isDevFallbackEnabled()) return recordCallThroughCore(event);') -and
+    $script.Contains('if (!isDevFallbackEnabled()) return createScheduleThroughCore(event);') -and
+    $script.Contains('if (!isDevFallbackEnabled()) return cancelRound1ThroughCore(event);') -and
+    $script.Contains('isTargetDevEnvironment() && $("dev-fallback-toggle").checked')) `
+    'Never auto-fallback from Candidate Core; enable the retained direct-write path only by explicit DEV switch'
 Assert-Test ($html.Contains('id="candidate-search"') -and
     $script.Contains('candidate[TABLES.candidate.number]') -and
     $script.Contains('candidate[TABLES.candidate.name]') -and
@@ -66,10 +95,9 @@ Assert-Test ($html.Contains('id="schedule-history-rows"') -and
     $html.Contains('<th>Scheduling Status</th>') -and
     $html.Contains('<th>Status Changed At</th>') -and
     $html.Contains('<th>Cancellation / Reschedule Reason</th>') -and
-    $script.Contains('&$orderby=createdon desc') -and
-    -not $script.Contains('&$top=2')) 'Show all Round 1 schedule history newest-first'
+    $script.Contains('&$orderby=createdon desc')) 'Show all Round 1 schedule history newest-first'
 Assert-Test ($html.Contains('id="save-schedule"') -and
-    $html.Contains('DEV-only persistence. No calendar availability check or calendar booking is performed.') -and
+    $html.Contains('Manual schedule evidence only. No calendar availability check or calendar booking is performed.') -and
     $script.Contains('round1: 100000000') -and
     $script.Contains('round1Scheduled: 100010003')) 'Use the reconciled schedule round and Candidate status values without implying calendar booking'
 Assert-Test ($script.Contains('loadLookupOptions("os_sr_ta", "scheduling-ta"') -and
@@ -186,6 +214,18 @@ Assert-Test ($script.Contains('scheduleRows.filter(isActiveSchedule).length === 
 Assert-Test (-not $script.Contains('WebApi.deleteRecord') -and
     $script.Contains('Do not retry blindly') -and
     $script.Contains('No compensation or retry was performed')) 'Preserve schedule history and report partial writes without retry or compensation'
+
+$deploymentPath = Join-Path $root 'scripts\Deploy-BsoRsCandidateConsole.ps1'
+$deployment = Get-Content -LiteralPath $deploymentPath -Raw
+$publishCalls = [regex]::Matches($deployment, "Invoke-DataverseRequest -Method POST -Path 'PublishXml'")
+$publishedReadbacks = [regex]::Matches($deployment, 'Assert-PublishedWebResourceReadback')
+Assert-Test ($publishCalls.Count -eq 2 -and
+    $publishedReadbacks.Count -eq 3 -and
+    $publishedReadbacks[1].Index -gt $publishCalls[0].Index -and
+    $publishedReadbacks[2].Index -gt $publishCalls[1].Index -and
+    $deployment.Contains('PUBLISHED_GET_RECONCILED') -and
+    $deployment.Contains('PUBLISH_ACCEPTED_RECONCILIATION_FAILED')) `
+    'Require exact published-resource GET reconciliation after each scoped PublishXml'
 
 $hash = (Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $version = [regex]::Match($html, 'candidate-console\.js\?v=([0-9a-f]+)')

@@ -6,7 +6,7 @@
   <title>Candidate Management</title>
   <link rel="stylesheet" href="candidate-console.css">
   <script src="../../ClientGlobalContext.js.aspx"></script>
-  <script defer src="candidate-console.js?v=34084d5a296f"></script>
+  <script defer src="candidate-console.js?v=d40e659e35aa"></script>
 </head>
 <body>
   <main class="shell">
@@ -16,18 +16,22 @@
         <h1>Candidate Management</h1>
       </div>
       <div class="page-badges">
-        <span class="dev-badge">VN LMV IT — DEV DIRECT WRITE</span>
-        <span class="dev-badge">PROTECTCANDIDATECORE DISABLED — NOT PRODUCTION</span>
+        <span id="workflow-path-badge" class="dev-badge">CANDIDATE CORE PATH</span>
+        <span class="dev-badge">PROTECTCANDIDATECORE INACTIVE — NOT PRODUCTION</span>
         <span class="dev-badge">REAL DATA PROHIBITED</span>
       </div>
     </header>
+    <label id="dev-fallback-control" class="muted workflow-switch">
+      <input id="dev-fallback-toggle" type="checkbox">
+      Enable DEV direct-write fallback for this browser session
+    </label>
 
     <p id="notice" class="notice" role="status" aria-live="polite" hidden></p>
 
     <section class="panel" aria-labelledby="create-heading">
       <div class="section-heading">
         <div>
-          <p class="eyebrow">DEV direct-write fallback</p>
+          <p class="eyebrow" data-workflow-label>Candidate Core / os_sr_cact</p>
           <h2 id="create-heading">New Candidate</h2>
         </div>
       </div>
@@ -58,7 +62,7 @@
         </label>
         <div class="form-actions field-wide">
           <button id="create-button" class="button button-primary" type="submit" data-action>Create Candidate</button>
-          <span id="create-help" class="muted">VN LMV IT DEV only. Use a [SYNTHETIC-E2E] name and a reserved .invalid email. Not production.</span>
+          <span id="create-help" class="muted">VN LMV IT only. Use a [SYNTHETIC-E2E] name and a reserved .invalid email. Direct writes require the explicit fallback switch.</span>
         </div>
       </form>
     </section>
@@ -147,7 +151,7 @@
       <section id="call-entry-panel" class="call-entry-panel" aria-labelledby="call-entry-heading" hidden>
         <div class="section-heading">
           <div>
-            <p class="eyebrow">DEV direct-write fallback</p>
+            <p class="eyebrow" data-workflow-label>Candidate Core / os_sr_cact</p>
             <h3 id="call-entry-heading">Record Call</h3>
           </div>
         </div>
@@ -190,7 +194,7 @@
       <section id="scheduling-panel" class="call-entry-panel" aria-labelledby="scheduling-heading" hidden>
         <div class="section-heading">
           <div>
-            <p class="eyebrow">DEV scheduling entry</p>
+            <p class="eyebrow" data-workflow-label>Candidate Core / os_sr_cact</p>
             <h3 id="scheduling-heading">Schedule Round 1</h3>
           </div>
         </div>
@@ -236,7 +240,7 @@
               Save Schedule
             </button>
             <span id="scheduling-dev-note" class="storage-warning" role="status">
-              DEV-only persistence. No calendar availability check or calendar booking is performed.
+              Manual schedule evidence only. No calendar availability check or calendar booking is performed.
             </span>
           </div>
         </form>
@@ -244,7 +248,7 @@
       <section id="cancellation-panel" class="call-entry-panel" aria-labelledby="cancellation-heading" hidden>
         <div class="section-heading">
           <div>
-            <p class="eyebrow">DEV direct-write fallback</p>
+            <p class="eyebrow" data-workflow-label>Candidate Core / os_sr_cact</p>
             <h3 id="cancellation-heading">Cancel Round 1</h3>
           </div>
         </div>
@@ -263,7 +267,7 @@
       <section id="interview-result-panel" class="call-entry-panel" aria-labelledby="interview-result-heading" hidden>
         <div class="section-heading">
           <div>
-            <p class="eyebrow">DEV direct-write fallback</p>
+            <p class="eyebrow" data-workflow-label>Candidate Core / os_sr_cact</p>
             <h3 id="interview-result-heading">Record Interview Result</h3>
           </div>
         </div>

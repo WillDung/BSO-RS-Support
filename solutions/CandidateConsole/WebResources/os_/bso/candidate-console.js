@@ -747,11 +747,21 @@
         scheduleId,
         `?$select=${[interview.id, interview.candidate, interview.round, interview.result, interview.resultRecordedAt, interview.resultNotes].join(",")}`
       );
-      if (normalizeGuid(saved[interview.candidate]) !== candidateId ||
-          saved[interview.round] !== interview.round1 ||
-          saved[interview.result] !== result ||
-          Date.parse(saved[interview.resultRecordedAt]) !== Date.parse(recordedAt) ||
-          (notes && saved[interview.resultNotes] !== notes)) {
+      const savedRecordedAt = Date.parse(saved[interview.resultRecordedAt]);
+      const expectedRecordedAt = Date.parse(recordedAt);
+      const readbackChecks = {
+        candidate: typeof saved[interview.candidate] === "string" &&
+          normalizeGuid(saved[interview.candidate]) === candidateId,
+        round: saved[interview.round] === interview.round1,
+        result: saved[interview.result] === result,
+        recordedAt: Number.isFinite(savedRecordedAt) &&
+          Math.floor(savedRecordedAt / 1000) === Math.floor(expectedRecordedAt / 1000),
+        notes: !notes || saved[interview.resultNotes] === notes
+      };
+      const failedReadbackChecks = Object.keys(readbackChecks)
+        .filter((check) => !readbackChecks[check]);
+      if (failedReadbackChecks.length) {
+        category = `INTERVIEW_RESULT_READBACK_${failedReadbackChecks.join("_").toUpperCase()}_MISMATCH`;
         throw new Error("DEV_DIRECT_WRITE_INTERVIEW_RESULT_READBACK_MISMATCH");
       }
       resultReadbackConfirmed = true;

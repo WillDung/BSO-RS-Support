@@ -34,7 +34,9 @@ The role remains unassigned; no user or team role membership was changed. The fi
 
 ## Phase 4D Interview Schedule result privilege gap (28 October 2026)
 
-The DEV result implementation updates an existing Interview Schedule row before changing Candidate status. The current unassigned role has Interview Schedule Create, Read, Append, and Append To at User (Basic) depth, but Write remains None; therefore, the current role does not have the table privilege required to record Pass/Fail. No privilege was broadened and no user/team membership was changed. A minimum User (Basic) Write grant is a prerequisite for BSO-role acceptance and requires explicit authorization; do not treat an app action or system-authorized browser test as proof of BSO effective access. `Delete`, `Assign`, and `Share` remain None. The result workflow still requires fresh synthetic browser acceptance and persistence-after-reload verification. The role remains unassigned.
+The DEV result implementation updates an existing Interview Schedule row before changing Candidate status. The current unassigned role has Interview Schedule Create, Read, Append, and Append To at User (Basic) depth, but Write remains None; therefore, the role does not have the table privilege required to record Pass/Fail. No privilege was broadened and no user/team membership was changed. A minimum User (Basic) Write grant is a prerequisite for BSO-role acceptance and requires separately authorized security scope; do not treat the successful browser branches, which did not validate effective BSO access, as proof of role usability. `Delete`, `Assign`, and `Share` remain None. The role remains unassigned.
+
+Browser acceptance for both synthetic result branches and persistence-after-reload is complete in the DEV app, but it does not close this role privilege gap. The first two synthetic acceptance fixtures retain persisted result rows after readback warnings and remain `Round 1 Scheduled` without terminal history; no retry or compensation was performed. See [Current State](CURRENT_STATE.md) for final states and live acceptance-scope counts.
 
 ## Current Candidate Core trust contract (26 October 2026)
 

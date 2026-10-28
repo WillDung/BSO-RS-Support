@@ -38,7 +38,7 @@ The table and two additional attributes were created in the separately authorize
 
 The `os_sr_intv` table was provisioned in VN LMV IT for the separately authorized Phase 4C synthetic DEV workflow and extended for the Phase 4D DEV result slice; it is a root component in `os_sr_bso_rs_support`. This is not approval of the wider production scheduling, availability, calendar-booking, reschedule, or interview-result design.
 
-| Item | Verified metadata, 27 October 2026 |
+| Item | Verified metadata, 28 October 2026 |
 |---|---|
 | Table | `os_sr_intv`; **Interview Schedule**; plural **Interview Schedules** |
 | Ownership | `UserOwned` |
@@ -53,7 +53,7 @@ The `os_sr_intv` table was provisioned in VN LMV IT for the separately authorize
 | Audit / Solution | Table audit metadata enabled; root component in unmanaged `os_sr_bso_rs_support`. Organization-level auditing remains unchanged and disabled. |
 | Scope exclusions | No scheduling-status, offer, reschedule, or calendar columns; no Round 2 or scorecard model |
 
-The live schema was reconciled after the Phase 4C and 4D provisioning. Phase 4C browser acceptance created one synthetic Round 1 schedule, read it back before the Candidate status update, and showed it after a full page reload; its Candidate / Call Log / Status History / Interview Schedule / Receipt counts were **1 / 2 / 3 / 1 / 0**. Phase 4D browser acceptance for Pass and Fail and persistence after reload remains **NOT VERIFIED**. See [Current State](CURRENT_STATE.md) and the [Candidate UI implementation note](CANDIDATE_UI_IMPLEMENTATION_NOTE.md).
+The live schema was reconciled after Phase 4C and 4D provisioning. Phase 4D browser acceptance verified Pass and Fail persistence after a full reload on replacement synthetic Candidates `CAND-00001021` and `CAND-00001022`, including the terminal Candidate status and matching Status History. The two initial fixtures (`CAND-00001019` and `CAND-00001020`) retain persisted Pass/Fail results but remain `Round 1 Scheduled` without terminal history after readback warnings; they were not retried or compensated. Live aggregate readback across all four Phase 4D fixtures is Candidate / Call Log / Status History / Interview Schedule / Receipt = **4 / 4 / 14 / 4 / 0**; the two successful branches alone are **2 / 2 / 8 / 2 / 0**. See [Current State](CURRENT_STATE.md) and the [Candidate UI implementation note](CANDIDATE_UI_IMPLEMENTATION_NOTE.md).
 
 ## Naming standard and private abbreviation dictionary
 

@@ -126,6 +126,9 @@ Assert-Test ($resultStart -ge 0 -and $resultEnd -gt $resultStart -and
     $resultHistoryIndex -gt $candidateUpdateIndex -and
     $resultFlow.Contains('STATUS.offerExtended') -and
     $resultFlow.Contains('STATUS.candidateFailed')) 'Persist and read back result before the exact Pass/Fail Candidate transition and Status History'
+Assert-Test ($resultFlow.Contains('Math.floor(savedRecordedAt / 1000) === Math.floor(expectedRecordedAt / 1000)') -and
+    $resultFlow.Contains('Number.isFinite(savedRecordedAt)') -and
+    $resultFlow.Contains('failedReadbackChecks.join("_").toUpperCase()')) 'Compare User Local result timestamps at Dataverse second precision and log only failed check names'
 Assert-Test ($resultFlow.Contains('resultRetryBlockedCandidateId = candidateId') -and
     $resultFlow.Contains('Interview result was persisted, but the Candidate status update failed or is uncertain') -and
     $resultFlow.Contains('Status History creation failed or is uncertain') -and

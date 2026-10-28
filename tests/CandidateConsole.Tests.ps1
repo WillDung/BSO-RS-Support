@@ -28,16 +28,18 @@ Assert-Test ($html.Contains('id="dev-fallback-toggle"') -and
     -not $html.Contains('id="dev-fallback-toggle" type="checkbox" checked')) 'Keep direct writes behind an explicit unchecked session switch'
 Assert-Test ($script -match 'function isTargetDevEnvironment\(\) \{(?s:.*?)catch \{\r?\n\s+return false;\r?\n\s+\}\r?\n\s+\}\r?\n\s+function isDevFallbackEnabled\(\)') `
     'Keep workflow path selection in the outer console scope'
-Assert-Test ($script.Contains('operationName: "os_sr_cact"') -and
-    $script.Contains('xrm().WebApi.online.execute(request)') -and
-    $script.Contains('parameterTypes: CORE_API_PARAMETER_TYPES') -and
-    $script.Contains('c.correlation')) 'Call Candidate Core through the typed Custom API and resolve CreateCandidate by its correlation'
+Assert-Test ($script.Contains('fetch("/api/data/v9.2/os_sr_cact"') -and
+    $script.Contains('credentials: "same-origin"') -and
+    $script.Contains('body: JSON.stringify(request)') -and
+    $script.Contains('c.correlation')) 'Call the fixed Candidate Core API with a same-origin JSON request and resolve CreateCandidate by its correlation'
 $coreInvokeStart = $script.IndexOf('async function invokeCandidateCore')
 $coreInvokeEnd = $script.IndexOf('async function resolveCreatedCandidate', $coreInvokeStart)
 $coreInvoke = $script.Substring($coreInvokeStart, $coreInvokeEnd - $coreInvokeStart)
-Assert-Test ($coreInvoke.Contains('Object.keys(CORE_API_PARAMETER_TYPES).map((name) => [name, null])') -and
-    $coreInvoke.Contains('Object.assign(request, {') -and
-    $coreInvoke.Contains('...values')) 'Serialize absent optional Custom API inputs as null before applying action-specific values'
+Assert-Test ($coreInvoke.Contains('const parameterNames = Object.keys(request);') -and
+    $coreInvoke.Contains('CORE_API_ACTIONS.has(action)') -and
+    $coreInvoke.Contains('CORE_API_PARAMETER_NAMES.has(name)') -and
+    $coreInvoke.Contains('const request = { ...values, ActionType: action, CorrelationId: correlationId };')) `
+    'Allow only supported actions and declared request fields; keep caller values from overriding action identity'
 foreach ($action in @(
     'CreateCandidate', 'RecordCall', 'ProceedToScheduling', 'MarkRound1Scheduled',
     'RecordPass', 'RecordFail', 'RequestReschedule', 'CancelRound1'

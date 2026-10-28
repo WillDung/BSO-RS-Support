@@ -128,26 +128,16 @@
   let resultRetryBlockedCandidateId = null;
   let currentRows = [];
   let busy = false;
-  const CORE_API_PARAMETER_TYPES = Object.freeze({
-    ActionType: { typeName: "Edm.String", structuralProperty: 1 },
-    CandidateId: { typeName: "Edm.Guid", structuralProperty: 1 },
-    ExpectedStatus: { typeName: "Edm.Int32", structuralProperty: 1 },
-    CorrelationId: { typeName: "Edm.Guid", structuralProperty: 1 },
-    CandidateName: { typeName: "Edm.String", structuralProperty: 1 },
-    CandidateEmail: { typeName: "Edm.String", structuralProperty: 1 },
-    CandidatePhone: { typeName: "Edm.String", structuralProperty: 1 },
-    PositionId: { typeName: "Edm.Guid", structuralProperty: 1 },
-    CandidateSourceId: { typeName: "Edm.Guid", structuralProperty: 1 },
-    Reason: { typeName: "Edm.String", structuralProperty: 1 },
-    CallOutcome: { typeName: "Edm.Int32", structuralProperty: 1 },
-    ContactedAt: { typeName: "Edm.DateTimeOffset", structuralProperty: 1 },
-    Notes: { typeName: "Edm.String", structuralProperty: 1 },
-    InterviewerId: { typeName: "Edm.Guid", structuralProperty: 1 },
-    LocationId: { typeName: "Edm.Guid", structuralProperty: 1 },
-    StartAt: { typeName: "Edm.DateTimeOffset", structuralProperty: 1 },
-    EndAt: { typeName: "Edm.DateTimeOffset", structuralProperty: 1 },
-    ResultNotes: { typeName: "Edm.String", structuralProperty: 1 }
-  });
+  const CORE_API_ACTIONS = new Set([
+    "CreateCandidate", "UpdateCandidate", "RecordCall", "ProceedToScheduling",
+    "MarkRound1Scheduled", "RecordPass", "RecordFail", "RequestReschedule", "CancelRound1"
+  ]);
+  const CORE_API_PARAMETER_NAMES = new Set([
+    "ActionType", "CandidateId", "ExpectedStatus", "CorrelationId", "CandidateName",
+    "CandidateEmail", "CandidatePhone", "PositionId", "CandidateSourceId", "Reason",
+    "CallOutcome", "ContactedAt", "Notes", "InterviewerId", "LocationId", "StartAt",
+    "EndAt", "ResultNotes"
+  ]);
 
   const $ = (id) => document.getElementById(id);
   const globalContext = () => {
@@ -318,24 +308,41 @@
 
   async function invokeCandidateCore(action, values = {}, correlationId = newCorrelationId()) {
     if (!isTargetDevEnvironment()) throw new Error("CANDIDATE_CORE_ENVIRONMENT_REJECTED");
-    const request = Object.fromEntries(
-      Object.keys(CORE_API_PARAMETER_TYPES).map((name) => [name, null])
-    );
-    Object.assign(request, {
-      ActionType: action,
-      CorrelationId: correlationId,
-      ...values
-    });
+    if (!CORE_API_ACTIONS.has(action)) throw new Error("CANDIDATE_CORE_ACTION_INVALID");
+    const request = { ...values, ActionType: action, CorrelationId: correlationId };
+    const parameterNames = Object.keys(request);
+    if (parameterNames.some((name) =>
+      !CORE_API_PARAMETER_NAMES.has(name))) {
+      throw new Error("CANDIDATE_CORE_PARAMETER_INVALID");
+    }
     if (request.CandidateId) request.CandidateId = normalizeGuid(request.CandidateId);
-    request.getMetadata = () => ({
-      boundParameter: null,
-      operationName: "os_sr_cact",
-      operationType: 0,
-      parameterTypes: CORE_API_PARAMETER_TYPES
+    // Xrm.WebApi.online.execute emits an undefined Edm.Guid for this action when optional inputs are omitted.
+    const response = await fetch("/api/data/v9.2/os_sr_cact", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json; charset=utf-8",
+        "OData-MaxVersion": "4.0",
+        "OData-Version": "4.0"
+      },
+      body: JSON.stringify(request)
     });
-    const response = await xrm().WebApi.online.execute(request);
-    if (!response || response.ok !== true) throw new Error("CANDIDATE_CORE_RESPONSE_INVALID");
-    const result = await response.json();
+    const responseText = await response.text();
+    let result;
+    try {
+      result = responseText ? JSON.parse(responseText) : null;
+    } catch {
+      throw new Error("CANDIDATE_CORE_RESPONSE_INVALID");
+    }
+    if (!response.ok) {
+      const error = new Error("CANDIDATE_CORE_REQUEST_REJECTED");
+      const errorCode = result && result.error && result.error.code;
+      if (typeof errorCode === "string" && /^0x[0-9a-f]{8}$/i.test(errorCode)) {
+        error.errorCode = Number.parseInt(errorCode.slice(2), 16);
+      }
+      throw error;
+    }
     if (!result || !["Applied", "DuplicateReplay"].includes(result.ResultCode)) {
       throw new Error("CANDIDATE_CORE_RESULT_INVALID");
     }

@@ -25,14 +25,16 @@ Assert-Test ($search.Value -match 'ancestor\.MessageName != "os_sr_cact"' -and
     $search.Value -match 'ancestor\.InitiatingUserId != context\.InitiatingUserId') `
     'Trusted ancestor requires approved API, synchronous transaction, nested depth, and caller identity'
 Assert-Test ($search.Value -notmatch 'ancestor\.SharedVariables|expectedIntent|RegistrationFailure|OwningExtension' -and
-    $plugin -notmatch 'ResolveGuardRegistration|CreateOrganizationService\(context\.UserId\)|CreateOrganizationService\(null\)') `
-    'MVP authorization uses server-owned ParentContext predicates without runtime registration metadata reads'
+    $plugin -notmatch 'ResolveGuardRegistration|CreateOrganizationService\(context\.UserId\)') `
+    'Historical guard source uses server-owned ParentContext predicates without runtime registration metadata reads'
 Assert-Test ($search.Value -match 'IsActionForOperation\(ancestor, operation\)' -and
     $plugin -match 'action == "CreateCandidate"' -and $plugin -match 'action == "RecordCall"' -and
     $plugin -match 'action == "ProceedToScheduling"') 'Trusted Custom API actions are constrained to the protected mutation category'
 Assert-Test ($plugin -notmatch 'SharedVariables|IntentKey|Authorize\(' -and
-    $plugin -match 'CreateOrganizationService\(context\.InitiatingUserId\)') `
-    'Business operations remain caller-context and create no mutation marker'
+    $plugin -match 'CreateOrganizationService\(context\.InitiatingUserId\)' -and
+    $plugin -match 'CreateOrganizationService\(null\)' -and
+    $plugin -match 'CandidateOperation\.AllowsMutation') `
+    'Current API uses caller reads and a matrix-constrained SYSTEM write service without markers'
 Assert-Test ($plugin -match 'CC_GUARD_TRUSTED_PARENT_FOUND:ANCESTOR_HOPS' -and
     $plugin -match 'CC_GUARD_TRUSTED_PARENT_NOT_FOUND:ANCESTOR_HOPS' -and
     $plugin -notmatch 'Trace\(.*IntentKey|Trace\(.*expectedIntent|Trace\(.*marker') `
@@ -49,7 +51,8 @@ Assert-Test ($sdk -match 'Operation Receipt child write' -and $sdk -match 'Call 
     $sdk -match 'Status History child write' -and $sdk -match 'Candidate Answered update') `
     'SDK tests accept legitimate Candidate, Call Log, History, and Receipt child writes by action'
 Assert-Test ($sdk -match 'MVP operation does not create, persist, return, trace, or require the superseded marker' -and
-    $sdk -match 'TRUSTED_PARENT_FOUND:ANCESTOR_HOPS') 'SDK tests verify marker independence and safe trace category'
+    $sdk -match 'Candidate Core writes use SYSTEM without requiring ProtectCandidateCore interception' -and
+    $plugin -match 'CreateOrganizationService\(null\)') 'SDK tests verify marker independence and the matrix-constrained SYSTEM path'
 Assert-Test ($plugin -match 'RegisteredWriteCode\(context\.MessageName, context\.PrimaryEntityName\)' -and
     $plugin -match 'context\.MessageName == "Associate"' -and
     $plugin -notmatch 'sdkmessageprocessingstep|pluginpackage|OwningExtension') `

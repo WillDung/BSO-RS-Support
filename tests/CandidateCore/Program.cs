@@ -21,6 +21,17 @@ static class Program
         var input = new Dictionary<string, object?> { ["ActionType"] = action, ["CorrelationId"] = correlation ?? Guid.NewGuid() };
         if (action != "CreateCandidate") input["CandidateId"] = Candidate;
         if (action == "RecordCall") { input["ExpectedStatus"] = ActionRequest.NeedCall; input["CallOutcome"] = 100010000; input["ContactedAt"] = Now; }
+        if (action == "MarkRound1Scheduled" || action == "RequestReschedule")
+        {
+            input["ExpectedStatus"] = action == "MarkRound1Scheduled" ? ActionRequest.Waiting : ActionRequest.Scheduled;
+            input["InterviewerId"] = Guid.Parse("00000000-0000-0000-0000-000000000003");
+            input["LocationId"] = Guid.Parse("00000000-0000-0000-0000-000000000004");
+            input["StartAt"] = Now.AddDays(1);
+            input["EndAt"] = Now.AddDays(1).AddHours(1);
+        }
+        if (action == "RecordPass" || action == "RecordFail" || action == "CancelRound1")
+            input["ExpectedStatus"] = ActionRequest.Scheduled;
+        if (action == "RequestReschedule" || action == "CancelRound1") input["Reason"] = "Synthetic reason";
         if (action == "CreateCandidate") { input["CandidateName"] = "Synthetic Candidate"; input["CandidateEmail"] = "synthetic@example.invalid"; }
         if (action == "UpdateCandidate") input["CandidateName"] = "Synthetic Replacement";
         return input;
@@ -53,18 +64,69 @@ static class Program
             Check(string.Join(",", store.Events) == "RECEIPT_READ" && store.Receipts.Count == 1,
                 "Canonical conflicting replay leaves receipt unchanged");
         }
-        foreach (var action in new[] { "MarkRound1Scheduled", "RecordPass", "RecordFail", "RequestReschedule" })
+        var scheduleInput = Input("MarkRound1Scheduled");
+        var scheduleStore = new MemoryStore { Status = ActionRequest.Waiting };
+        Reject(() => scheduleStore.Atomic(Request(scheduleInput)), "SCHEDULER_DEPENDENCY_UNAVAILABLE");
+        Check(string.Join(",", scheduleStore.Events) == "RECEIPT_READ,CANDIDATE_READ" &&
+            scheduleStore.Updates == 0 && scheduleStore.Histories == 0 && scheduleStore.Receipts.Count == 0,
+            "Round 1 scheduling stays fail-closed without trusted availability evidence");
+
+        foreach (var action in new[] { "RecordPass", "RecordFail" })
         {
             var input = Input(action);
-            var status = action == "MarkRound1Scheduled" ? ActionRequest.Waiting : ActionRequest.Scheduled;
-            input["ExpectedStatus"] = status;
-            if (action == "RequestReschedule") input["Reason"] = "Synthetic reason";
-            var store = new MemoryStore { Status = status };
-            Reject(() => store.Atomic(Request(input)), action == "MarkRound1Scheduled" ?
-                "SCHEDULER_DEPENDENCY_UNAVAILABLE" : "RESULT_OR_CANCELLATION_DEPENDENCY_UNAVAILABLE");
-            Check(string.Join(",", store.Events) == "RECEIPT_READ,CANDIDATE_READ" && store.Receipts.Count == 0,
-                "Fail-closed operation has no reachable protected mutation: " + action);
+            var store = new MemoryStore { Status = ActionRequest.Scheduled };
+            store.SeedActiveSchedule();
+            var result = store.Atomic(Request(input));
+            var expected = action == "RecordPass" ? ActionRequest.Passed : ActionRequest.Failed;
+            Check(result.Current == expected && store.ActiveSchedule?.Result ==
+                (action == "RecordPass" ? ActionRequest.ResultPass : ActionRequest.ResultFail) &&
+                store.Histories == 1, action + " updates schedule before terminal Candidate state");
+            Check(store.Events.IndexOf("INTERVIEW_SCHEDULE_UPDATE") < store.Events.IndexOf("CANDIDATE_UPDATE"),
+                action + " persists result before Candidate transition");
+            Check(string.Join(",", store.Events) ==
+                "RECEIPT_READ,CANDIDATE_READ,ACTIVE_SCHEDULE_READ,INTERVIEW_SCHEDULE_UPDATE,CANDIDATE_UPDATE,STATUS_HISTORY_CREATE,RECEIPT_CREATE",
+                action + " mutation order is schedule, Candidate, History, Receipt");
+            var updates = store.ScheduleUpdates;
+            var replay = store.Atomic(Request(input));
+            Check(replay.Replay && replay.Current == expected && store.ScheduleUpdates == updates &&
+                store.Histories == 1 && store.Receipts.Count == 1,
+                action + " replay creates no duplicate result or history");
+            input["ResultNotes"] = "Conflicting replay";
+            Reject(() => store.Atomic(Request(input)), "CORRELATION_CONFLICT");
         }
+
+        foreach (var action in new[] { "RequestReschedule", "CancelRound1" })
+        {
+            var input = Input(action);
+            var store = new MemoryStore { Status = ActionRequest.Scheduled };
+            var oldSchedule = store.SeedActiveSchedule();
+            Reject(() => store.Atomic(Request(input)), "RESULT_OR_CANCELLATION_DEPENDENCY_UNAVAILABLE");
+            Check(store.ActiveSchedule?.Id == oldSchedule.Id && store.ActiveSchedule?.Status == ActionRequest.ScheduleActive &&
+                store.Status == ActionRequest.Scheduled && store.ScheduleUpdates == 0 &&
+                store.Updates == 0 && store.Histories == 0 && store.Receipts.Count == 0,
+                action + " remains fail-closed without trusted calendar cancellation evidence");
+        }
+
+        var completedScheduleStore = new MemoryStore { Status = ActionRequest.Scheduled };
+        completedScheduleStore.SeedActiveSchedule(ActionRequest.ResultPass);
+        Reject(() => completedScheduleStore.Atomic(Request(Input("RecordFail"))),
+            "SCHEDULE_RESULT_ALREADY_RECORDED");
+        Check(completedScheduleStore.ScheduleUpdates == 0 && completedScheduleStore.Histories == 0 &&
+            completedScheduleStore.Status == ActionRequest.Scheduled,
+            "Completed result schedule cannot receive a second result");
+        var noScheduleStore = new MemoryStore { Status = ActionRequest.Scheduled };
+        Reject(() => noScheduleStore.Atomic(Request(Input("RecordPass"))), "ACTIVE_SCHEDULE_REQUIRED");
+        Check(noScheduleStore.ScheduleUpdates == 0 && noScheduleStore.Updates == 0 &&
+            noScheduleStore.Histories == 0 && noScheduleStore.Receipts.Count == 0,
+            "Result operation requires active Round 1 schedule evidence");
+        var ambiguousScheduleStore = new MemoryStore { Status = ActionRequest.Scheduled, AmbiguousActiveSchedule = true };
+        Reject(() => ambiguousScheduleStore.Atomic(Request(Input("RecordPass"))), "ACTIVE_SCHEDULE_REQUIRED");
+        Check(ambiguousScheduleStore.ScheduleUpdates == 0 && ambiguousScheduleStore.Updates == 0,
+            "Ambiguous active schedules fail closed before mutation");
+        var invalid = Input("MarkRound1Scheduled"); invalid["StartAt"] = DateTime.SpecifyKind(Now, DateTimeKind.Local);
+        Reject(() => Request(invalid), "INVALID_SCHEDULE_TIME");
+        invalid = Input("CancelRound1"); invalid.Remove("Reason");
+        Reject(() => Request(invalid), "REASON_REQUIRED");
         for (int outcome = 100010000; outcome <= 100010002; outcome++)
         {
             var input = Input(); input["CallOutcome"] = outcome;
@@ -82,21 +144,17 @@ static class Program
         var scheduling = Input("ProceedToScheduling"); scheduling["ExpectedStatus"] = ActionRequest.Answered;
         var queueStore = new MemoryStore { Status = ActionRequest.Answered };
         Check(queueStore.Atomic(Request(scheduling)).Current == ActionRequest.Waiting && queueStore.Histories == 1 && queueStore.Calls == 0, "Scheduling queue");
-        foreach (var item in new[] {
-            ("MarkRound1Scheduled", ActionRequest.Waiting, ActionRequest.Scheduled),
-            ("RecordPass", ActionRequest.Scheduled, ActionRequest.Passed),
-            ("RecordFail", ActionRequest.Scheduled, ActionRequest.Failed),
-            ("RequestReschedule", ActionRequest.Scheduled, ActionRequest.NeedCall) })
-            Check(CandidateOperation.Transition(item.Item1, item.Item2, null, true) == item.Item3, "Future transition contract");
         Reject(() => CandidateOperation.Transition("MarkRound1Scheduled", ActionRequest.Waiting, null), "SCHEDULER_DEPENDENCY_UNAVAILABLE");
-        foreach (var action in new[] { "RecordPass", "RecordFail", "RequestReschedule" })
+        foreach (var action in new[] { "RecordPass", "RecordFail", "RequestReschedule", "CancelRound1" })
         {
             Reject(() => CandidateOperation.Transition(action, ActionRequest.Waiting, null), "INVALID_TRANSITION");
-            Reject(() => CandidateOperation.Transition(action, ActionRequest.Scheduled, null), "RESULT_OR_CANCELLATION_DEPENDENCY_UNAVAILABLE");
+            Reject(() => CandidateOperation.Transition(action, ActionRequest.Scheduled, null),
+                action == "RecordPass" || action == "RecordFail" ?
+                    "RESULT_EVIDENCE_REQUIRED" : "RESULT_OR_CANCELLATION_DEPENDENCY_UNAVAILABLE");
         }
         foreach (var status in new[] { ActionRequest.Passed, ActionRequest.Failed, ActionRequest.Waiting })
             Reject(() => CandidateOperation.Transition("RecordCall", status, 100010000), "INVALID_TRANSITION");
-        var invalid = Input(); invalid["ExpectedStatus"] = ActionRequest.Answered;
+        invalid = Input(); invalid["ExpectedStatus"] = ActionRequest.Answered;
         Reject(() => new MemoryStore().Atomic(Request(invalid)), "STALE_EXPECTED_STATUS");
         invalid = Input(); invalid["CallOutcome"] = -1;
         Reject(() => Request(invalid), "INVALID_OUTCOME");
@@ -214,6 +272,7 @@ static class Program
         invalid = Input("UpdateCandidate"); invalid["ExpectedStatus"] = new StatusValue(ActionRequest.NeedCall);
         Reject(() => Request(invalid), "INVALID_EXPECTED_STATUS");
         invalid = Input("RequestReschedule"); invalid["ExpectedStatus"] = ActionRequest.Scheduled;
+        invalid.Remove("Reason");
         Reject(() => Request(invalid), "REASON_REQUIRED");
         invalid = Input(); invalid["Actor"] = Guid.NewGuid();
         Reject(() => Request(invalid), "UNEXPECTED_INPUT:ACTION_REQUEST:OTHER");
@@ -315,21 +374,40 @@ static class Program
 
     sealed class MemoryStore : IOperationStore
     {
-        public int Status = ActionRequest.NeedCall, Calls, Histories, Updates, Creates, Version = 1, FailMutation, Mutation;
-        public bool Audit, StaleVersion, CandidateExists = true, HideReceiptOnce;
+        public int Status = ActionRequest.NeedCall, Calls, Histories, Updates, Creates,
+            ScheduleUpdates, Version = 1, FailMutation, Mutation;
+        public bool Audit, StaleVersion, CandidateExists = true, HideReceiptOnce, AmbiguousActiveSchedule;
         public Dictionary<Guid, Receipt> Receipts = new();
+        public InterviewScheduleState? ActiveSchedule;
         public List<string> Events = new();
         void Mutate() { if (++Mutation == FailMutation) throw new OperationError("SYNTHETIC_MUTATION_FAILURE"); }
         public ActionResult Atomic(ActionRequest request)
         {
             Events.Clear();
-            var before = (Status, Calls, Histories, Updates, Creates, Version, Mutation, new Dictionary<Guid, Receipt>(Receipts));
+            var before = (Status, Calls, Histories, Updates, Creates, ScheduleUpdates, Version, Mutation,
+                new Dictionary<Guid, Receipt>(Receipts),
+                ActiveSchedule == null ? null : Copy(ActiveSchedule));
             try { return CandidateOperation.Execute(request, this); }
             catch
             {
-                (Status, Calls, Histories, Updates, Creates, Version, Mutation, Receipts) = before;
+                (Status, Calls, Histories, Updates, Creates, ScheduleUpdates, Version, Mutation,
+                    Receipts, ActiveSchedule) = before;
                 throw;
             }
+        }
+        static InterviewScheduleState Copy(InterviewScheduleState value) => new()
+        {
+            Id = value.Id, Status = value.Status, Result = value.Result, RowVersion = value.RowVersion
+        };
+        public InterviewScheduleState SeedActiveSchedule(int? result = ActionRequest.ResultPending)
+        {
+            var schedule = new InterviewScheduleState
+            {
+                Id = Guid.NewGuid(), Status = ActionRequest.ScheduleActive,
+                Result = result, RowVersion = "1"
+            };
+            ActiveSchedule = schedule;
+            return schedule;
         }
         public void RequireTransaction() { }
         public Receipt? FindReceipt(Guid correlation)
@@ -354,6 +432,20 @@ static class Program
         }
         public Guid CreateCall(ActionRequest request, Guid candidate) { Events.Add("CALL_LOG_CREATE"); Mutate(); Calls++; return Guid.NewGuid(); }
         public Guid CreateHistory(ActionRequest request, Guid candidate, int previous, int current) { Events.Add("STATUS_HISTORY_CREATE"); Mutate(); Histories++; return Guid.NewGuid(); }
+        public InterviewScheduleState? GetCurrentRound1Schedule(Guid candidateId)
+        {
+            Events.Add("ACTIVE_SCHEDULE_READ");
+            if (AmbiguousActiveSchedule) throw new OperationError("ACTIVE_SCHEDULE_REQUIRED");
+            return ActiveSchedule == null ? null : Copy(ActiveSchedule);
+        }
+        public void RecordRound1Result(ActionRequest request, InterviewScheduleState schedule, int result)
+        {
+            if (string.IsNullOrEmpty(schedule.RowVersion)) throw new OperationError("ROW_VERSION_UNAVAILABLE");
+            Events.Add("INTERVIEW_SCHEDULE_UPDATE"); Mutate(); ScheduleUpdates++;
+            if (ActiveSchedule == null || ActiveSchedule.Id != schedule.Id)
+                throw new OperationError("ACTIVE_SCHEDULE_REQUIRED");
+            ActiveSchedule.Result = result;
+        }
         public void CreateReceipt(ActionRequest request, ActionResult result)
         {
             Events.Add("RECEIPT_CREATE");

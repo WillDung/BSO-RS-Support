@@ -1,5 +1,19 @@
 # Current State
 
+## Phase 5A local Candidate Core SYSTEM boundary (2026-10-28)
+
+**Status:** `PHASE_5A_LOCAL_SOURCE_PARTIAL_NOT_DEPLOYED`; Candidate Core production path, BSO role, API metadata, and Candidate Console cutover are **not accepted**.
+
+The local `ApplyCandidateAction` source preserves the initiating caller for Candidate, schedule, and reference reads, validates caller visibility for Position, Candidate Source, TA, and Location references, then creates `CreateOrganizationService(null)` only inside the validated `os_sr_cact` handler. The typed store accepts no caller-supplied table names. The immutable `CandidateOperation.MutationMatrix` allows only fixed Candidate, Call Log, History, Interview Schedule result, and Receipt mutations for covered actions. Pass/Fail requires exactly one caller-readable active Round 1 schedule with no prior result; the result, terminal Candidate transition, Status History, and Receipt use the synchronous operation transaction. No generic write path is exposed.
+
+Several operations intentionally remain fail-closed. `MarkRound1Scheduled` has no trusted TA/room availability evidence boundary; under the approved rule, unknown or stale availability is not free. `RequestReschedule` and `CancelRound1` have no trusted calendar-event cancellation evidence boundary. These three ActionTypes have no allowed mutations in the local matrix. The Phase 4E DEV UI is not promoted into production authority, and its behavior does not override [Master Production Rules](../MASTER_PRODUCTION_RULES.md) or [Product Decisions](PRODUCT_DECISIONS.md).
+
+`ProtectCandidateCore` source remains for historical compatibility and is superseded as the intended production security mechanism. Its 50 registrations were documented inactive in the prior Phase 4E baseline; they were not re-read, modified, or reactivated. The unassigned `BSO-RS Support - BSO` role was not changed. Its deployed direct-write grants and the existing `prvWriteos_sr_cand` Custom API execution privilege remain unresolved against the required production no-direct-write role. Do not assign the role or use `prvWriteos_sr_cand` as a workaround.
+
+The local API contract now documents the action matrix and new schedule/result parameters, but API metadata, the existing unsigned package, Candidate Console, and the role were not updated in an environment. VN LMV IT is documented as Production; no environment was queried or changed. No browser/runtime acceptance, real data, deployment, commit, or push occurred. `REAL DATA PROHIBITED`.
+
+**Remaining Phase 5A gates:** approve and implement trusted availability and calendar-cancellation evidence boundaries; verify a Custom API execution privilege that does not grant Candidate Write; update and validate the existing package/API metadata, the unassigned role, and the Candidate Console in an approved non-production target; then run synthetic runtime/browser and negative privilege acceptance. No separate non-production target is verified. The requested Phase 5A success classifications are not established and Phase 5B has not started.
+
 ## Phase 4E Round 1 Reschedule and Cancellation DEV Slice (2026-10-28)
 
 **Result:** `PHASE_4E_RESCHEDULE_CANCEL_DEV_WORKING`; `ROUND1_RESCHEDULE_TO_NEED_CALL_WORKING`; `ROUND1_CANCELLATION_TO_NEED_CALL_WORKING`; `SCHEDULING_HISTORY_PRESERVED`; `BSO_INTERVIEW_SCHEDULE_PRIVILEGES_CORRECTED_UNASSIGNED`; `VN_LMV_IT_PROTECT_CANDIDATE_CORE_DEV_KILL_SWITCH_ACTIVE`; `REAL_DATA_PROHIBITED`; `CANDIDATE_CORE_PRODUCTION_BACKEND_REMAINS_PENDING`.

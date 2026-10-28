@@ -10,9 +10,27 @@
   "bindingType": 0,
   "allowedCustomProcessingStepType": 0,
   "executePrivilegeName": "prvWriteos_sr_cand",
-  "executionIdentity": "CallingUser; UserId must equal InitiatingUserId; no impersonating-user registration",
+  "executionIdentity": "CallingUser for authorization and business reads; UserId must equal InitiatingUserId; fixed business writes use CreateOrganizationService(null) only inside ApplyCandidateAction.",
+  "executionPrivilegeStatus": "UNRESOLVED: existing prvWriteos_sr_cand conflicts with the required BSO role having no direct Candidate Write; do not deploy or assign the role until an API-only execution privilege is verified.",
   "profileReplacement": "Present fields replace; omitted fields preserve; explicit null clears only optional phone/lookup fields. Required name/email cannot be null/blank.",
-  "futureEvidenceActions": "MarkRound1Scheduled, RecordPass, RecordFail, RequestReschedule remain fail-closed until their future trusted evidence boundaries exist.",
+  "supportedActionTypes": ["CreateCandidate", "UpdateCandidate", "RecordCall", "ProceedToScheduling", "MarkRound1Scheduled", "RecordPass", "RecordFail", "RequestReschedule", "CancelRound1"],
+  "futureEvidenceActions": {
+    "MarkRound1Scheduled": "FAIL_CLOSED: no trusted TA/room availability evidence boundary exists; unknown or stale availability is not free.",
+    "RequestReschedule": "FAIL_CLOSED: no trusted calendar-event cancellation evidence boundary exists.",
+    "CancelRound1": "FAIL_CLOSED: no trusted calendar-event cancellation evidence boundary exists."
+  },
+  "localSourceStatus": "Round 1 result persistence is implemented locally. The API metadata, package, UI, role, and runtime acceptance are not updated or verified.",
+  "actionMutationMatrix": {
+    "CreateCandidate": ["CANDIDATE_CREATE", "RECEIPT_CREATE"],
+    "UpdateCandidate": ["CANDIDATE_UPDATE", "RECEIPT_CREATE"],
+    "RecordCall": ["CANDIDATE_UPDATE", "CALL_LOG_CREATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE"],
+    "ProceedToScheduling": ["CANDIDATE_UPDATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE"],
+    "MarkRound1Scheduled": [],
+    "RecordPass": ["INTERVIEW_SCHEDULE_UPDATE", "CANDIDATE_UPDATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE"],
+    "RecordFail": ["INTERVIEW_SCHEDULE_UPDATE", "CANDIDATE_UPDATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE"],
+    "RequestReschedule": [],
+    "CancelRound1": []
+  },
   "fingerprintVersion": "1",
   "creationPreviousStatus": "No previous value is set; Web API Integer response default 0 is not a workflow status. Receipt previous status remains null.",
   "creationCandidateIdOutput": "Not added; approved five-output contract retained. Candidate reference is durably stored in receipt.",
@@ -29,7 +47,12 @@
     { "name": "Reason", "type": 10, "optional": true },
     { "name": "CallOutcome", "type": 7, "optional": true },
     { "name": "ContactedAt", "type": 1, "optional": true },
-    { "name": "Notes", "type": 10, "optional": true }
+    { "name": "Notes", "type": 10, "optional": true },
+    { "name": "InterviewerId", "type": 12, "optional": true },
+    { "name": "LocationId", "type": 12, "optional": true },
+    { "name": "StartAt", "type": 1, "optional": true },
+    { "name": "EndAt", "type": 1, "optional": true },
+    { "name": "ResultNotes", "type": 10, "optional": true }
   ],
   "outputs": [
     { "name": "ResultCode", "type": 10 },
@@ -38,7 +61,7 @@
     { "name": "CallLogId", "type": 12 },
     { "name": "StatusHistoryId", "type": 12 }
   ],
-  "protectedTables": ["os_sr_cand", "os_sr_call", "os_sr_csh", "os_sr_oprc"],
+  "protectedTables": ["os_sr_cand", "os_sr_call", "os_sr_csh", "os_sr_intv", "os_sr_oprc"],
   "guardMessages": [
     "Create", "Update", "Delete", "Upsert", "CreateMultiple", "UpdateMultiple",
     "UpsertMultiple", "DeleteMultiple", "SetState", "SetStateDynamicEntity", "Assign",

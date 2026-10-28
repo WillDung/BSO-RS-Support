@@ -15,10 +15,14 @@ Assert-Test ($e.Count -eq 0) 'Deployment runner parses'
 Assert-Test ($contract.uniqueName -ceq 'os_sr_cact' -and -not $contract.isFunction -and $contract.bindingType -eq 0) 'Approved unbound Action'
 Assert-Test ($contract.isPrivate -and $contract.allowedCustomProcessingStepType -eq 0) 'Private discovery with no extension steps'
 Assert-Test ($contract.executePrivilegeName -ceq 'prvWriteos_sr_cand') 'Existing generated Write privilege'
-Assert-Test ($contract.inputs.Count -eq 13 -and $contract.outputs.Count -eq 5) 'Exact approved parameter/output counts'
+Assert-Test ($contract.inputs.Count -eq 18 -and $contract.outputs.Count -eq 5) 'Local source contract preserves five outputs and declares typed scheduling/result inputs'
+Assert-Test ($contract.localSourceStatus -match 'not updated or verified' -and
+    $contract.futureEvidenceActions.MarkRound1Scheduled -match 'FAIL_CLOSED' -and
+    $contract.futureEvidenceActions.RequestReschedule -match 'FAIL_CLOSED' -and
+    $contract.futureEvidenceActions.CancelRound1 -match 'FAIL_CLOSED') 'Local contract status and external-evidence fail-closed gates are explicit'
 Assert-Test (@($contract.inputs | Where-Object { -not $_.optional }).name -join ',' -ceq 'ActionType,CorrelationId') 'Only common mandatory parameters are metadata-required'
 Assert-Test (@($contract.inputs | Where-Object name -CEQ 'CorrelationId')[0].type -eq 12) 'External CorrelationId remains GUID'
-Assert-Test ($contract.protectedTables.Count -eq 4) 'Only Candidate Core and receipt tables protected'
+Assert-Test ($contract.protectedTables.Count -eq 5 -and $contract.protectedTables -contains 'os_sr_intv') 'Interview Schedule is included among fixed protected business tables'
 Assert-Test ($source -match 'MaximumRetryCount = 0' -and $source -match 'MaximumRedirection = 0') 'No transport retry or redirect'
 Assert-Test ($source -match 'FileMode\]::CreateNew' -and $source -match 'DISPATCH_RESERVED' -and $source -match 'Flush\(\$true\)') 'Durable per-dispatch consumption journal'
 Assert-Test ($source -match 'Get-RegistrationNavigation' -and $source -match 'ReferencingEntityNavigationPropertyName') 'Resolve actual case-sensitive metadata navigation'
@@ -46,7 +50,15 @@ Assert-Test ($source -match 'one failed/uncertain registration GET reconciliatio
 Assert-Test ($source -match 'PrimaryIdAttribute -cne' -and $source -match "Required direct-write guard hook unavailable") 'Fail closed on missing baseline guard assumptions'
 Assert-Test ($source -match "foreach \(\`$messageName in @\('Associate', 'Disassociate'\)\)") 'Protect lookup reassociation outside normal update paths'
 $plugin = Get-Content -Raw (Join-Path $root 'solutions\CandidateCore\DataversePlugin.cs')
-Assert-Test ($plugin -match 'context.UserId != context.InitiatingUserId' -and $plugin -match 'CreateOrganizationService\(context.InitiatingUserId\)') 'No implicit execution-user elevation'
+Assert-Test ($plugin -match 'context.UserId != context.InitiatingUserId' -and
+    $plugin -match 'CreateOrganizationService\(context.InitiatingUserId\)' -and
+    $plugin -match 'CreateOrganizationService\(null\)' -and
+    $plugin -match 'new DataverseStore\(callerService, systemService, context, trace\)') `
+    'API context remains caller-bound while SYSTEM is explicitly scoped to Candidate Core'
+Assert-Test ($plugin -match 'CandidateOperation\.AllowsMutation' -and
+    $plugin -match 'EnsureAllowedMutation' -and
+    $plugin -match 'systemService\.Create' -and $plugin -match 'systemService\.Execute') `
+    'SYSTEM mutations are constrained by the canonical ActionType/write matrix'
 Assert-Test ($plugin -match 'IfRowVersionMatches' -and $plugin -match 'RequireTransaction' -and
     $plugin -notmatch 'isauditenabled|AUDIT_ACTIVATION_PENDING') 'Conditional writes retain transaction gate without organization-audit runtime blocker'
 Assert-Test ($plugin -match 'HasTrustedAncestor' -and $plugin -match 'MaximumParentContexts = 8' -and

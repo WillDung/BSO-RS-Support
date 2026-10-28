@@ -28,9 +28,12 @@ namespace os_sr_cact
                     !context.IsInTransaction || context.UserId != context.InitiatingUserId || context.Depth != 1)
                     throw new OperationError("UNSUPPORTED_EXECUTION_CONTEXT");
                 var factory = (IOrganizationServiceFactory)serviceProvider.GetService(typeof(IOrganizationServiceFactory));
-                var service = factory.CreateOrganizationService(context.InitiatingUserId);
+                var callerService = factory.CreateOrganizationService(context.InitiatingUserId);
                 var request = CandidateActionInputAdapter.Create(context.InitiatingUserId, context.InputParameters, DateTime.UtcNow);
-                var result = CandidateOperation.Execute(request, new DataverseStore(service, context, trace));
+                CandidateOperation.EnsureExternalEvidenceAvailable(request.Action);
+                ValidateCallerReferences(callerService, request, trace);
+                var systemService = factory.CreateOrganizationService(null);
+                var result = CandidateOperation.Execute(request, new DataverseStore(callerService, systemService, context, trace));
                 context.OutputParameters["ResultCode"] = result.Replay ? "DuplicateReplay" : "Applied";
                 if (result.Previous.HasValue) context.OutputParameters["PreviousStatus"] = result.Previous.Value;
                 context.OutputParameters["CurrentStatus"] = result.Current;
@@ -50,6 +53,35 @@ namespace os_sr_cact
                 string code = error.Detail.ErrorCode == unchecked((int)0x80040237) ? "CORRELATION_OR_KEY_CONFLICT" :
                     error.Detail.ErrorCode == unchecked((int)0x80060882) ? "ROW_VERSION_CONFLICT" : "DATAVERSE_OPERATION_REJECTED";
                 throw new InvalidPluginExecutionException(code);
+            }
+        }
+
+        private static void ValidateCallerReferences(
+            IOrganizationService callerService,
+            ActionRequest request,
+            ITracingService trace)
+        {
+            foreach (var reference in new[]
+            {
+                (Input: "PositionId", Table: "os_sr_pos"),
+                (Input: "CandidateSourceId", Table: "os_sr_csrc"),
+                (Input: "InterviewerId", Table: "os_sr_ta"),
+                (Input: "LocationId", Table: "os_sr_loc")
+            })
+            {
+                if (!request.Values.TryGetValue(reference.Input, out var value) || !(value is Guid id))
+                    continue;
+
+                try
+                {
+                    callerService.Retrieve(reference.Table, id, new ColumnSet(false));
+                }
+                catch (FaultException<OrganizationServiceFault> error)
+                {
+                    trace.Trace("CC_REFERENCE_VALIDATION_FAILED:{0}:0x{1:X8}",
+                        reference.Input, error.Detail.ErrorCode);
+                    throw new OperationError("REFERENCE_NOT_AVAILABLE:" + reference.Input, error);
+                }
             }
         }
     }
@@ -341,28 +373,19 @@ namespace os_sr_cact
 
     internal sealed class DataverseStore : IOperationStore
     {
-        private readonly IOrganizationService service;
+        private readonly IOrganizationService callerService;
+        private readonly IOrganizationService systemService;
         private readonly IPluginExecutionContext context;
         private readonly ITracingService trace;
-        private static readonly string[] GuardDiagnostics =
-        {
-            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:PARENT_CONTEXT",
-            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:CALLER_CONTEXT",
-            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_UPDATE:PARENT_CONTEXT",
-            "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_UPDATE:CALLER_CONTEXT",
-            "DIRECT_WRITE_GUARD_REJECTED:CALL_LOG_CREATE:PARENT_CONTEXT",
-            "DIRECT_WRITE_GUARD_REJECTED:CALL_LOG_CREATE:CALLER_CONTEXT",
-            "DIRECT_WRITE_GUARD_REJECTED:STATUS_HISTORY_CREATE:PARENT_CONTEXT",
-            "DIRECT_WRITE_GUARD_REJECTED:STATUS_HISTORY_CREATE:CALLER_CONTEXT",
-            "DIRECT_WRITE_GUARD_REJECTED:RECEIPT_CREATE:PARENT_CONTEXT",
-            "DIRECT_WRITE_GUARD_REJECTED:RECEIPT_CREATE:CALLER_CONTEXT",
-            "DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_PROTECTED_WRITE",
-            "DIRECT_WRITE_GUARD_REJECTED:LEGACY_GENERIC_GUARD"
-        };
 
-        public DataverseStore(IOrganizationService service, IPluginExecutionContext context, ITracingService trace)
+        public DataverseStore(
+            IOrganizationService callerService,
+            IOrganizationService systemService,
+            IPluginExecutionContext context,
+            ITracingService trace)
         {
-            this.service = service;
+            this.callerService = callerService;
+            this.systemService = systemService;
             this.context = context;
             this.trace = trace;
         }
@@ -377,24 +400,23 @@ namespace os_sr_cact
         {
             var query = new QueryExpression("os_sr_oprc")
             {
-                ColumnSet = new ColumnSet("createdby", "ownerid", "os_sr_oprc_cand", "os_sr_oprc_cact", "os_sr_oprc_hash",
+                ColumnSet = new ColumnSet("ownerid", "os_sr_oprc_cand", "os_sr_oprc_cact", "os_sr_oprc_hash",
                     "os_sr_oprc_ver", "os_sr_oprc_prevstat", "os_sr_oprc_newstat", "os_sr_oprc_callref", "os_sr_oprc_histref"),
                 TopCount = 2
             };
             query.Criteria.AddCondition("os_sr_oprc_corid", ConditionOperator.Equal, correlation.ToString("D"));
-            var rows = ExecuteAtStage("CC_READ_RECEIPT", () => service.RetrieveMultiple(query)).Entities;
+            var rows = ExecuteAtStage("CC_READ_RECEIPT", () => systemService.RetrieveMultiple(query)).Entities;
             if (rows.Count == 0) return null;
             if (rows.Count != 1) throw new OperationError("RECEIPT_INTEGRITY_FAILURE");
             var row = rows[0];
-            var actor = row.GetAttributeValue<EntityReference>("createdby");
             var owner = row.GetAttributeValue<EntityReference>("ownerid");
             var candidate = row.GetAttributeValue<EntityReference>("os_sr_oprc_cand");
-            if (actor == null || owner == null || owner.LogicalName != "systemuser" || actor.Id != owner.Id || candidate == null ||
+            if (owner == null || owner.LogicalName != "systemuser" || owner.Id == Guid.Empty || candidate == null ||
                 !row.Contains("os_sr_oprc_newstat") || string.IsNullOrEmpty(row.GetAttributeValue<string>("os_sr_oprc_hash")))
                 throw new OperationError("RECEIPT_INTEGRITY_FAILURE");
             return new Receipt
             {
-                Actor = actor.Id,
+                Actor = owner.Id,
                 Action = row.GetAttributeValue<string>("os_sr_oprc_cact"),
                 Fingerprint = row.GetAttributeValue<string>("os_sr_oprc_hash"),
                 Version = row.GetAttributeValue<string>("os_sr_oprc_ver"),
@@ -417,17 +439,24 @@ namespace os_sr_cact
         public CandidateState GetCandidate(Guid id)
         {
             var row = ExecuteAtStage("CC_READ_CANDIDATE",
-                () => service.Retrieve("os_sr_cand", id, new ColumnSet("os_sr_cand_stat", "versionnumber")));
+                () => callerService.Retrieve("os_sr_cand", id, new ColumnSet("os_sr_cand_stat", "versionnumber")));
             if (!row.Contains("os_sr_cand_stat")) throw new OperationError("CANDIDATE_INTEGRITY_FAILURE");
             int status = row.GetAttributeValue<OptionSetValue>("os_sr_cand_stat").Value;
             if (status < ActionRequest.NeedCall || status > ActionRequest.Failed) throw new OperationError("INVALID_CANDIDATE_STATUS");
             return new CandidateState { Id = id, Status = status, RowVersion = row.RowVersion };
         }
 
-        private Guid Create(Entity row, string stage)
+        private Guid Create(Entity row, string action, string mutation, string stage)
         {
+            EnsureAllowedMutation(action, mutation);
             if (row.Id == Guid.Empty) row.Id = Guid.NewGuid();
-            return ExecuteAtStage(stage, () => service.Create(row));
+            return ExecuteAtStage(stage, () => systemService.Create(row));
+        }
+
+        private static void EnsureAllowedMutation(string action, string mutation)
+        {
+            if (!CandidateOperation.AllowsMutation(action, mutation))
+                throw new OperationError("UNSUPPORTED_MUTATION:" + action + ":" + mutation);
         }
 
         private T ExecuteAtStage<T>(string stage, Func<T> operation)
@@ -441,43 +470,14 @@ namespace os_sr_cact
             {
                 var faultCode = "0x" + error.Detail.ErrorCode.ToString("X8", CultureInfo.InvariantCulture);
                 trace.Trace("CC_SERVICE_FAULT:{0}:{1}", stage, faultCode);
-                var guardDiagnostic = FindGuardDiagnostic(error.Detail.Message);
-                var code = guardDiagnostic == null
-                    ? "DATAVERSE_OPERATION_REJECTED:" + stage + ":" + faultCode
-                    : guardDiagnostic + ":" + stage + ":" + faultCode;
-                throw new OperationError(code, error);
+                throw new OperationError("DATAVERSE_OPERATION_REJECTED:" + stage + ":" + faultCode, error);
             }
             catch (Exception error)
             {
-                var guardDiagnostic = FindGuardDiagnostic(error.Message);
                 var category = ExceptionCategory(error);
                 trace.Trace("CC_SERVICE_FAILURE:{0}:{1}", stage, category);
-                var code = guardDiagnostic == null
-                    ? "CANDIDATE_CORE_FAILURE:" + stage + ":" + category
-                    : guardDiagnostic + ":" + stage;
-                throw new OperationError(code, error);
+                throw new OperationError("CANDIDATE_CORE_FAILURE:" + stage + ":" + category, error);
             }
-        }
-
-        private static string? FindGuardDiagnostic(string message)
-        {
-            if (message == null) return null;
-            var normalized = message.Trim();
-            var predicates = new[] { "API_MESSAGE_MISMATCH", "STAGE_MISMATCH", "MODE_MISMATCH",
-                "TRANSACTION_MISMATCH", "DEPTH_MISMATCH", "USER_CONTEXT_MISMATCH", "INITIATING_USER_MISMATCH",
-                "ACTIONTYPE_MISSING", "ACTIONTYPE_MISMATCH", "ANCESTOR_BOUND_EXCEEDED" };
-            foreach (var operation in ProtectCandidateCore.DiagnosticWriteCodes)
-                foreach (var predicate in predicates)
-                {
-                    var diagnostic = "DIRECT_WRITE_GUARD_REJECTED:" + operation + ":TRUSTED_PARENT:" + predicate;
-                    if (normalized == diagnostic) return diagnostic;
-                }
-            var guardDiagnostic = GuardDiagnostics.FirstOrDefault(diagnostic =>
-                string.Equals(normalized, diagnostic, StringComparison.Ordinal));
-            if (guardDiagnostic != null) return guardDiagnostic;
-            return string.Equals(normalized, "DIRECT_CANDIDATE_CORE_WRITE_BLOCKED", StringComparison.Ordinal)
-                ? "DIRECT_WRITE_GUARD_REJECTED:LEGACY_GENERIC_GUARD"
-                : null;
         }
 
         private static string ExceptionCategory(Exception error)
@@ -507,25 +507,28 @@ namespace os_sr_cact
 
         public Guid CreateCandidate(ActionRequest request)
         {
+            EnsureAllowedMutation(request.Action, "CANDIDATE_CREATE");
             var row = new Entity("os_sr_cand");
             SetProfile(row, request);
             row["os_sr_cand_stat"] = new OptionSetValue(ActionRequest.NeedCall);
             row["os_sr_cand_corid"] = request.Correlation.ToString("D");
             row["ownerid"] = new EntityReference("systemuser", request.Actor);
-            return Create(row, "CC_CREATE_CANDIDATE");
+            return Create(row, request.Action, "CANDIDATE_CREATE", "CC_CREATE_CANDIDATE");
         }
 
         public void UpdateCandidate(ActionRequest request, CandidateState candidate, int status)
         {
+            EnsureAllowedMutation(request.Action, "CANDIDATE_UPDATE");
             var row = new Entity("os_sr_cand", candidate.Id) { RowVersion = candidate.RowVersion };
             if (request.Action == "UpdateCandidate") SetProfile(row, request);
             else row["os_sr_cand_stat"] = new OptionSetValue(status);
             ExecuteAtStage("CC_UPDATE_CANDIDATE",
-                () => service.Execute(new UpdateRequest { Target = row, ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches }));
+                () => systemService.Execute(new UpdateRequest { Target = row, ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches }));
         }
 
         public Guid CreateCall(ActionRequest request, Guid candidateId)
         {
+            EnsureAllowedMutation(request.Action, "CALL_LOG_CREATE");
             var row = new Entity("os_sr_call");
             row["os_sr_call_cand"] = new EntityReference("os_sr_cand", candidateId);
             row["os_sr_call_out"] = new OptionSetValue((int)request.Values["CallOutcome"]!);
@@ -534,11 +537,12 @@ namespace os_sr_cact
             row["os_sr_call_corid"] = request.Correlation.ToString("D");
             row["ownerid"] = new EntityReference("systemuser", request.Actor);
             if (request.Values.TryGetValue("Notes", out var notes)) row["os_sr_call_nts"] = notes;
-            return Create(row, "CC_CREATE_CALL_LOG");
+            return Create(row, request.Action, "CALL_LOG_CREATE", "CC_CREATE_CALL_LOG");
         }
 
         public Guid CreateHistory(ActionRequest request, Guid candidateId, int previous, int current)
         {
+            EnsureAllowedMutation(request.Action, "STATUS_HISTORY_CREATE");
             var row = new Entity("os_sr_csh");
             row["os_sr_csh_cand"] = new EntityReference("os_sr_cand", candidateId);
             row["os_sr_csh_prevstat"] = new OptionSetValue(previous);
@@ -549,11 +553,70 @@ namespace os_sr_cact
             row["os_sr_csh_cact"] = request.Action;
             row["ownerid"] = new EntityReference("systemuser", request.Actor);
             if (request.Values.TryGetValue("Reason", out var reason)) row["os_sr_csh_rsn"] = reason;
-            return Create(row, "CC_CREATE_STATUS_HISTORY");
+            return Create(row, request.Action, "STATUS_HISTORY_CREATE", "CC_CREATE_STATUS_HISTORY");
+        }
+
+        public InterviewScheduleState? GetCurrentRound1Schedule(Guid candidateId)
+        {
+            var query = new QueryExpression("os_sr_intv")
+            {
+                ColumnSet = new ColumnSet("os_sr_intv_stat", "os_sr_intv_res", "versionnumber"),
+                TopCount = 2
+            };
+            query.Criteria.AddCondition("os_sr_intv_cand", ConditionOperator.Equal, candidateId);
+            query.Criteria.AddCondition("os_sr_intv_rnd", ConditionOperator.Equal, ActionRequest.Round1);
+            var active = new FilterExpression(LogicalOperator.Or);
+            active.AddCondition("os_sr_intv_stat", ConditionOperator.Null);
+            active.AddCondition("os_sr_intv_stat", ConditionOperator.Equal, ActionRequest.ScheduleActive);
+            query.Criteria.AddFilter(active);
+            return ReadUniqueSchedule(query, "ACTIVE_SCHEDULE_REQUIRED");
+        }
+
+        private InterviewScheduleState? ReadUniqueSchedule(QueryExpression query, string ambiguityCode)
+        {
+            var rows = ExecuteAtStage("CC_READ_INTERVIEW_SCHEDULE",
+                () => callerService.RetrieveMultiple(query)).Entities;
+            if (rows.Count > 1) throw new OperationError(ambiguityCode);
+            if (rows.Count == 0) return null;
+            var row = rows[0];
+            var result = row.GetAttributeValue<OptionSetValue>("os_sr_intv_res")?.Value;
+            var status = row.GetAttributeValue<OptionSetValue>("os_sr_intv_stat")?.Value;
+            if (row.Id == Guid.Empty ||
+                (status.HasValue && status.Value != ActionRequest.ScheduleActive) ||
+                (result.HasValue && result.Value != ActionRequest.ResultPending &&
+                    result.Value != ActionRequest.ResultPass && result.Value != ActionRequest.ResultFail))
+                throw new OperationError("SCHEDULE_INTEGRITY_FAILURE");
+            return new InterviewScheduleState
+            {
+                Id = row.Id,
+                Status = status,
+                Result = result,
+                RowVersion = row.RowVersion
+            };
+        }
+
+        public void RecordRound1Result(ActionRequest request, InterviewScheduleState schedule, int result)
+        {
+            EnsureAllowedMutation(request.Action, "INTERVIEW_SCHEDULE_UPDATE");
+            if (schedule.Id == Guid.Empty || string.IsNullOrEmpty(schedule.RowVersion))
+                throw new OperationError("ROW_VERSION_UNAVAILABLE");
+            if (result != ActionRequest.ResultPass && result != ActionRequest.ResultFail)
+                throw new OperationError("UNSUPPORTED_INTERVIEW_RESULT");
+            var row = new Entity("os_sr_intv", schedule.Id) { RowVersion = schedule.RowVersion };
+            row["os_sr_intv_res"] = new OptionSetValue(result);
+            row["os_sr_intv_recat"] = DateTime.UtcNow;
+            row["os_sr_intv_rnts"] = request.Values.TryGetValue("ResultNotes", out var notes) ? notes : null;
+            ExecuteAtStage("CC_UPDATE_INTERVIEW_SCHEDULE",
+                () => systemService.Execute(new UpdateRequest
+                {
+                    Target = row,
+                    ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches
+                }));
         }
 
         public void CreateReceipt(ActionRequest request, ActionResult result)
         {
+            EnsureAllowedMutation(request.Action, "RECEIPT_CREATE");
             var row = new Entity("os_sr_oprc");
             row["os_sr_oprc_nm"] = request.Correlation.ToString("D");
             row["os_sr_oprc_corid"] = request.Correlation.ToString("D");
@@ -566,10 +629,11 @@ namespace os_sr_cact
             if (result.Previous.HasValue) row["os_sr_oprc_prevstat"] = result.Previous.Value;
             if (result.CallId.HasValue) row["os_sr_oprc_callref"] = result.CallId.Value.ToString("D");
             if (result.HistoryId.HasValue) row["os_sr_oprc_histref"] = result.HistoryId.Value.ToString("D");
-            Create(row, "CC_CREATE_RECEIPT");
+            Create(row, request.Action, "RECEIPT_CREATE", "CC_CREATE_RECEIPT");
         }
     }
 
+    // Superseded as the production security boundary; retained for inactive historical registrations.
     public sealed class ProtectCandidateCore : IPlugin
     {
         private const int MaximumParentContexts = 8;

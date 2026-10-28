@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Linq;
 using System.Security.Cryptography;
@@ -21,6 +22,11 @@ namespace os_sr_cact
         public const int Scheduled = 100010003;
         public const int Passed = 100010004;
         public const int Failed = 100010005;
+        public const int Round1 = 100000000;
+        public const int ResultPending = 100000000;
+        public const int ResultPass = 100000001;
+        public const int ResultFail = 100000002;
+        public const int ScheduleActive = 100000001;
         public Guid Actor { get; }
         public Guid Correlation { get; }
         public Guid? CandidateId { get; }
@@ -33,7 +39,7 @@ namespace os_sr_cact
         {
             "ActionType", "CorrelationId", "CandidateId", "ExpectedStatus", "CandidateName",
             "CandidateEmail", "CandidatePhone", "PositionId", "CandidateSourceId", "CallOutcome",
-            "ContactedAt", "Notes", "Reason"
+            "ContactedAt", "Notes", "Reason", "InterviewerId", "LocationId", "StartAt", "EndAt", "ResultNotes"
         };
 
         private static readonly HashSet<string> DeclaredInputNameSet =
@@ -41,7 +47,8 @@ namespace os_sr_cact
 
         public static bool IsSupportedAction(string action) =>
             new[] { "CreateCandidate", "UpdateCandidate", "RecordCall", "ProceedToScheduling",
-                "MarkRound1Scheduled", "RecordPass", "RecordFail", "RequestReschedule" }.Contains(action);
+                "MarkRound1Scheduled", "RecordPass", "RecordFail", "RequestReschedule",
+                "CancelRound1" }.Contains(action);
 
         public static IEnumerable<string> ApplicableInputNames(string action)
         {
@@ -53,8 +60,13 @@ namespace os_sr_cact
                     "CandidatePhone", "PositionId", "CandidateSourceId" });
             if (action == "RecordCall")
                 return common.Concat(new[] { "CandidateId", "ExpectedStatus", "CallOutcome", "ContactedAt", "Notes" });
-            if (action == "RequestReschedule")
+            if (action == "MarkRound1Scheduled" || action == "RequestReschedule")
+                return common.Concat(new[] { "CandidateId", "ExpectedStatus", "InterviewerId", "LocationId",
+                    "StartAt", "EndAt", "Notes" }).Concat(action == "RequestReschedule" ? new[] { "Reason" } : Array.Empty<string>());
+            if (action == "CancelRound1")
                 return common.Concat(new[] { "CandidateId", "ExpectedStatus", "Reason" });
+            if (action == "RecordPass" || action == "RecordFail")
+                return common.Concat(new[] { "CandidateId", "ExpectedStatus", "ResultNotes" });
             if (action == "ProceedToScheduling" || action == "MarkRound1Scheduled" ||
                 action == "RecordPass" || action == "RecordFail")
                 return common.Concat(new[] { "CandidateId", "ExpectedStatus" });
@@ -107,7 +119,8 @@ namespace os_sr_cact
                     throw new OperationError("UNEXPECTED_INPUT:ACTION_REQUEST:" +
                         (IsDeclaredInputName(pair.Key) ? pair.Key : "OTHER"));
                 object? value = pair.Value;
-                if (profile.Contains(pair.Key) || pair.Key == "Notes" || pair.Key == "Reason")
+                if (profile.Contains(pair.Key) || pair.Key == "Notes" || pair.Key == "Reason" ||
+                    pair.Key == "ResultNotes")
                 {
                     if (optionalGuidProfile.Contains(pair.Key))
                     {
@@ -117,7 +130,8 @@ namespace os_sr_cact
                     {
                         if (value != null && !(value is string)) throw new OperationError("INVALID_TEXT");
                         value = (value as string)?.Trim();
-                        int length = pair.Key == "Notes" ? 4000 : pair.Key == "Reason" ? 1000 :
+                        int length = pair.Key == "Notes" ? (Action == "RecordCall" ? 4000 : 1000) :
+                            pair.Key == "Reason" || pair.Key == "ResultNotes" ? 1000 :
                             pair.Key == "CandidateName" ? 200 : pair.Key == "CandidateEmail" ? 254 : 50;
                         if (value is string text && text.Length > length) throw new OperationError("TEXT_TOO_LONG");
                         if (pair.Key == "CandidateName" || pair.Key == "CandidateEmail" || pair.Key == "Reason")
@@ -141,7 +155,21 @@ namespace os_sr_cact
                 var time = Required<DateTime>(values, "ContactedAt");
                 if (time.Kind != DateTimeKind.Utc || time > utcNow) throw new OperationError("INVALID_CONTACT_TIME");
             }
-            if (Action == "RequestReschedule" && !values.ContainsKey("Reason")) throw new OperationError("REASON_REQUIRED");
+            if (Action == "RequestReschedule" || Action == "CancelRound1")
+            {
+                if (!values.ContainsKey("Reason")) throw new OperationError("REASON_REQUIRED");
+            }
+            if (Action == "MarkRound1Scheduled" || Action == "RequestReschedule")
+            {
+                var interviewer = Required<Guid>(values, "InterviewerId");
+                var location = Required<Guid>(values, "LocationId");
+                var start = Required<DateTime>(values, "StartAt");
+                var end = Required<DateTime>(values, "EndAt");
+                if (interviewer == Guid.Empty || location == Guid.Empty)
+                    throw new OperationError("INVALID_SCHEDULE_REFERENCE");
+                if (start.Kind != DateTimeKind.Utc || end.Kind != DateTimeKind.Utc || end <= start)
+                    throw new OperationError("INVALID_SCHEDULE_TIME");
+            }
             Values = values;
             // Length prefixes distinguish omitted, null, empty, delimiters and different typed values.
             var canonical = new StringBuilder("os_sr_cact:1");
@@ -202,6 +230,14 @@ namespace os_sr_cact
         public string RowVersion { get; set; } = "";
     }
 
+    public sealed class InterviewScheduleState
+    {
+        public Guid Id { get; set; }
+        public int? Status { get; set; }
+        public int? Result { get; set; }
+        public string RowVersion { get; set; } = "";
+    }
+
     public sealed class ActionResult
     {
         public bool Replay { get; set; }
@@ -230,27 +266,66 @@ namespace os_sr_cact
         void UpdateCandidate(ActionRequest request, CandidateState candidate, int status);
         Guid CreateCall(ActionRequest request, Guid candidateId);
         Guid CreateHistory(ActionRequest request, Guid candidateId, int previous, int current);
+        InterviewScheduleState? GetCurrentRound1Schedule(Guid candidateId);
+        void RecordRound1Result(ActionRequest request, InterviewScheduleState schedule, int result);
         void CreateReceipt(ActionRequest request, ActionResult result);
     }
 
     public static class CandidateOperation
     {
-        public static int Transition(string action, int current, int? outcome, bool futureEvidence = false)
+        private static readonly IReadOnlyDictionary<string, IReadOnlyCollection<string>> AllowedMutations =
+            new ReadOnlyDictionary<string, IReadOnlyCollection<string>>(
+                new Dictionary<string, IReadOnlyCollection<string>>(StringComparer.Ordinal)
+                {
+                    ["CreateCandidate"] = Array.AsReadOnly(new[] { "CANDIDATE_CREATE", "RECEIPT_CREATE" }),
+                    ["UpdateCandidate"] = Array.AsReadOnly(new[] { "CANDIDATE_UPDATE", "RECEIPT_CREATE" }),
+                    ["RecordCall"] = Array.AsReadOnly(new[] { "CANDIDATE_UPDATE", "CALL_LOG_CREATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE" }),
+                    ["ProceedToScheduling"] = Array.AsReadOnly(new[] { "CANDIDATE_UPDATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE" }),
+                    ["MarkRound1Scheduled"] = Array.AsReadOnly(Array.Empty<string>()),
+                    ["RecordPass"] = Array.AsReadOnly(new[] { "CANDIDATE_UPDATE", "INTERVIEW_SCHEDULE_UPDATE",
+                        "STATUS_HISTORY_CREATE", "RECEIPT_CREATE" }),
+                    ["RecordFail"] = Array.AsReadOnly(new[] { "CANDIDATE_UPDATE", "INTERVIEW_SCHEDULE_UPDATE",
+                        "STATUS_HISTORY_CREATE", "RECEIPT_CREATE" }),
+                    ["RequestReschedule"] = Array.AsReadOnly(Array.Empty<string>()),
+                    ["CancelRound1"] = Array.AsReadOnly(Array.Empty<string>())
+                });
+
+        public static IReadOnlyDictionary<string, IReadOnlyCollection<string>> MutationMatrix => AllowedMutations;
+
+        public static bool AllowsMutation(string action, string mutation) =>
+            AllowedMutations.TryGetValue(action, out var mutations) && mutations.Contains(mutation, StringComparer.Ordinal);
+
+        public static void EnsureExternalEvidenceAvailable(string action)
+        {
+            if (action == "MarkRound1Scheduled")
+                throw new OperationError("SCHEDULER_DEPENDENCY_UNAVAILABLE");
+            if (action == "RequestReschedule" || action == "CancelRound1")
+                throw new OperationError("RESULT_OR_CANCELLATION_DEPENDENCY_UNAVAILABLE");
+        }
+
+        public static int Transition(string action, int current, int? outcome)
         {
             if (action == "RecordCall" && current == ActionRequest.NeedCall &&
                 outcome >= ActionRequest.NeedCall && outcome <= ActionRequest.Waiting)
                 return outcome == ActionRequest.NeedCall ? ActionRequest.Answered : current;
             if (action == "ProceedToScheduling" && current == ActionRequest.Answered) return ActionRequest.Waiting;
             if (action == "MarkRound1Scheduled" && current == ActionRequest.Waiting)
+                throw new OperationError("SCHEDULER_DEPENDENCY_UNAVAILABLE");
+            if ((action == "RecordPass" || action == "RecordFail" || action == "RequestReschedule" ||
+                action == "CancelRound1") && current == ActionRequest.Scheduled)
             {
-                if (!futureEvidence) throw new OperationError("SCHEDULER_DEPENDENCY_UNAVAILABLE");
-                return ActionRequest.Scheduled;
+                if (action == "RecordPass" || action == "RecordFail")
+                    throw new OperationError("RESULT_EVIDENCE_REQUIRED");
+                throw new OperationError("RESULT_OR_CANCELLATION_DEPENDENCY_UNAVAILABLE");
             }
-            if ((action == "RecordPass" || action == "RecordFail" || action == "RequestReschedule") && current == ActionRequest.Scheduled)
-            {
-                if (!futureEvidence) throw new OperationError("RESULT_OR_CANCELLATION_DEPENDENCY_UNAVAILABLE");
-                return action == "RecordPass" ? ActionRequest.Passed : action == "RecordFail" ? ActionRequest.Failed : ActionRequest.NeedCall;
-            }
+            throw new OperationError("INVALID_TRANSITION");
+        }
+
+        private static int ResultTransition(string action, int current)
+        {
+            if (current != ActionRequest.Scheduled) throw new OperationError("INVALID_TRANSITION");
+            if (action == "RecordPass") return ActionRequest.Passed;
+            if (action == "RecordFail") return ActionRequest.Failed;
             throw new OperationError("INVALID_TRANSITION");
         }
 
@@ -289,7 +364,26 @@ namespace os_sr_cact
                 else
                 {
                     int? outcome = request.Values.TryGetValue("CallOutcome", out var raw) ? (int?)raw : null;
-                    result.Current = Transition(request.Action, candidate.Status, outcome);
+                    if (request.Action == "MarkRound1Scheduled")
+                    {
+                        result.Current = Transition(request.Action, candidate.Status, outcome);
+                    }
+                    else if (request.Action == "RecordPass" || request.Action == "RecordFail")
+                    {
+                        result.Current = ResultTransition(request.Action, candidate.Status);
+                        var schedule = store.GetCurrentRound1Schedule(candidate.Id) ??
+                            throw new OperationError("ACTIVE_SCHEDULE_REQUIRED");
+                        if (schedule.Result.HasValue && schedule.Result.Value != ActionRequest.ResultPending)
+                            throw new OperationError("SCHEDULE_RESULT_ALREADY_RECORDED");
+                        store.RecordRound1Result(request, schedule,
+                            request.Action == "RecordPass" ? ActionRequest.ResultPass : ActionRequest.ResultFail);
+                    }
+                    else if (request.Action == "RequestReschedule" || request.Action == "CancelRound1")
+                    {
+                        result.Current = Transition(request.Action, candidate.Status, outcome);
+                    }
+                    else
+                        result.Current = Transition(request.Action, candidate.Status, outcome);
                     if (result.Current != candidate.Status) store.UpdateCandidate(request, candidate, result.Current);
                     if (request.Action == "RecordCall") result.CallId = store.CreateCall(request, candidate.Id);
                     if (result.Current != candidate.Status)

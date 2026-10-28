@@ -37,14 +37,14 @@
   },
   "semantics": {
     "identity": "API-wide lowercase D-format nonempty CorrelationId, unique across actors/actions/Candidates",
-    "actor": "createdby and ownerid must equal authenticated initiating caller; no configured execution-user elevation",
+    "actor": "Local Phase 5A source sets ownerid to the authenticated initiating caller; createdby reflects the SYSTEM organization service and is not the business actor. This source change is not deployed or live-verified.",
     "fingerprint": "SHA-256 of versioned length-delimited canonical validated inputs including initiating caller and CorrelationId; no raw request retained",
     "privacy": "Fingerprints are sensitive evidence, not anonymization. Random correlation identity is included; receipt row access remains least-privileged. No additional secret or key-management dependency is introduced.",
     "result": "Successful transaction retains derived original previous/current status and optional effect IDs; Applied is implicit. Replay returns DuplicateReplay plus those persisted values.",
     "retention": "No deletion or expiration authorized; no shorter replay lifetime introduced.",
-    "mutability": "Append only through validated synchronous operation; direct CRUD blocked by server guards.",
+    "mutability": "Append only through the validated synchronous operation. The local Phase 5A source uses SYSTEM writes behind an exact operation mutation matrix; production direct-write denial is intended to come from Dataverse role privileges. ProtectCandidateCore source is retained but superseded as the production security boundary; deployed privilege and registration state are not changed by this source update.",
     "navigation": "Not added to srapp or end-user navigation.",
-    "access": "No role/user/team grants. Effective execution remains dependent on a separately approved caller role with receipt Read/Create/Append and Candidate AppendTo as needed.",
+    "access": "No role/user/team grants. The local handler reads and writes receipts through SYSTEM, so no user-facing Receipt privilege is required by that source path. The current Custom API execute privilege prvWriteos_sr_cand conflicts with the BSO no-direct-Candidate-Write target and remains unresolved; no replacement privilege is assumed.",
     "candidateCreateReplay": "Candidate reference is filled after Candidate creation in the same transaction, with creation payload fingerprint preserved despite later profile edits."
   },
   "maximumSchemaWrites": {

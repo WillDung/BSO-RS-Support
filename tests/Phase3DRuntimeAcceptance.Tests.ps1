@@ -51,16 +51,16 @@ Assert-Test ($createRequest.Success -and
 Assert-Test ($sdkProject -match 'CandidateCorePackage\\CandidateCore\.Package\.csproj' -and
     $sdkProject -notmatch 'solutions\\CandidateCore\\CandidateCore\.csproj') `
     'SDK adapter harness references the unsigned package source, not the legacy signed project'
-Assert-Test ($sdkTests -match 'normalizes .* absent-equivalent to no lookup' -and
-    $sdkTests -match 'preserves valid .* reference' -and
-    $sdkTests -match 'rejected before any create' -and
+Assert-Test ($sdkTests.Contains('"SDK CreateCandidate normalizes " + parameter + " absent-equivalent to no lookup"') -and
+    $sdkTests.Contains('"SDK CreateCandidate preserves valid " + parameter + " reference"') -and
+    $sdkTests.Contains('"SDK invalid " + parameter + " rejected before any create"') -and
     $sdkTests -match 'accepts null CandidateId' -and
     $sdkTests -match 'accepts empty CandidateId' -and
     $sdkTests -match 'does not parse its non-applicable CandidateId input' -and
     $sdkTests -match 'minimalCreate\.Input\.Count == 5 && saturatedCreate\.Input\.Count == 13' -and
     $sdkTests -match 'saturated CreateCandidate fingerprint equals its minimal applicable-input fingerprint' -and
     $sdkTests -match 'UpdateCandidate accepts matching ExpectedStatus' -and
-    $sdkTests -match 'UpdateCandidate rejects stale ExpectedStatus') `
+    $sdkTests -match 'validates stale ExpectedStatus before any SYSTEM write') `
     'SDK adapter tests cover operation projection, saturated CreateCandidate inputs, optional GUIDs, and existing-record validation'
 Assert-Test ($runtime -match 'Get-Count -EntitySet' -and
     $runtime -match 'Zero-row safety gate failed' -and

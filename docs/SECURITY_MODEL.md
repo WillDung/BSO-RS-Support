@@ -1,5 +1,19 @@
 # Security Model
 
+## Phase 5A local Candidate Core service boundary (28 October 2026)
+
+**Scope and status:** local plug-in source and offline tests only; no package deployment, API metadata update, role edit, app publication, or live security acceptance was performed. The current repository state does not establish that the local handler is deployed.
+
+The local `ApplyCandidateAction` handler validates its Custom API execution context and request before creating the SYSTEM organization service with `CreateOrganizationService(null)`. Candidate, schedule, and reference reads use the initiating caller service; Position, Candidate Source, TA, and Location references are checked for caller visibility before the SYSTEM service is created. SYSTEM is limited to Receipt reads and fixed protected-table writes exposed through the typed operation store. `CandidateOperation.MutationMatrix` is the canonical local ActionType-to-mutation allowlist; caller-supplied table names are not accepted. Pass/Fail updates require exactly one caller-readable active Round 1 schedule with no prior result, and their schedule result, Candidate transition, History, and Receipt mutations use the synchronous operation transaction.
+
+`MarkRound1Scheduled` remains fail-closed because trusted TA/room availability evidence is not implemented. `RequestReschedule` and `CancelRound1` remain fail-closed because trusted calendar-event cancellation evidence is not implemented. They have no allowed mutations in the matrix. The Phase 4E DEV direct-write behavior does not override the approved production fail-closed rules.
+
+The approved Phase 5A target is to supersede `ProtectCandidateCore` as the production security boundary and rely on Dataverse privileges to deny direct protected-table Create/Write. The guard source is retained; the 50 registrations are documented as inactive and were not changed or re-read during this local implementation. Do not reactivate them. The adapter no longer maps guard-specific diagnostics into its production authorization path; Dataverse service failures are sanitized as ordinary operation rejections.
+
+**Open security dependency:** the existing `os_sr_cact` contract specifies `prvWriteos_sr_cand` as `ExecutePrivilegeName`. That privilege conflicts with the requirement that the BSO role have no direct Candidate Write. This local change does not change or replace the privilege. Until a supported API execution privilege is verified that does not grant Candidate Write, the production BSO role cannot be finalized safely.
+
+The role remains unassigned. No role privileges were changed, and the Production environment documented in [Product Decisions](PRODUCT_DECISIONS.md) was not queried or modified. A non-production target and effective-access acceptance remain prerequisites. Real candidate data remains prohibited.
+
 ## Phase 4A BSO role baseline (27 October 2026)
 
 The DEV environment contains the unassigned `BSO-RS Support - BSO` security role in the root Business Unit. Its solution membership in the unmanaged `os_sr_bso_rs_support` solution was verified by a read-only `solutioncomponent` check (component type Role). The 17 requested business privileges were saved and verified after reloading the role editor:

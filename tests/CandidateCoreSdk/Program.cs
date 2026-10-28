@@ -16,6 +16,7 @@ internal static class Program
     private static readonly Guid Actor = Guid.Parse("00000000-0000-0000-0000-000000000001");
     private static readonly Guid Candidate = Guid.Parse("00000000-0000-0000-0000-000000000002");
     private static readonly Guid Organization = Guid.Parse("00000000-0000-0000-0000-000000000003");
+    private static readonly Guid SystemActor = Guid.NewGuid();
     private static readonly Dictionary<Guid, Entity> Registrations = new Dictionary<Guid, Entity>();
     private static int registrationReads;
     private static EntityReference RegisterImplementation()
@@ -205,6 +206,8 @@ internal static class Program
             devWorkflow.CreatedHistory.GetAttributeValue<OptionSetValue>("os_sr_csh_newstat")?.Value == 100010001 &&
             devWorkflow.CreatedHistory.GetAttributeValue<string>("os_sr_csh_cact") == "RecordCall",
             "DEV Answered history captures the status transition");
+        Check(!devWorkflow.ServiceFactorySelections.Contains(null),
+            "DEV-only direct-write slice cannot obtain the Candidate Core SYSTEM service");
 
         var devCreateFault = new Host(-1, createCandidate: true);
         ConfigureDevHost(devCreateFault);
@@ -223,9 +226,12 @@ internal static class Program
             ["RecordCall"] = new[] { "CANDIDATE_UPDATE", "CALL_LOG_CREATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE" },
             ["ProceedToScheduling"] = new[] { "CANDIDATE_UPDATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE" },
             ["MarkRound1Scheduled"] = Array.Empty<string>(),
-            ["RecordPass"] = Array.Empty<string>(),
-            ["RecordFail"] = Array.Empty<string>(),
-            ["RequestReschedule"] = Array.Empty<string>()
+            ["RecordPass"] = new[] { "CANDIDATE_UPDATE", "INTERVIEW_SCHEDULE_UPDATE",
+                "STATUS_HISTORY_CREATE", "RECEIPT_CREATE" },
+            ["RecordFail"] = new[] { "CANDIDATE_UPDATE", "INTERVIEW_SCHEDULE_UPDATE",
+                "STATUS_HISTORY_CREATE", "RECEIPT_CREATE" },
+            ["RequestReschedule"] = Array.Empty<string>(),
+            ["CancelRound1"] = Array.Empty<string>()
         };
         var protectedWrites = new[]
         {
@@ -237,39 +243,50 @@ internal static class Program
         };
         foreach (var pair in actionWriteMatrix)
         {
-            foreach (var write in protectedWrites)
+            Check(CandidateOperation.MutationMatrix.TryGetValue(pair.Key, out var mutations) &&
+                mutations.OrderBy(value => value, StringComparer.Ordinal).SequenceEqual(
+                    pair.Value.OrderBy(value => value, StringComparer.Ordinal)),
+                "Canonical engine mutation matrix: " + pair.Key);
+            if (new[] { "CreateCandidate", "UpdateCandidate", "RecordCall", "ProceedToScheduling" }
+                .Contains(pair.Key, StringComparer.Ordinal))
             {
-                var target = new Entity(write.Table, Guid.NewGuid());
-                var parent = CreateTrustedParent(pair.Key, write.Message, target, 1, includeMarker: false);
-                if (pair.Value.Contains(write.Code))
+                foreach (var write in protectedWrites)
                 {
-                    ExecuteGuard(write.Message, target, parent);
-                    Check(true, "Canonical action/write allow: " + pair.Key + ":" + write.Code);
+                    var target = new Entity(write.Table, Guid.NewGuid());
+                    var parent = CreateTrustedParent(pair.Key, write.Message, target, 1, includeMarker: false);
+                    if (pair.Value.Contains(write.Code))
+                    {
+                        ExecuteGuard(write.Message, target, parent);
+                        Check(true, "Historical guard action/write allow: " + pair.Key + ":" + write.Code);
+                    }
+                    else RejectDirectGuard(write.Message, target, parent,
+                        "DIRECT_WRITE_GUARD_REJECTED:" + write.Code + ":TRUSTED_PARENT:ACTIONTYPE_MISMATCH");
+                    RejectDirectGuard(write.Message, target, null,
+                        "DIRECT_WRITE_GUARD_REJECTED:" + write.Code + ":PARENT_CONTEXT");
                 }
-                else RejectDirectGuard(write.Message, target, parent,
-                    "DIRECT_WRITE_GUARD_REJECTED:" + write.Code + ":TRUSTED_PARENT:ACTIONTYPE_MISMATCH");
-                RejectDirectGuard(write.Message, target, null,
-                    "DIRECT_WRITE_GUARD_REJECTED:" + write.Code + ":PARENT_CONTEXT");
+                foreach (var unsupported in new[] { ("Delete", "os_sr_cand"),
+                    ("Upsert", "os_sr_oprc"), ("Update", "os_sr_call"), ("Update", "os_sr_csh") })
+                {
+                    var target = new Entity(unsupported.Item2, Guid.NewGuid());
+                    RejectDirectGuard(unsupported.Item1, target,
+                        CreateTrustedParent(pair.Key, unsupported.Item1, target, 1),
+                        "DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_PROTECTED_WRITE");
+                }
+                var receiptUpdateTarget = new Entity("os_sr_oprc", Guid.NewGuid());
+                RejectDirectGuard("Update", receiptUpdateTarget,
+                    CreateTrustedParent(pair.Key, "Update", receiptUpdateTarget, 1),
+                    "DIRECT_WRITE_GUARD_REJECTED:RECEIPT_UPDATE:TRUSTED_PARENT:ACTIONTYPE_MISMATCH");
             }
-            foreach (var unsupported in new[] { ("Delete", "os_sr_cand"),
-                ("Upsert", "os_sr_oprc"), ("Update", "os_sr_call"), ("Update", "os_sr_csh") })
-            {
-                var target = new Entity(unsupported.Item2, Guid.NewGuid());
-                RejectDirectGuard(unsupported.Item1, target,
-                    CreateTrustedParent(pair.Key, unsupported.Item1, target, 1),
-                    "DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_PROTECTED_WRITE");
-            }
-            var receiptUpdateTarget = new Entity("os_sr_oprc", Guid.NewGuid());
-            RejectDirectGuard("Update", receiptUpdateTarget,
-                CreateTrustedParent(pair.Key, "Update", receiptUpdateTarget, 1),
-                "DIRECT_WRITE_GUARD_REJECTED:RECEIPT_UPDATE:TRUSTED_PARENT:ACTIONTYPE_MISMATCH");
         }
+        Check(!(CandidateOperation.MutationMatrix is Dictionary<string, IReadOnlyCollection<string>>) &&
+            ((IList<string>)CandidateOperation.MutationMatrix["CreateCandidate"]).IsReadOnly,
+            "The canonical write matrix cannot be changed by callers");
         var unsupportedFault = CreateCandidateHost();
         unsupportedFault.FaultOnCreateTable = "os_sr_cand";
         unsupportedFault.FaultErrorCode = unchecked((int)0x80040265);
         unsupportedFault.FaultMessage = "DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_PROTECTED_WRITE";
         Reject(() => new ApplyCandidateAction().Execute(unsupportedFault),
-            "DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_PROTECTED_WRITE:CC_CREATE_CANDIDATE:0x80040265");
+            "DATAVERSE_OPERATION_REJECTED:CC_CREATE_CANDIDATE:0x80040265");
         var unknownWriteTarget = new Entity("os_sr_oprc", Guid.NewGuid());
         var unknownActionParent = CreateGuardParent("os_sr_cact",
             new ParameterCollection { ["ActionType"] = "SENSITIVE_SENTINEL " + Actor.ToString("D") },
@@ -293,21 +310,20 @@ internal static class Program
             createWithoutOptionalGuids.TraceMessages.Where(message => message.StartsWith("CC_STAGE:", StringComparison.Ordinal))
                 .SequenceEqual(new[] { "CC_STAGE:CC_READ_RECEIPT", "CC_STAGE:CC_CREATE_CANDIDATE", "CC_STAGE:CC_CREATE_RECEIPT" }),
             "SDK CreateCandidate service-operation sequence and stage markers are exact");
-        Check(createWithoutOptionalGuids.TraceMessages.Contains("CC_GUARD_ALLOWED:CANDIDATE_CREATE") &&
-            createWithoutOptionalGuids.TraceMessages.Contains("CC_GUARD_ALLOWED:RECEIPT_CREATE"),
-            "Approved package-backed Custom API parent context satisfies Candidate and Receipt guard rules");
+        Check(createWithoutOptionalGuids.ServiceFactorySelections.Contains(Actor) &&
+            createWithoutOptionalGuids.ServiceFactorySelections.Contains(null) &&
+            createWithoutOptionalGuids.TraceMessages.All(message => !message.StartsWith("CC_GUARD_", StringComparison.Ordinal)),
+            "Candidate Core writes use SYSTEM without requiring ProtectCandidateCore interception");
         Check(!createWithoutOptionalGuids.Shared.Contains(GetGuardIntentKey()) &&
             createWithoutOptionalGuids.Receipt!.Attributes.Keys.All(name => name != GetGuardIntentKey()) &&
             createWithoutOptionalGuids.Output.Keys.All(name => name != GetGuardIntentKey()) &&
             createWithoutOptionalGuids.MarkersAtProtectedWrites.Count == 0,
             "MVP operation does not create, persist, return, trace, or require the superseded marker");
-        Check(createWithoutOptionalGuids.TraceMessages.Contains("CC_GUARD_TRUSTED_PARENT_FOUND:ANCESTOR_HOPS:1"),
-            "Trusted parent trace contains only the safe ancestor-hop category");
         var packageApiParent = CreateCandidateHost();
         new ApplyCandidateAction().Execute(packageApiParent);
         Check(packageApiParent.CreatedCandidates == 1 && packageApiParent.Receipt != null &&
-            packageApiParent.TraceMessages.Contains("CC_GUARD_ALLOWED:CANDIDATE_CREATE"),
-            "Package-backed ApplyCandidateAction server registration is accepted");
+            packageApiParent.ServiceFactorySelections.Contains(null),
+            "Candidate Core handler obtains its SYSTEM service after validating API context");
         var metadataIndependentApi = CreateCandidateHost();
         metadataIndependentApi.MainValues["OwningExtension"] = null;
         new ApplyCandidateAction().Execute(metadataIndependentApi);
@@ -342,11 +358,11 @@ internal static class Program
         legacyGuardFault.FaultErrorCode = unchecked((int)0x80040265);
         legacyGuardFault.FaultMessage = "DIRECT_CANDIDATE_CORE_WRITE_BLOCKED";
         var legacyGuardMessage = Reject(() => new ApplyCandidateAction().Execute(legacyGuardFault),
-            "DIRECT_WRITE_GUARD_REJECTED:LEGACY_GENERIC_GUARD:CC_CREATE_CANDIDATE:0x80040265");
+            "DATAVERSE_OPERATION_REJECTED:CC_CREATE_CANDIDATE:0x80040265");
         Check(legacyGuardFault.ServiceOperations.SequenceEqual(new[]
             { "RetrieveMultiple:os_sr_oprc", "Create:os_sr_cand" }) &&
             !legacyGuardMessage.Contains("DIRECT_CANDIDATE_CORE_WRITE_BLOCKED"),
-            "Unrecognized legacy guard fault is sanitized without exposing its raw message");
+            "Dataverse privilege faults use sanitized platform rejection without guard-specific authorization");
         var tamperedCreate = CreateCandidateHost();
         tamperedCreate.TamperTarget = true;
         tamperedCreate.MainValues["MessageName"] = "unrelated_operation";
@@ -369,6 +385,51 @@ internal static class Program
             { "RetrieveMultiple:os_sr_oprc", "Create:os_sr_cand" }) &&
             !unknownFailureMessage.Contains("SENSITIVE_SENTINEL"),
             "Unknown service exception is categorized, sanitized, and terminates immediately");
+        Check(!CandidateOperation.AllowsMutation("MarkRound1Scheduled", "INTERVIEW_SCHEDULE_CREATE") &&
+            CandidateOperation.AllowsMutation("RecordPass", "INTERVIEW_SCHEDULE_UPDATE") &&
+            CandidateOperation.AllowsMutation("RecordFail", "CANDIDATE_UPDATE") &&
+            !CandidateOperation.AllowsMutation("RequestReschedule", "INTERVIEW_SCHEDULE_CREATE") &&
+            !CandidateOperation.AllowsMutation("CancelRound1", "INTERVIEW_SCHEDULE_UPDATE") &&
+            !CandidateOperation.AllowsMutation("MarkRound1Scheduled", "UNLISTED_TABLE_WRITE") &&
+            !CandidateOperation.AllowsMutation("RequestReschedule", "*"),
+            "Scheduling actions allow only the canonical fixed mutation matrix");
+        var invalidAction = CreateCandidateHost();
+        invalidAction.Input["ActionType"] = "UnsupportedOperation";
+        Reject(() => new ApplyCandidateAction().Execute(invalidAction), "INVALID_ACTION");
+        Check(!invalidAction.ServiceFactorySelections.Contains(null) && invalidAction.ServiceOperations.Count == 0,
+            "Unsupported ActionType is rejected before SYSTEM service creation or protected access");
+        foreach (var blockedAction in new[] { "MarkRound1Scheduled", "RequestReschedule", "CancelRound1" })
+        {
+            var blocked = new Host(100010000);
+            blocked.Input["ActionType"] = blockedAction;
+            blocked.Input["ExpectedStatus"] = blockedAction == "MarkRound1Scheduled" ?
+                ActionRequest.Waiting : ActionRequest.Scheduled;
+            if (blockedAction != "CancelRound1")
+            {
+                blocked.Input["InterviewerId"] = Guid.NewGuid();
+                blocked.Input["LocationId"] = Guid.NewGuid();
+                blocked.Input["StartAt"] = DateTime.UtcNow.AddDays(1);
+                blocked.Input["EndAt"] = DateTime.UtcNow.AddDays(1).AddHours(1);
+            }
+            if (blockedAction == "RequestReschedule" || blockedAction == "CancelRound1")
+                blocked.Input["Reason"] = "Synthetic reason";
+            blocked.MainValues = Context(blocked.Input, blocked.Shared, blocked.Output);
+            blocked.MainContext = Execution(blocked.MainValues);
+            Reject(() => new ApplyCandidateAction().Execute(blocked),
+                blockedAction == "MarkRound1Scheduled" ? "SCHEDULER_DEPENDENCY_UNAVAILABLE" :
+                    "RESULT_OR_CANCELLATION_DEPENDENCY_UNAVAILABLE");
+            Check(!blocked.ServiceFactorySelections.Contains(null) && blocked.ServiceOperations.Count == 0,
+                blockedAction + " fails before SYSTEM service creation or business reads");
+        }
+        var inaccessibleReference = CreateCandidateHost();
+        inaccessibleReference.Input["PositionId"] = Guid.NewGuid();
+        inaccessibleReference.ReferenceReadFailureTable = "os_sr_pos";
+        var referenceFailure = Reject(() => new ApplyCandidateAction().Execute(inaccessibleReference),
+            "REFERENCE_NOT_AVAILABLE:PositionId");
+        Check(!inaccessibleReference.ServiceFactorySelections.Contains(null) &&
+            !inaccessibleReference.ServiceOperations.Any(operation => operation.StartsWith("Create:", StringComparison.Ordinal)) &&
+            !referenceFailure.Contains("SENSITIVE_SENTINEL"),
+            "Caller-inaccessible reference is rejected before SYSTEM service creation or business writes");
         var minimalCreate = CreateCandidateHost();
         minimalCreate.Input.Remove("ExpectedStatus");
         minimalCreate.Input["CandidatePhone"] = "5550100";
@@ -468,8 +529,45 @@ internal static class Program
             Check(host.Receipt != null && host.Receipt.Attributes.Keys.All(name => !name.Contains("email") && !name.Contains("notes")), "SDK receipt minimization");
             new ApplyCandidateAction().Execute(host);
             Check((string)host.Output["ResultCode"] == "DuplicateReplay" && host.Calls == 1, "SDK persisted replay");
-            Check(host.CallerFactorySelections.All(id => id == Actor), "SDK no service elevation");
+            Check(host.ServiceFactorySelections.Contains(Actor) &&
+                host.ServiceFactorySelections.Contains(null) &&
+                host.ServiceFactorySelections.All(id => id == Actor || id == null),
+                "SDK uses caller reads and the contained SYSTEM service");
             Check(host.CandidateRequests.All(request => request.ConcurrencyBehavior == ConcurrencyBehavior.IfRowVersionMatches), "SDK conditional updates");
+        }
+        foreach (var resultAction in new[] { ("RecordPass", ActionRequest.ResultPass, ActionRequest.Passed),
+            ("RecordFail", ActionRequest.ResultFail, ActionRequest.Failed) })
+        {
+            var resultHost = new Host(100010000) { Status = ActionRequest.Scheduled };
+            resultHost.Input["ActionType"] = resultAction.Item1;
+            resultHost.Input["ExpectedStatus"] = ActionRequest.Scheduled;
+            resultHost.Input["ResultNotes"] = "Synthetic result evidence";
+            resultHost.Round1Schedule = new Entity("os_sr_intv", Guid.NewGuid())
+            {
+            RowVersion = "17",
+            ["os_sr_intv_stat"] = new OptionSetValue(ActionRequest.ScheduleActive),
+            ["os_sr_intv_res"] = new OptionSetValue(ActionRequest.ResultPending)
+            };
+            resultHost.MainValues = Context(resultHost.Input, resultHost.Shared, resultHost.Output);
+            resultHost.MainContext = Execution(resultHost.MainValues);
+            new ApplyCandidateAction().Execute(resultHost);
+            Check(resultHost.Round1Schedule.GetAttributeValue<OptionSetValue>("os_sr_intv_res")?.Value == resultAction.Item2 &&
+            resultHost.Round1Schedule.GetAttributeValue<string>("os_sr_intv_rnts") == "Synthetic result evidence" &&
+            resultHost.ScheduleUpdates == 1 && resultHost.Status == resultAction.Item3,
+            "SDK " + resultAction.Item1 + " persists result and terminal Candidate status");
+            Check(resultHost.ScheduleRequests.Single().Target.RowVersion == "17" &&
+            resultHost.ScheduleRequests.Single().ConcurrencyBehavior == ConcurrencyBehavior.IfRowVersionMatches &&
+            resultHost.ScheduleRequests.Single().Target.GetAttributeValue<OptionSetValue>("os_sr_intv_res")?.Value == resultAction.Item2,
+            "SDK " + resultAction.Item1 + " uses conditional SYSTEM update on the fixed Interview Schedule row");
+            Check(resultHost.ServiceOperations.SequenceEqual(new[]
+            { "RetrieveMultiple:os_sr_oprc", "Retrieve:os_sr_cand", "RetrieveMultiple:os_sr_intv",
+                "Execute:Update:os_sr_intv", "Execute:Update:os_sr_cand", "Create:os_sr_csh", "Create:os_sr_oprc" }) &&
+            resultHost.ServiceFactorySelections.Contains(Actor) && resultHost.ServiceFactorySelections.Contains(null),
+            "SDK " + resultAction.Item1 + " keeps schedule reads caller-context and all business writes SYSTEM-context in order");
+            new ApplyCandidateAction().Execute(resultHost);
+            Check((string)resultHost.Output["ResultCode"] == "DuplicateReplay" &&
+            resultHost.ScheduleUpdates == 1 && resultHost.Histories == 1,
+            "SDK " + resultAction.Item1 + " replay creates no duplicate result or history");
         }
         var auditPending = new Host(100010000) { OrganizationAuditEnabled = false };
         new ApplyCandidateAction().Execute(auditPending);
@@ -492,8 +590,10 @@ internal static class Program
         staleUpdate.Input.Remove("CallOutcome");
         staleUpdate.Input.Remove("ContactedAt");
         Reject(() => new ApplyCandidateAction().Execute(staleUpdate), "STALE_EXPECTED_STATUS");
-        Check(staleUpdate.Updates == 0 && staleUpdate.Receipt == null,
-            "SDK UpdateCandidate rejects stale ExpectedStatus without mutation");
+        Check(staleUpdate.Updates == 0 && staleUpdate.Receipt == null &&
+            !staleUpdate.ServiceOperations.Any(operation => operation.StartsWith("Create:", StringComparison.Ordinal) ||
+                operation.StartsWith("Execute:", StringComparison.Ordinal)),
+            "SDK UpdateCandidate validates stale ExpectedStatus before any SYSTEM write");
         foreach (string property in new[] { "IsInTransaction", "Depth", "UserId" })
         {
             var host = new Host(100010000);
@@ -558,7 +658,7 @@ internal static class Program
             host.FaultErrorCode = unchecked((int)0x80040265);
             host.FaultMessage = "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:TRUSTED_PARENT:" + predicate;
             Reject(() => new ApplyCandidateAction().Execute(host),
-                host.FaultMessage + ":CC_CREATE_CANDIDATE:0x80040265");
+                "DATAVERSE_OPERATION_REJECTED:CC_CREATE_CANDIDATE:0x80040265");
         }
         foreach (var mutation in new (string Property, object Value, string Predicate)[]
         {
@@ -777,15 +877,18 @@ internal static class Program
         public Dictionary<string, object?> MainValues;
         public IPluginExecutionContext MainContext;
         public Entity? Receipt, CreatedCandidate, CreatedCall, CreatedHistory;
-        public int Calls, Histories, Updates, CreatedCandidates, OrganizationReads, Status = 100010000;
+        public int Calls, Histories, Updates, ScheduleUpdates, CreatedCandidates, OrganizationReads, Status = 100010000;
         public bool OrganizationAuditEnabled = true, TamperTarget;
-        public List<Guid?> CallerFactorySelections = new List<Guid?>();
+        public List<Guid?> ServiceFactorySelections = new List<Guid?>();
         public List<UpdateRequest> CandidateRequests = new List<UpdateRequest>();
+        public List<UpdateRequest> ScheduleRequests = new List<UpdateRequest>();
         public List<string> ServiceOperations = new List<string>();
         public List<string> TraceMessages = new List<string>();
         public List<string> MarkersAtProtectedWrites = new List<string>();
+        public Entity? Round1Schedule;
         public string? FaultOnCreateTable;
         public string? UnknownFailureOnCreateTable;
+        public string? ReferenceReadFailureTable;
         public string FaultMessage = "Synthetic service failure.";
         public int FaultErrorCode = unchecked((int)0x80040220);
         public Host(int outcome, bool createCandidate = false)
@@ -814,8 +917,9 @@ internal static class Program
             if (serviceType == typeof(IOrganizationServiceFactory))
                 return Proxy<IOrganizationServiceFactory>(call =>
                 {
-                    CallerFactorySelections.Add((Guid?)call.Args[0]);
-                    return Proxy<IOrganizationService>(InvokeService);
+                    var serviceUser = (Guid?)call.Args[0];
+                    ServiceFactorySelections.Add(serviceUser);
+                    return Proxy<IOrganizationService>(request => InvokeService(serviceUser, request));
                 });
             throw new Exception("Unexpected service " + serviceType.Name);
         }
@@ -828,11 +932,15 @@ internal static class Program
             child["OwningExtension"] = RegisterGuard(message, target.LogicalName);
             new ProtectCandidateCore().Execute(new ContextProvider(Execution(child), CreateTracingService()));
         }
-        private object? InvokeService(IMethodCallMessage call)
+        private object? InvokeService(Guid? serviceUser, IMethodCallMessage call)
         {
             if (call.MethodName == "Retrieve")
             {
                 var table = (string)call.Args[0];
+                var callerReadable = table == "os_sr_cand" || table == "os_sr_pos" || table == "os_sr_csrc" ||
+                    table == "os_sr_ta" || table == "os_sr_loc";
+                if (table != "organization" && (!callerReadable || serviceUser != Actor))
+                    throw new Exception("Unexpected read identity or table");
                 ServiceOperations.Add("Retrieve:" + table);
                 if (table == "organization")
                 {
@@ -851,17 +959,45 @@ internal static class Program
                         ["os_sr_cand_stat"] = new OptionSetValue(Status)
                     };
                 }
+                if (table == "os_sr_pos" || table == "os_sr_csrc")
+                {
+                    if (serviceUser != Actor) throw new Exception("Reference read escaped caller context");
+                    if (table == ReferenceReadFailureTable)
+                        throw new FaultException<OrganizationServiceFault>(
+                            new OrganizationServiceFault { ErrorCode = unchecked((int)0x80040220), Message = "SENSITIVE_SENTINEL" },
+                            new FaultReason("Synthetic reference access failure"));
+                    return new Entity(table, (Guid)call.Args[1]);
+                }
                 throw new Exception("Unexpected Retrieve");
             }
             if (call.MethodName == "RetrieveMultiple")
             {
-                ServiceOperations.Add("RetrieveMultiple:" + ((QueryExpression)call.Args[0]).EntityName);
-                Check(((QueryExpression)call.Args[0]).EntityName == "os_sr_oprc", "SDK query receipt only");
+                var query = (QueryExpression)call.Args[0];
+                ServiceOperations.Add("RetrieveMultiple:" + query.EntityName);
+                if (query.EntityName == "os_sr_oprc")
+                    Check(serviceUser == null, "SDK SYSTEM service reads Operation Receipt");
+                else if (query.EntityName == "os_sr_intv")
+                    Check(serviceUser == Actor && query.TopCount == 2 &&
+                        query.Criteria.Conditions.Any(condition => condition.AttributeName == "os_sr_intv_cand") &&
+                        query.Criteria.Conditions.Any(condition => condition.AttributeName == "os_sr_intv_rnd"),
+                        "SDK caller reads at most two Round 1 schedules for the target Candidate");
+                else
+                    throw new Exception("Unexpected RetrieveMultiple identity or table");
+                if (query.EntityName == "os_sr_intv")
+                    return Round1Schedule == null ? new EntityCollection() :
+                        new EntityCollection(new List<Entity> { Round1Schedule });
                 return Receipt == null ? new EntityCollection() : new EntityCollection(new List<Entity> { Receipt });
             }
             if (call.MethodName == "Create")
             {
                 var row = (Entity)call.Args[0];
+                if (MainContext.MessageName == "os_sr_devcs")
+                {
+                    if (serviceUser != Actor) throw new Exception("DEV slice unexpectedly used SYSTEM");
+                }
+                else if (serviceUser != null ||
+                    !new[] { "os_sr_cand", "os_sr_call", "os_sr_csh", "os_sr_oprc" }.Contains(row.LogicalName))
+                    throw new Exception("Candidate Core create escaped its SYSTEM table boundary");
                 ServiceOperations.Add("Create:" + row.LogicalName);
                 if (Shared.TryGetValue(GetGuardIntentKey(), out var marker) && marker is string markerValue)
                     MarkersAtProtectedWrites.Add(markerValue);
@@ -869,7 +1005,6 @@ internal static class Program
                     row.Id = row.LogicalName == "os_sr_cand" ? Candidate : Guid.NewGuid();
                 row[row.LogicalName + "id"] = row.Id;
                 if (TamperTarget) row["unexpected"] = "synthetic";
-                if (MainContext.MessageName != "os_sr_devcs") Guard("Create", row, MainContext);
                 if (row.LogicalName == FaultOnCreateTable)
                     throw new FaultException<OrganizationServiceFault>(
                         new OrganizationServiceFault { ErrorCode = FaultErrorCode, Message = FaultMessage },
@@ -885,15 +1020,16 @@ internal static class Program
                     row["os_sr_cand_cnum"] = "CAND-00000001";
                     Status = row.GetAttributeValue<OptionSetValue>("os_sr_cand_stat").Value;
                 }
-                else if (row.LogicalName == "os_sr_oprc") { Receipt = row; Receipt["createdby"] = new EntityReference("systemuser", Actor); }
+                else if (row.LogicalName == "os_sr_oprc") { Receipt = row; Receipt["createdby"] = new EntityReference("systemuser", SystemActor); }
                 else throw new Exception("Unexpected Create");
                 return row.Id;
             }
             if (call.MethodName == "Update")
             {
                 var target = (Entity)call.Args[0];
+                if (MainContext.MessageName != "os_sr_devcs" || serviceUser != Actor)
+                    throw new Exception("Unexpected caller-context update");
                 ServiceOperations.Add("Update:" + target.LogicalName);
-                if (MainContext.MessageName != "os_sr_devcs") Guard("Update", target, MainContext);
                 if (target.LogicalName != "os_sr_cand") throw new Exception("Unexpected direct Update");
                 Updates++;
                 if (target.Contains("os_sr_cand_stat"))
@@ -907,11 +1043,24 @@ internal static class Program
             if (call.MethodName == "Execute")
             {
                 var request = (UpdateRequest)call.Args[0];
+                if (serviceUser != null || (request.Target.LogicalName != "os_sr_cand" &&
+                    request.Target.LogicalName != "os_sr_intv"))
+                    throw new Exception("Candidate Core update escaped its SYSTEM table boundary");
                 ServiceOperations.Add("Execute:Update:" + request.Target.LogicalName);
                 if (Shared.TryGetValue(GetGuardIntentKey(), out var marker) && marker is string markerValue)
                     MarkersAtProtectedWrites.Add(markerValue);
                 if (TamperTarget) request.Target["unexpected"] = "synthetic";
-                Guard("Update", request.Target, MainContext);
+                if (request.Target.LogicalName == "os_sr_intv")
+                {
+                    if (Round1Schedule == null || request.Target.Id != Round1Schedule.Id ||
+                        request.Target.RowVersion != Round1Schedule.RowVersion ||
+                        request.ConcurrencyBehavior != ConcurrencyBehavior.IfRowVersionMatches)
+                        throw new Exception("Interview Schedule update escaped its fixed row/concurrency boundary");
+                    ScheduleRequests.Add(request); ScheduleUpdates++;
+                    foreach (var attribute in request.Target.Attributes)
+                        Round1Schedule[attribute.Key] = attribute.Value;
+                    return new UpdateResponse();
+                }
                 CandidateRequests.Add(request); Updates++;
                 if (request.Target.Contains("os_sr_cand_stat")) Status = request.Target.GetAttributeValue<OptionSetValue>("os_sr_cand_stat").Value;
                 return new UpdateResponse();

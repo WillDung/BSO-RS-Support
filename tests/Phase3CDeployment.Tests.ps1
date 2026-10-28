@@ -14,18 +14,19 @@ $ast = [System.Management.Automation.Language.Parser]::ParseFile($sourcePath, [r
 Assert-Test ($e.Count -eq 0) 'Deployment runner parses'
 Assert-Test ($contract.uniqueName -ceq 'os_sr_cact' -and -not $contract.isFunction -and $contract.bindingType -eq 0) 'Approved unbound Action'
 Assert-Test ($contract.isPrivate -and $contract.allowedCustomProcessingStepType -eq 0) 'Private discovery with no extension steps'
-Assert-Test ($contract.executePrivilegeName -ceq 'prvWriteos_sr_cand') 'Existing generated Write privilege'
+Assert-Test ($contract.executePrivilegeName -ceq 'prvReados_sr_cand') 'Least-privilege existing Candidate Read execution privilege'
 Assert-Test ($contract.inputs.Count -eq 18 -and $contract.outputs.Count -eq 5) 'Local source contract preserves five outputs and declares typed scheduling/result inputs'
-Assert-Test ($contract.localSourceStatus -match 'not updated or verified' -and
-    $contract.futureEvidenceActions.MarkRound1Scheduled -match 'FAIL_CLOSED' -and
-    $contract.futureEvidenceActions.RequestReschedule -match 'FAIL_CLOSED' -and
-    $contract.futureEvidenceActions.CancelRound1 -match 'FAIL_CLOSED') 'Local contract status and external-evidence fail-closed gates are explicit'
+Assert-Test ($contract.localSourceStatus -match 'local source' -and
+    $contract.schedulingEvidenceContract.source -match 'os_sr_intv' -and
+    $contract.schedulingEvidenceContract.MarkRound1Scheduled -match 'active TA and Location' -and
+    $contract.schedulingEvidenceContract.RequestReschedule -match 'Proposed replacement') 'Local contract status and durable schedule-evidence rules are explicit'
 Assert-Test (@($contract.inputs | Where-Object { -not $_.optional }).name -join ',' -ceq 'ActionType,CorrelationId') 'Only common mandatory parameters are metadata-required'
 Assert-Test (@($contract.inputs | Where-Object name -CEQ 'CorrelationId')[0].type -eq 12) 'External CorrelationId remains GUID'
 Assert-Test ($contract.protectedTables.Count -eq 5 -and $contract.protectedTables -contains 'os_sr_intv') 'Interview Schedule is included among fixed protected business tables'
 Assert-Test ($source -match 'MaximumRetryCount = 0' -and $source -match 'MaximumRedirection = 0') 'No transport retry or redirect'
 Assert-Test ($source -match 'FileMode\]::CreateNew' -and $source -match 'DISPATCH_RESERVED' -and $source -match 'Flush\(\$true\)') 'Durable per-dispatch consumption journal'
 Assert-Test ($source -match 'Get-RegistrationNavigation' -and $source -match 'ReferencingEntityNavigationPropertyName') 'Resolve actual case-sensitive metadata navigation'
+Assert-Test ($source -match '\$deploymentContract\.executePrivilegeName') 'Deployment reads the reviewed Custom API privilege from its contract'
 Assert-Test ($source -match 'AssemblySha256' -and $source -match 'ContractSha256' -and $source -match 'ReceiptPlanSha256' -and $source -match 'CoreManifestSha256') 'Predeployment immutable scope fingerprints'
 Assert-Test ($source -notmatch 'Invoke-DeploymentRequest -Method (DELETE|PUT)' -and
     $source -match 'Non-registration write path rejected') 'Original registration path remains create-only'

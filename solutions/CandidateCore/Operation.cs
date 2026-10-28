@@ -26,7 +26,10 @@ namespace os_sr_cact
         public const int ResultPending = 100000000;
         public const int ResultPass = 100000001;
         public const int ResultFail = 100000002;
+        public const int ScheduleProposed = 100000000;
         public const int ScheduleActive = 100000001;
+        public const int ScheduleCancelled = 100000002;
+        public const int ScheduleSuperseded = 100000003;
         public Guid Actor { get; }
         public Guid Correlation { get; }
         public Guid? CandidateId { get; }
@@ -167,7 +170,8 @@ namespace os_sr_cact
                 var end = Required<DateTime>(values, "EndAt");
                 if (interviewer == Guid.Empty || location == Guid.Empty)
                     throw new OperationError("INVALID_SCHEDULE_REFERENCE");
-                if (start.Kind != DateTimeKind.Utc || end.Kind != DateTimeKind.Utc || end <= start)
+                if (start.Kind != DateTimeKind.Utc || end.Kind != DateTimeKind.Utc ||
+                    start <= utcNow || end <= start || start.Date != end.Date)
                     throw new OperationError("INVALID_SCHEDULE_TIME");
             }
             Values = values;
@@ -233,6 +237,14 @@ namespace os_sr_cact
     public sealed class InterviewScheduleState
     {
         public Guid Id { get; set; }
+        public Guid CandidateId { get; set; }
+        public Guid InterviewerId { get; set; }
+        public Guid LocationId { get; set; }
+        public DateTime StartAt { get; set; }
+        public DateTime EndAt { get; set; }
+        public string Notes { get; set; } = "";
+        public string Reason { get; set; } = "";
+        public DateTime? ChangedAt { get; set; }
         public int? Status { get; set; }
         public int? Result { get; set; }
         public string RowVersion { get; set; } = "";
@@ -267,6 +279,10 @@ namespace os_sr_cact
         Guid CreateCall(ActionRequest request, Guid candidateId);
         Guid CreateHistory(ActionRequest request, Guid candidateId, int previous, int current);
         InterviewScheduleState? GetCurrentRound1Schedule(Guid candidateId);
+        InterviewScheduleState? GetProposedRound1Schedule(Guid candidateId);
+        InterviewScheduleState CreateRound1Schedule(ActionRequest request, Guid candidateId, int scheduleStatus);
+        InterviewScheduleState UpdateRound1Schedule(
+            ActionRequest request, InterviewScheduleState schedule, int scheduleStatus);
         void RecordRound1Result(ActionRequest request, InterviewScheduleState schedule, int result);
         void CreateReceipt(ActionRequest request, ActionResult result);
     }
@@ -281,27 +297,22 @@ namespace os_sr_cact
                     ["UpdateCandidate"] = Array.AsReadOnly(new[] { "CANDIDATE_UPDATE", "RECEIPT_CREATE" }),
                     ["RecordCall"] = Array.AsReadOnly(new[] { "CANDIDATE_UPDATE", "CALL_LOG_CREATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE" }),
                     ["ProceedToScheduling"] = Array.AsReadOnly(new[] { "CANDIDATE_UPDATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE" }),
-                    ["MarkRound1Scheduled"] = Array.AsReadOnly(Array.Empty<string>()),
+                    ["MarkRound1Scheduled"] = Array.AsReadOnly(new[] { "INTERVIEW_SCHEDULE_CREATE",
+                        "INTERVIEW_SCHEDULE_UPDATE", "CANDIDATE_UPDATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE" }),
                     ["RecordPass"] = Array.AsReadOnly(new[] { "CANDIDATE_UPDATE", "INTERVIEW_SCHEDULE_UPDATE",
                         "STATUS_HISTORY_CREATE", "RECEIPT_CREATE" }),
                     ["RecordFail"] = Array.AsReadOnly(new[] { "CANDIDATE_UPDATE", "INTERVIEW_SCHEDULE_UPDATE",
                         "STATUS_HISTORY_CREATE", "RECEIPT_CREATE" }),
-                    ["RequestReschedule"] = Array.AsReadOnly(Array.Empty<string>()),
-                    ["CancelRound1"] = Array.AsReadOnly(Array.Empty<string>())
+                    ["RequestReschedule"] = Array.AsReadOnly(new[] { "INTERVIEW_SCHEDULE_CREATE",
+                        "INTERVIEW_SCHEDULE_UPDATE", "CANDIDATE_UPDATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE" }),
+                    ["CancelRound1"] = Array.AsReadOnly(new[] { "INTERVIEW_SCHEDULE_UPDATE",
+                        "CANDIDATE_UPDATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE" })
                 });
 
         public static IReadOnlyDictionary<string, IReadOnlyCollection<string>> MutationMatrix => AllowedMutations;
 
         public static bool AllowsMutation(string action, string mutation) =>
             AllowedMutations.TryGetValue(action, out var mutations) && mutations.Contains(mutation, StringComparer.Ordinal);
-
-        public static void EnsureExternalEvidenceAvailable(string action)
-        {
-            if (action == "MarkRound1Scheduled")
-                throw new OperationError("SCHEDULER_DEPENDENCY_UNAVAILABLE");
-            if (action == "RequestReschedule" || action == "CancelRound1")
-                throw new OperationError("RESULT_OR_CANCELLATION_DEPENDENCY_UNAVAILABLE");
-        }
 
         public static int Transition(string action, int current, int? outcome)
         {
@@ -310,13 +321,13 @@ namespace os_sr_cact
                 return outcome == ActionRequest.NeedCall ? ActionRequest.Answered : current;
             if (action == "ProceedToScheduling" && current == ActionRequest.Answered) return ActionRequest.Waiting;
             if (action == "MarkRound1Scheduled" && current == ActionRequest.Waiting)
-                throw new OperationError("SCHEDULER_DEPENDENCY_UNAVAILABLE");
+                return ActionRequest.Scheduled;
             if ((action == "RecordPass" || action == "RecordFail" || action == "RequestReschedule" ||
                 action == "CancelRound1") && current == ActionRequest.Scheduled)
             {
                 if (action == "RecordPass" || action == "RecordFail")
                     throw new OperationError("RESULT_EVIDENCE_REQUIRED");
-                throw new OperationError("RESULT_OR_CANCELLATION_DEPENDENCY_UNAVAILABLE");
+                return ActionRequest.NeedCall;
             }
             throw new OperationError("INVALID_TRANSITION");
         }
@@ -367,6 +378,16 @@ namespace os_sr_cact
                     if (request.Action == "MarkRound1Scheduled")
                     {
                         result.Current = Transition(request.Action, candidate.Status, outcome);
+                        var activeSchedule = store.GetCurrentRound1Schedule(candidate.Id);
+                        var proposedSchedule = store.GetProposedRound1Schedule(candidate.Id);
+                        if (activeSchedule != null && proposedSchedule != null)
+                            throw new OperationError("SCHEDULE_STATE_AMBIGUOUS");
+                        if (activeSchedule != null)
+                            throw new OperationError("ACTIVE_SCHEDULE_CONFLICT");
+                        if (proposedSchedule == null)
+                            store.CreateRound1Schedule(request, candidate.Id, ActionRequest.ScheduleActive);
+                        else
+                            store.UpdateRound1Schedule(request, proposedSchedule, ActionRequest.ScheduleActive);
                     }
                     else if (request.Action == "RecordPass" || request.Action == "RecordFail")
                     {
@@ -381,6 +402,23 @@ namespace os_sr_cact
                     else if (request.Action == "RequestReschedule" || request.Action == "CancelRound1")
                     {
                         result.Current = Transition(request.Action, candidate.Status, outcome);
+                        var schedule = store.GetCurrentRound1Schedule(candidate.Id) ??
+                            throw new OperationError("ACTIVE_SCHEDULE_REQUIRED");
+                        if (schedule.Result.HasValue && schedule.Result.Value != ActionRequest.ResultPending)
+                            throw new OperationError("SCHEDULE_RESULT_ALREADY_RECORDED");
+                        if (request.Action == "RequestReschedule")
+                        {
+                            if (store.GetProposedRound1Schedule(candidate.Id) != null)
+                                throw new OperationError("SCHEDULE_STATE_AMBIGUOUS");
+                            store.UpdateRound1Schedule(request, schedule, ActionRequest.ScheduleSuperseded);
+                            store.CreateRound1Schedule(request, candidate.Id, ActionRequest.ScheduleProposed);
+                        }
+                        else
+                        {
+                            if (store.GetProposedRound1Schedule(candidate.Id) != null)
+                                throw new OperationError("SCHEDULE_STATE_AMBIGUOUS");
+                            store.UpdateRound1Schedule(request, schedule, ActionRequest.ScheduleCancelled);
+                        }
                     }
                     else
                         result.Current = Transition(request.Action, candidate.Status, outcome);

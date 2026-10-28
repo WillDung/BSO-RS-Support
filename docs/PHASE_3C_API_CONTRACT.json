@@ -9,27 +9,31 @@
   "isPrivate": true,
   "bindingType": 0,
   "allowedCustomProcessingStepType": 0,
-  "executePrivilegeName": "prvWriteos_sr_cand",
+  "executePrivilegeName": "prvReados_sr_cand",
   "executionIdentity": "CallingUser for authorization and business reads; UserId must equal InitiatingUserId; fixed business writes use CreateOrganizationService(null) only inside ApplyCandidateAction.",
-  "executionPrivilegeStatus": "UNRESOLVED: existing prvWriteos_sr_cand conflicts with the required BSO role having no direct Candidate Write; do not deploy or assign the role until an API-only execution privilege is verified.",
+  "executionPrivilegeStatus": "VERIFIED TARGET: prvReados_sr_cand exists in VN LMV IT and is already present on the unassigned BSO role. Live os_sr_cact metadata still uses prvWriteos_sr_cand; the metadata correction and protected-table role reduction remain pending.",
   "profileReplacement": "Present fields replace; omitted fields preserve; explicit null clears only optional phone/lookup fields. Required name/email cannot be null/blank.",
   "supportedActionTypes": ["CreateCandidate", "UpdateCandidate", "RecordCall", "ProceedToScheduling", "MarkRound1Scheduled", "RecordPass", "RecordFail", "RequestReschedule", "CancelRound1"],
-  "futureEvidenceActions": {
-    "MarkRound1Scheduled": "FAIL_CLOSED: no trusted TA/room availability evidence boundary exists; unknown or stale availability is not free.",
-    "RequestReschedule": "FAIL_CLOSED: no trusted calendar-event cancellation evidence boundary exists.",
-    "CancelRound1": "FAIL_CLOSED: no trusted calendar-event cancellation evidence boundary exists."
+  "schedulingEvidenceContract": {
+    "source": "Existing os_sr_intv Round 1 records are the authoritative durable scheduling evidence; do not require a separate external calendar system for these Candidate Core operations.",
+    "MarkRound1Scheduled": "Requires Waiting Manual Scheduling, caller-readable active TA and Location references, and a valid future same-day UTC interval. Create or promote the durable schedule and read it back before Candidate, Status History, and Receipt writes.",
+    "RecordPass": "Requires exactly one active Round 1 schedule with no terminal result. Persist result, timestamp, and notes before Candidate, Status History, and Receipt writes.",
+    "RecordFail": "Requires exactly one active Round 1 schedule with no terminal result. Persist result, timestamp, and notes before Candidate, Status History, and Receipt writes.",
+    "RequestReschedule": "Requires exactly one active Round 1 schedule with no terminal result and a reason. Supersede and read back the old schedule, create and read back the Proposed replacement, then write Candidate, Status History, and Receipt.",
+    "CancelRound1": "Requires exactly one active Round 1 schedule with no terminal result and a reason. Cancel and read back the existing schedule before Candidate, Status History, and Receipt writes.",
+    "calendarBoundary": "These manual scheduling records do not represent a calendar event booking. Separate email/calendar integrations continue to follow their approved identity, availability, and fail-closed rules."
   },
-  "localSourceStatus": "Round 1 result persistence is implemented locally. The API metadata, package, UI, role, and runtime acceptance are not updated or verified.",
+  "localSourceStatus": "Candidate Core scheduling, result, reschedule, and cancellation operations are implemented in local source and covered by offline tests. Live API metadata, package, UI, role, and runtime acceptance are not updated or verified.",
   "actionMutationMatrix": {
     "CreateCandidate": ["CANDIDATE_CREATE", "RECEIPT_CREATE"],
     "UpdateCandidate": ["CANDIDATE_UPDATE", "RECEIPT_CREATE"],
     "RecordCall": ["CANDIDATE_UPDATE", "CALL_LOG_CREATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE"],
     "ProceedToScheduling": ["CANDIDATE_UPDATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE"],
-    "MarkRound1Scheduled": [],
+    "MarkRound1Scheduled": ["INTERVIEW_SCHEDULE_CREATE", "INTERVIEW_SCHEDULE_UPDATE", "CANDIDATE_UPDATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE"],
     "RecordPass": ["INTERVIEW_SCHEDULE_UPDATE", "CANDIDATE_UPDATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE"],
     "RecordFail": ["INTERVIEW_SCHEDULE_UPDATE", "CANDIDATE_UPDATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE"],
-    "RequestReschedule": [],
-    "CancelRound1": []
+    "RequestReschedule": ["INTERVIEW_SCHEDULE_CREATE", "INTERVIEW_SCHEDULE_UPDATE", "CANDIDATE_UPDATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE"],
+    "CancelRound1": ["INTERVIEW_SCHEDULE_UPDATE", "CANDIDATE_UPDATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE"]
   },
   "fingerprintVersion": "1",
   "creationPreviousStatus": "No previous value is set; Web API Integer response default 0 is not a workflow status. Receipt previous status remains null.",

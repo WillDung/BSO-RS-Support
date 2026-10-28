@@ -30,7 +30,6 @@ namespace os_sr_cact
                 var factory = (IOrganizationServiceFactory)serviceProvider.GetService(typeof(IOrganizationServiceFactory));
                 var callerService = factory.CreateOrganizationService(context.InitiatingUserId);
                 var request = CandidateActionInputAdapter.Create(context.InitiatingUserId, context.InputParameters, DateTime.UtcNow);
-                CandidateOperation.EnsureExternalEvidenceAvailable(request.Action);
                 ValidateCallerReferences(callerService, request, trace);
                 var systemService = factory.CreateOrganizationService(null);
                 var result = CandidateOperation.Execute(request, new DataverseStore(callerService, systemService, context, trace));
@@ -74,7 +73,9 @@ namespace os_sr_cact
 
                 try
                 {
-                    callerService.Retrieve(reference.Table, id, new ColumnSet(false));
+                    var row = callerService.Retrieve(reference.Table, id, new ColumnSet("statecode"));
+                    if (row.GetAttributeValue<OptionSetValue>("statecode")?.Value != 0)
+                        throw new OperationError("REFERENCE_NOT_AVAILABLE:" + reference.Input);
                 }
                 catch (FaultException<OrganizationServiceFault> error)
                 {
@@ -560,7 +561,7 @@ namespace os_sr_cact
         {
             var query = new QueryExpression("os_sr_intv")
             {
-                ColumnSet = new ColumnSet("os_sr_intv_stat", "os_sr_intv_res", "versionnumber"),
+                ColumnSet = ScheduleColumns(),
                 TopCount = 2
             };
             query.Criteria.AddCondition("os_sr_intv_cand", ConditionOperator.Equal, candidateId);
@@ -569,10 +570,31 @@ namespace os_sr_cact
             active.AddCondition("os_sr_intv_stat", ConditionOperator.Null);
             active.AddCondition("os_sr_intv_stat", ConditionOperator.Equal, ActionRequest.ScheduleActive);
             query.Criteria.AddFilter(active);
-            return ReadUniqueSchedule(query, "ACTIVE_SCHEDULE_REQUIRED");
+            return ReadUniqueSchedule(query, "ACTIVE_SCHEDULE_REQUIRED",
+                new[] { ActionRequest.ScheduleActive });
         }
 
-        private InterviewScheduleState? ReadUniqueSchedule(QueryExpression query, string ambiguityCode)
+        public InterviewScheduleState? GetProposedRound1Schedule(Guid candidateId)
+        {
+            var query = new QueryExpression("os_sr_intv")
+            {
+                ColumnSet = ScheduleColumns(),
+                TopCount = 2
+            };
+            query.Criteria.AddCondition("os_sr_intv_cand", ConditionOperator.Equal, candidateId);
+            query.Criteria.AddCondition("os_sr_intv_rnd", ConditionOperator.Equal, ActionRequest.Round1);
+            query.Criteria.AddCondition("os_sr_intv_stat", ConditionOperator.Equal, ActionRequest.ScheduleProposed);
+            return ReadUniqueSchedule(query, "PROPOSED_SCHEDULE_AMBIGUOUS",
+                new[] { ActionRequest.ScheduleProposed });
+        }
+
+        private static ColumnSet ScheduleColumns() => new ColumnSet(
+            "os_sr_intv_cand", "os_sr_intv_rnd", "os_sr_intv_ta", "os_sr_intv_loc",
+            "os_sr_intv_strt", "os_sr_intv_end", "os_sr_intv_nts", "os_sr_intv_stat",
+            "os_sr_intv_res", "os_sr_intv_rsn", "os_sr_intv_chg", "versionnumber");
+
+        private InterviewScheduleState? ReadUniqueSchedule(
+            QueryExpression query, string ambiguityCode, int[] acceptedStatuses)
         {
             var rows = ExecuteAtStage("CC_READ_INTERVIEW_SCHEDULE",
                 () => callerService.RetrieveMultiple(query)).Entities;
@@ -581,18 +603,157 @@ namespace os_sr_cact
             var row = rows[0];
             var result = row.GetAttributeValue<OptionSetValue>("os_sr_intv_res")?.Value;
             var status = row.GetAttributeValue<OptionSetValue>("os_sr_intv_stat")?.Value;
-            if (row.Id == Guid.Empty ||
-                (status.HasValue && status.Value != ActionRequest.ScheduleActive) ||
+            var candidate = row.GetAttributeValue<EntityReference>("os_sr_intv_cand");
+            var interviewer = row.GetAttributeValue<EntityReference>("os_sr_intv_ta");
+            var location = row.GetAttributeValue<EntityReference>("os_sr_intv_loc");
+            if (row.Id == Guid.Empty || candidate == null || candidate.LogicalName != "os_sr_cand" ||
+                interviewer == null || interviewer.LogicalName != "os_sr_ta" ||
+                location == null || location.LogicalName != "os_sr_loc" ||
+                row.GetAttributeValue<OptionSetValue>("os_sr_intv_rnd")?.Value != ActionRequest.Round1 ||
+                !row.Contains("os_sr_intv_strt") || !row.Contains("os_sr_intv_end") ||
+                (status.HasValue && !acceptedStatuses.Contains(status.Value)) ||
                 (result.HasValue && result.Value != ActionRequest.ResultPending &&
                     result.Value != ActionRequest.ResultPass && result.Value != ActionRequest.ResultFail))
                 throw new OperationError("SCHEDULE_INTEGRITY_FAILURE");
             return new InterviewScheduleState
             {
                 Id = row.Id,
+                CandidateId = candidate.Id,
+                InterviewerId = interviewer.Id,
+                LocationId = location.Id,
+                StartAt = row.GetAttributeValue<DateTime>("os_sr_intv_strt"),
+                EndAt = row.GetAttributeValue<DateTime>("os_sr_intv_end"),
+                Notes = row.GetAttributeValue<string>("os_sr_intv_nts") ?? "",
+                Reason = row.GetAttributeValue<string>("os_sr_intv_rsn") ?? "",
+                ChangedAt = row.Contains("os_sr_intv_chg")
+                    ? row.GetAttributeValue<DateTime>("os_sr_intv_chg") : (DateTime?)null,
                 Status = status,
                 Result = result,
                 RowVersion = row.RowVersion
             };
+        }
+
+        public InterviewScheduleState CreateRound1Schedule(
+            ActionRequest request, Guid candidateId, int scheduleStatus)
+        {
+            EnsureAllowedMutation(request.Action, "INTERVIEW_SCHEDULE_CREATE");
+            if (request.Action != "MarkRound1Scheduled" && request.Action != "RequestReschedule")
+                throw new OperationError("UNSUPPORTED_MUTATION:" + request.Action + ":INTERVIEW_SCHEDULE_CREATE");
+            if (scheduleStatus != ActionRequest.ScheduleActive &&
+                !(request.Action == "RequestReschedule" && scheduleStatus == ActionRequest.ScheduleProposed))
+                throw new OperationError("UNSUPPORTED_SCHEDULE_STATE");
+
+            var row = new Entity("os_sr_intv");
+            SetScheduleInputs(row, request, candidateId);
+            row["os_sr_intv_stat"] = new OptionSetValue(scheduleStatus);
+            row["os_sr_intv_res"] = new OptionSetValue(ActionRequest.ResultPending);
+            row["ownerid"] = new EntityReference("systemuser", request.Actor);
+            var id = Create(row, request.Action, "INTERVIEW_SCHEDULE_CREATE", "CC_CREATE_INTERVIEW_SCHEDULE");
+            return ReadBackSchedule(request, id, candidateId, scheduleStatus);
+        }
+
+        public InterviewScheduleState UpdateRound1Schedule(
+            ActionRequest request, InterviewScheduleState schedule, int scheduleStatus)
+        {
+            EnsureAllowedMutation(request.Action, "INTERVIEW_SCHEDULE_UPDATE");
+            if (schedule.Id == Guid.Empty || schedule.CandidateId == Guid.Empty ||
+                string.IsNullOrEmpty(schedule.RowVersion))
+                throw new OperationError("ROW_VERSION_UNAVAILABLE");
+
+            var row = new Entity("os_sr_intv", schedule.Id) { RowVersion = schedule.RowVersion };
+            row["os_sr_intv_stat"] = new OptionSetValue(scheduleStatus);
+            if (request.Action == "MarkRound1Scheduled" &&
+                schedule.Status == ActionRequest.ScheduleProposed &&
+                scheduleStatus == ActionRequest.ScheduleActive)
+            {
+                SetScheduleInputs(row, request, schedule.CandidateId);
+            }
+            else if (request.Action == "RequestReschedule" &&
+                scheduleStatus == ActionRequest.ScheduleSuperseded)
+            {
+                row["os_sr_intv_rsn"] = request.Values["Reason"];
+                row["os_sr_intv_chg"] = DateTime.UtcNow;
+            }
+            else if (request.Action == "CancelRound1" &&
+                scheduleStatus == ActionRequest.ScheduleCancelled)
+            {
+                row["os_sr_intv_rsn"] = request.Values["Reason"];
+                row["os_sr_intv_chg"] = DateTime.UtcNow;
+            }
+            else
+            {
+                throw new OperationError("UNSUPPORTED_SCHEDULE_STATE");
+            }
+
+            ExecuteAtStage("CC_UPDATE_INTERVIEW_SCHEDULE",
+                () => systemService.Execute(new UpdateRequest
+                {
+                    Target = row,
+                    ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches
+                }));
+            return ReadBackSchedule(request, schedule.Id, schedule.CandidateId, scheduleStatus);
+        }
+
+        private static void SetScheduleInputs(Entity row, ActionRequest request, Guid candidateId)
+        {
+            row["os_sr_intv_cand"] = new EntityReference("os_sr_cand", candidateId);
+            row["os_sr_intv_rnd"] = new OptionSetValue(ActionRequest.Round1);
+            row["os_sr_intv_ta"] = new EntityReference("os_sr_ta", (Guid)request.Values["InterviewerId"]!);
+            row["os_sr_intv_loc"] = new EntityReference("os_sr_loc", (Guid)request.Values["LocationId"]!);
+            row["os_sr_intv_strt"] = (DateTime)request.Values["StartAt"]!;
+            row["os_sr_intv_end"] = (DateTime)request.Values["EndAt"]!;
+            if (request.Values.TryGetValue("Notes", out var notes))
+                row["os_sr_intv_nts"] = notes;
+        }
+
+        private InterviewScheduleState ReadBackSchedule(
+            ActionRequest request, Guid id, Guid candidateId, int expectedStatus)
+        {
+            var row = ExecuteAtStage("CC_VERIFY_INTERVIEW_SCHEDULE",
+                () => callerService.Retrieve("os_sr_intv", id, ScheduleColumns()));
+            if (row.Id != id || row.GetAttributeValue<EntityReference>("os_sr_intv_cand")?.Id != candidateId ||
+                row.GetAttributeValue<OptionSetValue>("os_sr_intv_rnd")?.Value != ActionRequest.Round1 ||
+                row.GetAttributeValue<OptionSetValue>("os_sr_intv_stat")?.Value != expectedStatus)
+                throw new OperationError("SCHEDULE_PERSISTENCE_NOT_CONFIRMED");
+
+            var state = new InterviewScheduleState
+            {
+                Id = row.Id,
+                CandidateId = candidateId,
+                InterviewerId = row.GetAttributeValue<EntityReference>("os_sr_intv_ta")?.Id ?? Guid.Empty,
+                LocationId = row.GetAttributeValue<EntityReference>("os_sr_intv_loc")?.Id ?? Guid.Empty,
+                StartAt = row.GetAttributeValue<DateTime>("os_sr_intv_strt"),
+                EndAt = row.GetAttributeValue<DateTime>("os_sr_intv_end"),
+                Notes = row.GetAttributeValue<string>("os_sr_intv_nts") ?? "",
+                Reason = row.GetAttributeValue<string>("os_sr_intv_rsn") ?? "",
+                ChangedAt = row.Contains("os_sr_intv_chg")
+                    ? row.GetAttributeValue<DateTime>("os_sr_intv_chg") : (DateTime?)null,
+                Status = expectedStatus,
+                Result = row.GetAttributeValue<OptionSetValue>("os_sr_intv_res")?.Value,
+                RowVersion = row.RowVersion
+            };
+            if (state.InterviewerId == Guid.Empty || state.LocationId == Guid.Empty ||
+                !row.Contains("os_sr_intv_strt") || !row.Contains("os_sr_intv_end"))
+                throw new OperationError("SCHEDULE_PERSISTENCE_NOT_CONFIRMED");
+            if ((request.Action == "RequestReschedule" && expectedStatus == ActionRequest.ScheduleSuperseded) ||
+                (request.Action == "CancelRound1" && expectedStatus == ActionRequest.ScheduleCancelled))
+            {
+                if (!string.Equals(state.Reason, (string)request.Values["Reason"]!, StringComparison.Ordinal) ||
+                    !state.ChangedAt.HasValue)
+                    throw new OperationError("SCHEDULE_PERSISTENCE_NOT_CONFIRMED");
+            }
+            if (request.Action == "MarkRound1Scheduled" ||
+                (request.Action == "RequestReschedule" && expectedStatus == ActionRequest.ScheduleProposed))
+            {
+                if (state.InterviewerId != (Guid)request.Values["InterviewerId"]! ||
+                    state.LocationId != (Guid)request.Values["LocationId"]! ||
+                    state.StartAt != (DateTime)request.Values["StartAt"]! ||
+                    state.EndAt != (DateTime)request.Values["EndAt"]! ||
+                    (request.Values.TryGetValue("Notes", out var notes) &&
+                        !string.Equals(state.Notes, (string?)notes ?? "", StringComparison.Ordinal)))
+                    throw new OperationError("SCHEDULE_PERSISTENCE_NOT_CONFIRMED");
+            }
+            return state;
         }
 
         public void RecordRound1Result(ActionRequest request, InterviewScheduleState schedule, int result)

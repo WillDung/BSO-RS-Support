@@ -122,6 +122,40 @@ internal static class Program
         host.Input["ContactedAt"] = DateTime.UtcNow.ToString("o");
         host.Input["Notes"] = "Synthetic SDK test";
     }
+    private static void SetScheduleAction(Host host, string action, int expectedStatus)
+    {
+        host.Input.Clear();
+        host.Input["ActionType"] = action;
+        host.Input["CorrelationId"] = Guid.NewGuid();
+        host.Input["CandidateId"] = Candidate;
+        host.Input["ExpectedStatus"] = expectedStatus;
+        if (action != "CancelRound1")
+        {
+            host.Input["InterviewerId"] = Guid.Parse("00000000-0000-0000-0000-000000000003");
+            host.Input["LocationId"] = Guid.Parse("00000000-0000-0000-0000-000000000004");
+            host.Input["StartAt"] = DateTime.UtcNow.AddDays(1);
+            host.Input["EndAt"] = DateTime.UtcNow.AddDays(1).AddHours(1);
+            host.Input["Notes"] = "Synthetic schedule";
+        }
+        if (action == "RequestReschedule" || action == "CancelRound1")
+            host.Input["Reason"] = "Synthetic schedule change";
+    }
+    private static Entity ScheduleEntity(int status, int? result = ActionRequest.ResultPending)
+    {
+        var row = new Entity("os_sr_intv", Guid.NewGuid())
+        {
+            RowVersion = "17",
+            ["os_sr_intv_cand"] = new EntityReference("os_sr_cand", Candidate),
+            ["os_sr_intv_rnd"] = new OptionSetValue(ActionRequest.Round1),
+            ["os_sr_intv_ta"] = new EntityReference("os_sr_ta", Guid.Parse("00000000-0000-0000-0000-000000000003")),
+            ["os_sr_intv_loc"] = new EntityReference("os_sr_loc", Guid.Parse("00000000-0000-0000-0000-000000000004")),
+            ["os_sr_intv_strt"] = DateTime.UtcNow.AddDays(1),
+            ["os_sr_intv_end"] = DateTime.UtcNow.AddDays(1).AddHours(1),
+            ["os_sr_intv_stat"] = new OptionSetValue(status)
+        };
+        if (result.HasValue) row["os_sr_intv_res"] = new OptionSetValue(result.Value);
+        return row;
+    }
     private static Dictionary<string, object?> Context(ParameterCollection input, ParameterCollection shared, ParameterCollection output)
     {
         return new Dictionary<string, object?>
@@ -225,13 +259,16 @@ internal static class Program
             ["UpdateCandidate"] = new[] { "CANDIDATE_UPDATE", "RECEIPT_CREATE" },
             ["RecordCall"] = new[] { "CANDIDATE_UPDATE", "CALL_LOG_CREATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE" },
             ["ProceedToScheduling"] = new[] { "CANDIDATE_UPDATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE" },
-            ["MarkRound1Scheduled"] = Array.Empty<string>(),
+            ["MarkRound1Scheduled"] = new[] { "INTERVIEW_SCHEDULE_CREATE", "INTERVIEW_SCHEDULE_UPDATE",
+                "CANDIDATE_UPDATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE" },
             ["RecordPass"] = new[] { "CANDIDATE_UPDATE", "INTERVIEW_SCHEDULE_UPDATE",
                 "STATUS_HISTORY_CREATE", "RECEIPT_CREATE" },
             ["RecordFail"] = new[] { "CANDIDATE_UPDATE", "INTERVIEW_SCHEDULE_UPDATE",
                 "STATUS_HISTORY_CREATE", "RECEIPT_CREATE" },
-            ["RequestReschedule"] = Array.Empty<string>(),
-            ["CancelRound1"] = Array.Empty<string>()
+            ["RequestReschedule"] = new[] { "INTERVIEW_SCHEDULE_CREATE", "INTERVIEW_SCHEDULE_UPDATE",
+                "CANDIDATE_UPDATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE" },
+            ["CancelRound1"] = new[] { "INTERVIEW_SCHEDULE_UPDATE",
+                "CANDIDATE_UPDATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE" }
         };
         var protectedWrites = new[]
         {
@@ -385,11 +422,11 @@ internal static class Program
             { "RetrieveMultiple:os_sr_oprc", "Create:os_sr_cand" }) &&
             !unknownFailureMessage.Contains("SENSITIVE_SENTINEL"),
             "Unknown service exception is categorized, sanitized, and terminates immediately");
-        Check(!CandidateOperation.AllowsMutation("MarkRound1Scheduled", "INTERVIEW_SCHEDULE_CREATE") &&
+        Check(CandidateOperation.AllowsMutation("MarkRound1Scheduled", "INTERVIEW_SCHEDULE_CREATE") &&
             CandidateOperation.AllowsMutation("RecordPass", "INTERVIEW_SCHEDULE_UPDATE") &&
             CandidateOperation.AllowsMutation("RecordFail", "CANDIDATE_UPDATE") &&
-            !CandidateOperation.AllowsMutation("RequestReschedule", "INTERVIEW_SCHEDULE_CREATE") &&
-            !CandidateOperation.AllowsMutation("CancelRound1", "INTERVIEW_SCHEDULE_UPDATE") &&
+            CandidateOperation.AllowsMutation("RequestReschedule", "INTERVIEW_SCHEDULE_CREATE") &&
+            CandidateOperation.AllowsMutation("CancelRound1", "INTERVIEW_SCHEDULE_UPDATE") &&
             !CandidateOperation.AllowsMutation("MarkRound1Scheduled", "UNLISTED_TABLE_WRITE") &&
             !CandidateOperation.AllowsMutation("RequestReschedule", "*"),
             "Scheduling actions allow only the canonical fixed mutation matrix");
@@ -398,29 +435,27 @@ internal static class Program
         Reject(() => new ApplyCandidateAction().Execute(invalidAction), "INVALID_ACTION");
         Check(!invalidAction.ServiceFactorySelections.Contains(null) && invalidAction.ServiceOperations.Count == 0,
             "Unsupported ActionType is rejected before SYSTEM service creation or protected access");
-        foreach (var blockedAction in new[] { "MarkRound1Scheduled", "RequestReschedule", "CancelRound1" })
-        {
-            var blocked = new Host(100010000);
-            blocked.Input["ActionType"] = blockedAction;
-            blocked.Input["ExpectedStatus"] = blockedAction == "MarkRound1Scheduled" ?
-                ActionRequest.Waiting : ActionRequest.Scheduled;
-            if (blockedAction != "CancelRound1")
-            {
-                blocked.Input["InterviewerId"] = Guid.NewGuid();
-                blocked.Input["LocationId"] = Guid.NewGuid();
-                blocked.Input["StartAt"] = DateTime.UtcNow.AddDays(1);
-                blocked.Input["EndAt"] = DateTime.UtcNow.AddDays(1).AddHours(1);
-            }
-            if (blockedAction == "RequestReschedule" || blockedAction == "CancelRound1")
-                blocked.Input["Reason"] = "Synthetic reason";
-            blocked.MainValues = Context(blocked.Input, blocked.Shared, blocked.Output);
-            blocked.MainContext = Execution(blocked.MainValues);
-            Reject(() => new ApplyCandidateAction().Execute(blocked),
-                blockedAction == "MarkRound1Scheduled" ? "SCHEDULER_DEPENDENCY_UNAVAILABLE" :
-                    "RESULT_OR_CANCELLATION_DEPENDENCY_UNAVAILABLE");
-            Check(!blocked.ServiceFactorySelections.Contains(null) && blocked.ServiceOperations.Count == 0,
-                blockedAction + " fails before SYSTEM service creation or business reads");
-        }
+        var invalidSchedule = new Host(-1) { Status = ActionRequest.Waiting };
+        SetScheduleAction(invalidSchedule, "MarkRound1Scheduled", ActionRequest.Waiting);
+        invalidSchedule.Input["EndAt"] = invalidSchedule.Input["StartAt"];
+        invalidSchedule.MainValues = Context(invalidSchedule.Input, invalidSchedule.Shared, invalidSchedule.Output);
+        invalidSchedule.MainContext = Execution(invalidSchedule.MainValues);
+        Reject(() => new ApplyCandidateAction().Execute(invalidSchedule), "INVALID_SCHEDULE_TIME");
+        Check(!invalidSchedule.ServiceFactorySelections.Contains(null) &&
+            invalidSchedule.ServiceOperations.Count == 0,
+            "Invalid schedule inputs are rejected before SYSTEM service creation");
+
+        var staleSchedule = new Host(-1) { Status = ActionRequest.Scheduled };
+        SetScheduleAction(staleSchedule, "MarkRound1Scheduled", ActionRequest.Waiting);
+        staleSchedule.MainValues = Context(staleSchedule.Input, staleSchedule.Shared, staleSchedule.Output);
+        staleSchedule.MainContext = Execution(staleSchedule.MainValues);
+        Reject(() => new ApplyCandidateAction().Execute(staleSchedule), "STALE_EXPECTED_STATUS");
+        Check(staleSchedule.ServiceOperations.Contains("RetrieveMultiple:os_sr_oprc") &&
+            staleSchedule.ServiceOperations.Contains("Retrieve:os_sr_cand") &&
+            !staleSchedule.ServiceOperations.Any(operation => operation.StartsWith("Create:", StringComparison.Ordinal) ||
+                operation.StartsWith("Execute:", StringComparison.Ordinal)) &&
+            staleSchedule.ScheduleCreates == 0 && staleSchedule.ScheduleUpdates == 0,
+            "Stale ExpectedStatus fails before any SYSTEM business write");
         var inaccessibleReference = CreateCandidateHost();
         inaccessibleReference.Input["PositionId"] = Guid.NewGuid();
         inaccessibleReference.ReferenceReadFailureTable = "os_sr_pos";
@@ -430,6 +465,18 @@ internal static class Program
             !inaccessibleReference.ServiceOperations.Any(operation => operation.StartsWith("Create:", StringComparison.Ordinal)) &&
             !referenceFailure.Contains("SENSITIVE_SENTINEL"),
             "Caller-inaccessible reference is rejected before SYSTEM service creation or business writes");
+        var inactiveScheduleReference = new Host(-1) { Status = ActionRequest.Waiting };
+        SetScheduleAction(inactiveScheduleReference, "MarkRound1Scheduled", ActionRequest.Waiting);
+        inactiveScheduleReference.InactiveReferenceTable = "os_sr_ta";
+        inactiveScheduleReference.MainValues = Context(
+            inactiveScheduleReference.Input, inactiveScheduleReference.Shared, inactiveScheduleReference.Output);
+        inactiveScheduleReference.MainContext = Execution(inactiveScheduleReference.MainValues);
+        Reject(() => new ApplyCandidateAction().Execute(inactiveScheduleReference),
+            "REFERENCE_NOT_AVAILABLE:InterviewerId");
+        Check(!inactiveScheduleReference.ServiceFactorySelections.Contains(null) &&
+            !inactiveScheduleReference.ServiceOperations.Any(operation => operation.StartsWith("Create:", StringComparison.Ordinal)) &&
+            !inactiveScheduleReference.ServiceOperations.Any(operation => operation.StartsWith("Execute:", StringComparison.Ordinal)),
+            "Inactive TA is rejected before SYSTEM service creation or business writes");
         var minimalCreate = CreateCandidateHost();
         minimalCreate.Input.Remove("ExpectedStatus");
         minimalCreate.Input["CandidatePhone"] = "5550100";
@@ -544,9 +591,15 @@ internal static class Program
             resultHost.Input["ResultNotes"] = "Synthetic result evidence";
             resultHost.Round1Schedule = new Entity("os_sr_intv", Guid.NewGuid())
             {
-            RowVersion = "17",
-            ["os_sr_intv_stat"] = new OptionSetValue(ActionRequest.ScheduleActive),
-            ["os_sr_intv_res"] = new OptionSetValue(ActionRequest.ResultPending)
+                RowVersion = "17",
+                ["os_sr_intv_cand"] = new EntityReference("os_sr_cand", Candidate),
+                ["os_sr_intv_rnd"] = new OptionSetValue(ActionRequest.Round1),
+                ["os_sr_intv_ta"] = new EntityReference("os_sr_ta", Guid.Parse("00000000-0000-0000-0000-000000000003")),
+                ["os_sr_intv_loc"] = new EntityReference("os_sr_loc", Guid.Parse("00000000-0000-0000-0000-000000000004")),
+                ["os_sr_intv_strt"] = DateTime.UtcNow.AddDays(1),
+                ["os_sr_intv_end"] = DateTime.UtcNow.AddDays(1).AddHours(1),
+                ["os_sr_intv_stat"] = new OptionSetValue(ActionRequest.ScheduleActive),
+                ["os_sr_intv_res"] = new OptionSetValue(ActionRequest.ResultPending)
             };
             resultHost.MainValues = Context(resultHost.Input, resultHost.Shared, resultHost.Output);
             resultHost.MainContext = Execution(resultHost.MainValues);
@@ -569,6 +622,78 @@ internal static class Program
             resultHost.ScheduleUpdates == 1 && resultHost.Histories == 1,
             "SDK " + resultAction.Item1 + " replay creates no duplicate result or history");
         }
+        var scheduleHost = new Host(-1) { Status = ActionRequest.Waiting };
+        SetScheduleAction(scheduleHost, "MarkRound1Scheduled", ActionRequest.Waiting);
+        scheduleHost.MainValues = Context(scheduleHost.Input, scheduleHost.Shared, scheduleHost.Output);
+        scheduleHost.MainContext = Execution(scheduleHost.MainValues);
+        new ApplyCandidateAction().Execute(scheduleHost);
+        Check(scheduleHost.ScheduleCreates == 1 && scheduleHost.ScheduleUpdates == 0 &&
+            scheduleHost.Round1Schedule?.GetAttributeValue<OptionSetValue>("os_sr_intv_stat")?.Value ==
+                ActionRequest.ScheduleActive &&
+            scheduleHost.Round1Schedule.GetAttributeValue<OptionSetValue>("os_sr_intv_res")?.Value ==
+                ActionRequest.ResultPending &&
+            scheduleHost.Status == ActionRequest.Scheduled && scheduleHost.Histories == 1 &&
+            scheduleHost.Receipt != null,
+            "SDK schedule creates and reads back Interview Schedule before Candidate, History, Receipt");
+        Check(scheduleHost.ServiceOperations.SequenceEqual(new[]
+            {
+                "Retrieve:os_sr_ta", "Retrieve:os_sr_loc",
+                "RetrieveMultiple:os_sr_oprc", "Retrieve:os_sr_cand",
+                "RetrieveMultiple:os_sr_intv", "RetrieveMultiple:os_sr_intv",
+                "Create:os_sr_intv", "Retrieve:os_sr_intv",
+                "Execute:Update:os_sr_cand", "Create:os_sr_csh", "Create:os_sr_oprc"
+            }) && scheduleHost.ServiceFactorySelections.Contains(null),
+            "SDK scheduling uses only fixed SYSTEM schedule create and caller-context evidence reads: " +
+            string.Join(",", scheduleHost.ServiceOperations));
+        Check(scheduleHost.Receipt!.GetAttributeValue<string>("os_sr_oprc_cact") == "MarkRound1Scheduled",
+            "SDK schedule operation records idempotency Receipt");
+
+        var confirmScheduleHost = new Host(-1) { Status = ActionRequest.Waiting };
+        SetScheduleAction(confirmScheduleHost, "MarkRound1Scheduled", ActionRequest.Waiting);
+        confirmScheduleHost.ProposedRound1Schedule = ScheduleEntity(ActionRequest.ScheduleProposed);
+        confirmScheduleHost.MainValues = Context(confirmScheduleHost.Input, confirmScheduleHost.Shared, confirmScheduleHost.Output);
+        confirmScheduleHost.MainContext = Execution(confirmScheduleHost.MainValues);
+        new ApplyCandidateAction().Execute(confirmScheduleHost);
+        Check(confirmScheduleHost.ScheduleCreates == 0 && confirmScheduleHost.ScheduleUpdates == 1 &&
+            confirmScheduleHost.Round1Schedule?.GetAttributeValue<OptionSetValue>("os_sr_intv_stat")?.Value ==
+                ActionRequest.ScheduleActive &&
+            confirmScheduleHost.ProposedRound1Schedule == null &&
+            confirmScheduleHost.Status == ActionRequest.Scheduled,
+            "SDK Schedule Round 1 promotes one persisted Proposed row without creating a duplicate");
+
+        var rescheduleHost = new Host(-1) { Status = ActionRequest.Scheduled };
+        SetScheduleAction(rescheduleHost, "RequestReschedule", ActionRequest.Scheduled);
+        rescheduleHost.Round1Schedule = ScheduleEntity(ActionRequest.ScheduleActive);
+        rescheduleHost.MainValues = Context(rescheduleHost.Input, rescheduleHost.Shared, rescheduleHost.Output);
+        rescheduleHost.MainContext = Execution(rescheduleHost.MainValues);
+        new ApplyCandidateAction().Execute(rescheduleHost);
+        Check(rescheduleHost.ScheduleUpdates == 1 && rescheduleHost.ScheduleCreates == 1 &&
+            rescheduleHost.Round1Schedule.GetAttributeValue<OptionSetValue>("os_sr_intv_stat")?.Value ==
+                ActionRequest.ScheduleSuperseded &&
+            rescheduleHost.Round1Schedule.GetAttributeValue<string>("os_sr_intv_rsn") ==
+                "Synthetic schedule change" &&
+            rescheduleHost.Round1Schedule.Contains("os_sr_intv_chg") &&
+            rescheduleHost.ProposedRound1Schedule?.GetAttributeValue<OptionSetValue>("os_sr_intv_stat")?.Value ==
+                ActionRequest.ScheduleProposed &&
+            rescheduleHost.Status == ActionRequest.NeedCall && rescheduleHost.Histories == 1 &&
+            rescheduleHost.Receipt != null,
+            "SDK reschedule preserves superseded evidence, stores reason/time, creates Proposed replacement, then resets Candidate");
+
+        var cancelHost = new Host(-1) { Status = ActionRequest.Scheduled };
+        SetScheduleAction(cancelHost, "CancelRound1", ActionRequest.Scheduled);
+        cancelHost.Round1Schedule = ScheduleEntity(ActionRequest.ScheduleActive);
+        cancelHost.MainValues = Context(cancelHost.Input, cancelHost.Shared, cancelHost.Output);
+        cancelHost.MainContext = Execution(cancelHost.MainValues);
+        new ApplyCandidateAction().Execute(cancelHost);
+        Check(cancelHost.ScheduleUpdates == 1 &&
+            cancelHost.Round1Schedule.GetAttributeValue<OptionSetValue>("os_sr_intv_stat")?.Value ==
+                ActionRequest.ScheduleCancelled &&
+            cancelHost.Round1Schedule.GetAttributeValue<string>("os_sr_intv_rsn") ==
+                "Synthetic schedule change" && cancelHost.Round1Schedule.Contains("os_sr_intv_chg") &&
+            cancelHost.Status == ActionRequest.NeedCall && cancelHost.Histories == 1 &&
+            cancelHost.Receipt != null,
+            "SDK cancel preserves schedule reason/time before Candidate reset, History, and Receipt");
+
         var auditPending = new Host(100010000) { OrganizationAuditEnabled = false };
         new ApplyCandidateAction().Execute(auditPending);
         Check(auditPending.Calls == 1 && auditPending.Updates == 1 && auditPending.Receipt != null,
@@ -877,7 +1002,8 @@ internal static class Program
         public Dictionary<string, object?> MainValues;
         public IPluginExecutionContext MainContext;
         public Entity? Receipt, CreatedCandidate, CreatedCall, CreatedHistory;
-        public int Calls, Histories, Updates, ScheduleUpdates, CreatedCandidates, OrganizationReads, Status = 100010000;
+        public int Calls, Histories, Updates, ScheduleCreates, ScheduleUpdates, CreatedCandidates,
+            OrganizationReads, Status = 100010000;
         public bool OrganizationAuditEnabled = true, TamperTarget;
         public List<Guid?> ServiceFactorySelections = new List<Guid?>();
         public List<UpdateRequest> CandidateRequests = new List<UpdateRequest>();
@@ -886,9 +1012,11 @@ internal static class Program
         public List<string> TraceMessages = new List<string>();
         public List<string> MarkersAtProtectedWrites = new List<string>();
         public Entity? Round1Schedule;
+        public Entity? ProposedRound1Schedule;
         public string? FaultOnCreateTable;
         public string? UnknownFailureOnCreateTable;
         public string? ReferenceReadFailureTable;
+        public string? InactiveReferenceTable;
         public string FaultMessage = "Synthetic service failure.";
         public int FaultErrorCode = unchecked((int)0x80040220);
         public Host(int outcome, bool createCandidate = false)
@@ -939,6 +1067,7 @@ internal static class Program
                 var table = (string)call.Args[0];
                 var callerReadable = table == "os_sr_cand" || table == "os_sr_pos" || table == "os_sr_csrc" ||
                     table == "os_sr_ta" || table == "os_sr_loc";
+                if (table == "os_sr_intv") callerReadable = true;
                 if (table != "organization" && (!callerReadable || serviceUser != Actor))
                     throw new Exception("Unexpected read identity or table");
                 ServiceOperations.Add("Retrieve:" + table);
@@ -966,7 +1095,22 @@ internal static class Program
                         throw new FaultException<OrganizationServiceFault>(
                             new OrganizationServiceFault { ErrorCode = unchecked((int)0x80040220), Message = "SENSITIVE_SENTINEL" },
                             new FaultReason("Synthetic reference access failure"));
-                    return new Entity(table, (Guid)call.Args[1]);
+                    return new Entity(table, (Guid)call.Args[1])
+                    {
+                        ["statecode"] = new OptionSetValue(table == InactiveReferenceTable ? 1 : 0)
+                    };
+                }
+                if (table == "os_sr_ta" || table == "os_sr_loc")
+                    return new Entity(table, (Guid)call.Args[1])
+                    {
+                        ["statecode"] = new OptionSetValue(table == InactiveReferenceTable ? 1 : 0)
+                    };
+                if (table == "os_sr_intv")
+                {
+                    if (serviceUser != Actor) throw new Exception("Schedule read escaped caller context");
+                    if (Round1Schedule?.Id == (Guid)call.Args[1]) return Round1Schedule;
+                    if (ProposedRound1Schedule?.Id == (Guid)call.Args[1]) return ProposedRound1Schedule;
+                    throw new Exception("Unexpected Interview Schedule readback ID");
                 }
                 throw new Exception("Unexpected Retrieve");
             }
@@ -984,8 +1128,14 @@ internal static class Program
                 else
                     throw new Exception("Unexpected RetrieveMultiple identity or table");
                 if (query.EntityName == "os_sr_intv")
-                    return Round1Schedule == null ? new EntityCollection() :
-                        new EntityCollection(new List<Entity> { Round1Schedule });
+                {
+                    bool proposed = query.Criteria.Conditions.Any(condition =>
+                        condition.AttributeName == "os_sr_intv_stat" &&
+                        condition.Values.Contains(ActionRequest.ScheduleProposed));
+                    var schedule = proposed ? ProposedRound1Schedule : Round1Schedule;
+                    return schedule == null ? new EntityCollection() :
+                        new EntityCollection(new List<Entity> { schedule });
+                }
                 return Receipt == null ? new EntityCollection() : new EntityCollection(new List<Entity> { Receipt });
             }
             if (call.MethodName == "Create")
@@ -996,7 +1146,7 @@ internal static class Program
                     if (serviceUser != Actor) throw new Exception("DEV slice unexpectedly used SYSTEM");
                 }
                 else if (serviceUser != null ||
-                    !new[] { "os_sr_cand", "os_sr_call", "os_sr_csh", "os_sr_oprc" }.Contains(row.LogicalName))
+                    !new[] { "os_sr_cand", "os_sr_call", "os_sr_csh", "os_sr_intv", "os_sr_oprc" }.Contains(row.LogicalName))
                     throw new Exception("Candidate Core create escaped its SYSTEM table boundary");
                 ServiceOperations.Add("Create:" + row.LogicalName);
                 if (Shared.TryGetValue(GetGuardIntentKey(), out var marker) && marker is string markerValue)
@@ -1004,6 +1154,7 @@ internal static class Program
                 if (row.Id == Guid.Empty)
                     row.Id = row.LogicalName == "os_sr_cand" ? Candidate : Guid.NewGuid();
                 row[row.LogicalName + "id"] = row.Id;
+                row.RowVersion = "1";
                 if (TamperTarget) row["unexpected"] = "synthetic";
                 if (row.LogicalName == FaultOnCreateTable)
                     throw new FaultException<OrganizationServiceFault>(
@@ -1021,6 +1172,19 @@ internal static class Program
                     Status = row.GetAttributeValue<OptionSetValue>("os_sr_cand_stat").Value;
                 }
                 else if (row.LogicalName == "os_sr_oprc") { Receipt = row; Receipt["createdby"] = new EntityReference("systemuser", SystemActor); }
+                else if (row.LogicalName == "os_sr_intv")
+                {
+                    if (row.GetAttributeValue<EntityReference>("os_sr_intv_cand")?.LogicalName != "os_sr_cand" ||
+                        row.GetAttributeValue<EntityReference>("os_sr_intv_ta")?.LogicalName != "os_sr_ta" ||
+                        row.GetAttributeValue<EntityReference>("os_sr_intv_loc")?.LogicalName != "os_sr_loc" ||
+                        row.GetAttributeValue<OptionSetValue>("os_sr_intv_rnd")?.Value != ActionRequest.Round1)
+                        throw new Exception("Interview Schedule create is outside its fixed schema boundary");
+                    ScheduleCreates++;
+                    if (row.GetAttributeValue<OptionSetValue>("os_sr_intv_stat")?.Value == ActionRequest.ScheduleProposed)
+                        ProposedRound1Schedule = row;
+                    else
+                        Round1Schedule = row;
+                }
                 else throw new Exception("Unexpected Create");
                 return row.Id;
             }
@@ -1052,13 +1216,22 @@ internal static class Program
                 if (TamperTarget) request.Target["unexpected"] = "synthetic";
                 if (request.Target.LogicalName == "os_sr_intv")
                 {
-                    if (Round1Schedule == null || request.Target.Id != Round1Schedule.Id ||
-                        request.Target.RowVersion != Round1Schedule.RowVersion ||
+                    var existingSchedule = Round1Schedule?.Id == request.Target.Id
+                        ? Round1Schedule : ProposedRound1Schedule;
+                    if (existingSchedule == null || request.Target.Id != existingSchedule.Id ||
+                        request.Target.RowVersion != existingSchedule.RowVersion ||
                         request.ConcurrencyBehavior != ConcurrencyBehavior.IfRowVersionMatches)
                         throw new Exception("Interview Schedule update escaped its fixed row/concurrency boundary");
                     ScheduleRequests.Add(request); ScheduleUpdates++;
                     foreach (var attribute in request.Target.Attributes)
-                        Round1Schedule[attribute.Key] = attribute.Value;
+                        existingSchedule[attribute.Key] = attribute.Value;
+                    existingSchedule.RowVersion = (int.Parse(existingSchedule.RowVersion) + 1).ToString();
+                    if (request.Target.GetAttributeValue<OptionSetValue>("os_sr_intv_stat")?.Value ==
+                        ActionRequest.ScheduleActive && ProposedRound1Schedule?.Id == existingSchedule.Id)
+                    {
+                        ProposedRound1Schedule = null;
+                        Round1Schedule = existingSchedule;
+                    }
                     return new UpdateResponse();
                 }
                 CandidateRequests.Add(request); Updates++;

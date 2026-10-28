@@ -326,7 +326,7 @@ try {
             customapiid = $apiId; uniquename = 'os_sr_cact'; name = 'Apply Candidate Action'; displayname = 'Apply Candidate Action'
             description = 'Server-enforced Candidate Core action with durable replay evidence.'
             isfunction = $false; isprivate = $true; bindingtype = 0; allowedcustomprocessingsteptype = 0
-            workflowsdkstepenabled = $false; executeprivilegename = 'prvWriteos_sr_cand'
+            workflowsdkstepenabled = $false; executeprivilegename = $deploymentContract.executePrivilegeName
             "$apiHandlerNav@odata.bind" = "/plugintypes($mainId)"
         })))
         foreach ($kind in @('inputs', 'outputs')) {

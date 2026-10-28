@@ -156,9 +156,11 @@ Assert-Test ($plugin -match 'if \(!context\.IsInTransaction \|\| context\.UserId
 Assert-Test ($operation -match 'void RequireTransaction\(\)' -and
     $operation -notmatch 'RequireTransactionAndAudit|AUDIT_ACTIVATION_PENDING') 'Engine gate reflects transaction-only runtime requirement'
 $engineTests = Get-Content -Raw (Join-Path $root 'tests\CandidateCore\Program.cs')
-Assert-Test ($engineTests -match 'SCHEDULER_DEPENDENCY_UNAVAILABLE' -and
-    $engineTests -match 'RESULT_OR_CANCELLATION_DEPENDENCY_UNAVAILABLE' -and
-    $engineTests -match 'Transition\(action, ActionRequest.Waiting, null\), "INVALID_TRANSITION"') 'Offline suite verifies evidence fail-closed behavior at scheduled and current states'
+Assert-Test ($engineTests -match 'Round 1 schedule is durable before Candidate transition' -and
+    $engineTests -match 'updates schedule before terminal Candidate state' -and
+    $engineTests -match 'Reschedule preserves old schedule, creates Proposed replacement' -and
+    $engineTests -match 'requires active schedule evidence before mutation' -and
+    $engineTests -match 'rejects terminal schedule evidence before mutation') 'Offline suite verifies durable scheduling, results, reschedule/cancel, and fail-closed evidence checks'
 Assert-Test ($operation -match 'Action == "CreateCandidate" && input\.TryGetValue\("CandidateId", out var createTarget\)' -and
     $operationTests -match 'Optional null CandidateId accepted on create' -and
     $operationTests -match 'Optional empty CandidateId accepted on create' -and

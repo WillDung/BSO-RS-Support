@@ -44,7 +44,7 @@
     "retention": "No deletion or expiration authorized; no shorter replay lifetime introduced.",
     "mutability": "Append only through the validated synchronous operation. The local Phase 5A source uses SYSTEM writes behind an exact operation mutation matrix; production direct-write denial is intended to come from Dataverse role privileges. ProtectCandidateCore source is retained but superseded as the production security boundary; deployed privilege and registration state are not changed by this source update.",
     "navigation": "Not added to srapp or end-user navigation.",
-    "access": "No role/user/team grants. The local handler reads and writes receipts through SYSTEM, so no user-facing Receipt privilege is required by that source path. The current Custom API execute privilege prvWriteos_sr_cand conflicts with the BSO no-direct-Candidate-Write target and remains unresolved; no replacement privilege is assumed.",
+    "access": "No role/user/team grants. The local handler reads and writes receipts through SYSTEM, so no user-facing Receipt privilege is required by that source path. Read-only VN LMV IT metadata confirmed the live API currently uses prvWriteos_sr_cand and that prvReados_sr_cand exists and is already present on the unassigned BSO role. The local API contract targets prvReados_sr_cand; the live API privilege and protected-table role grants remain unchanged pending the bounded Phase 5A update.",
     "candidateCreateReplay": "Candidate reference is filled after Candidate creation in the same transaction, with creation payload fingerprint preserved despite later profile edits."
   },
   "maximumSchemaWrites": {

@@ -1,5 +1,15 @@
 # Current State
 
+## Phase 5B role assigned; least-privilege acceptance blocked (2026-10-28)
+
+**Status:** `PHASE_5B_ROLE_ASSIGNED_SECURITY_ACCEPTANCE_BLOCKED_BY_ELEVATED_ACCESS`; not a security pass. Under explicit owner approval, exactly the approved Phase 5B account received the existing `BSO-RS Support - BSO` role directly using one PAC assignment invocation, zero retries, and immediate server readback. Only that existing role was also added to `srapp` access; System Administrator/System Customizer app associations were preserved, with no publication or app-content change.
+
+Fresh pre-assignment inventory showed no direct roles and pre-existing System Administrator plus Basic User through an Entra-backed Office group team (type 3); these team-derived roles remain unchanged after assignment. The new direct BSO role is verified. Effective administrator/customization/publish/role-management and Candidate Create/Write rights remain, so **all direct-write negative tests were skipped** as required by the elevated-access branch. No existing membership was removed.
+
+The same approved browser identity, Candidate Core active and fallback off, completed Create -> Answered -> Waiting Manual Scheduling -> Round 1 Scheduled for synthetic `CAND-00001049`. Durable readback is **1 Candidate / 1 Call / 3 Histories / 1 Schedule / 4 Receipts**; all four reference selectors loaded. This proves combined-role functional access, not BSO-only security. Exact target identity is retained in local evidence rather than repository documentation. See the [Phase 5B report](PHASE_5B_SECURITY_ACCEPTANCE_REPORT.md).
+
+`REAL_DATA_STILL_PROHIBITED`. Phase 5A remains accepted; its unassigned-role and approval-required statements below describe its historical closure, now superseded by this scoped assignment. Production-readiness approval is not reached; no Production work, guard reactivation, role/team removal, commit, or push occurred.
+
 ## Phase 5A Candidate Core SYSTEM boundary (2026-10-28)
 
 **Status:** `PHASE_5A_CANDIDATE_CORE_PRODUCTION_PATH_WORKING_IN_DEV`. Authenticated browser acceptance in exact `srapp` passed Create, No Answer, Answered, Waiting Manual Scheduling, Schedule, Pass, Fail, Reschedule/re-contact/reconfirmation, Cancel, and full-reload persistence through `os_sr_cact`, with fallback unchecked. Accepted synthetic Candidates `CAND-00001040`, `CAND-00001041`, `CAND-00001043`, and `CAND-00001044` reconcile to **4 Candidates / 6 Calls / 19 Histories / 5 Schedules / 24 Receipts**. A disabled reschedule-save gate was corrected and only that branch rerun with a fresh Candidate; stopped fixture `CAND-00001042` remains intact and excluded from accepted counts. The post-browser 27-dispatch runtime matrix passed identical replay, conflicting replay, and stale-status checks without automatic retries. See the [Phase 5A acceptance report](PHASE_5A_CANDIDATE_CORE_ACCEPTANCE_REPORT.md).

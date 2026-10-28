@@ -1,5 +1,13 @@
 # Security Model
 
+## Phase 5B effective-access gate (28 October 2026)
+
+**Result:** `BSO_SECURITY_ACCEPTANCE_BLOCKED_BY_PREEXISTING_ELEVATED_ACCESS`; `PHASE_5B_ROLE_ASSIGNED_SECURITY_ACCEPTANCE_BLOCKED_BY_ELEVATED_ACCESS`. The one explicitly approved account was assigned `BSO-RS Support - BSO` directly, once with zero retries and immediate readback. The app association now includes that role alongside the preserved System Administrator/System Customizer roles. No other user/team assignment or privilege change occurred.
+
+Fresh inventory: direct roles were empty before assignment and now contain BSO; an Entra-backed Office group team supplies System Administrator and Basic User both before and after. The default owner team has no role assignments. That effective administrator grant supplies broad customization, publish, app/solution editing, role-management, and Candidate Create/Write privileges. No existing role/team membership was changed. Tenant environment-management denial remains unverified.
+
+The target's actual browser identity completed the Candidate Core minimal lifecycle and reference-selector reads with fallback off. Those results are functional combined-role evidence only. Direct Candidate Create/Update, Call Create, History Create, and Schedule Create/Update negatives were **not attempted**, so no Dataverse-denial claim is made. The intended least-privilege role model and inactive/superseded guard stance remain unchanged. The Phase 5A unassigned-role state below is historical, superseded only by the approved assignment. See the [Phase 5B security report](PHASE_5B_SECURITY_ACCEPTANCE_REPORT.md). `REAL_DATA_STILL_PROHIBITED`; not Production-ready.
+
 ## Phase 5A Candidate Core service boundary (28 October 2026)
 
 **Scope and status:** `PHASE_5A_CANDIDATE_CORE_PRODUCTION_PATH_WORKING_IN_DEV`. Direct synthetic runtime and authenticated `srapp` browser acceptance passed in VN LMV IT only. Browser operations were observed through `os_sr_cact` with fallback off, and 24 receipts reconcile to the four accepted browser Candidates. Replay returned DuplicateReplay without duplicate effects; conflicting replay and stale status were rejected by the separate bounded runner. See the [Phase 5A acceptance report](PHASE_5A_CANDIDATE_CORE_ACCEPTANCE_REPORT.md). This is not effective BSO-user or Production security acceptance.

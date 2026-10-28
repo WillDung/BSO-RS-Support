@@ -32,6 +32,9 @@ $script:ExpectedAttributes = @(
     'os_sr_intv_res',
     'os_sr_intv_recat',
     'os_sr_intv_rnts',
+    'os_sr_intv_stat',
+    'os_sr_intv_rsn',
+    'os_sr_intv_chg',
     'os_sr_intv_cand',
     'os_sr_intv_ta',
     'os_sr_intv_loc'
@@ -52,6 +55,11 @@ $script:ResultAttributes = @(
         Type = 'Memo'
         DisplayName = 'Result Notes'
     }
+)
+$script:LifecycleAttributes = @(
+    [ordered]@{ LogicalName = 'os_sr_intv_stat'; Type = 'Picklist'; DisplayName = 'Scheduling Status' }
+    [ordered]@{ LogicalName = 'os_sr_intv_rsn'; Type = 'Memo'; DisplayName = 'Cancellation / Reschedule Reason' }
+    [ordered]@{ LogicalName = 'os_sr_intv_chg'; Type = 'DateTime'; DisplayName = 'Scheduling Status Changed At' }
 )
 $script:Relations = @(
     [ordered]@{
@@ -84,7 +92,7 @@ $script:WriteCount = 0
 $script:SolutionComponentDispatches = 0
 $script:CurrentStage = 'PARAMETERS'
 $script:WrittenPaths = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-$script:MaximumWrites = 7
+$script:MaximumWrites = 10
 
 function New-Label {
     param([Parameter(Mandatory)][string]$Text)
@@ -206,6 +214,66 @@ function New-ResultNotesAttribute {
     }
 }
 
+function New-SchedulingLifecycleAttribute {
+    param([Parameter(Mandatory)][string]$LogicalName)
+    switch ($LogicalName) {
+        'os_sr_intv_stat' {
+            $options = @('Proposed', 'Scheduled', 'Cancelled', 'Superseded') | ForEach-Object {
+                [ordered]@{
+                    '@odata.type' = 'Microsoft.Dynamics.CRM.OptionMetadata'
+                    Value = $null
+                    Label = New-Label -Text $_
+                }
+            }
+            return [ordered]@{
+                '@odata.type' = 'Microsoft.Dynamics.CRM.PicklistAttributeMetadata'
+                AttributeType = 'Picklist'
+                AttributeTypeName = [ordered]@{ Value = 'PicklistType' }
+                SchemaName = 'os_sr_intv_stat'
+                DisplayName = New-Label -Text 'Scheduling Status'
+                RequiredLevel = New-RequiredLevel
+                IsPrimaryName = $false
+                IsAuditEnabled = New-AuditSetting
+                OptionSet = [ordered]@{
+                    '@odata.type' = 'Microsoft.Dynamics.CRM.OptionSetMetadata'
+                    IsGlobal = $false
+                    OptionSetType = 'Picklist'
+                    Options = $options
+                }
+            }
+        }
+        'os_sr_intv_rsn' {
+            return [ordered]@{
+                '@odata.type' = 'Microsoft.Dynamics.CRM.MemoAttributeMetadata'
+                AttributeType = 'Memo'
+                AttributeTypeName = [ordered]@{ Value = 'MemoType' }
+                SchemaName = 'os_sr_intv_rsn'
+                DisplayName = New-Label -Text 'Cancellation / Reschedule Reason'
+                RequiredLevel = New-RequiredLevel
+                Format = 'Text'
+                MaxLength = 1000
+                IsPrimaryName = $false
+                IsAuditEnabled = New-AuditSetting
+            }
+        }
+        'os_sr_intv_chg' {
+            return [ordered]@{
+                '@odata.type' = 'Microsoft.Dynamics.CRM.DateTimeAttributeMetadata'
+                AttributeType = 'DateTime'
+                AttributeTypeName = [ordered]@{ Value = 'DateTimeType' }
+                SchemaName = 'os_sr_intv_chg'
+                DisplayName = New-Label -Text 'Scheduling Status Changed At'
+                RequiredLevel = New-RequiredLevel
+                Format = 'DateAndTime'
+                DateTimeBehavior = [ordered]@{ Value = 'UserLocal' }
+                IsPrimaryName = $false
+                IsAuditEnabled = New-AuditSetting
+            }
+        }
+        default { throw 'Scheduling lifecycle field is outside the fixed provisioning allowlist.' }
+    }
+}
+
 function New-TablePayload {
     $round = [ordered]@{
         '@odata.type' = 'Microsoft.Dynamics.CRM.PicklistAttributeMetadata'
@@ -312,6 +380,9 @@ function Get-Plan {
             [ordered]@{ LogicalName = 'os_sr_intv_res'; Type = 'Local Choice'; Required = $false; Options = @('Pending', 'Pass', 'Fail') }
             [ordered]@{ LogicalName = 'os_sr_intv_recat'; Type = 'DateTime UserLocal'; Required = $false }
             [ordered]@{ LogicalName = 'os_sr_intv_rnts'; Type = 'Memo'; Required = $false; MaxLength = 1000 }
+            [ordered]@{ LogicalName = 'os_sr_intv_stat'; Type = 'Local Choice'; Required = $false; Options = @('Proposed', 'Scheduled', 'Cancelled', 'Superseded') }
+            [ordered]@{ LogicalName = 'os_sr_intv_rsn'; Type = 'Memo'; Required = $false; MaxLength = 1000 }
+            [ordered]@{ LogicalName = 'os_sr_intv_chg'; Type = 'DateTime UserLocal'; Required = $false }
         )
         Relationships = @($script:Relations | ForEach-Object {
             [ordered]@{
@@ -522,11 +593,14 @@ function Assert-WriteAllowlist {
     }
     elseif ($Method -ceq 'POST' -and
         $Path -ceq "EntityDefinitions(LogicalName='$script:TableName')/Attributes") {
-        $definition = @($script:ResultAttributes | Where-Object LogicalName -CEQ $Body.SchemaName)
+        $definition = @($script:ResultAttributes + $script:LifecycleAttributes | Where-Object LogicalName -CEQ $Body.SchemaName)
         $typeMap = @{
             os_sr_intv_res = 'Microsoft.Dynamics.CRM.PicklistAttributeMetadata'
             os_sr_intv_recat = 'Microsoft.Dynamics.CRM.DateTimeAttributeMetadata'
             os_sr_intv_rnts = 'Microsoft.Dynamics.CRM.MemoAttributeMetadata'
+            os_sr_intv_stat = 'Microsoft.Dynamics.CRM.PicklistAttributeMetadata'
+            os_sr_intv_rsn = 'Microsoft.Dynamics.CRM.MemoAttributeMetadata'
+            os_sr_intv_chg = 'Microsoft.Dynamics.CRM.DateTimeAttributeMetadata'
         }
         $approved = $definition.Count -eq 1 -and
             $Body.DisplayName.LocalizedLabels[0].Label -ceq $definition[0].DisplayName -and
@@ -547,6 +621,21 @@ function Assert-WriteAllowlist {
             $approved = [string]$Body.RequiredLevel.Value -ceq 'None' -and
                 [int]$Body.MaxLength -eq 1000
         }
+        elseif ($approved -and $Body.SchemaName -ceq 'os_sr_intv_stat') {
+            $labels = @($Body.OptionSet.Options | ForEach-Object { [string]$_.Label.LocalizedLabels[0].Label } | Sort-Object)
+            $approved = $Body.OptionSet.IsGlobal -eq $false -and
+                [string]$Body.RequiredLevel.Value -ceq 'None' -and
+                ($labels -join '|') -ceq 'Cancelled|Proposed|Scheduled|Superseded'
+        }
+        elseif ($approved -and $Body.SchemaName -ceq 'os_sr_intv_rsn') {
+            $approved = [string]$Body.RequiredLevel.Value -ceq 'None' -and
+                [int]$Body.MaxLength -eq 1000
+        }
+        elseif ($approved -and $Body.SchemaName -ceq 'os_sr_intv_chg') {
+            $approved = [string]$Body.DateTimeBehavior.Value -ceq 'UserLocal' -and
+                [string]$Body.Format -ceq 'DateAndTime' -and
+                [string]$Body.RequiredLevel.Value -ceq 'None'
+        }
     }
     elseif ($Method -ceq 'POST' -and $Path -ceq 'RelationshipDefinitions') {
         $relation = @($script:Relations | Where-Object SchemaName -CEQ $Body.SchemaName)
@@ -565,7 +654,7 @@ function Assert-WriteAllowlist {
             [string]$Body['@odata.type'] -ceq 'Microsoft.Dynamics.CRM.LookupAttributeMetadata' -and
             $Body.IsAuditEnabled.Value -eq $true
     }
-    if (-not $approved) { throw 'Metadata request is outside the fixed Phase 4C allowlist.' }
+    if (-not $approved) { throw 'Metadata request is outside the fixed Phase 4C/4E allowlist.' }
     $script:WriteCount++
     $null = $script:WrittenPaths.Add($writeIdentity)
 }
@@ -695,6 +784,46 @@ function Assert-InterviewResultAttributes {
     }
 }
 
+function Assert-SchedulingLifecycleAttributes {
+    $choiceRows = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$script:TableName')/Attributes/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?`$select=LogicalName,RequiredLevel,IsAuditEnabled&`$filter=LogicalName%20eq%20%27os_sr_intv_stat%27&`$expand=OptionSet")
+    $labels = @()
+    $values = @()
+    if ($choiceRows.Count -eq 1) {
+        $labels = @($choiceRows[0].OptionSet.Options | ForEach-Object { [string]$_.Label.UserLocalizedLabel.Label } | Sort-Object)
+        $values = @($choiceRows[0].OptionSet.Options | ForEach-Object { [int]$_.Value })
+    }
+    if ($choiceRows.Count -ne 1 -or $choiceRows[0].OptionSet.IsGlobal -ne $false -or
+        [string]$choiceRows[0].OptionSet.OptionSetType -cne 'Picklist' -or
+        ($labels -join '|') -cne 'Cancelled|Proposed|Scheduled|Superseded' -or
+        $values.Count -ne 4 -or @($values | Where-Object { $_ -le 0 }).Count -gt 0 -or
+        @($values | Select-Object -Unique).Count -ne 4 -or
+        [string]$choiceRows[0].RequiredLevel.Value -cne 'None' -or
+        $choiceRows[0].IsAuditEnabled.Value -ne $true) {
+        throw 'Scheduling Status must be an optional audited local Choice with exactly Proposed, Scheduled, Cancelled, and Superseded.'
+    }
+    $reason = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$script:TableName')/Attributes/Microsoft.Dynamics.CRM.MemoAttributeMetadata?`$select=LogicalName,MaxLength,RequiredLevel,IsAuditEnabled&`$filter=LogicalName%20eq%20%27os_sr_intv_rsn%27")
+    if ($reason.Count -ne 1 -or [int]$reason[0].MaxLength -ne 1000 -or
+        [string]$reason[0].RequiredLevel.Value -cne 'None' -or
+        $reason[0].IsAuditEnabled.Value -ne $true) {
+        throw 'Cancellation / Reschedule Reason must be optional audited multiline text with max length 1000.'
+    }
+    $changedAt = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$script:TableName')/Attributes/Microsoft.Dynamics.CRM.DateTimeAttributeMetadata?`$select=LogicalName,Format,DateTimeBehavior,RequiredLevel,IsAuditEnabled&`$filter=LogicalName%20eq%20%27os_sr_intv_chg%27")
+    if ($changedAt.Count -ne 1 -or [string]$changedAt[0].Format -cne 'DateAndTime' -or
+        [string]$changedAt[0].DateTimeBehavior.Value -cne 'UserLocal' -or
+        [string]$changedAt[0].RequiredLevel.Value -cne 'None' -or
+        $changedAt[0].IsAuditEnabled.Value -ne $true) {
+        throw 'Scheduling Status Changed At must be optional audited User Local Date/Time.'
+    }
+    [pscustomobject]@{
+        ChoiceValues = [ordered]@{
+            Proposed = [int]($choiceRows[0].OptionSet.Options | Where-Object { $_.Label.UserLocalizedLabel.Label -ceq 'Proposed' } | Select-Object -ExpandProperty Value -First 1)
+            Scheduled = [int]($choiceRows[0].OptionSet.Options | Where-Object { $_.Label.UserLocalizedLabel.Label -ceq 'Scheduled' } | Select-Object -ExpandProperty Value -First 1)
+            Cancelled = [int]($choiceRows[0].OptionSet.Options | Where-Object { $_.Label.UserLocalizedLabel.Label -ceq 'Cancelled' } | Select-Object -ExpandProperty Value -First 1)
+            Superseded = [int]($choiceRows[0].OptionSet.Options | Where-Object { $_.Label.UserLocalizedLabel.Label -ceq 'Superseded' } | Select-Object -ExpandProperty Value -First 1)
+        }
+    }
+}
+
 function New-ResultAttributePayload {
     param([Parameter(Mandatory)][string]$LogicalName)
     switch ($LogicalName) {
@@ -743,6 +872,41 @@ function Ensure-InterviewResultAttributes {
         }
     }
     $null = Assert-InterviewResultAttributes
+}
+
+function Ensure-SchedulingLifecycleAttributes {
+    $existing = @(Get-TableAttributes | Where-Object SchemaName -in @($script:LifecycleAttributes | ForEach-Object LogicalName))
+    foreach ($attribute in $existing) {
+        $definition = @($script:LifecycleAttributes | Where-Object LogicalName -CEQ $attribute.SchemaName)
+        if ($definition.Count -ne 1 -or
+            [string]$attribute.LogicalName -cne $attribute.SchemaName -or
+            [string]$attribute.AttributeType -cne $definition[0].Type) {
+            throw "Existing scheduling lifecycle field $($attribute.SchemaName) has unexpected metadata; no changes were sent."
+        }
+    }
+    foreach ($definition in $script:LifecycleAttributes) {
+        $present = @($existing | Where-Object SchemaName -CEQ $definition.LogicalName)
+        if ($present.Count -gt 1) { throw "Duplicate scheduling lifecycle field metadata detected: $($definition.LogicalName)." }
+        if ($present.Count -eq 0) {
+            $script:CurrentStage = "SCHEDULING_LIFECYCLE_ATTRIBUTE_POST_$($definition.LogicalName)"
+            Send-MetadataWrite -Path "EntityDefinitions(LogicalName='$script:TableName')/Attributes" `
+                -Body (New-SchedulingLifecycleAttribute -LogicalName $definition.LogicalName)
+            $readback = $null
+            for ($poll = 0; $poll -lt 6; $poll++) {
+                Start-Sleep -Seconds 5
+                $readback = @(Get-TableAttributes | Where-Object SchemaName -CEQ $definition.LogicalName)
+                if ($readback.Count -eq 1) { break }
+                if ($readback.Count -gt 1) { throw "Duplicate scheduling lifecycle field metadata after write: $($definition.LogicalName)." }
+            }
+            if ($readback.Count -ne 1 -or
+                [string]$readback[0].LogicalName -cne $definition.LogicalName -or
+                [string]$readback[0].AttributeType -cne $definition.Type) {
+                throw "Scheduling lifecycle field $($definition.LogicalName) did not reconcile; do not retry before read-only reconciliation."
+            }
+            $existing += $readback
+        }
+    }
+    $null = Assert-SchedulingLifecycleAttributes
 }
 
 function Assert-Relationship {
@@ -856,6 +1020,7 @@ function Assert-CompleteSchema {
     $metadata = Get-TableMetadata
     $state = Assert-BaseTable -Metadata $metadata
     $resultState = Assert-InterviewResultAttributes
+    $lifecycleState = Assert-SchedulingLifecycleAttributes
     $relationships = @(Get-RelationshipRows)
     foreach ($relation in $script:Relations) {
         Assert-Relationship -Relation $relation -Rows $relationships
@@ -872,6 +1037,7 @@ function Assert-CompleteSchema {
         PrimaryNameAttribute = [string]$metadata.PrimaryNameAttribute
         Round1ChoiceValue = [int]$state.Round1Value
         InterviewResultChoiceValues = $resultState.ChoiceValues
+        SchedulingStatusChoiceValues = $lifecycleState.ChoiceValues
         Fields = @($state.Attributes | ForEach-Object { [string]$_.LogicalName } | Sort-Object)
         Relationships = @($script:Relations | ForEach-Object { [string]$_.SchemaName })
         TableRootInSolution = $true
@@ -922,6 +1088,9 @@ if ($null -eq $table) {
     if ($null -eq $table) { throw 'Interview Schedule creation was not confirmed by readback; do not retry before reconciliation.' }
 }
 $null = Assert-BaseTable -Metadata $table
+
+$script:CurrentStage = 'SCHEDULING_LIFECYCLE_ATTRIBUTE_PROVISIONING'
+Ensure-SchedulingLifecycleAttributes
 
 $script:CurrentStage = 'INTERVIEW_RESULT_ATTRIBUTE_PROVISIONING'
 Ensure-InterviewResultAttributes

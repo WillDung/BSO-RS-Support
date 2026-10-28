@@ -34,9 +34,15 @@ The role remains unassigned; no user or team role membership was changed. The fi
 
 ## Phase 4D Interview Schedule result privilege gap (28 October 2026)
 
-The DEV result implementation updates an existing Interview Schedule row before changing Candidate status. The current unassigned role has Interview Schedule Create, Read, Append, and Append To at User (Basic) depth, but Write remains None; therefore, the role does not have the table privilege required to record Pass/Fail. No privilege was broadened and no user/team membership was changed. A minimum User (Basic) Write grant is a prerequisite for BSO-role acceptance and requires separately authorized security scope; do not treat the successful browser branches, which did not validate effective BSO access, as proof of role usability. `Delete`, `Assign`, and `Share` remain None. The role remains unassigned.
+At the Phase 4D role readback, the DEV result implementation updated an existing Interview Schedule row before changing Candidate status, but the unassigned role had no Interview Schedule Write privilege. The subsequent Phase 4E section records the separately scoped minimum User (Basic) Write grant. This historical Phase 4D gap must not be read as the current privilege state.
 
-Browser acceptance for both synthetic result branches and persistence-after-reload is complete in the DEV app, but it does not close this role privilege gap. The first two synthetic acceptance fixtures retain persisted result rows after readback warnings and remain `Round 1 Scheduled` without terminal history; no retry or compensation was performed. See [Current State](CURRENT_STATE.md) for final states and live acceptance-scope counts.
+Browser acceptance for both synthetic result branches and persistence-after-reload is complete in the DEV app, but it did not test effective access under the BSO role. The first two synthetic acceptance fixtures retain persisted result rows after readback warnings and remain `Round 1 Scheduled` without terminal history; no retry or compensation was performed. See [Current State](CURRENT_STATE.md) for final states and live acceptance-scope counts.
+
+## Phase 4E Interview Schedule privilege correction (28 October 2026)
+
+The role was re-read after granting only Interview Schedule Write at User (Basic) depth. Interview Schedule Create, Read, Write, Append, and Append To are now all User (Basic); Delete, Assign, and Share remain None. The four existing Phase 4D privileges and unrelated table privileges were not changed. The `BSO-RS Support - BSO` role remains unassigned, with zero user/team assignments. This closes the missing table privilege for the visible result and reschedule/cancellation writes, but effective access with a BSO identity has not been tested; do not treat the browser acceptance under the current authenticated session as proof of role usability.
+
+The role's previously noted platform defaults remain `REVIEW BEFORE PRODUCTION`; no admin, customization, or publish privileges were added. Keep the role unassigned, real data prohibited, and Candidate Core production backend pending. See [Current State](CURRENT_STATE.md) for the Phase 4E scope and acceptance evidence.
 
 ## Current Candidate Core trust contract (26 October 2026)
 

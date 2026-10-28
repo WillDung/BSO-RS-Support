@@ -1,5 +1,21 @@
 # Current State
 
+## Phase 4E Round 1 Reschedule and Cancellation DEV Slice (2026-10-28)
+
+**Result:** `PHASE_4E_RESCHEDULE_CANCEL_DEV_WORKING`; `ROUND1_RESCHEDULE_TO_NEED_CALL_WORKING`; `ROUND1_CANCELLATION_TO_NEED_CALL_WORKING`; `SCHEDULING_HISTORY_PRESERVED`; `BSO_INTERVIEW_SCHEDULE_PRIVILEGES_CORRECTED_UNASSIGNED`; `VN_LMV_IT_PROTECT_CANDIDATE_CORE_DEV_KILL_SWITCH_ACTIVE`; `REAL_DATA_PROHIBITED`; `CANDIDATE_CORE_PRODUCTION_BACKEND_REMAINS_PENDING`.
+
+The existing `os_sr_intv` table was extended in VN LMV IT; no second scheduling table was created. Its optional schedule lifecycle Choice supports Proposed, Scheduled, Cancelled, and Superseded. Existing rows with no lifecycle value are displayed and treated as Scheduled for backward compatibility. A reschedule preserves the old row as Superseded, stores the required reason and changed timestamp, creates a Proposed replacement, then returns the Candidate to `Need Call Candidate`. The Proposed row is not current/active while the Candidate is being re-contacted. On a later successful Schedule Round 1 action, the BSO explicitly reselects the TA and Location and re-enters the date/time; the Proposed row is read back and promoted to Scheduled rather than duplicated. Cancellation preserves the row as Cancelled, stores its reason/time, and returns the Candidate to `Need Call Candidate`. Resulted Pass/Fail schedules, terminal Candidates, ambiguous schedule states, and multiple active/proposed rows fail closed. All Round 1 rows remain visible newest first.
+
+Authenticated-browser acceptance used fresh synthetic Candidates `CAND-00001023` and `CAND-00001024`. Candidate 1023 was rescheduled, returned to `Need Call Candidate`, re-contacted, and completed a new Round 1 schedule; after reload, its Superseded and Scheduled rows, reasons/timestamps, Candidate state, and Status History were visible. Candidate 1024 was cancelled; after reload, its Cancelled row, reason/timestamp, `Need Call Candidate` status, and Status History were visible. Acceptance-scope live readback for these two Candidates is Candidate / Call Log / Status History / Interview Schedule / Receipt = **2 / 3 / 11 / 3 / 0**. Final states: 1023 `Round 1 Scheduled` with one Superseded and one Scheduled row; 1024 `Need Call Candidate` with one Cancelled row.
+
+The `BSO-RS Support - BSO` role was re-read after adding only Interview Schedule Write at User (Basic). Its Interview Schedule Create, Read, Write, Append, and Append To privileges are now Basic; Delete, Assign, and Share remain None. The role remains unassigned with zero user/team assignments. Effective access using an assigned BSO identity has not been tested; other role privileges and memberships were not changed.
+
+Browser writes remain nontransactional DEV technical debt. If a schedule state persists but a later Candidate/History write fails, the UI warns and refreshes; it does not automatically retry, compensate, delete historical schedules, or fabricate Status History. The scoped Candidate Console refresh changed the HTML and JavaScript resources, left CSS unchanged, and used one `PublishXml` scoped to `srapp` and its exact resources; no Site Map patch or `PublishAllXml` occurred.
+
+`ALM_SOURCE_SNAPSHOT_DEFERRED_DEV_ORIGIN_GUARD` remains deferred: the prior unmanaged export captured the pre-existing tenant-specific DEV origin guard, and the guard was not weakened or exported again. This is not a Phase 4E blocker. All 50 `ProtectCandidateCore` registrations remain inactive under the DEV kill switch; Candidate Core production backend remains pending; real data remains prohibited. No package deployment, commit, or push occurred.
+
+**Next phase boundary:** `PHASE_5_PRODUCTION_HARDENING_AND_SECURITY_ACCEPTANCE` is next, but is not started by this result.
+
 ## Phase 4D Round 1 Interview Results DEV Slice (2026-10-28)
 
 **Result:** `PHASE_4D_INTERVIEW_RESULT_DEV_WORKING`; `ROUND1_PASS_TO_OFFER_EXTENDED_WORKING`; `ROUND1_FAIL_TO_CANDIDATE_FAILED_WORKING`; `INTERVIEW_RESULT_PERSISTENCE_VERIFIED`; `BSO_SECURITY_ROLE_REMAINS_UNASSIGNED`; `VN_LMV_IT_PROTECT_CANDIDATE_CORE_DEV_KILL_SWITCH_ACTIVE`; `REAL_DATA_PROHIBITED`; `CANDIDATE_CORE_PRODUCTION_BACKEND_REMAINS_PENDING`. The existing `os_sr_intv` result fields and exact `srapp` Candidate Console resources are present in VN LMV IT. The authenticated-browser acceptance completed both result branches and verified persisted details and history after a full page reload.
@@ -14,13 +30,13 @@ Live aggregate readback for all four Phase 4D synthetic Candidates: Candidate / 
 
 The app refresh updated the exact changed web resources and performed one `PublishXml` scoped to `srapp` and its three web resources; no Site Map PATCH, `PublishAllXml`, package deployment, or automatic retry occurred. All 50 `ProtectCandidateCore` registrations remain inactive under the DEV kill switch. `ALM_SOURCE_SNAPSHOT_DEFERRED_DEV_ORIGIN_GUARD` remains deferred and is not a Phase 4D blocker.
 
-**Next:** resolve the Interview Schedule Write privilege gap and validate effective access only under separately authorized security scope. Phase 4D app workflow acceptance is complete; BSO-role acceptance remains unresolved. Do not start `PHASE_4E_RESCHEDULE_AND_CANCELLATION_DEV_SLICE` automatically.
+**At Phase 4D closure:** the Interview Schedule Write privilege gap remained open and effective BSO access was not verified. Phase 4E below records the later minimum Write grant; the role remains unassigned and effective BSO access remains unverified.
 
 ## Phase 4C Round 1 Scheduling DEV Slice (2026-10-27)
 
 **Result:** `PHASE_4C_ROUND1_SCHEDULING_DEV_WORKING`; `SCHEDULING_STORAGE_PROVISIONED`; `ROUND1_SCHEDULE_PERSISTENCE_VERIFIED`; `ROUND1_SCHEDULED_STATUS_VISIBLE`; `BSO_SECURITY_ROLE_UPDATED_UNASSIGNED`; `VN_LMV_IT_PROTECT_CANDIDATE_CORE_DEV_KILL_SWITCH_ACTIVE`; `CANDIDATE_CORE_PRODUCTION_BACKEND_REMAINS_PENDING`; `REAL_DATA_PROHIBITED`.
 
-In VN LMV IT, the approved DEV-only `os_sr_intv` Interview Schedule table is in `os_sr_bso_rs_support`. It is UserOwned and table-audited, with required Candidate, TA, and Location lookups; Round 1 local Choice value `100000000`; User Local Start and End Date/Time; optional Notes; and no scheduling-status, result, offer, reschedule, or calendar fields. The environment-level audit setting remains unchanged and is not represented as enabled.
+At Phase 4C, the approved DEV-only `os_sr_intv` Interview Schedule table in `os_sr_bso_rs_support` was UserOwned and table-audited, with required Candidate, TA, and Location lookups; Round 1 local Choice value `100000000`; User Local Start and End Date/Time; optional Notes; and no scheduling-status, result, offer, reschedule, or calendar fields. The environment-level audit setting remains unchanged and is not represented as enabled.
 
 The published Candidate Management resource in exact `srapp` now persists the schedule and confirms it by readback before advancing the Candidate to `Round 1 Scheduled` and creating Status History. On any uncertain/partial direct-write outcome it does not automatically retry, compensate, or fabricate History; it reports a safe warning and refreshes server state. This remains DEV-only nontransactional technical debt. The UI requires an explicit End Time rather than assuming a duration and states that no calendar availability check or booking occurs.
 
@@ -28,11 +44,11 @@ Browser acceptance used one fresh synthetic Candidate with the existing `[DEV]` 
 
 The `BSO-RS Support - BSO` role now has only Create, Read, Append, and Append To on Interview Schedule at User (Basic) depth; Write, Delete, Assign, and Share remain None. The role remains unassigned. Its platform-default privileges remain `REVIEW BEFORE PRODUCTION`. No user/team role assignment was changed.
 
-The Candidate Console refresh used two web-resource PATCHes, no Site Map PATCH, one scoped `PublishXml` for `srapp` and its three exact web resources, zero `PublishAllXml`, and zero automatic retries. No package was deployed. All 50 `ProtectCandidateCore` registrations remain inactive under the authorized DEV kill switch; Candidate Core production backend remains pending. No Phase 4D work has started.
+The Candidate Console refresh used two web-resource PATCHes, no Site Map PATCH, one scoped `PublishXml` for `srapp` and its three exact web resources, zero `PublishAllXml`, and zero automatic retries. No package was deployed. All 50 `ProtectCandidateCore` registrations remain inactive under the authorized DEV kill switch; Candidate Core production backend remains pending. Phase 4D had not started at this Phase 4C closure point; it was subsequently completed as documented above.
 
 **ALM/privacy follow-up:** the unmanaged solution export was not retained in the repository. Its unpacked web resource contained the existing environment-specific origin used by the DEV-only target guard. Do not persist another source snapshot or replace that guard until an approved non-tenant-specific target-validation approach is available. No import, deployment, commit, or push occurred.
 
-**Next:** `PHASE_4D_INTERVIEW_RESULT_PASS_FAIL_DEV_SLICE` is the proposed next phase; it is not started or approved by this result. Keep real data prohibited, do not assign the BSO role, and do not treat this direct-write scheduling slice as production-ready.
+**At Phase 4C closure:** `PHASE_4D_INTERVIEW_RESULT_PASS_FAIL_DEV_SLICE` was the proposed next phase; subsequent completion is recorded in the newer sections above. Keep real data prohibited and do not treat this direct-write scheduling slice as production-ready.
 
 ## Phase 4B Reference and Security Validation (2026-10-27)
 

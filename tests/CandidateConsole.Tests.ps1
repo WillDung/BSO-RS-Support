@@ -63,7 +63,11 @@ Assert-Test ($html.Contains('id="scheduling-candidate"') -and
 Assert-Test ($html.Contains('id="schedule-history-rows"') -and
     $html.Contains('<th>Date/Time</th>') -and
     $script.Contains('function renderSchedulingDetails') -and
-    $script.Contains('Multiple Round 1 schedule rows exist')) 'Show the latest persisted schedule and flag duplicate rows'
+    $html.Contains('<th>Scheduling Status</th>') -and
+    $html.Contains('<th>Status Changed At</th>') -and
+    $html.Contains('<th>Cancellation / Reschedule Reason</th>') -and
+    $script.Contains('&$orderby=createdon desc') -and
+    -not $script.Contains('&$top=2')) 'Show all Round 1 schedule history newest-first'
 Assert-Test ($html.Contains('id="save-schedule"') -and
     $html.Contains('DEV-only persistence. No calendar availability check or calendar booking is performed.') -and
     $script.Contains('round1: 100000000') -and
@@ -87,7 +91,7 @@ Assert-Test ($scheduleStart -ge 0 -and $scheduleEnd -gt $scheduleStart -and
     $historyCreateIndex -gt $candidateUpdateIndex -and
     $scheduleFlow.Contains('[c.status]: STATUS.round1Scheduled')) 'Persist and read back schedule before Candidate status and Status History'
 Assert-Test ($script.Contains('scheduleRetryBlockedCandidateId') -and
-    $script.Contains('A Round 1 schedule already exists') -and
+    $script.Contains('Round 1 schedule state changed or is ambiguous') -and
     $script.Contains('No compensation or retry was performed')) 'Block duplicate submissions and report nontransactional partial failures without compensation'
 Assert-Test (-not $script.Contains('WebApi.deleteRecord') -and
     -not $script.Contains('PublishAllXml')) 'Do not compensate by deleting persisted schedules or publish globally'
@@ -105,7 +109,7 @@ Assert-Test ($script.Contains('offerExtended: 100010004') -and
     $script.Contains('pending: 100000000') -and
     $script.Contains('pass: 100000001') -and
     $script.Contains('fail: 100000002')) 'Use status and result values reconciled from authoritative Choice metadata'
-Assert-Test ($script.Contains('rows.length === 1') -and
+Assert-Test ($script.Contains('activeSchedules.length === 1') -and
     $script.Contains('selectedCandidate[TABLES.candidate.status] === STATUS.round1Scheduled') -and
     $script.Contains('isPendingInterviewResult(selectedSchedule)') -and
     $script.Contains('resultRetryBlockedCandidateId !== candidateId')) 'Show result action only for one persisted Round 1 schedule with Pending or unset result'
@@ -136,6 +140,52 @@ Assert-Test ($resultFlow.Contains('resultRetryBlockedCandidateId = candidateId')
 Assert-Test ($script.Contains('RecordRound1Pass') -and
     $script.Contains('RecordRound1Fail') -and
     $script.Contains('!canRecordInterviewResult()')) 'Record distinct Pass/Fail history operations and protect against duplicate submission'
+Assert-Test ($html.Contains('id="reschedule-round1-button"') -and
+    $html.Contains('id="cancel-round1-button"') -and
+    $html.Contains('id="scheduling-reason"') -and
+    $html.Contains('id="cancellation-reason"') -and
+    $html.Contains('maxlength="1000" required') -and
+    $script.Contains('canManageSchedule()') -and
+    $script.Contains('isPendingInterviewResult(selectedSchedule)')) 'Gate reschedule and cancellation to one active pending schedule and require reason fields'
+$rescheduleStart = $script.IndexOf('async function rescheduleRound1()')
+$rescheduleEnd = $script.IndexOf('async function cancelRound1(event)', $rescheduleStart)
+$rescheduleFlow = $script.Substring($rescheduleStart, $rescheduleEnd - $rescheduleStart)
+$oldScheduleUpdateIndex = $rescheduleFlow.IndexOf('updateRecord(interview.logicalName')
+$oldScheduleReadbackIndex = $rescheduleFlow.IndexOf('const superseded = await xrm().WebApi.retrieveRecord', $oldScheduleUpdateIndex)
+$proposalCreateIndex = $rescheduleFlow.IndexOf('createRecord(interview.logicalName', $oldScheduleReadbackIndex)
+$proposalReadbackIndex = $rescheduleFlow.IndexOf('const proposal = await xrm().WebApi.retrieveRecord', $proposalCreateIndex)
+$rescheduleCandidateUpdateIndex = $rescheduleFlow.IndexOf('updateRecord(c.logicalName', $proposalReadbackIndex)
+$rescheduleHistoryIndex = $rescheduleFlow.IndexOf('createRecord(history.logicalName', $rescheduleCandidateUpdateIndex)
+Assert-Test ($oldScheduleUpdateIndex -ge 0 -and
+    $oldScheduleReadbackIndex -gt $oldScheduleUpdateIndex -and
+    $proposalCreateIndex -gt $oldScheduleReadbackIndex -and
+    $proposalReadbackIndex -gt $proposalCreateIndex -and
+    $rescheduleCandidateUpdateIndex -gt $proposalReadbackIndex -and
+    $rescheduleHistoryIndex -gt $rescheduleCandidateUpdateIndex -and
+    $rescheduleFlow.Contains('[interview.status]: SCHEDULE_STATUS.superseded') -and
+    $rescheduleFlow.Contains('[c.status]: STATUS.needCall') -and
+    $rescheduleFlow.Contains('[interview.status]: SCHEDULE_STATUS.proposed')) 'Preserve/supersede old schedule and read back a Proposed replacement before returning Candidate to Need Call'
+$cancelStart = $script.IndexOf('async function cancelRound1(event)')
+$cancelEnd = $script.IndexOf('async function loadTableMetadata', $cancelStart)
+$cancelFlow = $script.Substring($cancelStart, $cancelEnd - $cancelStart)
+$cancelUpdateIndex = $cancelFlow.IndexOf('updateRecord(interview.logicalName')
+$cancelReadbackIndex = $cancelFlow.IndexOf('const cancelled = await xrm().WebApi.retrieveRecord', $cancelUpdateIndex)
+$cancelCandidateUpdateIndex = $cancelFlow.IndexOf('updateRecord(c.logicalName', $cancelReadbackIndex)
+$cancelHistoryIndex = $cancelFlow.IndexOf('createRecord(history.logicalName', $cancelCandidateUpdateIndex)
+Assert-Test ($cancelUpdateIndex -ge 0 -and $cancelReadbackIndex -gt $cancelUpdateIndex -and
+    $cancelCandidateUpdateIndex -gt $cancelReadbackIndex -and
+    $cancelHistoryIndex -gt $cancelCandidateUpdateIndex -and
+    $cancelFlow.Contains('[interview.status]: SCHEDULE_STATUS.cancelled') -and
+    $cancelFlow.Contains('[c.status]: STATUS.needCall') -and
+    $cancelFlow.Contains('Cancellation Reason')) 'Read back cancellation before Candidate transition and Status History'
+Assert-Test ($script.Contains('scheduleRows.filter(isActiveSchedule).length === 1') -and
+    $script.Contains('!scheduleRows.some((row) => row[TABLES.interview.status] === SCHEDULE_STATUS.proposed)') -and
+    $script.Contains('SCHEDULE_STATUS.proposed') -and
+    $script.Contains('function isKnownScheduleState') -and
+    $script.Contains('scheduleStatusLabel')) 'Fail closed on ambiguous schedule states and promote only a Proposed replacement after re-contact'
+Assert-Test (-not $script.Contains('WebApi.deleteRecord') -and
+    $script.Contains('Do not retry blindly') -and
+    $script.Contains('No compensation or retry was performed')) 'Preserve schedule history and report partial writes without retry or compensation'
 
 $hash = (Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $version = [regex]::Match($html, 'candidate-console\.js\?v=([0-9a-f]+)')

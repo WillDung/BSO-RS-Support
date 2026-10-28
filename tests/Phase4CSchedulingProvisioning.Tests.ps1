@@ -32,6 +32,9 @@ Assert-Test (@($plan.Fields | Where-Object { $_.LogicalName -in @('os_sr_intv_st
 Assert-Test (@($plan.Fields | Where-Object { $_.LogicalName -ceq 'os_sr_intv_res' -and $_.Type -ceq 'Local Choice' -and -not $_.Required -and (@($_.Options) -join '|') -ceq 'Pending|Pass|Fail' }).Count -eq 1 -and
     @($plan.Fields | Where-Object { $_.LogicalName -ceq 'os_sr_intv_recat' -and $_.Type -ceq 'DateTime UserLocal' -and -not $_.Required }).Count -eq 1 -and
     @($plan.Fields | Where-Object { $_.LogicalName -ceq 'os_sr_intv_rnts' -and $_.Type -ceq 'Memo' -and $_.MaxLength -eq 1000 -and -not $_.Required }).Count -eq 1) 'Plan only includes the three optional interview-result fields'
+Assert-Test (@($plan.Fields | Where-Object { $_.LogicalName -ceq 'os_sr_intv_stat' -and $_.Type -ceq 'Local Choice' -and -not $_.Required -and (@($_.Options) -join '|') -ceq 'Proposed|Scheduled|Cancelled|Superseded' }).Count -eq 1 -and
+    @($plan.Fields | Where-Object { $_.LogicalName -ceq 'os_sr_intv_rsn' -and $_.Type -ceq 'Memo' -and $_.MaxLength -eq 1000 -and -not $_.Required }).Count -eq 1 -and
+    @($plan.Fields | Where-Object { $_.LogicalName -ceq 'os_sr_intv_chg' -and $_.Type -ceq 'DateTime UserLocal' -and -not $_.Required }).Count -eq 1) 'Plan includes only minimal optional scheduling lifecycle metadata'
 Assert-Test (@($plan.Relationships | Where-Object { $_.Parent -in @('os_sr_cand', 'os_sr_ta', 'os_sr_loc') -and $_.Required -and $_.Delete -ceq 'Restrict' }).Count -eq 3) 'Require the Candidate, TA, and Location lookups with restricted deletes'
 Assert-Test ($plan.Writes -eq 0 -and $source.Contains("MaximumRetryCount = 0") -and
     $source.Contains('Retries = 0')) 'Plan and provisioning use no retry'
@@ -53,7 +56,7 @@ Assert-Test ($source.Contains('LookupAttributeMetadata?') -and
     $source.Contains('RequiredLevel,IsAuditEnabled')) 'Read required and audit settings from typed lookup metadata'
 Assert-Test ($source.Contains('$generatedLookupNames') -and
     $source.Contains('"$($_.Lookup)Name"')) 'Exclude only Dataverse-generated lookup name companions from custom field reconciliation'
-Assert-Test ($source.Contains('$script:MaximumWrites = 7') -and
+Assert-Test ($source.Contains('$script:MaximumWrites = 10') -and
     $source.Contains('function Ensure-LookupAudit') -and
     $source.Contains('Send-MetadataWrite -Method PUT') -and
     $source.Contains('function Assert-LookupAudit') -and
@@ -67,6 +70,14 @@ Assert-Test ($source.Contains('function Ensure-InterviewResultAttributes') -and
     $source.Contains('function Assert-InterviewResultAttributes') -and
     $source.Contains('InterviewResultChoiceValues = $resultState.ChoiceValues') -and
     $source.Contains('do not retry before read-only reconciliation')) 'Add the existing-table fields with authoritative metadata readback and no automatic retry'
+Assert-Test ($source.Contains('function Ensure-SchedulingLifecycleAttributes') -and
+    $source.Contains('function Assert-SchedulingLifecycleAttributes') -and
+    $source.Contains('SchedulingStatusChoiceValues = $lifecycleState.ChoiceValues') -and
+    $source.Contains("LogicalName = 'os_sr_intv_stat'") -and
+    $source.Contains("LogicalName = 'os_sr_intv_rsn'") -and
+    $source.Contains("LogicalName = 'os_sr_intv_chg'") -and
+    $source.Contains('Cancellation / Reschedule Reason') -and
+    $source.Contains('Scheduling Status Changed At')) 'Provision and reconcile the audited, minimal lifecycle fields on the existing schedule table'
 Assert-Test ($source.Contains("LogicalName = 'os_sr_intv_res'") -and
     $source.Contains("LogicalName = 'os_sr_intv_recat'") -and
     $source.Contains("LogicalName = 'os_sr_intv_rnts'") -and

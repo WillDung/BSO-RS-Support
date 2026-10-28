@@ -33,6 +33,18 @@
     pass: 100000001,
     fail: 100000002
   };
+  const SCHEDULE_STATUS_LABELS = {
+    100000000: "PROPOSED",
+    100000001: "ACTIVE / SCHEDULED",
+    100000002: "CANCELLED",
+    100000003: "SUPERSEDED"
+  };
+  const SCHEDULE_STATUS = {
+    proposed: 100000000,
+    scheduled: 100000001,
+    cancelled: 100000002,
+    superseded: 100000003
+  };
   const OUTCOME = {
     answered: 100010000,
     noAnswer: 100010001,
@@ -99,12 +111,18 @@
       notes: "os_sr_intv_nts",
       result: "os_sr_intv_res",
       resultRecordedAt: "os_sr_intv_recat",
-      resultNotes: "os_sr_intv_rnts"
+      resultNotes: "os_sr_intv_rnts",
+      status: "os_sr_intv_stat",
+      reason: "os_sr_intv_rsn",
+      changedAt: "os_sr_intv_chg"
     }
   };
 
   let selectedCandidate = null;
   let selectedSchedule = null;
+  let proposedSchedule = null;
+  let scheduleRows = [];
+  let scheduleMode = "new";
   let scheduleRetryBlockedCandidateId = null;
   let resultRetryBlockedCandidateId = null;
   let currentRows = [];
@@ -208,7 +226,13 @@
             Boolean(selectedSchedule) ||
             scheduleRetryBlockedCandidateId === selectedCandidate[TABLES.candidate.id])) ||
         (button.id === "save-interview-result" &&
-          (!selectedCandidate || !canRecordInterviewResult()));
+          (!selectedCandidate || !canRecordInterviewResult())) ||
+        (button.id === "reschedule-round1-button" &&
+          (button.hidden || !canManageSchedule())) ||
+        (button.id === "cancel-round1-button" &&
+          (button.hidden || !canManageSchedule())) ||
+        (button.id === "confirm-cancellation" &&
+          (!selectedCandidate || !canManageSchedule()));
     });
   }
 
@@ -216,6 +240,13 @@
     if (!value) return "";
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? "" : date.toLocaleString();
+  }
+
+  function sameInstant(actual, expected) {
+    const actualTime = Date.parse(actual);
+    const expectedTime = Date.parse(expected);
+    return Number.isFinite(actualTime) && Number.isFinite(expectedTime) &&
+      Math.floor(actualTime / 1000) === Math.floor(expectedTime / 1000);
   }
 
   function formatted(record, attribute, fallback = "") {
@@ -450,50 +481,67 @@
   async function renderSchedulingDetails(candidateId) {
     const interview = TABLES.interview;
     const rows = await retrieveAll(interview.logicalName,
-      `?$select=${[interview.id, interview.round, interview.start, interview.end, interview.notes, interview.ta, interview.location, interview.result, interview.resultRecordedAt, interview.resultNotes].join(",")}` +
+      `?$select=${[interview.id, interview.round, interview.start, interview.end, interview.notes, interview.ta, interview.location, interview.result, interview.resultRecordedAt, interview.resultNotes, interview.status, interview.reason, interview.changedAt, "createdon"].join(",")}` +
       `&$filter=${interview.candidate} eq ${candidateId} and ${interview.round} eq ${interview.round1}` +
-      `&$orderby=${interview.start} desc&$top=2`);
+      `&$orderby=createdon desc`);
     const body = $("schedule-history-rows");
     body.replaceChildren();
-    selectedSchedule = rows[0] || null;
-    if (!selectedSchedule) {
+    scheduleRows = rows;
+    const activeSchedules = rows.filter(isActiveSchedule);
+    const proposedSchedules = rows.filter((row) => row[interview.status] === SCHEDULE_STATUS.proposed);
+    const unknownScheduleStates = rows.some((row) => !isKnownScheduleState(row));
+    selectedSchedule = activeSchedules.length === 1 ? activeSchedules[0] : null;
+    proposedSchedule = proposedSchedules.length === 1 ? proposedSchedules[0] : null;
+    if (!rows.length) {
       const row = document.createElement("tr");
       const cell = appendCell(row, "No Round 1 schedule.");
-      cell.colSpan = 8;
+      cell.colSpan = 12;
       cell.className = "empty";
       body.appendChild(row);
     } else {
-      const names = await Promise.all([
-        getLookupName("os_sr_ta", selectedSchedule[interview.ta]),
-        getLookupName("os_sr_loc", selectedSchedule[interview.location])
-      ]);
-      const row = document.createElement("tr");
-      appendCell(row, choiceLabel(selectedSchedule, interview.round, { [interview.round1]: "Round 1" }));
-      appendCell(row, names[0]);
-      appendCell(row, `${formatDate(selectedSchedule[interview.start])} – ${formatDate(selectedSchedule[interview.end])}`);
-      appendCell(row, names[1]);
-      appendCell(row, selectedSchedule[interview.notes]);
-      appendCell(row, choiceLabel(selectedSchedule, interview.result, INTERVIEW_RESULT_LABELS) || "Pending");
-      appendCell(row, formatDate(selectedSchedule[interview.resultRecordedAt]));
-      appendCell(row, selectedSchedule[interview.resultNotes]);
-      body.appendChild(row);
-      if (rows.length > 1) {
+      const names = await Promise.all(rows.map((schedule) => Promise.all([
+        getLookupName("os_sr_ta", schedule[interview.ta]),
+        getLookupName("os_sr_loc", schedule[interview.location])
+      ])));
+      rows.forEach((schedule, index) => {
+        const row = document.createElement("tr");
+        appendCell(row, choiceLabel(schedule, interview.round, { [interview.round1]: "Round 1" }));
+        appendCell(row, names[index][0]);
+        appendCell(row, `${formatDate(schedule[interview.start])} – ${formatDate(schedule[interview.end])}`);
+        appendCell(row, names[index][1]);
+        appendCell(row, scheduleStatusLabel(schedule));
+        appendCell(row, formatDate(schedule[interview.changedAt]));
+        appendCell(row, schedule[interview.notes]);
+        appendCell(row, schedule[interview.reason]);
+        appendCell(row, formatDate(schedule.createdon));
+        appendCell(row, choiceLabel(schedule, interview.result, INTERVIEW_RESULT_LABELS) || "Pending");
+        appendCell(row, formatDate(schedule[interview.resultRecordedAt]));
+        appendCell(row, schedule[interview.resultNotes]);
+        body.appendChild(row);
+      });
+      if (activeSchedules.length > 1 || proposedSchedules.length > 1 || unknownScheduleStates) {
         const warning = document.createElement("tr");
-        const cell = appendCell(warning, "Multiple Round 1 schedule rows exist; showing the newest. Reconcile before creating another.");
-        cell.colSpan = 8;
+        const cell = appendCell(warning, "Schedule state is ambiguous. No scheduling action is available until the records are reconciled.");
+        cell.colSpan = 12;
         cell.className = "empty";
         body.appendChild(warning);
       }
     }
     const canSchedule = selectedCandidate &&
       selectedCandidate[TABLES.candidate.status] === STATUS.waitingManualScheduling &&
-      isSyntheticCandidate(selectedCandidate);
-    $("schedule-round1-button").disabled = busy || !canSchedule || Boolean(selectedSchedule) ||
+      isSyntheticCandidate(selectedCandidate) &&
+      activeSchedules.length === 0 &&
+      proposedSchedules.length <= 1 &&
+      !unknownScheduleStates;
+    $("schedule-round1-button").hidden = !canSchedule;
+    $("schedule-round1-button").disabled = busy || !canSchedule ||
       scheduleRetryBlockedCandidateId === candidateId;
     const canRecord = selectedCandidate &&
       selectedCandidate[TABLES.candidate.status] === STATUS.round1Scheduled &&
       isSyntheticCandidate(selectedCandidate) &&
-      rows.length === 1 &&
+      activeSchedules.length === 1 &&
+      proposedSchedules.length === 0 &&
+      !unknownScheduleStates &&
       isPendingInterviewResult(selectedSchedule) &&
       resultRetryBlockedCandidateId !== candidateId;
     $("record-interview-result-button").hidden = !canRecord;
@@ -506,12 +554,52 @@
       $("record-interview-result-button").removeAttribute("title");
     }
     if (selectedSchedule) {
-      $("schedule-round1-button").title = "A Round 1 schedule already exists. Reconcile the Candidate state before scheduling again.";
+      $("schedule-round1-button").title = "An active Round 1 schedule already exists.";
     } else if (scheduleRetryBlockedCandidateId === candidateId) {
       $("schedule-round1-button").title = "A previous submission needs reconciliation. Reload before trying again.";
     } else {
       $("schedule-round1-button").removeAttribute("title");
     }
+    const canManage = Boolean(selectedCandidate &&
+      selectedCandidate[TABLES.candidate.status] === STATUS.round1Scheduled &&
+      isSyntheticCandidate(selectedCandidate) &&
+      activeSchedules.length === 1 &&
+      proposedSchedules.length === 0 &&
+      !unknownScheduleStates &&
+      isPendingInterviewResult(selectedSchedule));
+    $("reschedule-round1-button").hidden = !canManage;
+    $("cancel-round1-button").hidden = !canManage;
+    $("reschedule-round1-button").disabled = busy || !canManage;
+    $("cancel-round1-button").disabled = busy || !canManage;
+  }
+
+  function isActiveSchedule(schedule) {
+    const status = schedule && schedule[TABLES.interview.status];
+    return status == null || status === SCHEDULE_STATUS.scheduled;
+  }
+
+  function isKnownScheduleState(schedule) {
+    const status = schedule && schedule[TABLES.interview.status];
+    return status == null || Object.values(SCHEDULE_STATUS).includes(status);
+  }
+
+  function scheduleStatusLabel(schedule) {
+    const status = schedule[TABLES.interview.status];
+    return status == null
+      ? "ACTIVE / SCHEDULED"
+      : (SCHEDULE_STATUS_LABELS[status] ||
+        choiceLabel(schedule, TABLES.interview.status, SCHEDULE_STATUS_LABELS));
+  }
+
+  function canManageSchedule() {
+    return Boolean(selectedCandidate &&
+      selectedCandidate[TABLES.candidate.status] === STATUS.round1Scheduled &&
+      isSyntheticCandidate(selectedCandidate) &&
+      scheduleRows.filter(isActiveSchedule).length === 1 &&
+      !scheduleRows.some((row) => !isKnownScheduleState(row)) &&
+      !scheduleRows.some((row) => row[TABLES.interview.status] === SCHEDULE_STATUS.proposed) &&
+      selectedSchedule &&
+      isPendingInterviewResult(selectedSchedule));
   }
 
   async function openCandidate(candidateId) {
@@ -521,10 +609,15 @@
         await xrm().WebApi.retrieveRecord(TABLES.candidate.logicalName, candidateId);
       selectedCandidate = candidate;
       selectedSchedule = null;
+      proposedSchedule = null;
+      scheduleRows = [];
       $("scheduling-panel").hidden = true;
       $("interview-result-panel").hidden = true;
+      $("cancellation-panel").hidden = true;
       $("schedule-round1-button").hidden = true;
       $("record-interview-result-button").hidden = true;
+      $("reschedule-round1-button").hidden = true;
+      $("cancel-round1-button").hidden = true;
       $("detail-heading").textContent = candidate[TABLES.candidate.name] || "Candidate";
       $("detail-panel").hidden = false;
       const terminal = [STATUS.offerExtended, STATUS.candidateFailed].includes(candidate[TABLES.candidate.status]);
@@ -548,9 +641,6 @@
         renderStatusHistory(candidateId),
         renderSchedulingDetails(candidateId)
       ]);
-      $("schedule-round1-button").hidden = !canSchedule;
-      $("schedule-round1-button").disabled = busy || !canSchedule || Boolean(selectedSchedule) ||
-        scheduleRetryBlockedCandidateId === candidateId;
       $("interview-result-panel").hidden = true;
       $("detail-panel").scrollIntoView({ behavior: "smooth", block: "start" });
       return true;
@@ -597,23 +687,50 @@
     }
   }
 
-  function showSchedulingPanel() {
+  function showSchedulingPanel(mode = "new") {
     if (busy || !selectedCandidate) return;
-    if (selectedCandidate[TABLES.candidate.status] !== STATUS.waitingManualScheduling ||
-        !isSyntheticCandidate(selectedCandidate)) {
-      showNotice("Schedule Round 1 is available only for synthetic candidates in Waiting Manual Scheduling.", true);
+    if (mode === "reschedule" ? !canManageSchedule() :
+        selectedCandidate[TABLES.candidate.status] !== STATUS.waitingManualScheduling ||
+        !isSyntheticCandidate(selectedCandidate) ||
+        scheduleRows.filter(isActiveSchedule).length > 0) {
+      showNotice(mode === "reschedule"
+        ? "Reschedule Round 1 requires exactly one active, pending Round 1 schedule."
+        : "Schedule Round 1 is available only for synthetic candidates in Waiting Manual Scheduling with no active schedule.", true);
       return;
     }
-    if (selectedSchedule || scheduleRetryBlockedCandidateId === selectedCandidate[TABLES.candidate.id]) {
+    if (scheduleRetryBlockedCandidateId === selectedCandidate[TABLES.candidate.id]) {
       showNotice("A previous Round 1 schedule submission needs reconciliation. Refresh or reload before trying again.", true);
       return;
     }
+    scheduleMode = mode === "reschedule"
+      ? "reschedule"
+      : (proposedSchedule ? "promote" : "new");
     $("scheduling-form").reset();
+    $("scheduling-reason").required = scheduleMode === "reschedule";
+    $("scheduling-reason-field").hidden = scheduleMode !== "reschedule";
+    $("scheduling-heading").textContent = scheduleMode === "reschedule"
+      ? "Reschedule Round 1"
+      : scheduleMode === "promote"
+        ? "Confirm Proposed Round 1 Schedule"
+        : "Schedule Round 1";
     $("scheduling-candidate").value =
       `${selectedCandidate[TABLES.candidate.number] || ""} ${selectedCandidate[TABLES.candidate.name] || ""}`.trim();
     $("scheduling-panel").hidden = false;
+    $("cancellation-panel").hidden = true;
     $("scheduling-panel").scrollIntoView({ behavior: "smooth", block: "center" });
     $("scheduling-ta").focus();
+  }
+
+  function showCancellationPanel() {
+    if (busy || !canManageSchedule()) {
+      showNotice("Cancel Round 1 requires exactly one active, pending Round 1 schedule.", true);
+      return;
+    }
+    $("cancellation-form").reset();
+    $("cancellation-panel").hidden = false;
+    $("scheduling-panel").hidden = true;
+    $("cancellation-panel").scrollIntoView({ behavior: "smooth", block: "center" });
+    $("cancellation-reason").focus();
   }
 
   function localDateTime(dateValue, timeValue) {
@@ -652,9 +769,9 @@
   async function findRound1Schedules(candidateId) {
     const interview = TABLES.interview;
     return retrieveAll(interview.logicalName,
-      `?$select=${[interview.id, interview.round, interview.start, interview.result].join(",")}` +
+      `?$select=${[interview.id, interview.round, interview.start, interview.result, interview.status, interview.reason, interview.changedAt].join(",")}` +
       `&$filter=${interview.candidate} eq ${candidateId} and ${interview.round} eq ${interview.round1}` +
-      `&$orderby=${interview.start} desc&$top=2`);
+      `&$orderby=createdon desc`);
   }
 
   function isPendingInterviewResult(schedule) {
@@ -668,6 +785,7 @@
       selectedCandidate[TABLES.candidate.status] === STATUS.round1Scheduled &&
       isSyntheticCandidate(selectedCandidate) &&
       selectedSchedule &&
+      isActiveSchedule(selectedSchedule) &&
       isPendingInterviewResult(selectedSchedule) &&
       resultRetryBlockedCandidateId !== selectedCandidate[TABLES.candidate.id]);
   }
@@ -722,10 +840,13 @@
 
       category = "INTERVIEW_RESULT_SCHEDULE_READ_FAILED";
       const schedules = await findRound1Schedules(candidateId);
-      if (schedules.length !== 1 || normalizeGuid(schedules[0][interview.id]) !== scheduleId ||
-          !isPendingInterviewResult(schedules[0])) {
+      const activeSchedules = schedules.filter(isActiveSchedule);
+      if (schedules.some((row) => !isKnownScheduleState(row)) ||
+          activeSchedules.length !== 1 ||
+          normalizeGuid(activeSchedules[0][interview.id]) !== scheduleId ||
+          !isPendingInterviewResult(activeSchedules[0])) {
         await reconcileAfterFailure(candidateId);
-        showNotice("Exactly one pending Round 1 schedule could not be verified. No interview result was written.", true);
+        showNotice("Exactly one active pending Round 1 schedule could not be verified. No interview result was written.", true);
         return;
       }
 
@@ -835,6 +956,10 @@
   async function createSchedule(event) {
     event.preventDefault();
     if (busy || !selectedCandidate) return;
+    if (scheduleMode === "reschedule") {
+      await rescheduleRound1();
+      return;
+    }
     hideNotice();
     const c = TABLES.candidate;
     const interview = TABLES.interview;
@@ -889,20 +1014,29 @@
         return;
       }
       const existingSchedules = await findRound1Schedules(candidateId);
-      if (existingSchedules.length) {
+      const activeSchedules = existingSchedules.filter(isActiveSchedule);
+      const proposals = existingSchedules.filter((row) => row[interview.status] === SCHEDULE_STATUS.proposed);
+      if (existingSchedules.some((row) => !isKnownScheduleState(row)) ||
+          activeSchedules.length || proposals.length > 1 ||
+          (scheduleMode === "promote" && proposals.length !== 1) ||
+          (scheduleMode === "promote" && !isPendingInterviewResult(proposals[0])) ||
+          (scheduleMode === "new" && proposals.length !== 0)) {
         await reconcileAfterFailure(candidateId);
-        showNotice("A Round 1 schedule already exists. No duplicate was created; reconcile the Candidate state.", true);
+        showNotice("Round 1 schedule state changed or is ambiguous. No schedule was written; reconcile the Candidate state.", true);
         return;
       }
       const ta = await getActiveSyntheticReference("os_sr_ta", $("scheduling-ta").value);
       const location = await getActiveSyntheticReference("os_sr_loc", $("scheduling-location").value);
       const userId = currentUserId();
+      const changedAt = new Date().toISOString();
       const payload = {
         [`${interview.candidateNavigation}@odata.bind`]: `/${c.entitySetName}(${candidateId})`,
         [`${interview.taNavigation}@odata.bind`]: `/${ta.entitySetName}(${ta.id})`,
         [`${interview.locationNavigation}@odata.bind`]: `/${location.entitySetName}(${location.id})`,
         [interview.round]: interview.round1,
         [interview.result]: INTERVIEW_RESULT.pending,
+        [interview.status]: SCHEDULE_STATUS.scheduled,
+        [interview.changedAt]: changedAt,
         [interview.start]: start.toISOString(),
         [interview.end]: end.toISOString()
       };
@@ -911,21 +1045,32 @@
 
       category = "SCHEDULE_CREATE_FAILED";
       scheduleCreateAttempted = true;
-      const result = await xrm().WebApi.createRecord(interview.logicalName, payload);
-      const scheduleId = result && typeof result.id === "string" ? normalizeGuid(result.id) : null;
-      if (!scheduleId) throw new Error("DEV_DIRECT_WRITE_SCHEDULE_ID_MISSING");
+      let persistedScheduleId = scheduleMode === "promote"
+        ? normalizeGuid(proposals[0][interview.id])
+        : null;
+      if (persistedScheduleId) {
+        delete payload[`${interview.candidateNavigation}@odata.bind`];
+        delete payload[interview.result];
+        await xrm().WebApi.updateRecord(interview.logicalName, persistedScheduleId, payload);
+      } else {
+        const result = await xrm().WebApi.createRecord(interview.logicalName, payload);
+        persistedScheduleId = result && typeof result.id === "string" ? normalizeGuid(result.id) : null;
+      }
+      if (!persistedScheduleId) throw new Error("DEV_DIRECT_WRITE_SCHEDULE_ID_MISSING");
 
       category = "SCHEDULE_READBACK_FAILED";
       const saved = await xrm().WebApi.retrieveRecord(
         interview.logicalName,
-        scheduleId,
-        `?$select=${[interview.id, interview.round, interview.result, interview.candidate, interview.ta, interview.location, interview.start, interview.end, interview.notes].join(",")}`
+        persistedScheduleId,
+        `?$select=${[interview.id, interview.round, interview.result, interview.status, interview.changedAt, interview.candidate, interview.ta, interview.location, interview.start, interview.end, interview.notes].join(",")}`
       );
       if (normalizeGuid(saved[interview.candidate]) !== candidateId ||
           normalizeGuid(saved[interview.ta]) !== ta.id ||
           normalizeGuid(saved[interview.location]) !== location.id ||
           saved[interview.round] !== interview.round1 ||
           saved[interview.result] !== INTERVIEW_RESULT.pending ||
+          saved[interview.status] !== SCHEDULE_STATUS.scheduled ||
+          !sameInstant(saved[interview.changedAt], changedAt) ||
           Date.parse(saved[interview.start]) !== start.getTime() ||
           Date.parse(saved[interview.end]) !== end.getTime()) {
         throw new Error("DEV_DIRECT_WRITE_SCHEDULE_READBACK_MISMATCH");
@@ -968,7 +1113,9 @@
       if (!(await openCandidate(candidateId))) {
         throw new Error("DEV_DIRECT_WRITE_SCHEDULE_DETAIL_REFRESH_FAILED");
       }
-      showNotice("Round 1 schedule saved and Candidate moved to Round 1 Scheduled.");
+      showNotice(scheduleMode === "promote"
+        ? "Proposed Round 1 schedule confirmed and Candidate moved to Round 1 Scheduled."
+        : "Round 1 schedule saved and Candidate moved to Round 1 Scheduled.");
     } catch (error) {
       logSafeFailure(`DEV_DIRECT_WRITE_${category}`, error);
       if (scheduleCreateAttempted) scheduleRetryBlockedCandidateId = candidateId;
@@ -984,6 +1131,332 @@
         message = "Schedule and Candidate status were persisted, but Status History creation failed or is uncertain. No compensation or retry was performed; reconcile the current state.";
       } else {
         message = "Schedule, Candidate status, and Status History were saved, but the UI refresh failed. Refresh to verify the current server state.";
+      }
+      showNotice(reconciled ? message : `${message} Server-state refresh was incomplete.`, true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function rescheduleRound1() {
+    if (busy || !selectedCandidate || !canManageSchedule()) return;
+    hideNotice();
+    const c = TABLES.candidate;
+    const interview = TABLES.interview;
+    const history = TABLES.history;
+    const candidateId = normalizeGuid(selectedCandidate[c.id]);
+    const previousScheduleId = normalizeGuid(selectedSchedule[interview.id]);
+    const reason = $("scheduling-reason").value.trim();
+    const start = localDateTime($("scheduling-date").value, $("scheduling-time").value);
+    const end = localDateTime($("scheduling-date").value, $("scheduling-end-time").value);
+    if (!reason) {
+      showNotice("Enter a Reschedule Reason.", true);
+      return;
+    }
+    if (!start || !end || start.getTime() <= Date.now() || end <= start) {
+      showNotice("Choose a future date and an End Time later than the Start Time on the same date.", true);
+      return;
+    }
+    if (!isTargetDevEnvironment() || !isSyntheticCandidate(selectedCandidate)) {
+      showNotice("Rescheduling is limited to synthetic candidates in VN LMV IT.", true);
+      return;
+    }
+
+    setBusy(true);
+    let category = "RESCHEDULE_CANDIDATE_READ_FAILED";
+    let scheduleUpdateAttempted = false;
+    let oldScheduleReadbackConfirmed = false;
+    let proposalCreateAttempted = false;
+    let proposalReadbackConfirmed = false;
+    let candidateStatusUpdateAttempted = false;
+    let candidateStatusUpdated = false;
+    let historyCreated = false;
+    try {
+      const current = await xrm().WebApi.retrieveRecord(
+        c.logicalName,
+        candidateId,
+        `?$select=${[c.id, c.name, c.email, c.status].join(",")}`
+      );
+      if (!isSyntheticCandidate(current) || current[c.status] !== STATUS.round1Scheduled) {
+        await reconcileAfterFailure(candidateId);
+        showNotice("Reschedule is available only while the synthetic Candidate is Round 1 Scheduled.", true);
+        return;
+      }
+
+      category = "RESCHEDULE_SCHEDULE_READ_FAILED";
+      const schedules = await findRound1Schedules(candidateId);
+      const activeSchedules = schedules.filter(isActiveSchedule);
+      if (schedules.some((row) => !isKnownScheduleState(row)) ||
+          activeSchedules.length !== 1 ||
+          normalizeGuid(activeSchedules[0][interview.id]) !== previousScheduleId ||
+          !isPendingInterviewResult(activeSchedules[0])) {
+        await reconcileAfterFailure(candidateId);
+        showNotice("Exactly one active pending Round 1 schedule could not be verified. No reschedule was written.", true);
+        return;
+      }
+
+      const ta = await getActiveSyntheticReference("os_sr_ta", $("scheduling-ta").value);
+      const location = await getActiveSyntheticReference("os_sr_loc", $("scheduling-location").value);
+      const userId = currentUserId();
+      const changedAt = new Date().toISOString();
+      category = "RESCHEDULE_OLD_SCHEDULE_UPDATE_FAILED";
+      scheduleUpdateAttempted = true;
+      await xrm().WebApi.updateRecord(interview.logicalName, previousScheduleId, {
+        [interview.status]: SCHEDULE_STATUS.superseded,
+        [interview.reason]: reason,
+        [interview.changedAt]: changedAt
+      });
+
+      category = "RESCHEDULE_OLD_SCHEDULE_READBACK_FAILED";
+      const superseded = await xrm().WebApi.retrieveRecord(
+        interview.logicalName,
+        previousScheduleId,
+        `?$select=${[interview.id, interview.candidate, interview.round, interview.result, interview.status, interview.reason, interview.changedAt].join(",")}`
+      );
+      if (normalizeGuid(superseded[interview.candidate]) !== candidateId ||
+          superseded[interview.round] !== interview.round1 ||
+          superseded[interview.status] !== SCHEDULE_STATUS.superseded ||
+          superseded[interview.reason] !== reason ||
+          !sameInstant(superseded[interview.changedAt], changedAt) ||
+          !isPendingInterviewResult(superseded)) {
+        throw new Error("DEV_DIRECT_WRITE_SUPERSEDED_SCHEDULE_READBACK_MISMATCH");
+      }
+      oldScheduleReadbackConfirmed = true;
+
+      const payload = {
+        [`${interview.candidateNavigation}@odata.bind`]: `/${c.entitySetName}(${candidateId})`,
+        [`${interview.taNavigation}@odata.bind`]: `/${ta.entitySetName}(${ta.id})`,
+        [`${interview.locationNavigation}@odata.bind`]: `/${location.entitySetName}(${location.id})`,
+        [interview.round]: interview.round1,
+        [interview.result]: INTERVIEW_RESULT.pending,
+        [interview.status]: SCHEDULE_STATUS.proposed,
+        [interview.reason]: reason,
+        [interview.changedAt]: changedAt,
+        [interview.start]: start.toISOString(),
+        [interview.end]: end.toISOString()
+      };
+      const notes = $("scheduling-notes").value.trim();
+      if (notes) payload[interview.notes] = notes;
+
+      category = "RESCHEDULE_PROPOSAL_CREATE_FAILED";
+      proposalCreateAttempted = true;
+      const created = await xrm().WebApi.createRecord(interview.logicalName, payload);
+      const proposalId = created && typeof created.id === "string" ? normalizeGuid(created.id) : null;
+      if (!proposalId) throw new Error("DEV_DIRECT_WRITE_RESCHEDULE_PROPOSAL_ID_MISSING");
+
+      category = "RESCHEDULE_PROPOSAL_READBACK_FAILED";
+      const proposal = await xrm().WebApi.retrieveRecord(
+        interview.logicalName,
+        proposalId,
+        `?$select=${[interview.id, interview.candidate, interview.round, interview.ta, interview.location, interview.result, interview.status, interview.reason, interview.changedAt, interview.start, interview.end].join(",")}`
+      );
+      if (normalizeGuid(proposal[interview.candidate]) !== candidateId ||
+          normalizeGuid(proposal[interview.ta]) !== ta.id ||
+          normalizeGuid(proposal[interview.location]) !== location.id ||
+          proposal[interview.round] !== interview.round1 ||
+          proposal[interview.result] !== INTERVIEW_RESULT.pending ||
+          proposal[interview.status] !== SCHEDULE_STATUS.proposed ||
+          proposal[interview.reason] !== reason ||
+          !sameInstant(proposal[interview.changedAt], changedAt) ||
+          Date.parse(proposal[interview.start]) !== start.getTime() ||
+          Date.parse(proposal[interview.end]) !== end.getTime()) {
+        throw new Error("DEV_DIRECT_WRITE_RESCHEDULE_PROPOSAL_READBACK_MISMATCH");
+      }
+      proposalReadbackConfirmed = true;
+
+      category = "RESCHEDULE_CANDIDATE_STATUS_UPDATE_FAILED";
+      const beforeStatusUpdate = await xrm().WebApi.retrieveRecord(
+        c.logicalName,
+        candidateId,
+        `?$select=${[c.id, c.name, c.email, c.status].join(",")}`
+      );
+      if (!isSyntheticCandidate(beforeStatusUpdate) ||
+          beforeStatusUpdate[c.status] !== STATUS.round1Scheduled) {
+        throw new Error("DEV_DIRECT_WRITE_CANDIDATE_STATUS_CHANGED_DURING_RESCHEDULE");
+      }
+      candidateStatusUpdateAttempted = true;
+      await xrm().WebApi.updateRecord(c.logicalName, candidateId, {
+        [c.status]: STATUS.needCall
+      });
+      candidateStatusUpdated = true;
+
+      category = "RESCHEDULE_STATUS_HISTORY_CREATE_FAILED";
+      await xrm().WebApi.createRecord(history.logicalName, {
+        [`${history.candidateNavigation}@odata.bind`]: `/${c.entitySetName}(${candidateId})`,
+        [`${history.actorNavigation}@odata.bind`]: `/systemusers(${userId})`,
+        [history.previous]: STATUS.round1Scheduled,
+        [history.current]: STATUS.needCall,
+        [history.changedAt]: new Date().toISOString(),
+        [history.correlation]: newCorrelationId(),
+        [history.action]: "RescheduleRound1",
+        [history.reason]: `DEV Candidate Management / Reschedule Round 1: ${reason}`
+      });
+      historyCreated = true;
+
+      category = "RESCHEDULE_REFRESH_FAILED";
+      $("scheduling-form").reset();
+      $("scheduling-panel").hidden = true;
+      scheduleMode = "new";
+      await refreshCandidates();
+      if (!(await openCandidate(candidateId))) {
+        throw new Error("DEV_DIRECT_WRITE_RESCHEDULE_DETAIL_REFRESH_FAILED");
+      }
+      showNotice("Round 1 rescheduled. The previous schedule is preserved as Superseded, the replacement is Proposed, and the Candidate returned to Need Call Candidate.");
+    } catch (error) {
+      logSafeFailure(`DEV_DIRECT_WRITE_${category}`, error);
+      if (scheduleUpdateAttempted || proposalCreateAttempted) {
+        scheduleRetryBlockedCandidateId = candidateId;
+      }
+      const reconciled = await reconcileAfterFailure(candidateId);
+      let message;
+      if (!scheduleUpdateAttempted) {
+        message = "Reschedule was not submitted. No schedule write was attempted; verify the Candidate and selected DEV references.";
+      } else if (!oldScheduleReadbackConfirmed) {
+        message = "The previous schedule update or readback is uncertain. No replacement was submitted and no Candidate status change was attempted.";
+      } else if (!proposalCreateAttempted || !proposalReadbackConfirmed) {
+        message = "The previous schedule is preserved as Superseded; replacement persistence is incomplete or uncertain. Candidate status was not changed. Do not retry blindly.";
+      } else if (!candidateStatusUpdateAttempted || !candidateStatusUpdated) {
+        message = "The superseded schedule and Proposed replacement were persisted, but the Candidate status update failed or is uncertain. No Status History was fabricated.";
+      } else if (!historyCreated) {
+        message = "Schedules and Candidate status were persisted, but Status History creation failed or is uncertain. No compensation or retry was performed.";
+      } else {
+        message = "Reschedule data was persisted, but the UI refresh failed. Refresh to verify the current server state.";
+      }
+      showNotice(reconciled ? message : `${message} Server-state refresh was incomplete.`, true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cancelRound1(event) {
+    event.preventDefault();
+    if (busy || !selectedCandidate || !canManageSchedule()) return;
+    hideNotice();
+    const c = TABLES.candidate;
+    const interview = TABLES.interview;
+    const history = TABLES.history;
+    const candidateId = normalizeGuid(selectedCandidate[c.id]);
+    const scheduleId = normalizeGuid(selectedSchedule[interview.id]);
+    const reason = $("cancellation-reason").value.trim();
+    if (!reason) {
+      showNotice("Enter a Cancellation Reason.", true);
+      return;
+    }
+    if (!isTargetDevEnvironment() || !isSyntheticCandidate(selectedCandidate)) {
+      showNotice("Cancellation is limited to synthetic candidates in VN LMV IT.", true);
+      return;
+    }
+
+    setBusy(true);
+    let category = "CANCELLATION_CANDIDATE_READ_FAILED";
+    let scheduleUpdateAttempted = false;
+    let scheduleReadbackConfirmed = false;
+    let candidateStatusUpdateAttempted = false;
+    let candidateStatusUpdated = false;
+    let historyCreated = false;
+    try {
+      const current = await xrm().WebApi.retrieveRecord(
+        c.logicalName,
+        candidateId,
+        `?$select=${[c.id, c.name, c.email, c.status].join(",")}`
+      );
+      if (!isSyntheticCandidate(current) || current[c.status] !== STATUS.round1Scheduled) {
+        await reconcileAfterFailure(candidateId);
+        showNotice("Cancel Round 1 is available only while the synthetic Candidate is Round 1 Scheduled.", true);
+        return;
+      }
+
+      category = "CANCELLATION_SCHEDULE_READ_FAILED";
+      const schedules = await findRound1Schedules(candidateId);
+      const activeSchedules = schedules.filter(isActiveSchedule);
+      if (schedules.some((row) => !isKnownScheduleState(row)) ||
+          schedules.some((row) => row[interview.status] === SCHEDULE_STATUS.proposed) ||
+          activeSchedules.length !== 1 ||
+          normalizeGuid(activeSchedules[0][interview.id]) !== scheduleId ||
+          !isPendingInterviewResult(activeSchedules[0])) {
+        await reconcileAfterFailure(candidateId);
+        showNotice("Exactly one active pending Round 1 schedule could not be verified. No cancellation was written.", true);
+        return;
+      }
+
+      const changedAt = new Date().toISOString();
+      const userId = currentUserId();
+      category = "CANCELLATION_SCHEDULE_UPDATE_FAILED";
+      scheduleUpdateAttempted = true;
+      await xrm().WebApi.updateRecord(interview.logicalName, scheduleId, {
+        [interview.status]: SCHEDULE_STATUS.cancelled,
+        [interview.reason]: reason,
+        [interview.changedAt]: changedAt
+      });
+
+      category = "CANCELLATION_SCHEDULE_READBACK_FAILED";
+      const cancelled = await xrm().WebApi.retrieveRecord(
+        interview.logicalName,
+        scheduleId,
+        `?$select=${[interview.id, interview.candidate, interview.round, interview.result, interview.status, interview.reason, interview.changedAt].join(",")}`
+      );
+      if (normalizeGuid(cancelled[interview.candidate]) !== candidateId ||
+          cancelled[interview.round] !== interview.round1 ||
+          cancelled[interview.status] !== SCHEDULE_STATUS.cancelled ||
+          cancelled[interview.reason] !== reason ||
+          !sameInstant(cancelled[interview.changedAt], changedAt) ||
+          !isPendingInterviewResult(cancelled)) {
+        throw new Error("DEV_DIRECT_WRITE_CANCELLED_SCHEDULE_READBACK_MISMATCH");
+      }
+      scheduleReadbackConfirmed = true;
+
+      category = "CANCELLATION_CANDIDATE_STATUS_UPDATE_FAILED";
+      const beforeStatusUpdate = await xrm().WebApi.retrieveRecord(
+        c.logicalName,
+        candidateId,
+        `?$select=${[c.id, c.name, c.email, c.status].join(",")}`
+      );
+      if (!isSyntheticCandidate(beforeStatusUpdate) ||
+          beforeStatusUpdate[c.status] !== STATUS.round1Scheduled) {
+        throw new Error("DEV_DIRECT_WRITE_CANDIDATE_STATUS_CHANGED_DURING_CANCELLATION");
+      }
+      candidateStatusUpdateAttempted = true;
+      await xrm().WebApi.updateRecord(c.logicalName, candidateId, {
+        [c.status]: STATUS.needCall
+      });
+      candidateStatusUpdated = true;
+
+      category = "CANCELLATION_STATUS_HISTORY_CREATE_FAILED";
+      await xrm().WebApi.createRecord(history.logicalName, {
+        [`${history.candidateNavigation}@odata.bind`]: `/${c.entitySetName}(${candidateId})`,
+        [`${history.actorNavigation}@odata.bind`]: `/systemusers(${userId})`,
+        [history.previous]: STATUS.round1Scheduled,
+        [history.current]: STATUS.needCall,
+        [history.changedAt]: new Date().toISOString(),
+        [history.correlation]: newCorrelationId(),
+        [history.action]: "CancelRound1",
+        [history.reason]: `DEV Candidate Management / Cancel Round 1: ${reason}`
+      });
+      historyCreated = true;
+
+      category = "CANCELLATION_REFRESH_FAILED";
+      $("cancellation-form").reset();
+      $("cancellation-panel").hidden = true;
+      await refreshCandidates();
+      if (!(await openCandidate(candidateId))) {
+        throw new Error("DEV_DIRECT_WRITE_CANCELLATION_DETAIL_REFRESH_FAILED");
+      }
+      showNotice("Round 1 schedule cancelled and preserved. Candidate returned to Need Call Candidate.");
+    } catch (error) {
+      logSafeFailure(`DEV_DIRECT_WRITE_${category}`, error);
+      if (scheduleUpdateAttempted) scheduleRetryBlockedCandidateId = candidateId;
+      const reconciled = await reconcileAfterFailure(candidateId);
+      let message;
+      if (!scheduleUpdateAttempted) {
+        message = "Cancellation was not submitted. No schedule write was attempted; verify the Candidate and reason.";
+      } else if (!scheduleReadbackConfirmed) {
+        message = "Schedule cancellation or readback is uncertain. Candidate status was not changed.";
+      } else if (!candidateStatusUpdateAttempted || !candidateStatusUpdated) {
+        message = "The schedule is preserved as Cancelled, but the Candidate status update failed or is uncertain. No Status History was fabricated.";
+      } else if (!historyCreated) {
+        message = "The schedule and Candidate status were persisted, but Status History creation failed or is uncertain. No compensation or retry was performed.";
+      } else {
+        message = "Cancellation was persisted, but the UI refresh failed. Refresh to verify the current server state.";
       }
       showNotice(reconciled ? message : `${message} Server-state refresh was incomplete.`, true);
     } finally {
@@ -1283,6 +1756,7 @@
     $("candidate-form").addEventListener("submit", createCandidate);
     $("call-form").addEventListener("submit", recordCall);
     $("scheduling-form").addEventListener("submit", createSchedule);
+    $("cancellation-form").addEventListener("submit", cancelRound1);
     $("interview-result-form").addEventListener("submit", recordInterviewResult);
     $("candidate-search").addEventListener("input", () => renderCandidateRows(currentRows));
     $("candidate-status-filter").addEventListener("change", () => renderCandidateRows(currentRows));
@@ -1301,7 +1775,10 @@
       $("waiting-status-button").hidden = true;
       $("schedule-round1-button").hidden = true;
       $("record-interview-result-button").hidden = true;
+      $("reschedule-round1-button").hidden = true;
+      $("cancel-round1-button").hidden = true;
       $("scheduling-panel").hidden = true;
+      $("cancellation-panel").hidden = true;
       $("interview-result-panel").hidden = true;
       selectedCandidate = null;
       selectedSchedule = null;
@@ -1310,6 +1787,8 @@
     $("waiting-status-button").addEventListener("click", moveToWaitingManualScheduling);
     $("schedule-round1-button").addEventListener("click", showSchedulingPanel);
     $("record-interview-result-button").addEventListener("click", showInterviewResultPanel);
+    $("reschedule-round1-button").addEventListener("click", () => showSchedulingPanel("reschedule"));
+    $("cancel-round1-button").addEventListener("click", showCancellationPanel);
   }
 
   async function initialize() {

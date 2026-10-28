@@ -6,7 +6,7 @@
   <title>Candidate Management</title>
   <link rel="stylesheet" href="candidate-console.css">
   <script src="../../ClientGlobalContext.js.aspx"></script>
-  <script defer src="candidate-console.js?v=74e29e41c357"></script>
+  <script defer src="candidate-console.js?v=34084d5a296f"></script>
 </head>
 <body>
   <main class="shell">
@@ -119,8 +119,8 @@
         <h3 id="schedule-history-heading">Scheduling</h3>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Round</th><th>Interviewer</th><th>Date/Time</th><th>Location</th><th>Schedule Notes</th><th>Interview Result</th><th>Result Recorded At</th><th>Result Notes</th></tr></thead>
-            <tbody id="schedule-history-rows"><tr><td class="empty" colspan="8">No Round 1 schedule.</td></tr></tbody>
+            <thead><tr><th>Round</th><th>Interviewer</th><th>Date/Time</th><th>Location</th><th>Scheduling Status</th><th>Status Changed At</th><th>Schedule Notes</th><th>Cancellation / Reschedule Reason</th><th>Created On</th><th>Interview Result</th><th>Result Recorded At</th><th>Result Notes</th></tr></thead>
+            <tbody id="schedule-history-rows"><tr><td class="empty" colspan="12">No Round 1 schedule.</td></tr></tbody>
           </table>
         </div>
       </section>
@@ -180,6 +180,12 @@
         <button id="record-interview-result-button" class="button button-primary" type="button" data-action hidden>
           Record Interview Result
         </button>
+        <button id="reschedule-round1-button" class="button button-primary" type="button" data-action hidden>
+          Reschedule Round 1
+        </button>
+        <button id="cancel-round1-button" class="button button-secondary" type="button" data-action hidden>
+          Cancel Round 1
+        </button>
       </div>
       <section id="scheduling-panel" class="call-entry-panel" aria-labelledby="scheduling-heading" hidden>
         <div class="section-heading">
@@ -221,6 +227,10 @@
             <span>Notes</span>
             <textarea id="scheduling-notes" maxlength="1000" rows="3"></textarea>
           </label>
+          <label id="scheduling-reason-field" class="field field-wide" hidden>
+            <span>Reschedule Reason <b aria-hidden="true">*</b></span>
+            <textarea id="scheduling-reason" maxlength="1000" rows="3"></textarea>
+          </label>
           <div class="form-actions field-wide">
             <button id="save-schedule" class="button button-primary" type="submit" data-action>
               Save Schedule
@@ -228,6 +238,25 @@
             <span id="scheduling-dev-note" class="storage-warning" role="status">
               DEV-only persistence. No calendar availability check or calendar booking is performed.
             </span>
+          </div>
+        </form>
+      </section>
+      <section id="cancellation-panel" class="call-entry-panel" aria-labelledby="cancellation-heading" hidden>
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">DEV direct-write fallback</p>
+            <h3 id="cancellation-heading">Cancel Round 1</h3>
+          </div>
+        </div>
+        <form id="cancellation-form" class="form-grid">
+          <label class="field field-wide">
+            <span>Cancellation Reason <b aria-hidden="true">*</b></span>
+            <textarea id="cancellation-reason" maxlength="1000" required rows="3"></textarea>
+          </label>
+          <div class="form-actions field-wide">
+            <button id="confirm-cancellation" class="button button-secondary" type="submit" data-action>
+              Confirm Cancellation
+            </button>
           </div>
         </form>
       </section>

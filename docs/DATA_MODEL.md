@@ -34,6 +34,25 @@ Creation used Dataverse Web API metadata requests with the approved Solution hea
 
 The table and two additional attributes were created in the separately authorized Sprint 02F.3 bounded operation. Each write was reconciled by Strong-consistency GET before the next step; the final exact-schema, inventory, membership, audit, and publication checks passed. No `PublishXml`, PATCH, DELETE, or retry was sent. This confirms metadata only, not application usability, business-data quality, security-role acceptance, or audit-policy approval; see [Current State](CURRENT_STATE.md).
 
+## Verified Round 1 Interview Schedule DEV Table
+
+The `os_sr_intv` table was provisioned in VN LMV IT for the separately authorized Phase 4C synthetic DEV workflow and added as a root component in `os_sr_bso_rs_support`. This is a narrow DEV persistence slice, not approval of the wider production scheduling, availability, calendar-booking, reschedule, or interview-result design.
+
+| Item | Verified metadata, 27 October 2026 |
+|---|---|
+| Table | `os_sr_intv`; **Interview Schedule**; plural **Interview Schedules** |
+| Ownership | `UserOwned` |
+| Primary ID / primary name | `os_sr_intvid`; required AutoNumber Text `os_sr_intv_ref`, format `INTV-{SEQNUM:8}`, max 100 |
+| Round | Required local Choice `os_sr_intv_rnd`; only `Round 1`, value `100000000` |
+| Times | Required User Local Date/Time `os_sr_intv_strt` and `os_sr_intv_end`; the UI requires explicit Start and End on the same date |
+| Notes | Optional Memo `os_sr_intv_nts`, max 1,000 |
+| Required lookups | Candidate `os_sr_intv_cand`, TA `os_sr_intv_ta`, Location `os_sr_intv_loc` |
+| Relationships | `os_sr_cand_intv`, `os_sr_ta_intv`, `os_sr_loc_intv`; parent-to-many, Delete Restrict, assignment/sharing/reparent cascades disabled |
+| Audit / Solution | Table audit metadata enabled; root component in unmanaged `os_sr_bso_rs_support`. Organization-level auditing remains unchanged and disabled. |
+| Status/results | No scheduling-status, interview-result, offer, reschedule, or calendar columns |
+
+The live schema was reconciled after provisioning. Browser acceptance created one synthetic Round 1 schedule, read it back before the Candidate status update, and showed it after a full page reload. Candidate / Call Log / Status History / Interview Schedule / Receipt counts for that acceptance were **1 / 2 / 3 / 1 / 0**. See [Current State](CURRENT_STATE.md) and the [Candidate UI implementation note](CANDIDATE_UI_IMPLEMENTATION_NOTE.md).
+
 ## Naming standard and private abbreviation dictionary
 
 ### Verified Phase 3C Operation Receipt
@@ -46,14 +65,15 @@ The approved receipt schema/API contracts and implementation semantics are in [r
 
 Receipt dictionary additions: `oprc` = Operation Receipt; `hash` = normalized request fingerprint; `callref` = original Call Log result GUID reference; `histref` = original Status History result GUID reference. Existing `cact`, `corid`, `ver`, `nm`, `cand`, `prevstat`/`newstat`, and `ak` tokens are reused. Assembly name/namespace is `os_sr_cact`; .NET type names use descriptive suffixes `ApplyCandidateAction` and `ProtectCandidateCore` within that namespace rather than inventing new table prefixes.
 
-The following internal dictionary maps business meanings to technical abbreviations. Keep this mapping in this repository; do not publish it externally. The selected naming strategy is Publisher Prefix `os` plus the project namespace segment `sr_`. Together they form the final technical-name prefix `os_sr_`; examples below show final names, not values to paste blindly into auto-prefixing name fields. Names other than the four verified reference-table slices remain proposals.
+The following internal dictionary maps business meanings to technical abbreviations. Keep this mapping in this repository; do not publish it externally. The selected naming strategy is Publisher Prefix `os` plus the project namespace segment `sr_`. Together they form the final technical-name prefix `os_sr_`; examples below show final names, not values to paste blindly into auto-prefixing name fields. The verified implementations are described in the sections above; names not identified there remain proposals.
 
-| Business meaning | Abbreviation | Example proposed table name |
+| Business meaning | Abbreviation | Example table name |
 |---|---|---|
 | Candidate | `cand` | `os_sr_cand` |
 | Call Log | `call` | `os_sr_call` |
 | Candidate Status History | `csh` | `os_sr_csh` |
 | Operation Receipt | `oprc` | `os_sr_oprc` |
+| Interview Schedule | `intv` | `os_sr_intv` |
 | Interview Round | `irnd` | `os_sr_irnd` |
 | Interview Result | `ires` | `os_sr_ires` |
 | TA Directory | `ta` | `os_sr_ta` |

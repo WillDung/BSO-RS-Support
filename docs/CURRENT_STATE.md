@@ -1,5 +1,23 @@
 # Current State
 
+## Phase 4C Round 1 Scheduling DEV Slice (2026-10-27)
+
+**Result:** `PHASE_4C_ROUND1_SCHEDULING_DEV_WORKING`; `SCHEDULING_STORAGE_PROVISIONED`; `ROUND1_SCHEDULE_PERSISTENCE_VERIFIED`; `ROUND1_SCHEDULED_STATUS_VISIBLE`; `BSO_SECURITY_ROLE_UPDATED_UNASSIGNED`; `VN_LMV_IT_PROTECT_CANDIDATE_CORE_DEV_KILL_SWITCH_ACTIVE`; `CANDIDATE_CORE_PRODUCTION_BACKEND_REMAINS_PENDING`; `REAL_DATA_PROHIBITED`.
+
+In VN LMV IT, the approved DEV-only `os_sr_intv` Interview Schedule table is in `os_sr_bso_rs_support`. It is UserOwned and table-audited, with required Candidate, TA, and Location lookups; Round 1 local Choice value `100000000`; User Local Start and End Date/Time; optional Notes; and no scheduling-status, result, offer, reschedule, or calendar fields. The environment-level audit setting remains unchanged and is not represented as enabled.
+
+The published Candidate Management resource in exact `srapp` now persists the schedule and confirms it by readback before advancing the Candidate to `Round 1 Scheduled` and creating Status History. On any uncertain/partial direct-write outcome it does not automatically retry, compensate, or fabricate History; it reports a safe warning and refreshes server state. This remains DEV-only nontransactional technical debt. The UI requires an explicit End Time rather than assuming a duration and states that no calendar availability check or booking occurs.
+
+Browser acceptance used one fresh synthetic Candidate with the existing `[DEV]` Position and Candidate Source. It recorded No Answer and Answered, moved through `Candidate Answered` and `Waiting Manual Scheduling`, then saved a future Round 1 schedule with the `[DEV]` TA and Location. After a full page reload, the schedule details, Candidate status, and histories remained visible. Search and status filtering worked; the Schedule action was hidden for a Candidate at `Candidate Answered` and after this Candidate reached `Round 1 Scheduled`; no arbitrary status editor was exposed. Acceptance-scope readback: Candidate / Call Log / Status History / Interview Schedule / Operation Receipt = **1 / 2 / 3 / 1 / 0**. Final Candidate status: **Round 1 Scheduled**.
+
+The `BSO-RS Support - BSO` role now has only Create, Read, Append, and Append To on Interview Schedule at User (Basic) depth; Write, Delete, Assign, and Share remain None. The role remains unassigned. Its platform-default privileges remain `REVIEW BEFORE PRODUCTION`. No user/team role assignment was changed.
+
+The Candidate Console refresh used two web-resource PATCHes, no Site Map PATCH, one scoped `PublishXml` for `srapp` and its three exact web resources, zero `PublishAllXml`, and zero automatic retries. No package was deployed. All 50 `ProtectCandidateCore` registrations remain inactive under the authorized DEV kill switch; Candidate Core production backend remains pending. No Phase 4D work has started.
+
+**ALM/privacy follow-up:** the unmanaged solution export was not retained in the repository. Its unpacked web resource contained the existing environment-specific origin used by the DEV-only target guard. Do not persist another source snapshot or replace that guard until an approved non-tenant-specific target-validation approach is available. No import, deployment, commit, or push occurred.
+
+**Next:** `PHASE_4D_INTERVIEW_RESULT_PASS_FAIL_DEV_SLICE` is the proposed next phase; it is not started or approved by this result. Keep real data prohibited, do not assign the BSO role, and do not treat this direct-write scheduling slice as production-ready.
+
 ## Phase 4B Reference and Security Validation (2026-10-27)
 
 **Result:** `PHASE_4B_REFERENCE_AND_SECURITY_COMPLETE`; `SCHEDULING_STORAGE_NOT_PROVISIONED`; `BSO_SECURITY_ROLE_VALIDATED_UNASSIGNED`. In VN LMV IT, four synthetic `[DEV]` lookup rows are present for Position, Candidate Source, Location, and TA Directory. The published Candidate Management form loads the Position and Candidate Source choices; browser acceptance created one fresh synthetic Candidate using both and showed the saved references in the list and details. The Candidate was answered, then moved to `Waiting Manual Scheduling`; the one Call Log and both Status History transitions were visible. Search by Candidate Number and status filtering were verified.

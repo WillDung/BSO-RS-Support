@@ -6,7 +6,7 @@
   <title>Candidate Management</title>
   <link rel="stylesheet" href="candidate-console.css">
   <script src="../../ClientGlobalContext.js.aspx"></script>
-  <script defer src="candidate-console.js?v=f8de2459ad4c"></script>
+  <script defer src="candidate-console.js?v=572f5dd9db11"></script>
 </head>
 <body>
   <main class="shell">
@@ -18,6 +18,7 @@
       <div class="page-badges">
         <span class="dev-badge">VN LMV IT — DEV DIRECT WRITE</span>
         <span class="dev-badge">PROTECTCANDIDATECORE DISABLED — NOT PRODUCTION</span>
+        <span class="dev-badge">REAL DATA PROHIBITED</span>
       </div>
     </header>
 
@@ -114,6 +115,15 @@
         <button id="close-detail" class="button button-secondary" type="button" data-action>Close</button>
       </div>
       <dl id="candidate-details" class="detail-grid"></dl>
+      <section aria-labelledby="schedule-history-heading">
+        <h3 id="schedule-history-heading">Scheduling</h3>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Round</th><th>Interviewer</th><th>Date/Time</th><th>Location</th><th>Notes</th></tr></thead>
+            <tbody id="schedule-history-rows"><tr><td class="empty" colspan="5">No Round 1 schedule.</td></tr></tbody>
+          </table>
+        </div>
+      </section>
       <div class="history-grid">
         <section aria-labelledby="call-history-heading">
           <h3 id="call-history-heading">Call History</h3>
@@ -195,6 +205,10 @@
             <input id="scheduling-time" type="time" required>
           </label>
           <label class="field">
+            <span>End Time <b aria-hidden="true">*</b></span>
+            <input id="scheduling-end-time" type="time" required>
+          </label>
+          <label class="field">
             <span>Location <b aria-hidden="true">*</b></span>
             <select id="scheduling-location" required>
               <option value="">Select location</option>
@@ -205,11 +219,11 @@
             <textarea id="scheduling-notes" maxlength="1000" rows="3"></textarea>
           </label>
           <div class="form-actions field-wide">
-            <button id="save-schedule" class="button button-primary" type="submit" data-action disabled>
+            <button id="save-schedule" class="button button-primary" type="submit" data-action>
               Save Schedule
             </button>
-            <span id="scheduling-storage-warning" class="storage-warning" role="status">
-              SCHEDULING_STORAGE_NOT_PROVISIONED — saving and status advancement are disabled.
+            <span id="scheduling-dev-note" class="storage-warning" role="status">
+              DEV-only persistence. No calendar availability check or calendar booking is performed.
             </span>
           </div>
         </form>

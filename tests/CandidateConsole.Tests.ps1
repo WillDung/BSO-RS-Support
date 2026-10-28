@@ -20,7 +20,8 @@ function Assert-Test {
 }
 
 Assert-Test ($html.Contains('VN LMV IT — DEV DIRECT WRITE') -and
-    $html.Contains('PROTECTCANDIDATECORE DISABLED — NOT PRODUCTION')) 'Keep both prominent DEV safety banners'
+    $html.Contains('PROTECTCANDIDATECORE DISABLED — NOT PRODUCTION') -and
+    $html.Contains('REAL DATA PROHIBITED')) 'Keep prominent DEV safety and synthetic-only warnings'
 Assert-Test ($html.Contains('id="candidate-search"') -and
     $script.Contains('candidate[TABLES.candidate.number]') -and
     $script.Contains('candidate[TABLES.candidate.name]') -and
@@ -56,17 +57,40 @@ Assert-Test ($html.Contains('id="scheduling-candidate"') -and
     $html.Contains('id="scheduling-ta"') -and
     $html.Contains('id="scheduling-date"') -and
     $html.Contains('id="scheduling-time"') -and
+    $html.Contains('id="scheduling-end-time"') -and
     $html.Contains('id="scheduling-location"') -and
     $html.Contains('id="scheduling-notes"')) 'Provide the compact Round 1 scheduling draft fields'
+Assert-Test ($html.Contains('id="schedule-history-rows"') -and
+    $html.Contains('<th>Date/Time</th>') -and
+    $script.Contains('function renderSchedulingDetails') -and
+    $script.Contains('Multiple Round 1 schedule rows exist')) 'Show the latest persisted schedule and flag duplicate rows'
 Assert-Test ($html.Contains('id="save-schedule"') -and
-    $html.Contains('type="submit" data-action disabled') -and
-    $html.Contains('SCHEDULING_STORAGE_NOT_PROVISIONED') -and
-    $script.Contains('SCHEDULING_STORAGE_NOT_PROVISIONED. No schedule was saved') -and
-    $script.Contains('button.id === "save-schedule"')) 'Keep scheduling persistence and status advancement fail-closed without storage'
+    $html.Contains('DEV-only persistence. No calendar availability check or calendar booking is performed.') -and
+    $script.Contains('round1: 100000000') -and
+    $script.Contains('round1Scheduled: 100010003')) 'Use the reconciled schedule round and Candidate status values without implying calendar booking'
 Assert-Test ($script.Contains('loadLookupOptions("os_sr_ta", "scheduling-ta"') -and
     $script.Contains('loadLookupOptions("os_sr_loc", "scheduling-location"') -and
     $script.Contains('label.startsWith("[DEV]")')) 'Load only active synthetic TA and Location lookup choices'
-Assert-Test (-not $script.Contains('[c.status]: STATUS.round1Scheduled')) 'Do not advance Candidate status without durable schedule evidence'
+Assert-Test ($script.Contains('getActiveSyntheticReference("os_sr_ta"') -and
+    $script.Contains('getActiveSyntheticReference("os_sr_loc"') -and
+    $script.Contains('reference.statecode !== 0')) 'Revalidate both active [DEV] references before persistence'
+$scheduleStart = $script.IndexOf('async function createSchedule(event)')
+$scheduleEnd = $script.IndexOf('async function loadTableMetadata', $scheduleStart)
+$scheduleFlow = $script.Substring($scheduleStart, $scheduleEnd - $scheduleStart)
+$scheduleCreateIndex = $scheduleFlow.IndexOf('createRecord(interview.logicalName')
+$scheduleReadbackIndex = $scheduleFlow.IndexOf('retrieveRecord(', $scheduleCreateIndex)
+$candidateUpdateIndex = $scheduleFlow.IndexOf('updateRecord(c.logicalName', $scheduleReadbackIndex)
+$historyCreateIndex = $scheduleFlow.IndexOf('createRecord(history.logicalName', $candidateUpdateIndex)
+Assert-Test ($scheduleStart -ge 0 -and $scheduleEnd -gt $scheduleStart -and
+    $scheduleCreateIndex -ge 0 -and $scheduleReadbackIndex -gt $scheduleCreateIndex -and
+    $candidateUpdateIndex -gt $scheduleReadbackIndex -and
+    $historyCreateIndex -gt $candidateUpdateIndex -and
+    $scheduleFlow.Contains('[c.status]: STATUS.round1Scheduled')) 'Persist and read back schedule before Candidate status and Status History'
+Assert-Test ($script.Contains('scheduleRetryBlockedCandidateId') -and
+    $script.Contains('A Round 1 schedule already exists') -and
+    $script.Contains('No compensation or retry was performed')) 'Block duplicate submissions and report nontransactional partial failures without compensation'
+Assert-Test (-not $script.Contains('WebApi.deleteRecord') -and
+    -not $script.Contains('PublishAllXml')) 'Do not compensate by deleting persisted schedules or publish globally'
 Assert-Test (-not $html.Contains('id="candidate-status"') -and
     -not $html.Contains('<dialog') -and
     -not $html.Contains('call-dialog')) 'Expose no arbitrary status editor or call debug dialog'

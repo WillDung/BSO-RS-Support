@@ -18,7 +18,8 @@
   const STATUS = {
     needCall: 100010000,
     answered: 100010001,
-    waitingManualScheduling: 100010002
+    waitingManualScheduling: 100010002,
+    round1Scheduled: 100010003
   };
   const OUTCOME = {
     answered: 100010000,
@@ -68,10 +69,28 @@
       action: "os_sr_csh_cact",
       changedAt: "os_sr_csh_chg",
       reason: "os_sr_csh_rsn"
+    },
+    interview: {
+      logicalName: "os_sr_intv",
+      entitySetName: "os_sr_intvs",
+      id: "",
+      candidate: "_os_sr_intv_cand_value",
+      candidateNavigation: "os_sr_intv_cand",
+      ta: "_os_sr_intv_ta_value",
+      taNavigation: "os_sr_intv_ta",
+      location: "_os_sr_intv_loc_value",
+      locationNavigation: "os_sr_intv_loc",
+      round: "os_sr_intv_rnd",
+      round1: 100000000,
+      start: "os_sr_intv_strt",
+      end: "os_sr_intv_end",
+      notes: "os_sr_intv_nts"
     }
   };
 
   let selectedCandidate = null;
+  let selectedSchedule = null;
+  let scheduleRetryBlockedCandidateId = null;
   let currentRows = [];
   let busy = false;
 
@@ -158,12 +177,18 @@
     busy = value;
     document.querySelectorAll("button[data-action]").forEach((button) => {
       button.disabled = value ||
-        button.id === "save-schedule" ||
         (button.id === "submit-call" && !selectedCandidate) ||
         (button.id === "waiting-status-button" && button.hidden) ||
         (button.id === "schedule-round1-button" &&
           (button.hidden || !selectedCandidate ||
-            selectedCandidate[TABLES.candidate.status] !== STATUS.waitingManualScheduling));
+            selectedCandidate[TABLES.candidate.status] !== STATUS.waitingManualScheduling ||
+            Boolean(selectedSchedule) ||
+            scheduleRetryBlockedCandidateId === selectedCandidate[TABLES.candidate.id])) ||
+        (button.id === "save-schedule" &&
+          (!selectedCandidate ||
+            selectedCandidate[TABLES.candidate.status] !== STATUS.waitingManualScheduling ||
+            Boolean(selectedSchedule) ||
+            scheduleRetryBlockedCandidateId === selectedCandidate[TABLES.candidate.id]));
     });
   }
 
@@ -401,13 +426,64 @@
     }
   }
 
+  async function renderSchedulingDetails(candidateId) {
+    const interview = TABLES.interview;
+    const rows = await retrieveAll(interview.logicalName,
+      `?$select=${[interview.id, interview.round, interview.start, interview.end, interview.notes, interview.ta, interview.location].join(",")}` +
+      `&$filter=${interview.candidate} eq ${candidateId} and ${interview.round} eq ${interview.round1}` +
+      `&$orderby=${interview.start} desc&$top=2`);
+    const body = $("schedule-history-rows");
+    body.replaceChildren();
+    selectedSchedule = rows[0] || null;
+    if (!selectedSchedule) {
+      const row = document.createElement("tr");
+      const cell = appendCell(row, "No Round 1 schedule.");
+      cell.colSpan = 5;
+      cell.className = "empty";
+      body.appendChild(row);
+    } else {
+      const names = await Promise.all([
+        getLookupName("os_sr_ta", selectedSchedule[interview.ta]),
+        getLookupName("os_sr_loc", selectedSchedule[interview.location])
+      ]);
+      const row = document.createElement("tr");
+      appendCell(row, choiceLabel(selectedSchedule, interview.round, { [interview.round1]: "Round 1" }));
+      appendCell(row, names[0]);
+      appendCell(row, `${formatDate(selectedSchedule[interview.start])} – ${formatDate(selectedSchedule[interview.end])}`);
+      appendCell(row, names[1]);
+      appendCell(row, selectedSchedule[interview.notes]);
+      body.appendChild(row);
+      if (rows.length > 1) {
+        const warning = document.createElement("tr");
+        const cell = appendCell(warning, "Multiple Round 1 schedule rows exist; showing the newest. Reconcile before creating another.");
+        cell.colSpan = 5;
+        cell.className = "empty";
+        body.appendChild(warning);
+      }
+    }
+    const canSchedule = selectedCandidate &&
+      selectedCandidate[TABLES.candidate.status] === STATUS.waitingManualScheduling &&
+      isSyntheticCandidate(selectedCandidate);
+    $("schedule-round1-button").disabled = busy || !canSchedule || Boolean(selectedSchedule) ||
+      scheduleRetryBlockedCandidateId === candidateId;
+    if (selectedSchedule) {
+      $("schedule-round1-button").title = "A Round 1 schedule already exists. Reconcile the Candidate state before scheduling again.";
+    } else if (scheduleRetryBlockedCandidateId === candidateId) {
+      $("schedule-round1-button").title = "A previous submission needs reconciliation. Reload before trying again.";
+    } else {
+      $("schedule-round1-button").removeAttribute("title");
+    }
+  }
+
   async function openCandidate(candidateId) {
     hideNotice();
     try {
       const candidate = currentRows.find((row) => row[TABLES.candidate.id] === candidateId) ||
         await xrm().WebApi.retrieveRecord(TABLES.candidate.logicalName, candidateId);
       selectedCandidate = candidate;
+      selectedSchedule = null;
       $("scheduling-panel").hidden = true;
+      $("schedule-round1-button").hidden = true;
       $("detail-heading").textContent = candidate[TABLES.candidate.name] || "Candidate";
       $("detail-panel").hidden = false;
       $("call-entry-panel").hidden = false;
@@ -425,8 +501,12 @@
       await Promise.all([
         renderCandidateDetails(candidate),
         renderCallHistory(candidateId),
-        renderStatusHistory(candidateId)
+        renderStatusHistory(candidateId),
+        renderSchedulingDetails(candidateId)
       ]);
+      $("schedule-round1-button").hidden = !canSchedule;
+      $("schedule-round1-button").disabled = busy || !canSchedule || Boolean(selectedSchedule) ||
+        scheduleRetryBlockedCandidateId === candidateId;
       $("detail-panel").scrollIntoView({ behavior: "smooth", block: "start" });
       return true;
     } catch {
@@ -479,6 +559,10 @@
       showNotice("Schedule Round 1 is available only for synthetic candidates in Waiting Manual Scheduling.", true);
       return;
     }
+    if (selectedSchedule || scheduleRetryBlockedCandidateId === selectedCandidate[TABLES.candidate.id]) {
+      showNotice("A previous Round 1 schedule submission needs reconciliation. Refresh or reload before trying again.", true);
+      return;
+    }
     $("scheduling-form").reset();
     $("scheduling-candidate").value =
       `${selectedCandidate[TABLES.candidate.number] || ""} ${selectedCandidate[TABLES.candidate.name] || ""}`.trim();
@@ -487,18 +571,209 @@
     $("scheduling-ta").focus();
   }
 
-  function rejectScheduleWithoutStorage(event) {
-    event.preventDefault();
-    showNotice(
-      "SCHEDULING_STORAGE_NOT_PROVISIONED. No schedule was saved and Candidate status remains Waiting Manual Scheduling.",
-      true
+  function localDateTime(dateValue, timeValue) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dateValue) || !/^\d{2}:\d{2}$/.test(timeValue)) {
+      return null;
+    }
+    const dateTime = new Date(`${dateValue}T${timeValue}:00`);
+    if (Number.isNaN(dateTime.getTime()) ||
+        dateTime.getFullYear() !== Number(dateValue.slice(0, 4)) ||
+        dateTime.getMonth() !== Number(dateValue.slice(5, 7)) - 1 ||
+        dateTime.getDate() !== Number(dateValue.slice(8, 10))) {
+      return null;
+    }
+    return dateTime;
+  }
+
+  async function getActiveSyntheticReference(tableName, value) {
+    const id = normalizeGuid(value);
+    const metadata = await xrm().Utility.getEntityMetadata(tableName);
+    if (!metadata.PrimaryIdAttribute || !metadata.PrimaryNameAttribute || !metadata.EntitySetName) {
+      throw new Error("DEV_DIRECT_WRITE_REFERENCE_METADATA_INVALID");
+    }
+    const reference = await xrm().WebApi.retrieveRecord(
+      tableName,
+      id,
+      `?$select=${[metadata.PrimaryIdAttribute, metadata.PrimaryNameAttribute, "statecode"].join(",")}`
     );
+    if (reference.statecode !== 0 ||
+        typeof reference[metadata.PrimaryNameAttribute] !== "string" ||
+        !reference[metadata.PrimaryNameAttribute].startsWith("[DEV]")) {
+      throw new Error("DEV_DIRECT_WRITE_REFERENCE_NOT_SYNTHETIC_ACTIVE");
+    }
+    return { id, entitySetName: metadata.EntitySetName };
+  }
+
+  async function findRound1Schedules(candidateId) {
+    const interview = TABLES.interview;
+    return retrieveAll(interview.logicalName,
+      `?$select=${[interview.id, interview.round, interview.start].join(",")}` +
+      `&$filter=${interview.candidate} eq ${candidateId} and ${interview.round} eq ${interview.round1}` +
+      `&$orderby=${interview.start} desc&$top=2`);
+  }
+
+  async function createSchedule(event) {
+    event.preventDefault();
+    if (busy || !selectedCandidate) return;
+    hideNotice();
+    const c = TABLES.candidate;
+    const interview = TABLES.interview;
+    const history = TABLES.history;
+    let candidateId;
+    try {
+      candidateId = normalizeGuid(selectedCandidate[c.id]);
+    } catch (error) {
+      logSafeFailure("DEV_DIRECT_WRITE_INVALID_CANDIDATE_REFERENCE", error);
+      showNotice("Candidate reference is invalid. Refresh the list and select the Candidate again.", true);
+      return;
+    }
+    if (!isTargetDevEnvironment() || !isSyntheticCandidate(selectedCandidate)) {
+      showNotice("Scheduling is limited to synthetic candidates in VN LMV IT.", true);
+      return;
+    }
+    if (selectedCandidate[c.status] !== STATUS.waitingManualScheduling) {
+      showNotice("Round 1 can be scheduled only from Waiting Manual Scheduling.", true);
+      return;
+    }
+    const start = localDateTime($("scheduling-date").value, $("scheduling-time").value);
+    const end = localDateTime($("scheduling-date").value, $("scheduling-end-time").value);
+    if (!start || !end || start.getTime() <= Date.now() || end <= start) {
+      showNotice("Choose a future date and an End Time later than the Start Time on the same date.", true);
+      return;
+    }
+    if (selectedSchedule || scheduleRetryBlockedCandidateId === candidateId) {
+      showNotice("A previous Round 1 schedule submission needs reconciliation. Refresh or reload before trying again.", true);
+      return;
+    }
+
+    setBusy(true);
+    let category = "SCHEDULE_CANDIDATE_READ_FAILED";
+    let scheduleCreateAttempted = false;
+    let scheduleReadbackConfirmed = false;
+    let statusUpdateAttempted = false;
+    let statusUpdated = false;
+    let historyCreated = false;
+    try {
+      const current = await xrm().WebApi.retrieveRecord(
+        c.logicalName,
+        candidateId,
+        `?$select=${[c.id, c.name, c.email, c.status].join(",")}`
+      );
+      if (!isSyntheticCandidate(current)) {
+        showNotice("Scheduling is limited to [SYNTHETIC-E2E] candidates with .invalid email addresses.", true);
+        return;
+      }
+      if (current[c.status] !== STATUS.waitingManualScheduling) {
+        await reconcileAfterFailure(candidateId);
+        showNotice("Candidate status changed. No schedule was created; refresh and verify the current state.", true);
+        return;
+      }
+      const existingSchedules = await findRound1Schedules(candidateId);
+      if (existingSchedules.length) {
+        await reconcileAfterFailure(candidateId);
+        showNotice("A Round 1 schedule already exists. No duplicate was created; reconcile the Candidate state.", true);
+        return;
+      }
+      const ta = await getActiveSyntheticReference("os_sr_ta", $("scheduling-ta").value);
+      const location = await getActiveSyntheticReference("os_sr_loc", $("scheduling-location").value);
+      const userId = currentUserId();
+      const payload = {
+        [`${interview.candidateNavigation}@odata.bind`]: `/${c.entitySetName}(${candidateId})`,
+        [`${interview.taNavigation}@odata.bind`]: `/${ta.entitySetName}(${ta.id})`,
+        [`${interview.locationNavigation}@odata.bind`]: `/${location.entitySetName}(${location.id})`,
+        [interview.round]: interview.round1,
+        [interview.start]: start.toISOString(),
+        [interview.end]: end.toISOString()
+      };
+      const notes = $("scheduling-notes").value.trim();
+      if (notes) payload[interview.notes] = notes;
+
+      category = "SCHEDULE_CREATE_FAILED";
+      scheduleCreateAttempted = true;
+      const result = await xrm().WebApi.createRecord(interview.logicalName, payload);
+      const scheduleId = result && typeof result.id === "string" ? normalizeGuid(result.id) : null;
+      if (!scheduleId) throw new Error("DEV_DIRECT_WRITE_SCHEDULE_ID_MISSING");
+
+      category = "SCHEDULE_READBACK_FAILED";
+      const saved = await xrm().WebApi.retrieveRecord(
+        interview.logicalName,
+        scheduleId,
+        `?$select=${[interview.id, interview.round, interview.candidate, interview.ta, interview.location, interview.start, interview.end, interview.notes].join(",")}`
+      );
+      if (normalizeGuid(saved[interview.candidate]) !== candidateId ||
+          normalizeGuid(saved[interview.ta]) !== ta.id ||
+          normalizeGuid(saved[interview.location]) !== location.id ||
+          saved[interview.round] !== interview.round1 ||
+          Date.parse(saved[interview.start]) !== start.getTime() ||
+          Date.parse(saved[interview.end]) !== end.getTime()) {
+        throw new Error("DEV_DIRECT_WRITE_SCHEDULE_READBACK_MISMATCH");
+      }
+      scheduleReadbackConfirmed = true;
+
+      category = "SCHEDULE_CANDIDATE_STATUS_UPDATE_FAILED";
+      const beforeStatusUpdate = await xrm().WebApi.retrieveRecord(
+        c.logicalName,
+        candidateId,
+        `?$select=${[c.id, c.name, c.email, c.status].join(",")}`
+      );
+      if (!isSyntheticCandidate(beforeStatusUpdate) ||
+          beforeStatusUpdate[c.status] !== STATUS.waitingManualScheduling) {
+        throw new Error("DEV_DIRECT_WRITE_CANDIDATE_STATUS_CHANGED_AFTER_SCHEDULE");
+      }
+      statusUpdateAttempted = true;
+      await xrm().WebApi.updateRecord(c.logicalName, candidateId, {
+        [c.status]: STATUS.round1Scheduled
+      });
+      statusUpdated = true;
+
+      category = "SCHEDULE_STATUS_HISTORY_CREATE_FAILED";
+      await xrm().WebApi.createRecord(history.logicalName, {
+        [`${history.candidateNavigation}@odata.bind`]: `/${c.entitySetName}(${candidateId})`,
+        [`${history.actorNavigation}@odata.bind`]: `/systemusers(${userId})`,
+        [history.previous]: STATUS.waitingManualScheduling,
+        [history.current]: STATUS.round1Scheduled,
+        [history.changedAt]: new Date().toISOString(),
+        [history.correlation]: newCorrelationId(),
+        [history.action]: "ScheduleRound1",
+        [history.reason]: "DEV Candidate Management / Schedule Round 1"
+      });
+      historyCreated = true;
+
+      category = "SCHEDULE_REFRESH_FAILED";
+      $("scheduling-form").reset();
+      $("scheduling-panel").hidden = true;
+      await refreshCandidates();
+      if (!(await openCandidate(candidateId))) {
+        throw new Error("DEV_DIRECT_WRITE_SCHEDULE_DETAIL_REFRESH_FAILED");
+      }
+      showNotice("Round 1 schedule saved and Candidate moved to Round 1 Scheduled.");
+    } catch (error) {
+      logSafeFailure(`DEV_DIRECT_WRITE_${category}`, error);
+      if (scheduleCreateAttempted) scheduleRetryBlockedCandidateId = candidateId;
+      const reconciled = await reconcileAfterFailure(candidateId);
+      let message;
+      if (!scheduleCreateAttempted) {
+        message = "Schedule could not be submitted. No schedule write was attempted; verify the selected DEV references and try again.";
+      } else if (!scheduleReadbackConfirmed) {
+        message = "Schedule creation or readback is uncertain. Candidate status was not updated; refresh and reconcile before any retry.";
+      } else if (!statusUpdateAttempted || !statusUpdated) {
+        message = "Schedule was persisted, but the Candidate status update failed or is uncertain. The schedule remains; no Status History was fabricated. Reconcile before retrying.";
+      } else if (!historyCreated) {
+        message = "Schedule and Candidate status were persisted, but Status History creation failed or is uncertain. No compensation or retry was performed; reconcile the current state.";
+      } else {
+        message = "Schedule, Candidate status, and Status History were saved, but the UI refresh failed. Refresh to verify the current server state.";
+      }
+      showNotice(reconciled ? message : `${message} Server-state refresh was incomplete.`, true);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function loadTableMetadata(table) {
     const metadata = await xrm().Utility.getEntityMetadata(table.logicalName);
     table.id = metadata.PrimaryIdAttribute;
-    if (!table.id) throw new Error("Table metadata is incomplete.");
+    if (!table.id || !metadata.EntitySetName) throw new Error("Table metadata is incomplete.");
+    table.entitySetName = metadata.EntitySetName;
   }
 
   async function showCallPanel(candidate) {
@@ -777,7 +1052,7 @@
   function bindEvents() {
     $("candidate-form").addEventListener("submit", createCandidate);
     $("call-form").addEventListener("submit", recordCall);
-    $("scheduling-form").addEventListener("submit", rejectScheduleWithoutStorage);
+    $("scheduling-form").addEventListener("submit", createSchedule);
     $("candidate-search").addEventListener("input", () => renderCandidateRows(currentRows));
     $("candidate-status-filter").addEventListener("change", () => renderCandidateRows(currentRows));
     $("refresh-button").addEventListener("click", async () => {
@@ -796,6 +1071,7 @@
       $("schedule-round1-button").hidden = true;
       $("scheduling-panel").hidden = true;
       selectedCandidate = null;
+      selectedSchedule = null;
       renderCandidateRows(currentRows);
     });
     $("waiting-status-button").addEventListener("click", moveToWaitingManualScheduling);
@@ -817,7 +1093,8 @@
       await Promise.all([
         loadTableMetadata(TABLES.candidate),
         loadTableMetadata(TABLES.call),
-        loadTableMetadata(TABLES.history)
+        loadTableMetadata(TABLES.history),
+        loadTableMetadata(TABLES.interview)
       ]);
       loadStage = "Position and Candidate Source options";
       await Promise.all([

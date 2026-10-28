@@ -1,6 +1,6 @@
 # Proposed Dataverse Schema Specification
 
-**Status:** Wider Phase 1C design proposal, originally documented 19 October 2026, with current implementation reconciled through Phase 2D.4F on 23 October 2026. The verified reference-table set includes `os_sr_ta`, `os_sr_pos`, `os_sr_csrc`, and `os_sr_loc`; approved columns and evidence are summarized in [Data Model](DATA_MODEL.md) and [Current State](CURRENT_STATE.md). Candidate, Call Log, Candidate Status History, their keys/relationships, and business operations remain unprovisioned proposals. Their owner decisions are recorded in [Phase 3A](PHASE_3A_CANDIDATE_CORE_DESIGN.md); readiness remains blocked by external audit and API privilege prerequisites, not product decisions.
+**Status:** Historical snapshot of the wider Phase 1C design proposal, originally documented 19 October 2026 and reflecting repository/environment evidence only through 23 October 2026. It is not the current provisioning inventory: later Candidate Core and Phase 4 DEV implementation evidence is tracked in [Data Model](DATA_MODEL.md) and [Current State](CURRENT_STATE.md). The Phase 4C `os_sr_intv` Interview Schedule table is DEV-only evidence storage; it does not approve or replace the production scheduling, availability, calendar, reschedule, or result requirements in this proposal.
 
 ## Evidence and Decision Labels
 

@@ -26,6 +26,12 @@ The role editor showed five Organization-depth Read defaults for Plug-in Assembl
 
 The app's scheduling draft uses existing TA Directory and Location rows only. Since no scheduling storage exists, no scheduling-table privilege is included in this role validation. Revalidate least privilege if an approved scheduling table is provisioned. The role remains unassigned pending a separately approved test-user target.
 
+## Phase 4C scheduling privilege update (27 October 2026)
+
+After the DEV-only `os_sr_intv` Interview Schedule table was provisioned in `os_sr_bso_rs_support`, the existing `BSO-RS Support - BSO` role was updated and reloaded in the role editor. The table is UserOwned. The role has Create, Read, Append, and Append To at User (Basic) depth; Write, Delete, Assign, and Share remain None because the current UI does not edit or delete schedule rows. Existing Candidate, Call Log, Status History, Position, Candidate Source, Location, and TA Directory grants were not changed. Operation Receipt remains outside the user-facing role.
+
+The role remains unassigned; no user or team role membership was changed. The five visible Organization-depth plug-in/SDK metadata Read defaults and four previously identified SharePoint-related defaults remain unchanged and classified **REVIEW BEFORE PRODUCTION**. Effective access has not been tested with a BSO user. Keep real data prohibited, restore the 50 disabled `ProtectCandidateCore` registrations before security/production acceptance, and treat the DEV direct-write schedule sequence as nontransactional technical debt. Candidate Core production backend remains pending.
+
 ## Current Candidate Core trust contract (26 October 2026)
 
 ### R4O server-registration-backed protected-write classification

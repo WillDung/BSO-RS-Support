@@ -1,6 +1,22 @@
 # Candidate UI Implementation Note
 
-**Current status (27 October 2026):** Phase 4A and the Phase 4B reference/security slice are implemented, published, and browser-accepted in VN LMV IT as a DEV-only direct-write fallback. `PHASE_4B_REFERENCE_AND_SECURITY_COMPLETE`; `SCHEDULING_STORAGE_NOT_PROVISIONED`; `BSO_SECURITY_ROLE_VALIDATED_UNASSIGNED`. Not production-ready.
+**Current status (27 October 2026):** `PHASE_4C_ROUND1_SCHEDULING_DEV_WORKING`; `SCHEDULING_STORAGE_PROVISIONED`; `ROUND1_SCHEDULE_PERSISTENCE_VERIFIED`; `ROUND1_SCHEDULED_STATUS_VISIBLE`; `BSO_SECURITY_ROLE_UPDATED_UNASSIGNED`. Phase 4C is implemented, scoped-published, and browser-accepted in VN LMV IT as a DEV-only direct-write fallback. Acceptance-scope readback: Candidate / Call Log / Status History / Interview Schedule / Receipt = **1 / 2 / 3 / 1 / 0**; final Candidate status is `Round 1 Scheduled`. The DEV schedule remains nontransactional, has no calendar availability check or booking, and does not complete the Candidate Core production backend. **`REAL DATA PROHIBITED`; not production-ready.**
+
+## Phase 4C Round 1 Scheduling acceptance (27 October 2026)
+
+The DEV-only `os_sr_intv` Interview Schedule table is in `os_sr_bso_rs_support`. It stores one current Round 1 schedule with required Candidate, TA, and Location lookups; a Round 1 local Choice; required User Local Start and End Date/Time; and optional Notes. It has no schedule status, result, offer, reschedule, or calendar fields. The form asks for an explicit End Time and does not infer a duration.
+
+The exact `srapp` Candidate Management page loads the existing `[DEV]` TA and Location rows. `Schedule Round 1` is available only for a synthetic Candidate at `Waiting Manual Scheduling`. The save sequence checks current Candidate status, creates the Interview Schedule row, confirms the saved row and its lookups/times, rechecks Candidate status, updates to `Round 1 Scheduled`, creates Status History, and refreshes. If a later write fails or is uncertain, it retains any saved rows, performs no automatic retry or compensation, fabricates no History, and presents a safe partial-state warning. This is DEV-only technical debt: browser Web API writes are not transactional.
+
+Browser acceptance created one fresh synthetic Candidate using the existing `[DEV]` Position and Candidate Source, recorded No Answer and Answered, moved through `Candidate Answered` and `Waiting Manual Scheduling`, and saved a future schedule using the `[DEV]` Synthetic Interviewer and Test Location. Search and status filtering worked. The Schedule action was hidden on a Candidate at `Candidate Answered` and on the accepted Candidate after scheduling; no arbitrary status editor was exposed. Following a full page reload, the Candidate remained `Round 1 Scheduled` and the Round 1 schedule, both Call Logs, and all three Status History rows were visible. No calendar availability check or calendar booking was performed.
+
+The existing `BSO-RS Support - BSO` role gained Create, Read, Append, and Append To on Interview Schedule at User (Basic) depth. Write, Delete, Assign, and Share remain None. The role remains unassigned; platform defaults remain `REVIEW BEFORE PRODUCTION`. The scoped refresh updated only the two changed web resources, performed no Site Map PATCH, and used one `PublishXml` scoped to `srapp` and its three exact web resources; `PublishAllXml` and package deployment were not used.
+
+**Next:** `PHASE_4D_INTERVIEW_RESULT_PASS_FAIL_DEV_SLICE` is not started. `VN_LMV_IT_PROTECT_CANDIDATE_CORE_DEV_KILL_SWITCH_ACTIVE`; `CANDIDATE_CORE_PRODUCTION_BACKEND_REMAINS_PENDING`; `REAL DATA PROHIBITED`.
+
+## Historical Phase 4B reference and security acceptance (27 October 2026)
+
+The Phase 4B record below is a historical state before scheduling storage was provisioned.
 
 Phase 4B created one synthetic `[DEV]` Position, Candidate Source, Location, and TA Directory reference row; no existing reference data was overwritten. Candidate Create loads Position and Candidate Source and displays the saved references. Browser acceptance created one synthetic Candidate using both references, verified Candidate Number/name/email/status/Created On and reference values, recorded one Answered Call Log, then moved the Candidate from `Candidate Answered` to `Waiting Manual Scheduling` with both transitions visible in Status History. Search by Candidate Number and the status filter were also verified.
 

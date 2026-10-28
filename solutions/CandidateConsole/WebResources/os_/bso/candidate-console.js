@@ -255,8 +255,10 @@
           (button.hidden || !canRecordInterviewResult())) ||
         (button.id === "save-schedule" &&
           (!selectedCandidate ||
-            selectedCandidate[TABLES.candidate.status] !== STATUS.waitingManualScheduling ||
-            Boolean(selectedSchedule) ||
+            (scheduleMode === "reschedule"
+              ? !canManageSchedule()
+              : selectedCandidate[TABLES.candidate.status] !== STATUS.waitingManualScheduling ||
+                Boolean(selectedSchedule)) ||
             scheduleRetryBlockedCandidateId === selectedCandidate[TABLES.candidate.id])) ||
         (button.id === "save-interview-result" &&
           (!selectedCandidate || !canRecordInterviewResult())) ||
@@ -838,6 +840,7 @@
       `${selectedCandidate[TABLES.candidate.number] || ""} ${selectedCandidate[TABLES.candidate.name] || ""}`.trim();
     $("scheduling-panel").hidden = false;
     $("cancellation-panel").hidden = true;
+    setBusy(false);
     $("scheduling-panel").scrollIntoView({ behavior: "smooth", block: "center" });
     $("scheduling-ta").focus();
   }
@@ -2143,6 +2146,21 @@
   }
 
   function bindEvents() {
+    const forceSubmit = (buttonId, formId) => {
+      const button = $(buttonId);
+      const form = $(formId);
+      button.addEventListener("click", (event) => {
+        if (button.disabled || busy) return;
+        event.preventDefault();
+        form.requestSubmit();
+      });
+    };
+    forceSubmit("create-button", "candidate-form");
+    forceSubmit("submit-call", "call-form");
+    forceSubmit("save-schedule", "scheduling-form");
+    forceSubmit("confirm-cancellation", "cancellation-form");
+    forceSubmit("save-interview-result", "interview-result-form");
+
     $("candidate-form").addEventListener("submit", createCandidate);
     $("call-form").addEventListener("submit", recordCall);
     $("scheduling-form").addEventListener("submit", createSchedule);

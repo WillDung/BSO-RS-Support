@@ -53,6 +53,14 @@ Assert-Test ($script.Contains('if (!isDevFallbackEnabled()) return createCandida
     $script.Contains('if (!isDevFallbackEnabled()) return cancelRound1ThroughCore(event);') -and
     $script.Contains('isTargetDevEnvironment() && $("dev-fallback-toggle").checked')) `
     'Never auto-fallback from Candidate Core; enable the retained direct-write path only by explicit DEV switch'
+Assert-Test ($script.Contains('const forceSubmit = (buttonId, formId) => {') -and
+    $script.Contains('form.requestSubmit();') -and
+    $script.Contains('forceSubmit("create-button", "candidate-form");') -and
+    $script.Contains('forceSubmit("submit-call", "call-form");') -and
+    $script.Contains('forceSubmit("save-schedule", "scheduling-form");') -and
+    $script.Contains('forceSubmit("confirm-cancellation", "cancellation-form");') -and
+    $script.Contains('forceSubmit("save-interview-result", "interview-result-form");')) `
+    'Force submit action buttons through requestSubmit so UCI click handling always reaches form submit handlers'
 Assert-Test ($html.Contains('id="candidate-search"') -and
     $script.Contains('candidate[TABLES.candidate.number]') -and
     $script.Contains('candidate[TABLES.candidate.name]') -and
@@ -84,6 +92,10 @@ Assert-Test ($script.Contains('[history.previous]: STATUS.answered') -and
 Assert-Test ($html.Contains('id="schedule-round1-button"') -and
     $script.Contains('candidate[TABLES.candidate.status] === STATUS.waitingManualScheduling') -and
     $script.Contains('$("scheduling-panel").hidden = true;')) 'Expose Schedule Round 1 only from Waiting Manual Scheduling and close stale drafts on selection changes'
+Assert-Test ($script.Contains('(scheduleMode === "reschedule"' ) -and
+    $script.Contains('? !canManageSchedule()') -and
+    $script -match '\$\("cancellation-panel"\)\.hidden = true;\r?\n\s+setBusy\(false\);\r?\n\s+\$\("scheduling-panel"\)\.scrollIntoView') `
+    'Recompute Save Schedule availability when opening a draft and use pending active schedule eligibility for rescheduling'
 Assert-Test ($html.Contains('id="scheduling-candidate"') -and
     $html.Contains('id="scheduling-ta"') -and
     $html.Contains('id="scheduling-date"') -and

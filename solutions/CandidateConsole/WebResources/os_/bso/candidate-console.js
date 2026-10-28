@@ -19,7 +19,19 @@
     needCall: 100010000,
     answered: 100010001,
     waitingManualScheduling: 100010002,
-    round1Scheduled: 100010003
+    round1Scheduled: 100010003,
+    offerExtended: 100010004,
+    candidateFailed: 100010005
+  };
+  const INTERVIEW_RESULT_LABELS = {
+    100000000: "Pending",
+    100000001: "Pass",
+    100000002: "Fail"
+  };
+  const INTERVIEW_RESULT = {
+    pending: 100000000,
+    pass: 100000001,
+    fail: 100000002
   };
   const OUTCOME = {
     answered: 100010000,
@@ -84,13 +96,17 @@
       round1: 100000000,
       start: "os_sr_intv_strt",
       end: "os_sr_intv_end",
-      notes: "os_sr_intv_nts"
+      notes: "os_sr_intv_nts",
+      result: "os_sr_intv_res",
+      resultRecordedAt: "os_sr_intv_recat",
+      resultNotes: "os_sr_intv_rnts"
     }
   };
 
   let selectedCandidate = null;
   let selectedSchedule = null;
   let scheduleRetryBlockedCandidateId = null;
+  let resultRetryBlockedCandidateId = null;
   let currentRows = [];
   let busy = false;
 
@@ -184,11 +200,15 @@
             selectedCandidate[TABLES.candidate.status] !== STATUS.waitingManualScheduling ||
             Boolean(selectedSchedule) ||
             scheduleRetryBlockedCandidateId === selectedCandidate[TABLES.candidate.id])) ||
+        (button.id === "record-interview-result-button" &&
+          (button.hidden || !canRecordInterviewResult())) ||
         (button.id === "save-schedule" &&
           (!selectedCandidate ||
             selectedCandidate[TABLES.candidate.status] !== STATUS.waitingManualScheduling ||
             Boolean(selectedSchedule) ||
-            scheduleRetryBlockedCandidateId === selectedCandidate[TABLES.candidate.id]));
+            scheduleRetryBlockedCandidateId === selectedCandidate[TABLES.candidate.id])) ||
+        (button.id === "save-interview-result" &&
+          (!selectedCandidate || !canRecordInterviewResult()));
     });
   }
 
@@ -313,6 +333,7 @@
       call.className = "button button-primary button-small";
       call.dataset.action = "";
       call.textContent = "Record Call";
+      call.hidden = [STATUS.offerExtended, STATUS.candidateFailed].includes(candidate[TABLES.candidate.status]);
       call.disabled = busy;
       call.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -429,7 +450,7 @@
   async function renderSchedulingDetails(candidateId) {
     const interview = TABLES.interview;
     const rows = await retrieveAll(interview.logicalName,
-      `?$select=${[interview.id, interview.round, interview.start, interview.end, interview.notes, interview.ta, interview.location].join(",")}` +
+      `?$select=${[interview.id, interview.round, interview.start, interview.end, interview.notes, interview.ta, interview.location, interview.result, interview.resultRecordedAt, interview.resultNotes].join(",")}` +
       `&$filter=${interview.candidate} eq ${candidateId} and ${interview.round} eq ${interview.round1}` +
       `&$orderby=${interview.start} desc&$top=2`);
     const body = $("schedule-history-rows");
@@ -438,7 +459,7 @@
     if (!selectedSchedule) {
       const row = document.createElement("tr");
       const cell = appendCell(row, "No Round 1 schedule.");
-      cell.colSpan = 5;
+      cell.colSpan = 8;
       cell.className = "empty";
       body.appendChild(row);
     } else {
@@ -452,11 +473,14 @@
       appendCell(row, `${formatDate(selectedSchedule[interview.start])} – ${formatDate(selectedSchedule[interview.end])}`);
       appendCell(row, names[1]);
       appendCell(row, selectedSchedule[interview.notes]);
+      appendCell(row, choiceLabel(selectedSchedule, interview.result, INTERVIEW_RESULT_LABELS) || "Pending");
+      appendCell(row, formatDate(selectedSchedule[interview.resultRecordedAt]));
+      appendCell(row, selectedSchedule[interview.resultNotes]);
       body.appendChild(row);
       if (rows.length > 1) {
         const warning = document.createElement("tr");
         const cell = appendCell(warning, "Multiple Round 1 schedule rows exist; showing the newest. Reconcile before creating another.");
-        cell.colSpan = 5;
+        cell.colSpan = 8;
         cell.className = "empty";
         body.appendChild(warning);
       }
@@ -466,6 +490,21 @@
       isSyntheticCandidate(selectedCandidate);
     $("schedule-round1-button").disabled = busy || !canSchedule || Boolean(selectedSchedule) ||
       scheduleRetryBlockedCandidateId === candidateId;
+    const canRecord = selectedCandidate &&
+      selectedCandidate[TABLES.candidate.status] === STATUS.round1Scheduled &&
+      isSyntheticCandidate(selectedCandidate) &&
+      rows.length === 1 &&
+      isPendingInterviewResult(selectedSchedule) &&
+      resultRetryBlockedCandidateId !== candidateId;
+    $("record-interview-result-button").hidden = !canRecord;
+    $("record-interview-result-button").disabled = busy || !canRecord;
+    if (canRecord) {
+      $("record-interview-result-button").removeAttribute("title");
+    } else if (resultRetryBlockedCandidateId === candidateId) {
+      $("record-interview-result-button").title = "A previous submission needs reconciliation. Reload and verify the persisted result before another action.";
+    } else {
+      $("record-interview-result-button").removeAttribute("title");
+    }
     if (selectedSchedule) {
       $("schedule-round1-button").title = "A Round 1 schedule already exists. Reconcile the Candidate state before scheduling again.";
     } else if (scheduleRetryBlockedCandidateId === candidateId) {
@@ -483,10 +522,13 @@
       selectedCandidate = candidate;
       selectedSchedule = null;
       $("scheduling-panel").hidden = true;
+      $("interview-result-panel").hidden = true;
       $("schedule-round1-button").hidden = true;
+      $("record-interview-result-button").hidden = true;
       $("detail-heading").textContent = candidate[TABLES.candidate.name] || "Candidate";
       $("detail-panel").hidden = false;
-      $("call-entry-panel").hidden = false;
+      const terminal = [STATUS.offerExtended, STATUS.candidateFailed].includes(candidate[TABLES.candidate.status]);
+      $("call-entry-panel").hidden = terminal;
       $("call-candidate-label").textContent =
         `${candidate[TABLES.candidate.number] || ""} ${candidate[TABLES.candidate.name] || ""}`.trim();
       $("submit-call").disabled = busy;
@@ -497,6 +539,8 @@
       $("waiting-status-button").disabled = busy || !canMoveToWaiting;
       $("schedule-round1-button").hidden = !canSchedule;
       $("schedule-round1-button").disabled = busy || !canSchedule;
+      $("record-interview-result-button").hidden = true;
+      $("interview-result-panel").hidden = true;
       renderCandidateRows(currentRows);
       await Promise.all([
         renderCandidateDetails(candidate),
@@ -507,6 +551,7 @@
       $("schedule-round1-button").hidden = !canSchedule;
       $("schedule-round1-button").disabled = busy || !canSchedule || Boolean(selectedSchedule) ||
         scheduleRetryBlockedCandidateId === candidateId;
+      $("interview-result-panel").hidden = true;
       $("detail-panel").scrollIntoView({ behavior: "smooth", block: "start" });
       return true;
     } catch {
@@ -607,9 +652,174 @@
   async function findRound1Schedules(candidateId) {
     const interview = TABLES.interview;
     return retrieveAll(interview.logicalName,
-      `?$select=${[interview.id, interview.round, interview.start].join(",")}` +
+      `?$select=${[interview.id, interview.round, interview.start, interview.result].join(",")}` +
       `&$filter=${interview.candidate} eq ${candidateId} and ${interview.round} eq ${interview.round1}` +
       `&$orderby=${interview.start} desc&$top=2`);
+  }
+
+  function isPendingInterviewResult(schedule) {
+    return Boolean(schedule &&
+      (schedule[TABLES.interview.result] == null ||
+        schedule[TABLES.interview.result] === INTERVIEW_RESULT.pending));
+  }
+
+  function canRecordInterviewResult() {
+    return Boolean(selectedCandidate &&
+      selectedCandidate[TABLES.candidate.status] === STATUS.round1Scheduled &&
+      isSyntheticCandidate(selectedCandidate) &&
+      selectedSchedule &&
+      isPendingInterviewResult(selectedSchedule) &&
+      resultRetryBlockedCandidateId !== selectedCandidate[TABLES.candidate.id]);
+  }
+
+  function showInterviewResultPanel() {
+    if (busy || !canRecordInterviewResult()) return;
+    $("interview-result-form").reset();
+    $("interview-result-candidate").textContent =
+      `${selectedCandidate[TABLES.candidate.number] || ""} ${selectedCandidate[TABLES.candidate.name] || ""}`.trim();
+    $("interview-result-panel").hidden = false;
+    $("interview-result-panel").scrollIntoView({ behavior: "smooth", block: "center" });
+    $("interview-result-choice").focus();
+  }
+
+  async function recordInterviewResult(event) {
+    event.preventDefault();
+    if (busy || !selectedCandidate || !canRecordInterviewResult()) return;
+    hideNotice();
+    const c = TABLES.candidate;
+    const interview = TABLES.interview;
+    const history = TABLES.history;
+    const candidateId = normalizeGuid(selectedCandidate[c.id]);
+    const scheduleId = normalizeGuid(selectedSchedule[interview.id]);
+    if (!isTargetDevEnvironment() || !isSyntheticCandidate(selectedCandidate)) {
+      showNotice("Interview results are limited to synthetic candidates in VN LMV IT.", true);
+      return;
+    }
+    const result = Number($("interview-result-choice").value);
+    if (![INTERVIEW_RESULT.pass, INTERVIEW_RESULT.fail].includes(result)) {
+      showNotice("Choose Pass or Fail.", true);
+      return;
+    }
+
+    setBusy(true);
+    let category = "INTERVIEW_RESULT_CANDIDATE_READ_FAILED";
+    let resultUpdateAttempted = false;
+    let resultReadbackConfirmed = false;
+    let candidateStatusUpdateAttempted = false;
+    let candidateStatusUpdated = false;
+    let historyCreated = false;
+    try {
+      const current = await xrm().WebApi.retrieveRecord(
+        c.logicalName,
+        candidateId,
+        `?$select=${[c.id, c.name, c.email, c.status].join(",")}`
+      );
+      if (!isSyntheticCandidate(current) || current[c.status] !== STATUS.round1Scheduled) {
+        await reconcileAfterFailure(candidateId);
+        showNotice("Candidate is no longer Round 1 Scheduled. No interview result was written.", true);
+        return;
+      }
+
+      category = "INTERVIEW_RESULT_SCHEDULE_READ_FAILED";
+      const schedules = await findRound1Schedules(candidateId);
+      if (schedules.length !== 1 || normalizeGuid(schedules[0][interview.id]) !== scheduleId ||
+          !isPendingInterviewResult(schedules[0])) {
+        await reconcileAfterFailure(candidateId);
+        showNotice("Exactly one pending Round 1 schedule could not be verified. No interview result was written.", true);
+        return;
+      }
+
+      const recordedAt = new Date().toISOString();
+      const notes = $("interview-result-notes").value.trim();
+      const payload = {
+        [interview.result]: result,
+        [interview.resultRecordedAt]: recordedAt
+      };
+      if (notes) payload[interview.resultNotes] = notes;
+
+      category = "INTERVIEW_RESULT_UPDATE_FAILED";
+      resultUpdateAttempted = true;
+      await xrm().WebApi.updateRecord(interview.logicalName, scheduleId, payload);
+
+      category = "INTERVIEW_RESULT_READBACK_FAILED";
+      const saved = await xrm().WebApi.retrieveRecord(
+        interview.logicalName,
+        scheduleId,
+        `?$select=${[interview.id, interview.candidate, interview.round, interview.result, interview.resultRecordedAt, interview.resultNotes].join(",")}`
+      );
+      if (normalizeGuid(saved[interview.candidate]) !== candidateId ||
+          saved[interview.round] !== interview.round1 ||
+          saved[interview.result] !== result ||
+          Date.parse(saved[interview.resultRecordedAt]) !== Date.parse(recordedAt) ||
+          (notes && saved[interview.resultNotes] !== notes)) {
+        throw new Error("DEV_DIRECT_WRITE_INTERVIEW_RESULT_READBACK_MISMATCH");
+      }
+      resultReadbackConfirmed = true;
+
+      category = "INTERVIEW_RESULT_CANDIDATE_STATUS_READ_FAILED";
+      const beforeStatusUpdate = await xrm().WebApi.retrieveRecord(
+        c.logicalName,
+        candidateId,
+        `?$select=${[c.id, c.name, c.email, c.status].join(",")}`
+      );
+      if (!isSyntheticCandidate(beforeStatusUpdate) ||
+          beforeStatusUpdate[c.status] !== STATUS.round1Scheduled) {
+        throw new Error("DEV_DIRECT_WRITE_CANDIDATE_STATUS_CHANGED_AFTER_RESULT");
+      }
+      const nextStatus = result === INTERVIEW_RESULT.pass
+        ? STATUS.offerExtended
+        : STATUS.candidateFailed;
+      candidateStatusUpdateAttempted = true;
+
+      category = "INTERVIEW_RESULT_CANDIDATE_STATUS_UPDATE_FAILED";
+      await xrm().WebApi.updateRecord(c.logicalName, candidateId, {
+        [c.status]: nextStatus
+      });
+      candidateStatusUpdated = true;
+
+      category = "INTERVIEW_RESULT_STATUS_HISTORY_CREATE_FAILED";
+      await xrm().WebApi.createRecord(history.logicalName, {
+        [`${history.candidateNavigation}@odata.bind`]: `/${c.entitySetName}(${candidateId})`,
+        [`${history.actorNavigation}@odata.bind`]: `/systemusers(${currentUserId()})`,
+        [history.previous]: STATUS.round1Scheduled,
+        [history.current]: nextStatus,
+        [history.changedAt]: new Date().toISOString(),
+        [history.correlation]: newCorrelationId(),
+        [history.action]: result === INTERVIEW_RESULT.pass ? "RecordRound1Pass" : "RecordRound1Fail",
+        [history.reason]: "DEV Candidate Management / Record Interview Result"
+      });
+      historyCreated = true;
+
+      category = "INTERVIEW_RESULT_REFRESH_FAILED";
+      $("interview-result-form").reset();
+      $("interview-result-panel").hidden = true;
+      await refreshCandidates();
+      if (!(await openCandidate(candidateId))) {
+        throw new Error("DEV_DIRECT_WRITE_INTERVIEW_RESULT_DETAIL_REFRESH_FAILED");
+      }
+      showNotice(result === INTERVIEW_RESULT.pass
+        ? "Round 1 result saved: Pass. Candidate moved to Offer Extended."
+        : "Round 1 result saved: Fail. Candidate moved to Candidate Failed.");
+    } catch (error) {
+      logSafeFailure(`DEV_DIRECT_WRITE_${category}`, error);
+      if (resultUpdateAttempted) resultRetryBlockedCandidateId = candidateId;
+      const reconciled = await reconcileAfterFailure(candidateId);
+      let message;
+      if (!resultUpdateAttempted) {
+        message = "Interview result was not submitted. Verify the Candidate and schedule, then try again.";
+      } else if (!resultReadbackConfirmed) {
+        message = "Interview result update or readback is uncertain. Candidate status was not changed; refresh and reconcile before any retry.";
+      } else if (!candidateStatusUpdateAttempted || !candidateStatusUpdated) {
+        message = "Interview result was persisted, but the Candidate status update failed or is uncertain. The result remains; no Status History was fabricated. Reconcile before retrying.";
+      } else if (!historyCreated) {
+        message = "Interview result and Candidate status were persisted, but Status History creation failed or is uncertain. No compensation or retry was performed; reconcile the current state.";
+      } else {
+        message = "Interview result, Candidate status, and Status History were saved, but the UI refresh failed. Refresh to verify the current server state.";
+      }
+      showNotice(reconciled ? message : `${message} Server-state refresh was incomplete.`, true);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function createSchedule(event) {
@@ -682,6 +892,7 @@
         [`${interview.taNavigation}@odata.bind`]: `/${ta.entitySetName}(${ta.id})`,
         [`${interview.locationNavigation}@odata.bind`]: `/${location.entitySetName}(${location.id})`,
         [interview.round]: interview.round1,
+        [interview.result]: INTERVIEW_RESULT.pending,
         [interview.start]: start.toISOString(),
         [interview.end]: end.toISOString()
       };
@@ -698,12 +909,13 @@
       const saved = await xrm().WebApi.retrieveRecord(
         interview.logicalName,
         scheduleId,
-        `?$select=${[interview.id, interview.round, interview.candidate, interview.ta, interview.location, interview.start, interview.end, interview.notes].join(",")}`
+        `?$select=${[interview.id, interview.round, interview.result, interview.candidate, interview.ta, interview.location, interview.start, interview.end, interview.notes].join(",")}`
       );
       if (normalizeGuid(saved[interview.candidate]) !== candidateId ||
           normalizeGuid(saved[interview.ta]) !== ta.id ||
           normalizeGuid(saved[interview.location]) !== location.id ||
           saved[interview.round] !== interview.round1 ||
+          saved[interview.result] !== INTERVIEW_RESULT.pending ||
           Date.parse(saved[interview.start]) !== start.getTime() ||
           Date.parse(saved[interview.end]) !== end.getTime()) {
         throw new Error("DEV_DIRECT_WRITE_SCHEDULE_READBACK_MISMATCH");
@@ -779,6 +991,10 @@
   async function showCallPanel(candidate) {
     if (!isSyntheticCandidate(candidate)) {
       showNotice("DEV direct write is limited to [SYNTHETIC-E2E] candidates with .invalid email addresses.", true);
+      return;
+    }
+    if ([STATUS.offerExtended, STATUS.candidateFailed].includes(candidate[TABLES.candidate.status])) {
+      showNotice("No further workflow actions are available for this Candidate in the current DEV scope.", true);
       return;
     }
     if (await openCandidate(candidate[TABLES.candidate.id])) {
@@ -912,6 +1128,10 @@
         return;
       }
       const previousStatus = current[c.status];
+      if ([STATUS.offerExtended, STATUS.candidateFailed].includes(previousStatus)) {
+        showNotice("No further workflow actions are available for this Candidate in the current DEV scope.", true);
+        return;
+      }
       const correlationId = newCorrelationId();
       category = "CALL_LOG_CREATE_FAILED";
       const userId = currentUserId();
@@ -1053,6 +1273,7 @@
     $("candidate-form").addEventListener("submit", createCandidate);
     $("call-form").addEventListener("submit", recordCall);
     $("scheduling-form").addEventListener("submit", createSchedule);
+    $("interview-result-form").addEventListener("submit", recordInterviewResult);
     $("candidate-search").addEventListener("input", () => renderCandidateRows(currentRows));
     $("candidate-status-filter").addEventListener("change", () => renderCandidateRows(currentRows));
     $("refresh-button").addEventListener("click", async () => {
@@ -1069,13 +1290,16 @@
       $("call-entry-panel").hidden = true;
       $("waiting-status-button").hidden = true;
       $("schedule-round1-button").hidden = true;
+      $("record-interview-result-button").hidden = true;
       $("scheduling-panel").hidden = true;
+      $("interview-result-panel").hidden = true;
       selectedCandidate = null;
       selectedSchedule = null;
       renderCandidateRows(currentRows);
     });
     $("waiting-status-button").addEventListener("click", moveToWaitingManualScheduling);
     $("schedule-round1-button").addEventListener("click", showSchedulingPanel);
+    $("record-interview-result-button").addEventListener("click", showInterviewResultPanel);
   }
 
   async function initialize() {

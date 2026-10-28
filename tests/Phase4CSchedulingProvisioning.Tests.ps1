@@ -29,6 +29,9 @@ Assert-Test ($plan.PrimaryName.LogicalName -ceq 'os_sr_intv_ref' -and
 Assert-Test (@($plan.Fields | Where-Object LogicalName -ceq 'os_sr_intv_rnd').Count -eq 1 -and
     @($plan.Fields | Where-Object { $_.LogicalName -ceq 'os_sr_intv_rnd' -and @($_.Options).Count -eq 1 -and $_.Options[0] -ceq 'Round 1' }).Count -eq 1) 'Support Round 1 only with a single local Choice option'
 Assert-Test (@($plan.Fields | Where-Object { $_.LogicalName -in @('os_sr_intv_strt', 'os_sr_intv_end') -and $_.Type -ceq 'DateTime UserLocal' -and $_.Required }).Count -eq 2) 'Require User Local start and end Date/Time'
+Assert-Test (@($plan.Fields | Where-Object { $_.LogicalName -ceq 'os_sr_intv_res' -and $_.Type -ceq 'Local Choice' -and -not $_.Required -and (@($_.Options) -join '|') -ceq 'Pending|Pass|Fail' }).Count -eq 1 -and
+    @($plan.Fields | Where-Object { $_.LogicalName -ceq 'os_sr_intv_recat' -and $_.Type -ceq 'DateTime UserLocal' -and -not $_.Required }).Count -eq 1 -and
+    @($plan.Fields | Where-Object { $_.LogicalName -ceq 'os_sr_intv_rnts' -and $_.Type -ceq 'Memo' -and $_.MaxLength -eq 1000 -and -not $_.Required }).Count -eq 1) 'Plan only includes the three optional interview-result fields'
 Assert-Test (@($plan.Relationships | Where-Object { $_.Parent -in @('os_sr_cand', 'os_sr_ta', 'os_sr_loc') -and $_.Required -and $_.Delete -ceq 'Restrict' }).Count -eq 3) 'Require the Candidate, TA, and Location lookups with restricted deletes'
 Assert-Test ($plan.Writes -eq 0 -and $source.Contains("MaximumRetryCount = 0") -and
     $source.Contains('Retries = 0')) 'Plan and provisioning use no retry'
@@ -60,6 +63,15 @@ Assert-Test (-not $source.Contains('PublishAllXml') -and
     -not $source.Contains('pac admin assign-user')) 'Do not publish globally or change role assignment'
 Assert-Test ($source.Contains("Outcome = 'SCHEDULING_STORAGE_PROVISIONED'") -and
     $source.Contains("'SCHEDULING_STORAGE_NOT_PROVISIONED'")) 'Report storage state explicitly'
+Assert-Test ($source.Contains('function Ensure-InterviewResultAttributes') -and
+    $source.Contains('function Assert-InterviewResultAttributes') -and
+    $source.Contains('InterviewResultChoiceValues = $resultState.ChoiceValues') -and
+    $source.Contains('do not retry before read-only reconciliation')) 'Add the existing-table fields with authoritative metadata readback and no automatic retry'
+Assert-Test ($source.Contains("LogicalName = 'os_sr_intv_res'") -and
+    $source.Contains("LogicalName = 'os_sr_intv_recat'") -and
+    $source.Contains("LogicalName = 'os_sr_intv_rnts'") -and
+    $source.Contains("Value = `$null") -and
+$source.Contains("DisplayName = New-Label -Text 'Result Recorded At'")) 'Use stable os_sr_ names and allow Dataverse to allocate Choice values'
 Assert-Test ($source -notmatch 'https?://[A-Za-z0-9.-]+\.crm\d?\.dynamics\.com' -and
     $source -notmatch 'org[0-9a-f]{6,}\.crm\d?\.dynamics\.com') 'Keep tenant-specific organization URLs out of the provisioning source'
 Assert-Test ($source.Contains("Host -notmatch '^org[0-9a-f]{6,}\.crm\d?\.dynamics\.com$'") -and

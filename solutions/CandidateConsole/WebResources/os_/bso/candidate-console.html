@@ -6,7 +6,7 @@
   <title>Candidate Management</title>
   <link rel="stylesheet" href="candidate-console.css">
   <script src="../../ClientGlobalContext.js.aspx"></script>
-  <script defer src="candidate-console.js?v=572f5dd9db11"></script>
+  <script defer src="candidate-console.js?v=0d474f05ab59"></script>
 </head>
 <body>
   <main class="shell">
@@ -119,8 +119,8 @@
         <h3 id="schedule-history-heading">Scheduling</h3>
         <div class="table-wrap">
           <table>
-            <thead><tr><th>Round</th><th>Interviewer</th><th>Date/Time</th><th>Location</th><th>Notes</th></tr></thead>
-            <tbody id="schedule-history-rows"><tr><td class="empty" colspan="5">No Round 1 schedule.</td></tr></tbody>
+            <thead><tr><th>Round</th><th>Interviewer</th><th>Date/Time</th><th>Location</th><th>Schedule Notes</th><th>Interview Result</th><th>Result Recorded At</th><th>Result Notes</th></tr></thead>
+            <tbody id="schedule-history-rows"><tr><td class="empty" colspan="8">No Round 1 schedule.</td></tr></tbody>
           </table>
         </div>
       </section>
@@ -177,6 +177,9 @@
         <button id="schedule-round1-button" class="button button-primary" type="button" data-action hidden>
           Schedule Round 1
         </button>
+        <button id="record-interview-result-button" class="button button-primary" type="button" data-action hidden>
+          Record Interview Result
+        </button>
       </div>
       <section id="scheduling-panel" class="call-entry-panel" aria-labelledby="scheduling-heading" hidden>
         <div class="section-heading">
@@ -225,6 +228,33 @@
             <span id="scheduling-dev-note" class="storage-warning" role="status">
               DEV-only persistence. No calendar availability check or calendar booking is performed.
             </span>
+          </div>
+        </form>
+      </section>
+      <section id="interview-result-panel" class="call-entry-panel" aria-labelledby="interview-result-heading" hidden>
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">DEV direct-write fallback</p>
+            <h3 id="interview-result-heading">Record Interview Result</h3>
+          </div>
+        </div>
+        <p id="interview-result-candidate" class="muted"></p>
+        <form id="interview-result-form" class="form-grid">
+          <label class="field">
+            <span>Result <b aria-hidden="true">*</b></span>
+            <select id="interview-result-choice" required>
+              <option value="100000001">Pass</option>
+              <option value="100000002">Fail</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Result Notes</span>
+            <textarea id="interview-result-notes" maxlength="1000" rows="3"></textarea>
+          </label>
+          <div class="form-actions field-wide">
+            <button id="save-interview-result" class="button button-primary" type="submit" data-action>
+              Save Interview Result
+            </button>
           </div>
         </form>
       </section>

@@ -36,7 +36,7 @@ The table and two additional attributes were created in the separately authorize
 
 ## Verified Round 1 Interview Schedule DEV Table
 
-The `os_sr_intv` table was provisioned in VN LMV IT for the separately authorized Phase 4C synthetic DEV workflow and added as a root component in `os_sr_bso_rs_support`. This is a narrow DEV persistence slice, not approval of the wider production scheduling, availability, calendar-booking, reschedule, or interview-result design.
+The `os_sr_intv` table was provisioned in VN LMV IT for the separately authorized Phase 4C synthetic DEV workflow and extended for the Phase 4D DEV result slice; it is a root component in `os_sr_bso_rs_support`. This is not approval of the wider production scheduling, availability, calendar-booking, reschedule, or interview-result design.
 
 | Item | Verified metadata, 27 October 2026 |
 |---|---|
@@ -46,12 +46,14 @@ The `os_sr_intv` table was provisioned in VN LMV IT for the separately authorize
 | Round | Required local Choice `os_sr_intv_rnd`; only `Round 1`, value `100000000` |
 | Times | Required User Local Date/Time `os_sr_intv_strt` and `os_sr_intv_end`; the UI requires explicit Start and End on the same date |
 | Notes | Optional Memo `os_sr_intv_nts`, max 1,000 |
+| Interview result | Optional local Choice `os_sr_intv_res`; Pending `100000000`, Pass `100000001`, Fail `100000002` |
+| Result timestamp / notes | Optional User Local Date/Time `os_sr_intv_recat`; optional Memo `os_sr_intv_rnts`, max 1,000 |
 | Required lookups | Candidate `os_sr_intv_cand`, TA `os_sr_intv_ta`, Location `os_sr_intv_loc` |
 | Relationships | `os_sr_cand_intv`, `os_sr_ta_intv`, `os_sr_loc_intv`; parent-to-many, Delete Restrict, assignment/sharing/reparent cascades disabled |
 | Audit / Solution | Table audit metadata enabled; root component in unmanaged `os_sr_bso_rs_support`. Organization-level auditing remains unchanged and disabled. |
-| Status/results | No scheduling-status, interview-result, offer, reschedule, or calendar columns |
+| Scope exclusions | No scheduling-status, offer, reschedule, or calendar columns; no Round 2 or scorecard model |
 
-The live schema was reconciled after provisioning. Browser acceptance created one synthetic Round 1 schedule, read it back before the Candidate status update, and showed it after a full page reload. Candidate / Call Log / Status History / Interview Schedule / Receipt counts for that acceptance were **1 / 2 / 3 / 1 / 0**. See [Current State](CURRENT_STATE.md) and the [Candidate UI implementation note](CANDIDATE_UI_IMPLEMENTATION_NOTE.md).
+The live schema was reconciled after the Phase 4C and 4D provisioning. Phase 4C browser acceptance created one synthetic Round 1 schedule, read it back before the Candidate status update, and showed it after a full page reload; its Candidate / Call Log / Status History / Interview Schedule / Receipt counts were **1 / 2 / 3 / 1 / 0**. Phase 4D browser acceptance for Pass and Fail and persistence after reload remains **NOT VERIFIED**. See [Current State](CURRENT_STATE.md) and the [Candidate UI implementation note](CANDIDATE_UI_IMPLEMENTATION_NOTE.md).
 
 ## Naming standard and private abbreviation dictionary
 

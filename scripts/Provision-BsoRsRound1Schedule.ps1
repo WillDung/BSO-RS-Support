@@ -29,9 +29,29 @@ $script:ExpectedAttributes = @(
     'os_sr_intv_strt',
     'os_sr_intv_end',
     'os_sr_intv_nts',
+    'os_sr_intv_res',
+    'os_sr_intv_recat',
+    'os_sr_intv_rnts',
     'os_sr_intv_cand',
     'os_sr_intv_ta',
     'os_sr_intv_loc'
+)
+$script:ResultAttributes = @(
+    [ordered]@{
+        LogicalName = 'os_sr_intv_res'
+        Type = 'Picklist'
+        DisplayName = 'Interview Result'
+    }
+    [ordered]@{
+        LogicalName = 'os_sr_intv_recat'
+        Type = 'DateTime'
+        DisplayName = 'Result Recorded At'
+    }
+    [ordered]@{
+        LogicalName = 'os_sr_intv_rnts'
+        Type = 'Memo'
+        DisplayName = 'Result Notes'
+    }
 )
 $script:Relations = @(
     [ordered]@{
@@ -130,6 +150,62 @@ function New-DateTimeAttribute {
     }
 }
 
+function New-InterviewResultChoiceAttribute {
+    $options = @('Pending', 'Pass', 'Fail') | ForEach-Object {
+        [ordered]@{
+            '@odata.type' = 'Microsoft.Dynamics.CRM.OptionMetadata'
+            Value = $null
+            Label = New-Label -Text $_
+        }
+    }
+    [ordered]@{
+        '@odata.type' = 'Microsoft.Dynamics.CRM.PicklistAttributeMetadata'
+        AttributeType = 'Picklist'
+        AttributeTypeName = [ordered]@{ Value = 'PicklistType' }
+        SchemaName = 'os_sr_intv_res'
+        DisplayName = New-Label -Text 'Interview Result'
+        RequiredLevel = New-RequiredLevel
+        IsPrimaryName = $false
+        IsAuditEnabled = New-AuditSetting
+        OptionSet = [ordered]@{
+            '@odata.type' = 'Microsoft.Dynamics.CRM.OptionSetMetadata'
+            IsGlobal = $false
+            OptionSetType = 'Picklist'
+            Options = $options
+        }
+    }
+}
+
+function New-ResultRecordedAtAttribute {
+    [ordered]@{
+        '@odata.type' = 'Microsoft.Dynamics.CRM.DateTimeAttributeMetadata'
+        AttributeType = 'DateTime'
+        AttributeTypeName = [ordered]@{ Value = 'DateTimeType' }
+        SchemaName = 'os_sr_intv_recat'
+        DisplayName = New-Label -Text 'Result Recorded At'
+        RequiredLevel = New-RequiredLevel
+        Format = 'DateAndTime'
+        DateTimeBehavior = [ordered]@{ Value = 'UserLocal' }
+        IsPrimaryName = $false
+        IsAuditEnabled = New-AuditSetting
+    }
+}
+
+function New-ResultNotesAttribute {
+    [ordered]@{
+        '@odata.type' = 'Microsoft.Dynamics.CRM.MemoAttributeMetadata'
+        AttributeType = 'Memo'
+        AttributeTypeName = [ordered]@{ Value = 'MemoType' }
+        SchemaName = 'os_sr_intv_rnts'
+        DisplayName = New-Label -Text 'Result Notes'
+        RequiredLevel = New-RequiredLevel
+        Format = 'Text'
+        MaxLength = 1000
+        IsPrimaryName = $false
+        IsAuditEnabled = New-AuditSetting
+    }
+}
+
 function New-TablePayload {
     $round = [ordered]@{
         '@odata.type' = 'Microsoft.Dynamics.CRM.PicklistAttributeMetadata'
@@ -180,6 +256,9 @@ function New-TablePayload {
             (New-DateTimeAttribute -SchemaName 'os_sr_intv_strt' -DisplayName 'Start Date/Time')
             (New-DateTimeAttribute -SchemaName 'os_sr_intv_end' -DisplayName 'End Date/Time')
             $notes
+            (New-InterviewResultChoiceAttribute)
+            (New-ResultRecordedAtAttribute)
+            (New-ResultNotesAttribute)
         )
     }
 }
@@ -230,6 +309,9 @@ function Get-Plan {
             [ordered]@{ LogicalName = 'os_sr_intv_strt'; Type = 'DateTime UserLocal'; Required = $true }
             [ordered]@{ LogicalName = 'os_sr_intv_end'; Type = 'DateTime UserLocal'; Required = $true }
             [ordered]@{ LogicalName = 'os_sr_intv_nts'; Type = 'Memo'; Required = $false }
+            [ordered]@{ LogicalName = 'os_sr_intv_res'; Type = 'Local Choice'; Required = $false; Options = @('Pending', 'Pass', 'Fail') }
+            [ordered]@{ LogicalName = 'os_sr_intv_recat'; Type = 'DateTime UserLocal'; Required = $false }
+            [ordered]@{ LogicalName = 'os_sr_intv_rnts'; Type = 'Memo'; Required = $false; MaxLength = 1000 }
         )
         Relationships = @($script:Relations | ForEach-Object {
             [ordered]@{
@@ -436,7 +518,35 @@ function Assert-WriteAllowlist {
         $approved = $Body.SchemaName -ceq $script:TableName -and
             $Body.OwnershipType -ceq 'UserOwned' -and
             $Body.IsAuditEnabled.Value -eq $true -and
-            @($Body.Attributes).Count -eq 5
+            @($Body.Attributes).Count -eq 8
+    }
+    elseif ($Method -ceq 'POST' -and
+        $Path -ceq "EntityDefinitions(LogicalName='$script:TableName')/Attributes") {
+        $definition = @($script:ResultAttributes | Where-Object LogicalName -CEQ $Body.SchemaName)
+        $typeMap = @{
+            os_sr_intv_res = 'Microsoft.Dynamics.CRM.PicklistAttributeMetadata'
+            os_sr_intv_recat = 'Microsoft.Dynamics.CRM.DateTimeAttributeMetadata'
+            os_sr_intv_rnts = 'Microsoft.Dynamics.CRM.MemoAttributeMetadata'
+        }
+        $approved = $definition.Count -eq 1 -and
+            $Body.DisplayName.LocalizedLabels[0].Label -ceq $definition[0].DisplayName -and
+            [string]$Body['@odata.type'] -ceq $typeMap[[string]$Body.SchemaName] -and
+            $Body.IsAuditEnabled.Value -eq $true
+        if ($approved -and $Body.SchemaName -ceq 'os_sr_intv_res') {
+            $labels = @($Body.OptionSet.Options | ForEach-Object { [string]$_.Label.LocalizedLabels[0].Label } | Sort-Object)
+            $approved = $Body.OptionSet.IsGlobal -eq $false -and
+                [string]$Body.RequiredLevel.Value -ceq 'None' -and
+                ($labels -join '|') -ceq 'Fail|Pass|Pending'
+        }
+        elseif ($approved -and $Body.SchemaName -ceq 'os_sr_intv_recat') {
+            $approved = [string]$Body.DateTimeBehavior.Value -ceq 'UserLocal' -and
+                [string]$Body.Format -ceq 'DateAndTime' -and
+                [string]$Body.RequiredLevel.Value -ceq 'None'
+        }
+        elseif ($approved -and $Body.SchemaName -ceq 'os_sr_intv_rnts') {
+            $approved = [string]$Body.RequiredLevel.Value -ceq 'None' -and
+                [int]$Body.MaxLength -eq 1000
+        }
     }
     elseif ($Method -ceq 'POST' -and $Path -ceq 'RelationshipDefinitions') {
         $relation = @($script:Relations | Where-Object SchemaName -CEQ $Body.SchemaName)
@@ -471,7 +581,7 @@ function Send-MetadataWrite {
 }
 
 function Get-TableAttributes {
-    Get-ODataRows -Path "EntityDefinitions(LogicalName='$script:TableName')/Attributes?`$select=LogicalName,SchemaName,AttributeType,RequiredLevel,IsAuditEnabled,IsValidForCreate"
+    Get-ODataRows -Path "EntityDefinitions(LogicalName='$script:TableName')/Attributes?`$select=MetadataId,LogicalName,SchemaName,AttributeType,RequiredLevel,IsAuditEnabled,IsValidForCreate"
 }
 
 function Get-RelationshipRows {
@@ -544,6 +654,95 @@ function Assert-BaseTable {
         Attributes = $attributes
         Round1Value = [int]$choiceRows[0].OptionSet.Options[0].Value
     }
+}
+
+function Assert-InterviewResultAttributes {
+    $choiceRows = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$script:TableName')/Attributes/Microsoft.Dynamics.CRM.PicklistAttributeMetadata?`$select=LogicalName,RequiredLevel,IsAuditEnabled&`$filter=LogicalName%20eq%20%27os_sr_intv_res%27&`$expand=OptionSet")
+    $labels = @()
+    $values = @()
+    if ($choiceRows.Count -eq 1) {
+        $labels = @($choiceRows[0].OptionSet.Options | ForEach-Object { [string]$_.Label.UserLocalizedLabel.Label } | Sort-Object)
+        $values = @($choiceRows[0].OptionSet.Options | ForEach-Object { [int]$_.Value })
+    }
+    if ($choiceRows.Count -ne 1 -or $choiceRows[0].OptionSet.IsGlobal -ne $false -or
+        [string]$choiceRows[0].OptionSet.OptionSetType -cne 'Picklist' -or
+        ($labels -join '|') -cne 'Fail|Pass|Pending' -or
+        $values.Count -ne 3 -or @($values | Where-Object { $_ -le 0 }).Count -gt 0 -or
+        @($values | Select-Object -Unique).Count -ne 3 -or
+        [string]$choiceRows[0].RequiredLevel.Value -cne 'None' -or
+        $choiceRows[0].IsAuditEnabled.Value -ne $true) {
+        throw 'Interview Result must be an optional audited local Choice with exactly Pending, Pass, and Fail.'
+    }
+    $dates = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$script:TableName')/Attributes/Microsoft.Dynamics.CRM.DateTimeAttributeMetadata?`$select=LogicalName,Format,DateTimeBehavior,RequiredLevel,IsAuditEnabled&`$filter=LogicalName%20eq%20%27os_sr_intv_recat%27")
+    if ($dates.Count -ne 1 -or [string]$dates[0].Format -cne 'DateAndTime' -or
+        [string]$dates[0].DateTimeBehavior.Value -cne 'UserLocal' -or
+        [string]$dates[0].RequiredLevel.Value -cne 'None' -or
+        $dates[0].IsAuditEnabled.Value -ne $true) {
+        throw 'Result Recorded At must be optional, audited User Local Date/Time.'
+    }
+    $notes = @(Get-ODataRows -Path "EntityDefinitions(LogicalName='$script:TableName')/Attributes/Microsoft.Dynamics.CRM.MemoAttributeMetadata?`$select=LogicalName,MaxLength,RequiredLevel,IsAuditEnabled&`$filter=LogicalName%20eq%20%27os_sr_intv_rnts%27")
+    if ($notes.Count -ne 1 -or [int]$notes[0].MaxLength -ne 1000 -or
+        [string]$notes[0].RequiredLevel.Value -cne 'None' -or
+        $notes[0].IsAuditEnabled.Value -ne $true) {
+        throw 'Result Notes must be optional audited multiline text with max length 1000.'
+    }
+    [pscustomobject]@{
+        ChoiceValues = [ordered]@{
+            Pending = [int]($choiceRows[0].OptionSet.Options | Where-Object { $_.Label.UserLocalizedLabel.Label -ceq 'Pending' } | Select-Object -ExpandProperty Value -First 1)
+            Pass = [int]($choiceRows[0].OptionSet.Options | Where-Object { $_.Label.UserLocalizedLabel.Label -ceq 'Pass' } | Select-Object -ExpandProperty Value -First 1)
+            Fail = [int]($choiceRows[0].OptionSet.Options | Where-Object { $_.Label.UserLocalizedLabel.Label -ceq 'Fail' } | Select-Object -ExpandProperty Value -First 1)
+        }
+    }
+}
+
+function New-ResultAttributePayload {
+    param([Parameter(Mandatory)][string]$LogicalName)
+    switch ($LogicalName) {
+        'os_sr_intv_res' { return (New-InterviewResultChoiceAttribute) }
+        'os_sr_intv_recat' { return (New-ResultRecordedAtAttribute) }
+        'os_sr_intv_rnts' { return (New-ResultNotesAttribute) }
+        default { throw 'Interview Result field is outside the fixed provisioning allowlist.' }
+    }
+}
+
+function Ensure-InterviewResultAttributes {
+    $existing = @(Get-TableAttributes | Where-Object SchemaName -in @($script:ResultAttributes | ForEach-Object LogicalName))
+    foreach ($attribute in $existing) {
+        $definition = @($script:ResultAttributes | Where-Object LogicalName -CEQ $attribute.SchemaName)
+        $expectedType = switch ($attribute.SchemaName) {
+            'os_sr_intv_res' { 'Picklist' }
+            'os_sr_intv_recat' { 'DateTime' }
+            'os_sr_intv_rnts' { 'Memo' }
+            default { 'INVALID' }
+        }
+        if ($definition.Count -ne 1 -or
+            [string]$attribute.LogicalName -cne $attribute.SchemaName -or
+            [string]$attribute.AttributeType -cne $expectedType) {
+            throw "Existing Interview Result field $($attribute.SchemaName) has unexpected metadata; no changes were sent."
+        }
+    }
+    foreach ($definition in $script:ResultAttributes) {
+        $present = @($existing | Where-Object SchemaName -CEQ $definition.LogicalName)
+        if ($present.Count -gt 1) { throw "Duplicate Interview Result field metadata detected: $($definition.LogicalName)." }
+        if ($present.Count -eq 0) {
+            $script:CurrentStage = "INTERVIEW_RESULT_ATTRIBUTE_POST_$($definition.LogicalName)"
+            Send-MetadataWrite -Path "EntityDefinitions(LogicalName='$script:TableName')/Attributes" `
+                -Body (New-ResultAttributePayload -LogicalName $definition.LogicalName)
+            $readback = $null
+            for ($poll = 0; $poll -lt 6; $poll++) {
+                Start-Sleep -Seconds 5
+                $readback = @(Get-TableAttributes | Where-Object SchemaName -CEQ $definition.LogicalName)
+                if ($readback.Count -eq 1) { break }
+                if ($readback.Count -gt 1) { throw "Duplicate Interview Result field metadata detected after write: $($definition.LogicalName)." }
+            }
+            if ($readback.Count -ne 1 -or
+                [string]$readback[0].LogicalName -cne $definition.LogicalName -or
+                [string]$readback[0].AttributeType -cne $definition.Type) {
+                throw "Interview Result field $($definition.LogicalName) did not reconcile; do not retry before read-only reconciliation."
+            }
+        }
+    }
+    $null = Assert-InterviewResultAttributes
 }
 
 function Assert-Relationship {
@@ -656,6 +855,7 @@ function Ensure-SolutionMembership {
 function Assert-CompleteSchema {
     $metadata = Get-TableMetadata
     $state = Assert-BaseTable -Metadata $metadata
+    $resultState = Assert-InterviewResultAttributes
     $relationships = @(Get-RelationshipRows)
     foreach ($relation in $script:Relations) {
         Assert-Relationship -Relation $relation -Rows $relationships
@@ -671,6 +871,7 @@ function Assert-CompleteSchema {
         PrimaryIdAttribute = [string]$metadata.PrimaryIdAttribute
         PrimaryNameAttribute = [string]$metadata.PrimaryNameAttribute
         Round1ChoiceValue = [int]$state.Round1Value
+        InterviewResultChoiceValues = $resultState.ChoiceValues
         Fields = @($state.Attributes | ForEach-Object { [string]$_.LogicalName } | Sort-Object)
         Relationships = @($script:Relations | ForEach-Object { [string]$_.SchemaName })
         TableRootInSolution = $true
@@ -721,6 +922,9 @@ if ($null -eq $table) {
     if ($null -eq $table) { throw 'Interview Schedule creation was not confirmed by readback; do not retry before reconciliation.' }
 }
 $null = Assert-BaseTable -Metadata $table
+
+$script:CurrentStage = 'INTERVIEW_RESULT_ATTRIBUTE_PROVISIONING'
+Ensure-InterviewResultAttributes
 
 $relationshipRows = @(Get-RelationshipRows)
 foreach ($relation in $script:Relations) {

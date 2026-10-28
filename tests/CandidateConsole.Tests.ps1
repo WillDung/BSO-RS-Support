@@ -94,6 +94,45 @@ Assert-Test (-not $script.Contains('WebApi.deleteRecord') -and
 Assert-Test (-not $html.Contains('id="candidate-status"') -and
     -not $html.Contains('<dialog') -and
     -not $html.Contains('call-dialog')) 'Expose no arbitrary status editor or call debug dialog'
+Assert-Test ($html.Contains('id="record-interview-result-button"') -and
+    $html.Contains('id="interview-result-form"') -and
+    $html.Contains('<option value="100000001">Pass</option>') -and
+    $html.Contains('<option value="100000002">Fail</option>') -and
+    $html.Contains('id="interview-result-notes"') -and
+    -not $html.Contains('<option value="100000000">Pending</option>')) 'Offer exactly Pass and Fail with optional notes'
+Assert-Test ($script.Contains('offerExtended: 100010004') -and
+    $script.Contains('candidateFailed: 100010005') -and
+    $script.Contains('pending: 100000000') -and
+    $script.Contains('pass: 100000001') -and
+    $script.Contains('fail: 100000002')) 'Use status and result values reconciled from authoritative Choice metadata'
+Assert-Test ($script.Contains('rows.length === 1') -and
+    $script.Contains('selectedCandidate[TABLES.candidate.status] === STATUS.round1Scheduled') -and
+    $script.Contains('isPendingInterviewResult(selectedSchedule)') -and
+    $script.Contains('resultRetryBlockedCandidateId !== candidateId')) 'Show result action only for one persisted Round 1 schedule with Pending or unset result'
+$resultStart = $script.IndexOf('async function recordInterviewResult(event)')
+$resultEnd = $script.IndexOf('async function createSchedule(event)', $resultStart)
+$resultFlow = $script.Substring($resultStart, $resultEnd - $resultStart)
+$candidateReadIndex = $resultFlow.IndexOf('const current = await xrm().WebApi.retrieveRecord')
+$scheduleVerifyIndex = $resultFlow.IndexOf('const schedules = await findRound1Schedules', $candidateReadIndex)
+$scheduleUpdateIndex = $resultFlow.IndexOf('updateRecord(interview.logicalName', $scheduleVerifyIndex)
+$resultReadbackIndex = $resultFlow.IndexOf('const saved = await xrm().WebApi.retrieveRecord', $scheduleUpdateIndex)
+$candidateUpdateIndex = $resultFlow.IndexOf('updateRecord(c.logicalName', $resultReadbackIndex)
+$resultHistoryIndex = $resultFlow.IndexOf('createRecord(history.logicalName', $candidateUpdateIndex)
+Assert-Test ($resultStart -ge 0 -and $resultEnd -gt $resultStart -and
+    $candidateReadIndex -ge 0 -and $scheduleVerifyIndex -gt $candidateReadIndex -and
+    $scheduleUpdateIndex -gt $scheduleVerifyIndex -and
+    $resultReadbackIndex -gt $scheduleUpdateIndex -and
+    $candidateUpdateIndex -gt $resultReadbackIndex -and
+    $resultHistoryIndex -gt $candidateUpdateIndex -and
+    $resultFlow.Contains('STATUS.offerExtended') -and
+    $resultFlow.Contains('STATUS.candidateFailed')) 'Persist and read back result before the exact Pass/Fail Candidate transition and Status History'
+Assert-Test ($resultFlow.Contains('resultRetryBlockedCandidateId = candidateId') -and
+    $resultFlow.Contains('Interview result was persisted, but the Candidate status update failed or is uncertain') -and
+    $resultFlow.Contains('Status History creation failed or is uncertain') -and
+    -not $resultFlow.Contains('WebApi.deleteRecord')) 'Preserve partial result writes, refresh, warn safely, and never retry or compensate'
+Assert-Test ($script.Contains('RecordRound1Pass') -and
+    $script.Contains('RecordRound1Fail') -and
+    $script.Contains('!canRecordInterviewResult()')) 'Record distinct Pass/Fail history operations and protect against duplicate submission'
 
 $hash = (Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $version = [regex]::Match($html, 'candidate-console\.js\?v=([0-9a-f]+)')

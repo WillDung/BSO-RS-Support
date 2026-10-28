@@ -1,5 +1,17 @@
 # Current State
 
+## Phase 4D Round 1 Interview Results DEV Slice (2026-10-28)
+
+**Implementation status:** the existing `os_sr_intv` Interview Schedule table was extended in VN LMV IT and reconciled with `os_sr_bso_rs_support`; the exact `srapp` Candidate Console resources were refreshed and scoped-published. `Interview Result` (`Pending` / `Pass` / `Fail`), `Result Recorded At`, and optional `Result Notes` are present. The result workflow implementation and local checks are in place, but the required browser acceptance is **NOT VERIFIED**: the integrated browser reached Microsoft sign-in, and no credentials were entered. No Phase 4D acceptance Candidates, results, or history rows were created in this continuation.
+
+The UI supports only Pass and Fail for a Candidate at `Round 1 Scheduled` with one pending Round 1 schedule. It persists and reads back the schedule result before attempting the Candidate transition to `Offer Extended` or `Candidate Failed`, then creates Status History. Direct browser writes remain nontransactional DEV technical debt; the implementation does not automatically retry, compensate, delete a saved result, or fabricate History after partial failure. Both branches and persistence-after-reload still require browser acceptance with separate fresh synthetic Candidates.
+
+`BSO-RS Support - BSO` remains unassigned. Its current Interview Schedule privilege set has Create, Read, Append, and Append To, but Write is None. Recording a result updates an existing schedule row, so effective BSO use is blocked unless the minimum required Write grant is separately authorized and validated. No privilege or membership was changed. Do not treat successful system-authorized DEV writes as proof of BSO-role access.
+
+The app refresh updated the exact changed web resources and performed one `PublishXml` scoped to `srapp` and its three web resources; no Site Map PATCH, `PublishAllXml`, package deployment, or automatic retry occurred. `VN_LMV_IT_PROTECT_CANDIDATE_CORE_DEV_KILL_SWITCH_ACTIVE`, `CANDIDATE_CORE_PRODUCTION_BACKEND_REMAINS_PENDING`, and `REAL_DATA_PROHIBITED` remain in force. `ALM_SOURCE_SNAPSHOT_DEFERRED_DEV_ORIGIN_GUARD` remains deferred and is not a Phase 4D blocker.
+
+**Next:** complete both fresh synthetic browser branches and mandatory reload/readback acceptance, reconcile the requested counts, and resolve the BSO Interview Schedule Write privilege gap without assigning the role. Do not start Phase 4E.
+
 ## Phase 4C Round 1 Scheduling DEV Slice (2026-10-27)
 
 **Result:** `PHASE_4C_ROUND1_SCHEDULING_DEV_WORKING`; `SCHEDULING_STORAGE_PROVISIONED`; `ROUND1_SCHEDULE_PERSISTENCE_VERIFIED`; `ROUND1_SCHEDULED_STATUS_VISIBLE`; `BSO_SECURITY_ROLE_UPDATED_UNASSIGNED`; `VN_LMV_IT_PROTECT_CANDIDATE_CORE_DEV_KILL_SWITCH_ACTIVE`; `CANDIDATE_CORE_PRODUCTION_BACKEND_REMAINS_PENDING`; `REAL_DATA_PROHIBITED`.

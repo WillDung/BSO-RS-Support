@@ -32,6 +32,10 @@ After the DEV-only `os_sr_intv` Interview Schedule table was provisioned in `os_
 
 The role remains unassigned; no user or team role membership was changed. The five visible Organization-depth plug-in/SDK metadata Read defaults and four previously identified SharePoint-related defaults remain unchanged and classified **REVIEW BEFORE PRODUCTION**. Effective access has not been tested with a BSO user. Keep real data prohibited, restore the 50 disabled `ProtectCandidateCore` registrations before security/production acceptance, and treat the DEV direct-write schedule sequence as nontransactional technical debt. Candidate Core production backend remains pending.
 
+## Phase 4D Interview Schedule result privilege gap (28 October 2026)
+
+The DEV result implementation updates an existing Interview Schedule row before changing Candidate status. The current unassigned role has Interview Schedule Create, Read, Append, and Append To at User (Basic) depth, but Write remains None; therefore, the current role does not have the table privilege required to record Pass/Fail. No privilege was broadened and no user/team membership was changed. A minimum User (Basic) Write grant is a prerequisite for BSO-role acceptance and requires explicit authorization; do not treat an app action or system-authorized browser test as proof of BSO effective access. `Delete`, `Assign`, and `Share` remain None. The result workflow still requires fresh synthetic browser acceptance and persistence-after-reload verification. The role remains unassigned.
+
 ## Current Candidate Core trust contract (26 October 2026)
 
 ### R4O server-registration-backed protected-write classification

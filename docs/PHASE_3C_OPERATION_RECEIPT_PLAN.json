@@ -37,7 +37,7 @@
   },
   "semantics": {
     "identity": "API-wide lowercase D-format nonempty CorrelationId, unique across actors/actions/Candidates",
-    "actor": "Local Phase 5A source sets ownerid to the authenticated initiating caller; createdby reflects the SYSTEM organization service and is not the business actor. This source change is not deployed or live-verified.",
+    "actor": "The initiating caller is included in the canonical request fingerprint; Receipt owner is infrastructure ownership supplied by the bounded SYSTEM organization service and is not business actor attribution. Candidate owner and explicit actor fields on business evidence remain the initiating caller.",
     "fingerprint": "SHA-256 of versioned length-delimited canonical validated inputs including initiating caller and CorrelationId; no raw request retained",
     "privacy": "Fingerprints are sensitive evidence, not anonymization. Random correlation identity is included; receipt row access remains least-privileged. No additional secret or key-management dependency is introduced.",
     "result": "Successful transaction retains derived original previous/current status and optional effect IDs; Applied is implicit. Replay returns DuplicateReplay plus those persisted values.",

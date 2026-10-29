@@ -616,7 +616,7 @@ static class Program
         {
             Events.Add("RECEIPT_CREATE");
             Mutate();
-            if (!Receipts.TryAdd(request.Correlation, new Receipt { Actor = request.Actor, Action = request.Action,
+            if (!Receipts.TryAdd(request.Correlation, new Receipt { Action = request.Action,
                 Fingerprint = request.Fingerprint, Version = "1", Result = result }))
                 throw new OperationError("RECEIPT_UNIQUENESS_CONFLICT");
         }

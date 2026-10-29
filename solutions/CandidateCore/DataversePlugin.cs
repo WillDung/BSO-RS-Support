@@ -483,7 +483,7 @@ namespace os_sr_cact
             SetCreateCandidateStage("RECEIPT_READ");
             var query = new QueryExpression("os_sr_oprc")
             {
-                ColumnSet = new ColumnSet("ownerid", "os_sr_oprc_cand", "os_sr_oprc_cact", "os_sr_oprc_hash",
+                ColumnSet = new ColumnSet("os_sr_oprc_cand", "os_sr_oprc_cact", "os_sr_oprc_hash",
                     "os_sr_oprc_ver", "os_sr_oprc_prevstat", "os_sr_oprc_newstat", "os_sr_oprc_callref", "os_sr_oprc_histref"),
                 TopCount = 2
             };
@@ -492,14 +492,12 @@ namespace os_sr_cact
             if (rows.Count == 0) return null;
             if (rows.Count != 1) throw new OperationError("RECEIPT_INTEGRITY_FAILURE");
             var row = rows[0];
-            var owner = row.GetAttributeValue<EntityReference>("ownerid");
             var candidate = row.GetAttributeValue<EntityReference>("os_sr_oprc_cand");
-            if (owner == null || owner.LogicalName != "systemuser" || owner.Id == Guid.Empty || candidate == null ||
+            if (candidate == null ||
                 !row.Contains("os_sr_oprc_newstat") || string.IsNullOrEmpty(row.GetAttributeValue<string>("os_sr_oprc_hash")))
                 throw new OperationError("RECEIPT_INTEGRITY_FAILURE");
             return new Receipt
             {
-                Actor = owner.Id,
                 Action = row.GetAttributeValue<string>("os_sr_oprc_cact"),
                 Fingerprint = row.GetAttributeValue<string>("os_sr_oprc_hash"),
                 Version = row.GetAttributeValue<string>("os_sr_oprc_ver"),
@@ -896,7 +894,6 @@ namespace os_sr_cact
             row["os_sr_oprc_ver"] = "1";
             row["os_sr_oprc_cand"] = new EntityReference("os_sr_cand", result.CandidateId);
             row["os_sr_oprc_newstat"] = result.Current;
-            row["ownerid"] = new EntityReference("systemuser", request.Actor);
             if (result.Previous.HasValue) row["os_sr_oprc_prevstat"] = result.Previous.Value;
             if (result.CallId.HasValue) row["os_sr_oprc_callref"] = result.CallId.Value.ToString("D");
             if (result.HistoryId.HasValue) row["os_sr_oprc_histref"] = result.HistoryId.Value.ToString("D");

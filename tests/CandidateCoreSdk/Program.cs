@@ -359,10 +359,47 @@ internal static class Program
             createWithoutOptionalGuids.ServiceFactorySelections.Contains(null) &&
             createWithoutOptionalGuids.CallerProtectedWriteAttempts == 0 &&
             !createWithoutOptionalGuids.CandidateNumberWasSupplied &&
-            createWithoutOptionalGuids.Receipt!.GetAttributeValue<EntityReference>("ownerid").Id == Actor &&
+            createWithoutOptionalGuids.ReceiptCreateTarget != null &&
+            !createWithoutOptionalGuids.ReceiptCreateTarget.Contains("ownerid") &&
+            createWithoutOptionalGuids.Receipt!.GetAttributeValue<EntityReference>("ownerid").Id == SystemActor &&
             createWithoutOptionalGuids.CreatedCandidate!.GetAttributeValue<EntityReference>("ownerid").Id == Actor &&
             createWithoutOptionalGuids.TraceMessages.All(message => !message.StartsWith("CC_GUARD_", StringComparison.Ordinal)),
-            "Least-privilege caller creates Candidate and Receipt through SYSTEM with caller ownership and server-generated Candidate Number");
+            "Least-privilege caller creates Candidate and Receipt through SYSTEM; Candidate remains caller-owned and Receipt uses default SYSTEM ownership");
+        var callerOwnedReceipt = new Entity("os_sr_oprc", Guid.NewGuid())
+        {
+            ["ownerid"] = new EntityReference("systemuser", Actor)
+        };
+        try
+        {
+            createWithoutOptionalGuids.ValidateReceiptOwner(callerOwnedReceipt);
+            throw new Exception("Expected caller-owned Receipt rejection");
+        }
+        catch (FaultException<OrganizationServiceFault> error)
+        {
+            Check(error.Detail.ErrorCode == unchecked((int)0x80040299),
+                "Explicitly assigning the no-Receipt-access caller reproduces TargetPrincipalLacksReadPrivilege");
+        }
+        new ApplyCandidateAction().Execute(createWithoutOptionalGuids);
+        Check((string)createWithoutOptionalGuids.Output["ResultCode"] == "DuplicateReplay" &&
+            createWithoutOptionalGuids.CreatedCandidates == 1 &&
+            createWithoutOptionalGuids.Receipt != null &&
+            createWithoutOptionalGuids.Receipt.GetAttributeValue<EntityReference>("ownerid").Id == SystemActor,
+            "SYSTEM-owned Receipt replays without duplicate Candidate or Receipt effects");
+        createWithoutOptionalGuids.MainValues["UserId"] = Guid.Parse("00000000-0000-0000-0000-000000000004");
+        createWithoutOptionalGuids.MainValues["InitiatingUserId"] = Guid.Parse("00000000-0000-0000-0000-000000000004");
+        Reject(() => new ApplyCandidateAction().Execute(createWithoutOptionalGuids),
+            "CANDIDATE_CORE_OPERATION_REJECTED:CREATE_CANDIDATE:RECEIPT_READ:CORRELATION_CONFLICT");
+        Check(createWithoutOptionalGuids.CreatedCandidates == 1 &&
+            createWithoutOptionalGuids.ServiceOperations.Count(operation => operation == "Create:os_sr_oprc") == 1,
+            "Actor-bound fingerprint rejects another caller replay without reading business data or changing the Receipt");
+        createWithoutOptionalGuids.MainValues["UserId"] = Actor;
+        createWithoutOptionalGuids.MainValues["InitiatingUserId"] = Actor;
+        createWithoutOptionalGuids.Input["CandidateName"] = "Conflicting synthetic replay";
+        Reject(() => new ApplyCandidateAction().Execute(createWithoutOptionalGuids),
+            "CANDIDATE_CORE_OPERATION_REJECTED:CREATE_CANDIDATE:RECEIPT_READ:CORRELATION_CONFLICT");
+        Check(createWithoutOptionalGuids.CreatedCandidates == 1 &&
+            createWithoutOptionalGuids.ServiceOperations.Count(operation => operation == "Create:os_sr_oprc") == 1,
+            "Conflicting Receipt replay is rejected without duplicate or mutable Receipt writes");
         Check(!createWithoutOptionalGuids.Shared.Contains(GetGuardIntentKey()) &&
             createWithoutOptionalGuids.Receipt!.Attributes.Keys.All(name => name != GetGuardIntentKey()) &&
             createWithoutOptionalGuids.Output.Keys.All(name => name != GetGuardIntentKey()) &&
@@ -645,7 +682,9 @@ internal static class Program
             }
             Check(host.Calls == 1 && host.Histories == (outcome == 100010000 ? 1 : 0), "SDK exact call/history effects");
             Check(host.Updates == (outcome == 100010000 ? 1 : 0), "SDK non-answer log only");
-            Check(host.Receipt != null && host.Receipt.GetAttributeValue<EntityReference>("ownerid").Id == Actor, "SDK receipt caller owner");
+            Check(host.ReceiptCreateTarget != null && !host.ReceiptCreateTarget.Contains("ownerid") &&
+                host.Receipt != null && host.Receipt.GetAttributeValue<EntityReference>("ownerid").Id == SystemActor,
+                "SDK Receipt creation omits caller ownership and uses SYSTEM default owner");
             Check(host.Receipt != null && host.Receipt.Attributes.Keys.All(name => !name.Contains("email") && !name.Contains("notes")), "SDK receipt minimization");
             new ApplyCandidateAction().Execute(host);
             Check((string)host.Output["ResultCode"] == "DuplicateReplay" && host.Calls == 1, "SDK persisted replay");
@@ -1079,7 +1118,7 @@ internal static class Program
         public ParameterCollection Input = new ParameterCollection(), Output = new ParameterCollection(), Shared = new ParameterCollection();
         public Dictionary<string, object?> MainValues;
         public IPluginExecutionContext MainContext;
-        public Entity? Receipt, CreatedCandidate, CreatedCall, CreatedHistory;
+        public Entity? Receipt, ReceiptCreateTarget, CreatedCandidate, CreatedCall, CreatedHistory;
         public int Calls, Histories, Updates, ScheduleCreates, ScheduleUpdates, CreatedCandidates,
             OrganizationReads, CallerProtectedWriteAttempts, Status = 100010000;
         public bool OrganizationAuditEnabled = true, TamperTarget;
@@ -1121,6 +1160,18 @@ internal static class Program
             }
             MainValues = Context(Input, Shared, Output);
             MainContext = Execution(MainValues);
+        }
+        public void ValidateReceiptOwner(Entity row)
+        {
+            var owner = row.GetAttributeValue<EntityReference>("ownerid");
+            if (row.LogicalName == "os_sr_oprc" && owner?.LogicalName == "systemuser" && owner.Id == Actor)
+                throw new FaultException<OrganizationServiceFault>(
+                    new OrganizationServiceFault
+                    {
+                        ErrorCode = unchecked((int)0x80040299),
+                        Message = "Target principal lacks Read privilege."
+                    },
+                    new FaultReason("Synthetic service fault"));
         }
         public object GetService(Type serviceType)
         {
@@ -1278,7 +1329,17 @@ internal static class Program
                     row["os_sr_cand_cnum"] = "CAND-00000001";
                     Status = row.GetAttributeValue<OptionSetValue>("os_sr_cand_stat").Value;
                 }
-                else if (row.LogicalName == "os_sr_oprc") { Receipt = row; Receipt["createdby"] = new EntityReference("systemuser", SystemActor); }
+                else if (row.LogicalName == "os_sr_oprc")
+                {
+                    ReceiptCreateTarget = new Entity(row.LogicalName, row.Id);
+                    foreach (var attribute in row.Attributes)
+                        ReceiptCreateTarget[attribute.Key] = attribute.Value;
+                    ValidateReceiptOwner(row);
+                    if (!row.Contains("ownerid"))
+                        row["ownerid"] = new EntityReference("systemuser", SystemActor);
+                    Receipt = row;
+                    Receipt["createdby"] = new EntityReference("systemuser", SystemActor);
+                }
                 else if (row.LogicalName == "os_sr_intv")
                 {
                     if (row.GetAttributeValue<EntityReference>("os_sr_intv_cand")?.LogicalName != "os_sr_cand" ||

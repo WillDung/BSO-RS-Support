@@ -1,5 +1,13 @@
 # Phase 5B role assignment and security acceptance - 28 October 2026
 
+## 29 October 2026 continuation - Receipt ownership defect proven; local correction validated
+
+**Current status:** `PHASE_5B_RECEIPT_OWNERSHIP_FIX_LOCAL_VALIDATED_NOT_DEPLOYED`; Phase 5B is not accepted. Static inspection confirmed that the `CreateReceipt` Entity passed to the SYSTEM storage service explicitly set `ownerid` to the initiating BSO user. The live stage was `RECEIPT_CREATE:0x80040299` (`TargetPrincipalLacksReadPrivilege`), matching that caller-owned target on a UserOwned infrastructure table. No Receipt privilege was granted.
+
+The local correction removes only the explicit Receipt `ownerid` assignment and no longer reads Receipt owner as actor attribution. The initiating actor remains included in the existing versioned request fingerprint, so identical replay remains actor-bound and conflicting replay remains rejected. Candidate ownership remains the initiating BSO user; existing explicit actor fields on Call Log, Status History, scheduling, and result evidence were not changed. The Receipt remains append-only with no Update operation.
+
+Validation passed: engine 177; SDK/storage/SYSTEM-boundary 346; Receipt plan/idempotency 27; Phase 5A runtime/API-input/security suites 19/9/10; Phase 5B security suite 12; unsigned package integrity 12; PowerShell parsing 19 scripts. The rebuilt local package remains unsigned. At report time, no package update or post-fix runtime call had occurred; no Phase 5B pass or lifecycle/direct-write acceptance is claimed. `REAL_DATA_STILL_PROHIBITED`.
+
 ## 29 October 2026 continuation - Candidate Console refreshed; Receipt create failure localized
 
 **Current status:** `PHASE_5B_CANDIDATE_CORE_FAILURE:RECEIPT_CREATE`; sanitized Dataverse code `0x80040299`. This is not a Phase 5B pass.

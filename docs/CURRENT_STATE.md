@@ -1,5 +1,11 @@
 # Current State
 
+## Phase 5B Receipt owner defect proven; local correction validated (2026-10-29)
+
+**Status:** `PHASE_5B_RECEIPT_OWNERSHIP_FIX_LOCAL_VALIDATED_NOT_DEPLOYED`. Static inspection confirmed `CreateReceipt` explicitly assigned `ownerid` to the initiating BSO user while persisting through the SYSTEM service. The observed `RECEIPT_CREATE:0x80040299` (`TargetPrincipalLacksReadPrivilege`) is consistent with that target-owner selection. The local correction removes the Receipt owner assignment and no longer derives actor identity from Receipt ownership. Actor binding remains in the unchanged request fingerprint; Candidate ownership and Call Log/History/scheduling actor attribution remain unchanged.
+
+Local validation passed: Candidate Core engine **177**, SDK/storage and SYSTEM-boundary **346**, Receipt/idempotency **27**, Phase 5A runtime/API-input/security **19/9/10**, Phase 5B security **12**, package integrity **12**, and PowerShell parsing **19 scripts**. The unsigned package rebuilt successfully. No package update or post-fix Candidate Core call has occurred yet; no live result is claimed. The approved target remains VN LMV IT; use only the existing `os_sr_cact_pkg`, zero retries, and the same approved BSO browser identity for the authorized next steps. No Receipt privilege, role, schema, trace, profiler, signing, or production changes. `REAL_DATA_STILL_PROHIBITED`.
+
 ## Phase 5B browser parser refreshed; CreateCandidate localized to Receipt create (2026-10-29)
 
 **Status:** `PHASE_5B_CANDIDATE_CORE_FAILURE:RECEIPT_CREATE`; sanitized Dataverse code `0x80040299`. Phase 5B is not accepted. The existing scoped Candidate Console refresh workflow updated only `os_/bso/candidate-console.js`, then only `os_/bso/candidate-console.html` after a browser reload proved its served cache token was stale. Each exact resource received one PATCH and one scoped `PublishXml` for `srapp` plus that resource; sitemap patches, package deployment, schema/security changes, and retries were zero. Published GET readback reconciled both resources. The current local JS SHA-256 is `82a252c25d5c33b557ff41a8b339f3879c6dff3d7d54f53bf8cba43c7f138ea4`; its HTML cache token is `82a252c25d5c`.

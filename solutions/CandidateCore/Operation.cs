@@ -262,7 +262,6 @@ namespace os_sr_cact
 
     public sealed class Receipt
     {
-        public Guid Actor { get; set; }
         public string Action { get; set; } = "";
         public string Fingerprint { get; set; } = "";
         public string Version { get; set; } = "";
@@ -346,8 +345,8 @@ namespace os_sr_cact
             var receipt = store.FindReceipt(request.Correlation);
             if (receipt != null)
             {
-                if (receipt.Actor != request.Actor || receipt.Action != request.Action ||
-                    receipt.Fingerprint != request.Fingerprint || receipt.Version != "1")
+                if (receipt.Action != request.Action || receipt.Fingerprint != request.Fingerprint ||
+                    receipt.Version != "1")
                     throw new OperationError("CORRELATION_CONFLICT");
                 if (request.CandidateId.HasValue && request.CandidateId != receipt.Result.CandidateId)
                     throw new OperationError("CORRELATION_CONFLICT");

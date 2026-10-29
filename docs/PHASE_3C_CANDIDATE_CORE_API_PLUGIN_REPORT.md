@@ -105,7 +105,7 @@ Offline host rollback simulation exercises each failure boundary; SDK adapter te
 
 The service factory explicitly selects the initiating caller; different execution-user and nested contexts are rejected. All steps have no impersonating-user lookup. No SYSTEM, registration-owner, fixed account, or TA substitution.
 
-Contacted By, History Actor, and record owner come from the caller. Receipt `createdby`/owner retain actor evidence. Direct Create/Update requires an exact mutation fingerprint in the synchronous parent API context. Other guarded mutation paths are rejected. Associate/Disassociate guards reject only project tables/relationships and no-op for unrelated associations.
+Contacted By, History Actor, and business record owner come from the caller. At the time of this historical report, Receipt `createdby`/owner were described as actor evidence. The 29 October 2026 Phase 5B ownership-boundary correction supersedes the Receipt-owner portion: Receipt owner is infrastructure ownership supplied by the bounded SYSTEM service; the caller remains bound by the canonical request fingerprint, and business actor fields remain unchanged. Direct Create/Update requires an exact mutation fingerprint in the synchronous parent API context. Other guarded mutation paths are rejected. Associate/Disassociate guards reject only project tables/relationships and no-op for unrelated associations.
 
 ## 13. Candidate Privilege Discovery
 

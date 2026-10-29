@@ -1,0 +1,9 @@
+<customapirequestparameter uniquename="CandidateId">
+  <displayname default="CandidateId">
+    <label description="CandidateId" languagecode="1033" />
+  </displayname>
+  <iscustomizable>1</iscustomizable>
+  <isoptional>1</isoptional>
+  <name>os_sr_cact.CandidateId</name>
+  <type>12</type>
+</customapirequestparameter>

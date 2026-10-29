@@ -1,0 +1,8 @@
+<customapiresponseproperty uniquename="PreviousStatus">
+  <displayname default="PreviousStatus">
+    <label description="PreviousStatus" languagecode="1033" />
+  </displayname>
+  <iscustomizable>1</iscustomizable>
+  <name>os_sr_cact.PreviousStatus</name>
+  <type>7</type>
+</customapiresponseproperty>

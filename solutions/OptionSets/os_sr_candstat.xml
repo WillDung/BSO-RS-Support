@@ -1,0 +1,42 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<optionset Name="os_sr_candstat" localizedName="Candidate Workflow Status" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <OptionSetType>picklist</OptionSetType>
+  <IsGlobal>1</IsGlobal>
+  <IntroducedVersion>1.0.0.0</IntroducedVersion>
+  <IsCustomizable>1</IsCustomizable>
+  <displaynames>
+    <displayname description="Candidate Workflow Status" languagecode="1033" />
+  </displaynames>
+  <options>
+    <option value="100010000" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Need Call Candidate" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100010001" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Candidate Answered" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100010002" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Waiting Manual Scheduling" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100010003" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Round 1 Scheduled" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100010004" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Offer Extended" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100010005" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Candidate Failed" languagecode="1033" />
+      </labels>
+    </option>
+  </options>
+</optionset>

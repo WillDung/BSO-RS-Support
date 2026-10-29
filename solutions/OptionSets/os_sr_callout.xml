@@ -1,0 +1,30 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<optionset Name="os_sr_callout" localizedName="Call Outcome" description="Approved initial Candidate call outcome taxonomy." xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <OptionSetType>picklist</OptionSetType>
+  <IsGlobal>1</IsGlobal>
+  <IntroducedVersion>1.0.0.0</IntroducedVersion>
+  <IsCustomizable>1</IsCustomizable>
+  <displaynames>
+    <displayname description="Call Outcome" languagecode="1033" />
+  </displaynames>
+  <Descriptions>
+    <Description description="Approved initial Candidate call outcome taxonomy." languagecode="1033" />
+  </Descriptions>
+  <options>
+    <option value="100010000" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Answered" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100010001" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="No Answer" languagecode="1033" />
+      </labels>
+    </option>
+    <option value="100010002" ExternalValue="" IsHidden="0">
+      <labels>
+        <label description="Call Back Requested" languagecode="1033" />
+      </labels>
+    </option>
+  </options>
+</optionset>

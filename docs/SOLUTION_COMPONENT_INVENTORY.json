@@ -1,0 +1,703 @@
+{
+  "provenance": "Unmanaged PAC export unpacked 2026-10-29; 72 root components; target identifiers excluded.",
+  "rootComponentCount": 72,
+  "countsByType": [
+    {
+      "componentType": 1,
+      "typeName": "Entity",
+      "count": 10
+    },
+    {
+      "componentType": 9,
+      "typeName": "OptionSet",
+      "count": 2
+    },
+    {
+      "componentType": 20,
+      "typeName": "SecurityRole",
+      "count": 1
+    },
+    {
+      "componentType": 61,
+      "typeName": "WebResource",
+      "count": 5
+    },
+    {
+      "componentType": 62,
+      "typeName": "AppModuleSiteMap",
+      "count": 1
+    },
+    {
+      "componentType": 80,
+      "typeName": "AppModule",
+      "count": 1
+    },
+    {
+      "componentType": 91,
+      "typeName": "PluginAssembly",
+      "count": 2
+    },
+    {
+      "componentType": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "count": 50
+    }
+  ],
+  "releaseDisposition": {
+    "retainedReleaseRoots": 20,
+    "excludedInactiveProtectCandidateCoreSteps": 50,
+    "excludedSignedRollbackAssembly": 1,
+    "packageBackedAssemblyManagedSeparately": 1,
+    "temporaryDevCustomApiExcluded": "os_sr_devcs"
+  },
+  "components": [
+    {
+      "type": 1,
+      "typeName": "Entity",
+      "id": null,
+      "schemaName": "os_sr_call",
+      "name": "os_sr_call",
+      "sourceMapping": "Entities/os_sr_call/Entity.xml",
+      "disposition": "RETAINED_SOURCE"
+    },
+    {
+      "type": 1,
+      "typeName": "Entity",
+      "id": null,
+      "schemaName": "os_sr_cand",
+      "name": "os_sr_cand",
+      "sourceMapping": "Entities/os_sr_cand/Entity.xml",
+      "disposition": "RETAINED_SOURCE"
+    },
+    {
+      "type": 1,
+      "typeName": "Entity",
+      "id": null,
+      "schemaName": "os_sr_csh",
+      "name": "os_sr_csh",
+      "sourceMapping": "Entities/os_sr_csh/Entity.xml",
+      "disposition": "RETAINED_SOURCE"
+    },
+    {
+      "type": 1,
+      "typeName": "Entity",
+      "id": null,
+      "schemaName": "os_sr_csrc",
+      "name": "os_sr_csrc",
+      "sourceMapping": "Entities/os_sr_csrc/Entity.xml",
+      "disposition": "RETAINED_SOURCE"
+    },
+    {
+      "type": 1,
+      "typeName": "Entity",
+      "id": null,
+      "schemaName": "os_sr_intv",
+      "name": "os_sr_intv",
+      "sourceMapping": "Entities/os_sr_intv/Entity.xml",
+      "disposition": "RETAINED_SOURCE"
+    },
+    {
+      "type": 1,
+      "typeName": "Entity",
+      "id": null,
+      "schemaName": "os_sr_loc",
+      "name": "os_sr_loc",
+      "sourceMapping": "Entities/os_sr_loc/Entity.xml",
+      "disposition": "RETAINED_SOURCE"
+    },
+    {
+      "type": 1,
+      "typeName": "Entity",
+      "id": null,
+      "schemaName": "os_sr_oprc",
+      "name": "os_sr_oprc",
+      "sourceMapping": "Entities/os_sr_oprc/Entity.xml",
+      "disposition": "RETAINED_SOURCE"
+    },
+    {
+      "type": 1,
+      "typeName": "Entity",
+      "id": null,
+      "schemaName": "os_sr_pos",
+      "name": "os_sr_pos",
+      "sourceMapping": "Entities/os_sr_pos/Entity.xml",
+      "disposition": "RETAINED_SOURCE"
+    },
+    {
+      "type": 1,
+      "typeName": "Entity",
+      "id": null,
+      "schemaName": "os_sr_ta",
+      "name": "os_sr_ta",
+      "sourceMapping": "Entities/os_sr_ta/Entity.xml",
+      "disposition": "RETAINED_SOURCE"
+    },
+    {
+      "type": 1,
+      "typeName": "Entity",
+      "id": null,
+      "schemaName": "systemuser",
+      "name": "systemuser",
+      "sourceMapping": "Entities/systemuser/Entity.xml",
+      "disposition": "RETAINED_SOURCE"
+    },
+    {
+      "type": 20,
+      "typeName": "SecurityRole",
+      "id": "63d7bb93-0bd2-f111-a05a-000d3a64b349",
+      "schemaName": null,
+      "name": "BSO-RS Support - BSO",
+      "sourceMapping": "Roles/BSO-RS Support - BSO.xml",
+      "disposition": "RETAINED_SOURCE"
+    },
+    {
+      "type": 61,
+      "typeName": "WebResource",
+      "id": null,
+      "schemaName": "os_/bso/candidate-console-environment.js",
+      "name": "os_/bso/candidate-console-environment.js",
+      "sourceMapping": "CandidateConsole/WebResources/os_/bso/candidate-console-environment.js; WebResources/os_/bso/candidate-console-environment.js.data.xml",
+      "disposition": "RETAINED_SOURCE"
+    },
+    {
+      "type": 61,
+      "typeName": "WebResource",
+      "id": null,
+      "schemaName": "os_/bso/candidate-console-policy.js",
+      "name": "os_/bso/candidate-console-policy.js",
+      "sourceMapping": "CandidateConsole/WebResources/os_/bso/candidate-console-policy.js; WebResources/os_/bso/candidate-console-policy.js.data.xml",
+      "disposition": "RETAINED_SOURCE"
+    },
+    {
+      "type": 61,
+      "typeName": "WebResource",
+      "id": null,
+      "schemaName": "os_/bso/candidate-console.css",
+      "name": "os_/bso/candidate-console.css",
+      "sourceMapping": "CandidateConsole/WebResources/os_/bso/candidate-console.css; WebResources/os_/bso/candidate-console.css.data.xml",
+      "disposition": "RETAINED_SOURCE"
+    },
+    {
+      "type": 61,
+      "typeName": "WebResource",
+      "id": null,
+      "schemaName": "os_/bso/candidate-console.html",
+      "name": "os_/bso/candidate-console.html",
+      "sourceMapping": "CandidateConsole/WebResources/os_/bso/candidate-console.html; WebResources/os_/bso/candidate-console.html.data.xml",
+      "disposition": "RETAINED_SOURCE"
+    },
+    {
+      "type": 61,
+      "typeName": "WebResource",
+      "id": null,
+      "schemaName": "os_/bso/candidate-console.js",
+      "name": "os_/bso/candidate-console.js",
+      "sourceMapping": "CandidateConsole/WebResources/os_/bso/candidate-console.js; WebResources/os_/bso/candidate-console.js.data.xml",
+      "disposition": "RETAINED_SOURCE"
+    },
+    {
+      "type": 62,
+      "typeName": "AppModuleSiteMap",
+      "id": null,
+      "schemaName": "srapp",
+      "name": "srapp",
+      "sourceMapping": "AppModuleSiteMaps/srapp/AppModuleSiteMap.xml",
+      "disposition": "RETAINED_SOURCE"
+    },
+    {
+      "type": 80,
+      "typeName": "AppModule",
+      "id": null,
+      "schemaName": "srapp",
+      "name": "srapp",
+      "sourceMapping": "AppModules/srapp/AppModule.xml",
+      "disposition": "RETAINED_SOURCE"
+    },
+    {
+      "type": 9,
+      "typeName": "OptionSet",
+      "id": null,
+      "schemaName": "os_sr_callout",
+      "name": "os_sr_callout",
+      "sourceMapping": "OptionSets/os_sr_callout.xml",
+      "disposition": "RETAINED_SOURCE"
+    },
+    {
+      "type": 9,
+      "typeName": "OptionSet",
+      "id": null,
+      "schemaName": "os_sr_candstat",
+      "name": "os_sr_candstat",
+      "sourceMapping": "OptionSets/os_sr_candstat.xml",
+      "disposition": "RETAINED_SOURCE"
+    },
+    {
+      "type": 91,
+      "typeName": "PluginAssembly",
+      "id": "ebabddad-3635-471b-9e97-88dbb0396df0",
+      "schemaName": "os_sr_cact, Version=1.0.0.0, Culture=neutral, PublicKeyToken=d73b02688ba7f9aa",
+      "name": "os_sr_cact, Version=1.0.0.0, Culture=neutral, PublicKeyToken=d73b02688ba7f9aa",
+      "sourceMapping": "Rollback manifest only; binary excluded from canonical source.",
+      "disposition": "ROLLBACK_ONLY_SIGNED_ASSEMBLY_NOT_RETAINED"
+    },
+    {
+      "type": 91,
+      "typeName": "PluginAssembly",
+      "id": "d71c6048-4fd0-f111-a05a-002248a1ba20",
+      "schemaName": "os_sr_cact, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+      "name": "os_sr_cact, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+      "sourceMapping": "pluginpackages/os_sr_cact_pkg/pluginpackage.xml; package/os_sr_cact_pkg.nupkg",
+      "disposition": "PACKAGE_BACKED_ASSEMBLY_MANAGED_BY_EXISTING_PACKAGE_UPDATER"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "051c4665-8c13-4941-ace8-529b4cdcd017",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_cand.Assign",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "1a00ec9c-f0d2-475e-9eae-b7c871279f4a",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_csh.UpdateMultiple",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "27526e60-b04e-437c-993f-1ff95d08225a",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_call.RevokeAccess",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "2adf9803-edda-44b2-8d1f-11d02fc828e1",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_call.Delete",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "2b6df1a1-cc23-49ef-ac2b-828c1a8f22c6",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_call.SetState",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "2e354c46-1a27-4319-9c34-3616053ac4f7",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_call.SetStateDynamicEntity",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "2fd1c5d3-2644-4131-a1f4-4c4175d570fd",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.relationships.Associate",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "38027727-4179-49ef-904e-d5f25763225e",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_csh.ModifyAccess",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "38ad01f4-5d5e-4e29-96d4-70d6f78416b9",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_oprc.DeleteMultiple",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "38d3656d-bb50-4449-acf5-7c82e9e35b49",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_oprc.CreateMultiple",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "3b56e4f3-ef39-41e1-9244-19f24574ad47",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_call.GrantAccess",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "42d987f0-12a5-4681-bcaf-91abb5873a39",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_call.Update",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "49624b8b-daf9-4785-9e97-1e0c0c4fb323",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_cand.GrantAccess",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "4a2cea4b-0f4c-4dd4-8368-079b662b8e9f",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_csh.GrantAccess",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "4c5ff71c-6df1-4a56-a2e0-3813a49867df",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_call.UpdateMultiple",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "53d6c5f8-12a7-4d7c-bdd8-8df56cf2ca13",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_csh.Create",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "53f202d6-517a-439c-a61d-2716857b220c",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_cand.SetState",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "60ebf8d0-c052-4294-8765-af056c99cadd",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_call.DeleteMultiple",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "63d04fca-da46-4780-91b8-b7a9b730e687",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_csh.Update",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "647319e8-5b24-4023-89d9-aa9598acff6f",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_csh.CreateMultiple",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "6f57c607-93b3-49f2-b2bd-f89bca740dc6",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_call.CreateMultiple",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "71b8e077-9203-4d64-933c-f562b4a4ecc5",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_oprc.UpdateMultiple",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "72259693-44aa-43f1-bd4f-e7454575d8bb",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_csh.SetStateDynamicEntity",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "74a5f121-2c5d-4099-9aa6-ded9ee4d0dd4",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_cand.Delete",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "7693ed85-0a35-43b8-a955-052d0a566b9c",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_oprc.RevokeAccess",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "812deb20-4e84-42d9-bdf7-569325fe97e0",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_call.Create",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "832a7cbb-90ca-4fa5-92a5-516a7b46cb0a",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_cand.Create",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "87452fe4-970a-45f8-9864-2704af915562",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_csh.SetState",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "883bb8ad-af8e-4f6c-9223-698541f9bd5f",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_call.Assign",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "8ad2cae8-6315-4db7-9fb8-8548468636f5",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_oprc.Create",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "8b709761-4504-4f96-9c40-7a8849304ab4",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_oprc.SetStateDynamicEntity",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "8c1c0125-a0a9-4b33-a613-fbec5cffc7ea",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_cand.RevokeAccess",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "951c2e98-75f9-4d42-bb65-98a2a56273af",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_cand.UpdateMultiple",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "9e035695-5eef-4533-adeb-23fc6b8bf686",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_oprc.ModifyAccess",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "a9fa86bf-1470-4624-9647-cc156decd8b6",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_csh.DeleteMultiple",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "aa05bca9-09ac-4a42-ac81-9ab8353fd07c",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_csh.Delete",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "c325f210-b8a6-4ce7-8af0-0944e680f3e2",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_oprc.GrantAccess",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "ca818d2d-68f5-4e0d-8277-a27057c8dd22",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_oprc.Delete",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "cb001eb9-f0fd-4b21-9a34-32ffc5a3f839",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_cand.ModifyAccess",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "d5b295a8-1a64-4a18-87af-fe223969ed18",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_cand.Update",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "d98ffe78-6669-4b4a-86d6-5f230baac3ee",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_oprc.Assign",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "dccf01e7-d669-4e57-9826-a4676381fefa",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_cand.DeleteMultiple",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "de0f10ec-c898-4cc4-b536-195502ae1ae1",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_csh.Assign",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "e2bf1e96-679f-44ab-ae79-85d539668042",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_cand.CreateMultiple",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "e5c376a4-26d0-4f35-b4bb-2cc137886a4a",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_oprc.SetState",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "e6bcfcc6-ce45-4f57-904b-8bfb0ed909f6",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_cand.SetStateDynamicEntity",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "ebcd100b-d6c7-4f77-8cb7-e91786f47bda",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_oprc.Update",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "f39b1b9d-92f2-42f7-b602-ffbf0fe8eff7",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_call.ModifyAccess",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "f843e083-e154-427d-b817-74e75a9d7dc8",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.relationships.Disassociate",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    },
+    {
+      "type": 92,
+      "typeName": "SdkMessageProcessingStep",
+      "id": "fd6dc0cb-d600-4bf7-ad4e-669e57b592c1",
+      "schemaName": null,
+      "name": "os_sr_cact.guard.os_sr_csh.RevokeAccess",
+      "sourceMapping": "Step definition inventoried from export; excluded from release to prevent guard reactivation.",
+      "disposition": "INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE"
+    }
+  ]
+}

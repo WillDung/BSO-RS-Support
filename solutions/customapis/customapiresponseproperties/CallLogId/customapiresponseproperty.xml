@@ -1,0 +1,8 @@
+<customapiresponseproperty uniquename="CallLogId">
+  <displayname default="CallLogId">
+    <label description="CallLogId" languagecode="1033" />
+  </displayname>
+  <iscustomizable>1</iscustomizable>
+  <name>os_sr_cact.CallLogId</name>
+  <type>12</type>
+</customapiresponseproperty>

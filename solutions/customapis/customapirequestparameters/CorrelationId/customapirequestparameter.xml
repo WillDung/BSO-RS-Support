@@ -1,0 +1,9 @@
+<customapirequestparameter uniquename="CorrelationId">
+  <displayname default="CorrelationId">
+    <label description="CorrelationId" languagecode="1033" />
+  </displayname>
+  <iscustomizable>1</iscustomizable>
+  <isoptional>0</isoptional>
+  <name>os_sr_cact.CorrelationId</name>
+  <type>12</type>
+</customapirequestparameter>

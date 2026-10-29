@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{d83e5079-ced1-f111-a05a-7c1e52376817}</WebResourceId>
+  <Name>os_/bso/candidate-console.html</Name>
+  <DisplayName>Candidate Management Console</DisplayName>
+  <Description>Candidate Management console. Business writes use os_sr_cact.</Description>
+  <WebResourceType>1</WebResourceType>
+  <IntroducedVersion>1.0.0.0</IntroducedVersion>
+  <IsEnabledForMobileClient>0</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/os_bsocandidate-consolehtmlD83E5079-CED1-F111-A05A-7C1E52376817</FileName>
+</WebResource>

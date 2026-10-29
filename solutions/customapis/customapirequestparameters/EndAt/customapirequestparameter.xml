@@ -1,0 +1,9 @@
+<customapirequestparameter uniquename="EndAt">
+  <displayname default="EndAt">
+    <label description="EndAt" languagecode="1033" />
+  </displayname>
+  <iscustomizable>1</iscustomizable>
+  <isoptional>1</isoptional>
+  <name>os_sr_cact.EndAt</name>
+  <type>1</type>
+</customapirequestparameter>

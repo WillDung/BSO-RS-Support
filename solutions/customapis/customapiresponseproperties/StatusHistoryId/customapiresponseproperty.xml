@@ -1,0 +1,8 @@
+<customapiresponseproperty uniquename="StatusHistoryId">
+  <displayname default="StatusHistoryId">
+    <label description="StatusHistoryId" languagecode="1033" />
+  </displayname>
+  <iscustomizable>1</iscustomizable>
+  <name>os_sr_cact.StatusHistoryId</name>
+  <type>12</type>
+</customapiresponseproperty>

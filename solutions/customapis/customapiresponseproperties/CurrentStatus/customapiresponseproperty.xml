@@ -1,0 +1,8 @@
+<customapiresponseproperty uniquename="CurrentStatus">
+  <displayname default="CurrentStatus">
+    <label description="CurrentStatus" languagecode="1033" />
+  </displayname>
+  <iscustomizable>1</iscustomizable>
+  <name>os_sr_cact.CurrentStatus</name>
+  <type>7</type>
+</customapiresponseproperty>

@@ -208,7 +208,11 @@ if ($hasHtmlResource) {
     throw 'An external HTML resource is accepted only when that exact HTML resource is selected.'
 }
 $publishLabel = "srapp + $($resources.Count) exact web resources scoped PublishXml"
-$finalDispatchName = if ($CreateNewResources) { $publishLabel } else { 'srapp sitemap + scoped PublishXml' }
+$finalDispatchName = if ($CreateNewResources -or $RefreshExisting) {
+    $publishLabel
+} else {
+    'srapp sitemap + scoped PublishXml'
+}
 foreach ($resource in $resources) {
     $resource.Path = [IO.Path]::GetFullPath($resource.Path)
     if (-not (Test-Path -LiteralPath $resource.Path -PathType Leaf)) {
@@ -967,7 +971,7 @@ try {
     }
 
     $lastEntry = @($script:Journal.Dispatches | Where-Object Name -CEQ $finalDispatchName)[0]
-    if (-not $Continue -and -not $CreateNewResources) {
+    if (-not $Continue -and -not $CreateNewResources -and -not $RefreshExisting) {
       $lastEntry.State = 'DISPATCH_RESERVED'
       $script:Journal.SiteMapPatch = 'DISPATCH_RESERVED'
       Save-Journal
@@ -983,7 +987,7 @@ try {
       Assert-UnpublishedSiteMap -ExpectedXml $proposed.Xml
       $script:Journal.SiteMapPatch = 'GET_RECONCILED_DRAFT'
       Save-Journal
-    } elseif ($CreateNewResources) {
+    } elseif ($CreateNewResources -or $RefreshExisting) {
       $script:Journal.SiteMapPatch = 'NOT_REQUIRED_EXISTING_NAVIGATION_RECONCILED'
       Save-Journal
     }
@@ -1028,7 +1032,7 @@ try {
         WebResourceCount = $createdIds.Count
         SiteMapPatchCount = $script:Counts.PATCH
         PublishXmlCount = 1
-        PublishXmlIncludesOnlyTargetAppAndThreeWebResources = $true
+        PublishXmlIncludesOnlyTargetAppAndSelectedWebResources = $true
         PublishedWebResourceReadback = 'GET_RECONCILED'
         PublishAllXml = 0
         AutomaticRetries = 0

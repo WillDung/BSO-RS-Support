@@ -1,0 +1,37 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>0</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>0</isdefault>
+    <savedqueryid>{a5f99c9b-1e57-43f6-948d-f140d9fb3e8a}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="os_sr_cand_cnum" select="1" icon="1" preview="1">
+        <row name="result" id="os_sr_candid">
+          <cell name="os_sr_cand_cnum" width="300" />
+          <cell name="createdon" width="125" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" mapping="logical">
+        <entity name="os_sr_cand">
+          <attribute name="os_sr_candid" />
+          <attribute name="os_sr_cand_cnum" />
+          <attribute name="createdon" />
+          <order attribute="os_sr_cand_cnum" descending="false" />
+          <filter type="and">
+            <condition attribute="statecode" operator="eq" value="1" />
+          </filter>
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0.0.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="Inactive Candidates" languagecode="1033" />
+    </LocalizedNames>
+  </savedquery>
+</savedqueries>

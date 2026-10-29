@@ -287,10 +287,15 @@ Assert-Test ($deployment.Contains('[switch]$CreateNewResources') -and
     $deployment.Contains('candidate-console-policy.js')) `
     'Restrict creation to the two configuration resources and verify the external DEV configuration before dispatch'
 Assert-Test ($deployment.Contains('CANDIDATE_CONSOLE_CONFIG_RESOURCES_PREFLIGHT_READY') -and
-    $deployment.Contains('if (-not $Continue -and -not $CreateNewResources)') -and
+    $deployment.Contains('if (-not $Continue -and -not $CreateNewResources -and -not $RefreshExisting)') -and
     $deployment.Contains('NOT_REQUIRED_EXISTING_NAVIGATION_RECONCILED') -and
     $deployment.Contains('Assert-PublishedWebResourceReadback')) `
     'Create only the selected configuration resources, preserve the sitemap, and reconcile published bytes'
+Assert-Test ($deployment.Contains('if (-not $Continue -and -not $CreateNewResources -and -not $RefreshExisting)') -and
+    $deployment.Contains('if ($CreateNewResources -or $RefreshExisting)') -and
+    $deployment.Contains('PublishXmlIncludesOnlyTargetAppAndSelectedWebResources = $true') -and
+    $deployment.Contains('$publishLabel = "srapp + $($resources.Count) exact web resources scoped PublishXml"')) `
+    'Refresh exact web resources without PATCHing the sitemap and publish only selected resources with srapp'
 
 $hash = (Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $version = [regex]::Match($html, 'candidate-console\.js\?v=([0-9a-f]+)')

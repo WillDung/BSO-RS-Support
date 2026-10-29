@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{dbf3efa7-ced1-f111-a05a-002248a1ba20}</WebResourceId>
+  <Name>os_/bso/candidate-console.css</Name>
+  <DisplayName>Candidate Management Console Styles</DisplayName>
+  <Description>Candidate Management console. Business writes use os_sr_cact.</Description>
+  <WebResourceType>2</WebResourceType>
+  <IntroducedVersion>1.0.0.0</IntroducedVersion>
+  <IsEnabledForMobileClient>0</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/os_bsocandidate-consolecssDBF3EFA7-CED1-F111-A05A-002248A1BA20</FileName>
+</WebResource>

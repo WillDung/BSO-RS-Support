@@ -1,0 +1,19 @@
+<customapi uniquename="os_sr_cact">
+  <allowedcustomprocessingsteptype>0</allowedcustomprocessingsteptype>
+  <bindingtype>0</bindingtype>
+  <description default="Server-enforced Candidate Core action with durable replay evidence.">
+    <label description="Server-enforced Candidate Core action with durable replay evidence." languagecode="1033" />
+  </description>
+  <displayname default="Apply Candidate Action">
+    <label description="Apply Candidate Action" languagecode="1033" />
+  </displayname>
+  <executeprivilegename>prvReados_sr_cand</executeprivilegename>
+  <iscustomizable>1</iscustomizable>
+  <isfunction>0</isfunction>
+  <isprivate>1</isprivate>
+  <name>Apply Candidate Action</name>
+  <plugintypeid>
+    <plugintypeexportkey>D0066AC27AB1EE581B14DF3DDE310464AF314E41CE7204F2C005221DD39A7458</plugintypeexportkey>
+  </plugintypeid>
+  <workflowsdkstepenabled>0</workflowsdkstepenabled>
+</customapi>

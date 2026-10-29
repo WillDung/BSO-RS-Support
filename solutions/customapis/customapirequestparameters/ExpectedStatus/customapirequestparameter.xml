@@ -1,0 +1,9 @@
+<customapirequestparameter uniquename="ExpectedStatus">
+  <displayname default="ExpectedStatus">
+    <label description="ExpectedStatus" languagecode="1033" />
+  </displayname>
+  <iscustomizable>1</iscustomizable>
+  <isoptional>1</isoptional>
+  <name>os_sr_cact.ExpectedStatus</name>
+  <type>7</type>
+</customapirequestparameter>

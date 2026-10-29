@@ -1,0 +1,8 @@
+<customapiresponseproperty uniquename="ResultCode">
+  <displayname default="ResultCode">
+    <label description="ResultCode" languagecode="1033" />
+  </displayname>
+  <iscustomizable>1</iscustomizable>
+  <name>os_sr_cact.ResultCode</name>
+  <type>10</type>
+</customapiresponseproperty>

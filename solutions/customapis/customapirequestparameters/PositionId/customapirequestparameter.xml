@@ -1,0 +1,9 @@
+<customapirequestparameter uniquename="PositionId">
+  <displayname default="PositionId">
+    <label description="PositionId" languagecode="1033" />
+  </displayname>
+  <iscustomizable>1</iscustomizable>
+  <isoptional>1</isoptional>
+  <name>os_sr_cact.PositionId</name>
+  <type>12</type>
+</customapirequestparameter>

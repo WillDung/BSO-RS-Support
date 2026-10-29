@@ -1,0 +1,9 @@
+<customapirequestparameter uniquename="LocationId">
+  <displayname default="LocationId">
+    <label description="LocationId" languagecode="1033" />
+  </displayname>
+  <iscustomizable>1</iscustomizable>
+  <isoptional>1</isoptional>
+  <name>os_sr_cact.LocationId</name>
+  <type>12</type>
+</customapirequestparameter>

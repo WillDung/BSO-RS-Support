@@ -1,0 +1,9 @@
+<customapirequestparameter uniquename="ActionType">
+  <displayname default="ActionType">
+    <label description="ActionType" languagecode="1033" />
+  </displayname>
+  <iscustomizable>1</iscustomizable>
+  <isoptional>0</isoptional>
+  <name>os_sr_cact.ActionType</name>
+  <type>10</type>
+</customapirequestparameter>

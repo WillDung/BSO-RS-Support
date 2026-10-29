@@ -1,0 +1,44 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<AppModule>
+  <UniqueName>srapp</UniqueName>
+  <IntroducedVersion>1.0.0.0</IntroducedVersion>
+  <WebResourceId>953b9fac-1e5e-e611-80d6-00155ded156f</WebResourceId>
+  <OptimizedFor></OptimizedFor>
+  <statecode>0</statecode>
+  <statuscode>1</statuscode>
+  <FormFactor>1</FormFactor>
+  <ClientType>2</ClientType>
+  <NavigationType>0</NavigationType>
+  <AppModuleComponents>
+    <AppModuleComponent type="1" schemaName="os_sr_csrc" />
+    <AppModuleComponent type="1" schemaName="os_sr_loc" />
+    <AppModuleComponent type="1" schemaName="os_sr_pos" />
+    <AppModuleComponent type="1" schemaName="os_sr_ta" />
+    <AppModuleComponent type="26" id="{aa862e5f-26f5-4cf8-a660-06932b0f9b22}" />
+    <AppModuleComponent type="26" id="{7f5d6ad3-8ca2-44e3-8f4d-250e183dfb3e}" />
+    <AppModuleComponent type="26" id="{2cb98672-8176-4337-af5e-d6aabcac8f2d}" />
+    <AppModuleComponent type="26" id="{be4c932f-c13e-4b9a-9422-d7e9adf342c2}" />
+    <AppModuleComponent type="60" id="{4881172e-d1b2-4623-8e17-897b14b825ac}" />
+    <AppModuleComponent type="60" id="{e076f089-e35b-46f3-b123-9cf0463759e5}" />
+    <AppModuleComponent type="60" id="{cb547630-8c43-4a68-b052-b71cea4616ce}" />
+    <AppModuleComponent type="60" id="{aa697cca-4698-475e-8dd6-c08183fccfa8}" />
+    <AppModuleComponent type="62" schemaName="srapp" />
+  </AppModuleComponents>
+  <AppModuleRoleMaps>
+    <Role id="{63d7bb93-0bd2-f111-a05a-000d3a64b349}" />
+    <Role id="{627090ff-40a3-4053-8790-584edc5be201}" />
+    <Role id="{119f245c-3cc8-4b62-b31c-d1a046ced15d}" />
+  </AppModuleRoleMaps>
+  <LocalizedNames>
+    <LocalizedName description="BSO-RS-Support" languagecode="1033" />
+  </LocalizedNames>
+  <Descriptions>
+    <Description description="Internal recruitment support application for authorized BSO candidate operations, backed by Dataverse." languagecode="1033" />
+  </Descriptions>
+  <appsettings>
+    <appsetting settingdefinitionid.uniquename="AppChannel">
+      <iscustomizable>1</iscustomizable>
+      <value>1</value>
+    </appsetting>
+  </appsettings>
+</AppModule>

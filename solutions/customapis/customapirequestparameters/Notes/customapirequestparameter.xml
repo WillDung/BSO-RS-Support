@@ -1,0 +1,9 @@
+<customapirequestparameter uniquename="Notes">
+  <displayname default="Notes">
+    <label description="Notes" languagecode="1033" />
+  </displayname>
+  <iscustomizable>1</iscustomizable>
+  <isoptional>1</isoptional>
+  <name>os_sr_cact.Notes</name>
+  <type>10</type>
+</customapirequestparameter>

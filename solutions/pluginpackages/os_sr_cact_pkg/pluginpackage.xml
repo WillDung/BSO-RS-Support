@@ -1,0 +1,9 @@
+<pluginpackage uniquename="os_sr_cact_pkg">
+  <exportkeyversion>1</exportkeyversion>
+  <iscustomizable>1</iscustomizable>
+  <name>os_sr_cact_pkg</name>
+  <package mimetype="application/octet-stream">os_sr_cact_pkg.nupkg</package>
+  <statecode>0</statecode>
+  <statuscode>1</statuscode>
+  <version>1.0.0</version>
+</pluginpackage>

@@ -1,6 +1,6 @@
 # Candidate Core server operations
 
-Source for the signed `os_sr_cact` Dataverse assembly, version `1.0.0.0`. This is authored .NET plug-in source, **not an exported/unpacked Solution**. The supported target is .NET Framework 4.6.2 with `Microsoft.CrmSdk.CoreAssemblies` pinned to 9.0.2.60; the SDK assembly is supplied by the Dataverse sandbox. No runtime dependency is merged/uploaded with this assembly.
+Source for Candidate Core plug-in code used by the legacy signed `os_sr_cact` assembly and the unsigned package-backed `os_sr_cact` assembly, version `1.0.0.0`. This is authored .NET plug-in source, **not an exported/unpacked Solution**. The supported target is .NET Framework 4.6.2 with `Microsoft.CrmSdk.CoreAssemblies` pinned to 9.0.2.60; the SDK assembly is supplied by the Dataverse sandbox. No runtime dependency is merged/uploaded with the package assembly.
 
 ## Phase 5B storage-boundary correction (29 October 2026)
 
@@ -8,7 +8,9 @@ The source audit proved that Candidate Core's protected Candidate and Interview 
 
 CreateCandidate failures now have a constrained stage diagnostic (`RECEIPT_READ`, `CANDIDATE_CREATE`, `CANDIDATE_READBACK`, `RECEIPT_CREATE`, or `RESPONSE`) containing only the stage and sanitized code/category. The Candidate Console displays/logs only that allowlisted diagnostic, never the raw server error message.
 
-**Deployment status:** local SDK and package validation do not establish that the edited source is deployed. The live VN LMV IT assembly is signed; no compatible signing key was available in this session. The unsigned package build is not compatible with that live assembly identity, so no package update or browser retry was performed. Phase 5B remains pending.
+**Deployment status (29 October 2026):** live topology reconciliation confirmed that the active handler is the unsigned File Store assembly under the existing `os_sr_cact_pkg`, while a separate signed Database assembly remains for rollback. The existing package was updated once in VN LMV IT using the local unsigned artifact; its identity/version remained `os_sr_cact_pkg` / `1.0.0`, and live `ModifiedOn` advanced. The Custom API handler relationship and metadata remained unchanged; all 50 `ProtectCandidateCore` steps remained Disabled. The local package SHA-256 is `758adef7e3a3704e4e500c6cf19d493f0840e0c853a6055dcfa43854cbb85c44`; the embedded and current Release DLL SHA-256 is `74c1c0642159a38d5c703ad16fd5485a9a50adab0238b34207418f87c84a1ed4`.
+
+The approved BSO-role browser identity opened exact `srapp`; Candidate Management showed Candidate Core active and DEV direct-write fallback off. One synthetic CreateCandidate attempt returned HTTP 400 / `0x80040265`. The browser exposed only `CANDIDATE_CORE_CreateCandidate_FAILED`, not an allowlisted internal stage. No retry or follow-on lifecycle action was performed. Phase 5B remains pending; the failure and remaining acceptance gates are documented in the [Phase 5B acceptance report](../../docs/PHASE_5B_SECURITY_ACCEPTANCE_REPORT.md). No signing key was accessed or used.
 
 ## Build and offline validation
 

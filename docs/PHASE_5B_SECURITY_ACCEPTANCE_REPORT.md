@@ -1,6 +1,16 @@
 # Phase 5B role assignment and security acceptance - 28 October 2026
 
-## 29 October 2026 continuation - Candidate Core storage boundary
+## 29 October 2026 continuation - existing unsigned package deployed; Candidate Core acceptance blocked
+
+**Current status:** `PHASE_5B_SECURITY_ACCEPTANCE_PENDING`; not a security pass. Fresh PAC identity verification matched VN LMV IT. Read-only topology reconciliation found exactly one existing `os_sr_cact_pkg` v1.0.0; the active `os_sr_cact` Custom API handler remained `os_sr_cact.ApplyCandidateAction` in its package-backed File Store assembly with an empty public-key token. The separate signed Database assembly remained the rollback artifact and was not modified.
+
+The existing package was updated once with the locally rebuilt unsigned artifact. An initial PAC command used a nonexistent package ID and returned before an update; after a fresh exact-name lookup, the single valid update succeeded. The existing package identity/version remained unchanged and its `ModifiedOn` advanced from 28 to 29 October 2026. The active handler relationship and Custom API metadata remained unchanged. The local package SHA-256 is `758adef7e3a3704e4e500c6cf19d493f0840e0c853a6055dcfa43854cbb85c44`; the embedded and current Release DLL SHA-256 is `74c1c0642159a38d5c703ad16fd5485a9a50adab0238b34207418f87c84a1ed4`. Dataverse package bytes were not required for reconciliation. All **50/50** `ProtectCandidateCore` registrations remained Disabled. Organization PluginTraceLog remained Off; no active Plugin Profiler wrapper was found. No signing key was inspected or used.
+
+The exact `srapp` browser session returned WhoAmI HTTP 200 for the BSO-role test identity and VN LMV IT. The user had the BSO direct role and only the default owner team. Candidate Management loaded with Candidate Core active and the DEV direct-write fallback unchecked; Position and Candidate Source selectors loaded.
+
+Exactly one fresh synthetic CreateCandidate request was sent through Candidate Management / `os_sr_cact`. It returned HTTP 400 / `0x80040265`. The browser console exposed `CANDIDATE_CORE_CreateCandidate_FAILED` but did **not** expose an allowlisted internal stage or sanitized stage category. The UI refreshed its candidate list and showed no synthetic candidate. No retry occurred. Per the stop rule, no further Candidate action was attempted: Answered, Waiting Manual Scheduling, Round 1 scheduling, receipt verification, TA/Location selector verification, and all five direct-write negatives remain unperformed. Phase 5B is blocked at the Candidate Core CreateCandidate runtime gate, not accepted. Real data remains prohibited; no Production work, role changes, commit, or push occurred.
+
+## 29 October 2026 continuation - Candidate Core storage boundary (predeployment audit)
 
 **Current status:** `PHASE_5B_SECURITY_ACCEPTANCE_PENDING`. The approved BSO identity can reach Candidate Management in exact `srapp`. The BSO role retains the App Opener baseline and Candidate Core execute privilege; no protected-table Create/Write/Delete or Operation Receipt privileges were granted. `ProtectCandidateCore` remains inactive. No additional role, app, or team changes occurred.
 
@@ -36,7 +46,7 @@ CreateCandidate stage failures now produce only `CANDIDATE_CORE_OPERATION_REJECT
 - Phase 3D-R4 package/deployment checks: **12 / 29 passed**.
 - Unsigned `CandidateCore.Package.csproj` build: **passed**, version `1.0.0.0`, no strong-name public key.
 
-The live VN LMV IT plug-in assembly is signed. No compatible signing key was available in this session; the unsigned local build cannot safely update that live assembly identity. Therefore **no package update, environment write, browser diagnostic retry, or direct-write test was performed**. The source change is local and not deployed; the live `0x80040265` cause remains undiagnosed. Phase 5B is not accepted. The next step is to make the existing compatible signing identity available through the approved protected local build process (do not transmit or commit the key), then re-run package/deployment preflight before any one-shot in-place update. After a successful deployment readback, perform only the single authorized synthetic diagnostic CreateCandidate attempt and stop on failure.
+At the time of this predeployment audit, the active handler was incorrectly believed to be the signed Database assembly. Later live topology reconciliation showed that the active handler was already package-backed by the existing unsigned File Store package, so signing-key availability was not a blocker. The package update and one synthetic diagnostic attempt are recorded in the current section above. Phase 5B remains pending; the live CreateCandidate failure is not resolved and no direct-write negative test has been performed.
 
 ## 29 October 2026 continuation - App Opener read baseline and gateway block
 

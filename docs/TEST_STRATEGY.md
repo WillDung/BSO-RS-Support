@@ -1,6 +1,6 @@
 # Test Strategy
 
-**Status:** Test approach plus partial implementation evidence. Candidate Core metadata and the server operation API/plugin are deployed; offline synthetic suites exist. The owner-authorized assembly update removed the organization-audit runtime rejection and was GET-reconciled, though its HTTP status was not captured. Phase 3D is `UNCERTAIN_WRITE_OUTCOME`: the runtime one-shot lock was already consumed, no matching dispatch journal was found among retained session artifacts inspected, and Apply was not rerun. Fresh count-only reads returned zero rows in all four Candidate Core business/evidence tables; live operation behavior remains unverified. Scheduler/result/reschedule actions must continue failing closed until trusted evidence exists. See the [Phase 3D report](PHASE_3D_CANDIDATE_CORE_RUNTIME_ACCEPTANCE_REPORT.md).
+**Status:** Candidate Core offline suites and the DEV Phase 5B BSO lifecycle/security acceptance are complete; the exact evidence and boundaries are recorded in [Current State](CURRENT_STATE.md) and the [Phase 5B report](PHASE_5B_SECURITY_ACCEPTANCE_REPORT.md). Phase 3D's `UNCERTAIN_WRITE_OUTCOME` is historical and was superseded by later accepted Phase 5A/5B evidence; it does not authorize rerunning its consumed one-shot. The Candidate Console environment-configuration refactor is local only and not browser-accepted. No approved Test target is established (`TEST_TARGET_APPROVAL_REQUIRED`); use the [Test Rehearsal Plan](TEST_REHEARSAL_PLAN.md) only after its entry gates are approved.
 
 ## Test layers
 
@@ -24,4 +24,4 @@
 
 ## Evidence and exit
 
-Record test environment/type, revision, prerequisites, case/results, and defects with sensitive data sanitized. Never report a test as passed if unrun. Production cutover requires relevant regression, authorization/security, integration failure, migration reconciliation, UAT sign-off, and smoke-test evidence. See [Acceptance Criteria](ACCEPTANCE_CRITERIA.md).
+Record test environment/type, revision, prerequisites, case/results, and defects with sensitive data sanitized. Never report a test as passed if unrun. Production cutover requires relevant regression, authorization/security, integration failure, migration reconciliation, UAT sign-off, and smoke-test evidence. See [Acceptance Criteria](ACCEPTANCE_CRITERIA.md) and [Rollback Plan](ROLLBACK_PLAN.md).

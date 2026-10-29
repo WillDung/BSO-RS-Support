@@ -6,7 +6,9 @@
   <title>Candidate Management</title>
   <link rel="stylesheet" href="candidate-console.css">
   <script src="../../ClientGlobalContext.js.aspx"></script>
-  <script defer src="candidate-console.js?v=82a252c25d5c"></script>
+  <script defer src="candidate-console-environment.js?v=39135f67e4c9"></script>
+  <script defer src="candidate-console-policy.js?v=0cecccb9377c"></script>
+  <script defer src="candidate-console.js?v=768b61cd2b60"></script>
 </head>
 <body>
   <main class="shell">
@@ -17,8 +19,9 @@
       </div>
       <div class="page-badges">
         <span id="workflow-path-badge" class="dev-badge">CANDIDATE CORE PATH</span>
+        <span id="environment-mode-badge" class="dev-badge">ENVIRONMENT CONFIGURATION REQUIRED</span>
         <span class="dev-badge">PROTECTCANDIDATECORE INACTIVE — NOT PRODUCTION</span>
-        <span class="dev-badge">REAL DATA PROHIBITED</span>
+        <span id="real-data-badge" class="dev-badge">REAL DATA PROHIBITED</span>
       </div>
     </header>
     <label id="dev-fallback-control" class="muted workflow-switch">
@@ -62,7 +65,7 @@
         </label>
         <div class="form-actions field-wide">
           <button id="create-button" class="button button-primary" type="submit" data-action>Create Candidate</button>
-          <span id="create-help" class="muted">VN LMV IT only. Use a [SYNTHETIC-E2E] name and a reserved .invalid email. Direct writes require the explicit fallback switch.</span>
+          <span id="create-help" class="muted">Use environment-approved data. DEV direct writes are available only when explicitly enabled.</span>
         </div>
       </form>
     </section>

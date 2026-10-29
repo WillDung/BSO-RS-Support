@@ -39,6 +39,16 @@ Use dedicated Dev, Test, and Production environments where approved. Confirm reg
 
 Use environment variables for environment-specific nonsecret configuration and supported secret handling for secrets. Use connection references rather than embedded personal connection IDs. Keep connector identity and authorization explicit: the intended BSO email/calendar identity must be verified; a fixed Flow owner must not silently impersonate the BSO. Validate references and permissions at each environment boundary.
 
+## Candidate Console environment configuration (local source; not deployed)
+
+**Current implementation:** the local Candidate Console source now loads a separate environment configuration and pure policy resource before its main script. The checked-in configuration is `UNCONFIGURED`, disables Candidate Core, keeps synthetic-only mode, disables fallback, and sets diagnostics Off. The policy compares the configured HTTPS organization origin and organization ID with the runtime model-driven app context; fallback availability is limited to DEV. DEV and TEST configurations must remain synthetic-only. Non-synthetic PROD mode is representable only as an explicit external configuration and is not approved or present.
+
+The least-privilege app session could not read Environment Variable Definition metadata (`0x80040220`, `prvReadEnvironmentVariableDefinition`). No privilege was granted, and Environment Variable Value access was not independently verified. The implementation therefore uses a guarded configuration web resource rather than requiring the Candidate Console user to read Environment Variables. `New-BsoRsCandidateConsoleEnvironmentConfig.ps1` requires explicit target URL and IDs and writes the generated configuration plus matching hash-busted HTML outside the repository. Do not commit generated files or deployment evidence.
+
+`Deploy-BsoRsCandidateConsole.ps1 -CreateNewResources` is limited to the exact configuration and policy resources, checks the external config against the fixed DEV target, preserves the existing sitemap, and scopes publication to the selected resources and `srapp`. A later refresh that changes configuration must include the exact config and generated HTML resources so the HTML cache token matches the generated configuration hash. Preflight and GET reconciliation are mandatory; retries remain zero. These scripts have not been run for this local refactor, so the new resources and browser behavior are **not verified deployed**.
+
+**Dependencies/open decisions:** the active PAC profile matched the pinned DEV identity during a read-only check, but no full Solution export was performed because target confirmation for that export was unavailable. The full Solution source snapshot and managed release candidate remain outstanding; do not infer that the current resource files constitute a complete Solution. No approved TEST target or target-specific configuration is established (`TEST_TARGET_APPROVAL_REQUIRED`). Production configuration, import, and runtime validation remain unauthorized. Production readiness still requires approved audit, privacy, DLP, backup/recovery, business acceptance, and change-control gates.
+
 ## Promotion gates
 
 1. Build and validate in Dev with synthetic data.

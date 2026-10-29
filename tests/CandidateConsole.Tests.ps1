@@ -7,9 +7,13 @@ $root = Split-Path -Parent $PSScriptRoot
 $webRoot = Join-Path $root 'solutions\CandidateConsole\WebResources\os_\bso'
 $htmlPath = Join-Path $webRoot 'candidate-console.html'
 $scriptPath = Join-Path $webRoot 'candidate-console.js'
+$configurationPath = Join-Path $webRoot 'candidate-console-environment.js'
+$policyPath = Join-Path $webRoot 'candidate-console-policy.js'
 $stylePath = Join-Path $webRoot 'candidate-console.css'
 $html = Get-Content -LiteralPath $htmlPath -Raw
 $script = Get-Content -LiteralPath $scriptPath -Raw
+$configuration = Get-Content -LiteralPath $configurationPath -Raw
+$policy = Get-Content -LiteralPath $policyPath -Raw
 $style = Get-Content -LiteralPath $stylePath -Raw
 $passed = 0
 
@@ -20,14 +24,29 @@ function Assert-Test {
 }
 
 Assert-Test ($html.Contains('id="workflow-path-badge"') -and
+    $html.Contains('id="environment-mode-badge"') -and
+    $html.Contains('id="real-data-badge"') -and
     $html.Contains('CANDIDATE CORE PATH') -and
     $html.Contains('PROTECTCANDIDATECORE INACTIVE — NOT PRODUCTION') -and
     $html.Contains('REAL DATA PROHIBITED')) 'Default to the Candidate Core path and retain DEV safety warnings'
 Assert-Test ($html.Contains('id="dev-fallback-toggle"') -and
     $html.Contains('Enable DEV direct-write fallback for this browser session') -and
     -not $html.Contains('id="dev-fallback-toggle" type="checkbox" checked')) 'Keep direct writes behind an explicit unchecked session switch'
-Assert-Test ($script -match 'function isTargetDevEnvironment\(\) \{(?s:.*?)catch \{\r?\n\s+return false;\r?\n\s+\}\r?\n\s+\}\r?\n\s+function isDevFallbackEnabled\(\)') `
+Assert-Test ($script -match 'function isDevConfiguration\(\) \{\r?\n\s+return isCandidateCoreEnabled\(\) && environmentPolicy\.mode === "DEV";\r?\n\s+\}\r?\n\r?\n\s+function isDevFallbackEnabled\(\)') `
     'Keep workflow path selection in the outer console scope'
+Assert-Test ($configuration.Contains('mode: "UNCONFIGURED"') -and
+    $configuration.Contains('candidateCoreEnabled: false') -and
+    $configuration.Contains('devDirectWriteFallbackEnabled: false') -and
+    $policy.Contains('actualUrl.origin.toLowerCase()') -and
+    $policy.Contains('runtime.organizationId') -and
+    $policy.Contains('directWriteFallbackAvailable: mode === "DEV"')) `
+    'Fail closed on unconfigured settings, verify runtime identity, and make fallback DEV-only'
+Assert-Test ($html.IndexOf('candidate-console-environment.js') -ge 0 -and
+    $html.IndexOf('candidate-console-policy.js') -gt $html.IndexOf('candidate-console-environment.js') -and
+    $html.IndexOf('candidate-console.js') -gt $html.IndexOf('candidate-console-policy.js') -and
+    -not $script.Contains('DEV_ORIGIN') -and
+    -not $configuration.Contains('crm4.dynamics.com')) `
+    'Load environment configuration and policy before the console without embedding an environment URL'
 Assert-Test ($script.Contains('fetch("/api/data/v9.2/os_sr_cact"') -and
     $script.Contains('credentials: "same-origin"') -and
     $script.Contains('body: JSON.stringify(request)') -and
@@ -57,7 +76,8 @@ Assert-Test ($script.Contains('if (!isDevFallbackEnabled()) return createCandida
     $script.Contains('if (!isDevFallbackEnabled()) return recordCallThroughCore(event);') -and
     $script.Contains('if (!isDevFallbackEnabled()) return createScheduleThroughCore(event);') -and
     $script.Contains('if (!isDevFallbackEnabled()) return cancelRound1ThroughCore(event);') -and
-    $script.Contains('isTargetDevEnvironment() && $("dev-fallback-toggle").checked')) `
+    $script.Contains('function isDevConfiguration()') -and
+    $script.Contains('if (!isDevConfiguration())')) `
     'Never auto-fallback from Candidate Core; enable the retained direct-write path only by explicit DEV switch'
 Assert-Test ($script.Contains('const forceSubmit = (buttonId, formId) => {') -and
     $script.Contains('form.requestSubmit();') -and
@@ -88,8 +108,11 @@ Assert-Test ($html.Contains('Changed On / Created On') -and
     $script.Contains('history[h.changedAt] || history.createdon')) 'Show Status History time with Created On fallback'
 Assert-Test ($html.Contains('data-action disabled') -and
     $script.Contains('if (busy || !selectedCandidate) return;')) 'Prevent call submission without a selection or during a request'
-Assert-Test ($script.Contains('candidateName.startsWith("[SYNTHETIC-E2E]")') -and
-    $script.Contains('\.invalid')) 'Keep the synthetic name and reserved email write gates'
+Assert-Test ($script.Contains('function isSyntheticInput(name, email)') -and
+    $script.Contains('name.startsWith("[SYNTHETIC-E2E]")') -and
+    $script.Contains('environmentPolicy.syntheticDataOnly && !isSyntheticInput(candidateName, candidateEmail)') -and
+    $script.Contains('(!environmentPolicy.syntheticDataOnly || isSyntheticCandidateMarkers(candidate))') -and
+    $script.Contains('\.invalid')) 'Apply the configured synthetic-only gate to candidate input and reads'
 Assert-Test ($script.Contains('waitingManualScheduling: 100010002') -and
     $script.Contains('current[c.status] !== STATUS.answered') -and
     $script.Contains('[c.status]: STATUS.waitingManualScheduling')) 'Gate the explicit Answered-to-Waiting transition'
@@ -246,17 +269,41 @@ Assert-Test ($publishCalls.Count -eq 2 -and
     $deployment.Contains('PUBLISHED_GET_RECONCILED') -and
     $deployment.Contains('PUBLISH_ACCEPTED_RECONCILIATION_FAILED')) `
     'Require exact published-resource GET reconciliation after each scoped PublishXml'
-$resourceSelection = $deployment.IndexOf('$resources = @($resources | Where-Object { $RefreshResourceNames -ccontains $_.Name })')
+$resourceSelection = $deployment.IndexOf('$resources = @($allResources | Where-Object { $RefreshResourceNames -ccontains $_.Name })')
 $publishLabel = $deployment.IndexOf('$publishLabel = "srapp + $($resources.Count) exact web resources scoped PublishXml"')
 Assert-Test ($deployment.Contains('[string[]]$RefreshResourceNames = @()') -and
-    $deployment.Contains('if (-not $RefreshExisting -or $Continue)') -and
+    $deployment.Contains('if ($Continue -or (-not $RefreshExisting -and -not $CreateNewResources))') -and
     $resourceSelection -ge 0 -and $publishLabel -gt $resourceSelection -and
     $deployment.Contains('$publishEntry = @($script:Journal.Dispatches | Where-Object Name -CEQ $publishLabel)[0]') -and
     $deployment.Contains('foreach ($resourceId in $script:Journal.ResourceIds)')) `
-    'Allow an exact existing-resource refresh and scope PublishXml to only selected web resources'
+    'Allow exact existing-resource refreshes and scope PublishXml to only selected web resources'
+Assert-Test ($deployment.Contains('[switch]$CreateNewResources') -and
+    $deployment.Contains('New-resource creation is restricted to the two exact Candidate Console configuration resources.') -and
+    $deployment.Contains('$environmentConfiguration.environmentId -ine $target.EnvironmentId') -and
+    $deployment.Contains('Generated environment files must remain outside the repository.') -and
+    $deployment.Contains('[string]$EnvironmentHtmlPath') -and
+    $deployment.Contains('Generated HTML differs from the checked-in source except for the verified environment cache token.') -and
+    $deployment.Contains('candidate-console-environment.js') -and
+    $deployment.Contains('candidate-console-policy.js')) `
+    'Restrict creation to the two configuration resources and verify the external DEV configuration before dispatch'
+Assert-Test ($deployment.Contains('CANDIDATE_CONSOLE_CONFIG_RESOURCES_PREFLIGHT_READY') -and
+    $deployment.Contains('if (-not $Continue -and -not $CreateNewResources)') -and
+    $deployment.Contains('NOT_REQUIRED_EXISTING_NAVIGATION_RECONCILED') -and
+    $deployment.Contains('Assert-PublishedWebResourceReadback')) `
+    'Create only the selected configuration resources, preserve the sitemap, and reconcile published bytes'
 
 $hash = (Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $version = [regex]::Match($html, 'candidate-console\.js\?v=([0-9a-f]+)')
 Assert-Test ($version.Success -and $hash.StartsWith($version.Groups[1].Value)) 'Keep the script cache version tied to its content'
+$resourceVersions = @(
+    @{ Path = $configurationPath; Name = 'candidate-console-environment.js' },
+    @{ Path = $policyPath; Name = 'candidate-console-policy.js' }
+)
+foreach ($resource in $resourceVersions) {
+    $resourceHash = (Get-FileHash -LiteralPath $resource.Path -Algorithm SHA256).Hash.ToLowerInvariant()
+    $resourceVersion = [regex]::Match($html, "$([regex]::Escape($resource.Name))\?v=([0-9a-f]+)")
+    Assert-Test ($resourceVersion.Success -and $resourceHash.StartsWith($resourceVersion.Groups[1].Value)) `
+        "Keep $($resource.Name) cache version tied to its content"
+}
 
 Write-Output "Candidate Console static checks passed: $passed"

@@ -4,8 +4,17 @@ param(
     [switch]$Apply,
     [switch]$Continue,
     [switch]$RefreshExisting,
-    [ValidateSet('os_/bso/candidate-console.html', 'os_/bso/candidate-console.css', 'os_/bso/candidate-console.js')]
+    [switch]$CreateNewResources,
+    [ValidateSet(
+        'os_/bso/candidate-console.html',
+        'os_/bso/candidate-console.css',
+        'os_/bso/candidate-console.js',
+        'os_/bso/candidate-console-environment.js',
+        'os_/bso/candidate-console-policy.js'
+    )]
     [string[]]$RefreshResourceNames = @(),
+    [string]$EnvironmentConfigurationPath,
+    [string]$EnvironmentHtmlPath,
     [Parameter(Mandatory)][string]$EnvironmentName,
     [Parameter(Mandatory)][string]$OrganizationUrl,
     [Parameter(Mandatory)][string]$ExpectedEnvironmentId,
@@ -30,7 +39,7 @@ $target = [ordered]@{
     WebResourceObjectTypeCode = 61
     NavigationId = 'subarea_bso_candidate_management'
 }
-$resources = @(
+$allResources = @(
     [pscustomobject]@{
         Name = 'os_/bso/candidate-console.html'
         DisplayName = 'Candidate Management Console'
@@ -49,8 +58,28 @@ $resources = @(
         Type = 3
         Path = Join-Path $PSScriptRoot '..\solutions\CandidateConsole\WebResources\os_\bso\candidate-console.js'
     }
+    [pscustomobject]@{
+        Name = 'os_/bso/candidate-console-environment.js'
+        DisplayName = 'Candidate Management Environment Configuration'
+        Type = 3
+        Path = Join-Path $PSScriptRoot '..\solutions\CandidateConsole\WebResources\os_\bso\candidate-console-environment.js'
+    }
+    [pscustomobject]@{
+        Name = 'os_/bso/candidate-console-policy.js'
+        DisplayName = 'Candidate Management Environment Policy'
+        Type = 3
+        Path = Join-Path $PSScriptRoot '..\solutions\CandidateConsole\WebResources\os_\bso\candidate-console-policy.js'
+    }
 )
+$resources = @($allResources | Where-Object {
+    $_.Name -notin @(
+        'os_/bso/candidate-console-environment.js',
+        'os_/bso/candidate-console-policy.js'
+    )
+})
+$repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $script:ApiRoot = $target.OrganizationUrl + '/api/data/v9.2/'
+$relativeEvidencePath = [IO.Path]::GetRelativePath($repositoryRoot, [IO.Path]::GetFullPath($EvidencePath))
 $script:AccessToken = $null
 $script:Counts = @{ GET = 0; POST = 0; PATCH = 0 }
 $script:Journal = $null
@@ -61,26 +90,125 @@ if ($EnvironmentName -cne $target.EnvironmentName -or
     $OrganizationUrl.TrimEnd('/') -cne $target.OrganizationUrl -or
     $ExpectedEnvironmentId -ine $target.EnvironmentId -or
     $ExpectedOrganizationId -ine $target.OrganizationId -or
+    ($RefreshExisting -and $CreateNewResources) -or
+    ($CreateNewResources -and ($Continue -or $RefreshResourceNames.Count -ne 2)) -or
     -not [IO.Path]::IsPathFullyQualified($EvidencePath) -or
+    $relativeEvidencePath -eq '.' -or
+    (-not [IO.Path]::IsPathRooted($relativeEvidencePath) -and $relativeEvidencePath -notmatch '^\.\.(\\|$)') -or
     ((Test-Path -LiteralPath $EvidencePath) -and -not $Continue) -or
     ($Continue -and (-not (Test-Path -LiteralPath $EvidencePath -PathType Leaf) -or $RefreshExisting)) -or
     ($RefreshExisting -and -not $Apply -and (Test-Path -LiteralPath $EvidencePath))) {
     throw 'Candidate Console target or new evidence path is not exact.'
 }
 if ($RefreshResourceNames.Count -gt 0) {
-    if (-not $RefreshExisting -or $Continue) {
-        throw 'Exact resource selection is supported only by a fresh existing-resource refresh.'
+    if ($Continue -or (-not $RefreshExisting -and -not $CreateNewResources)) {
+        throw 'Exact resource selection is supported only by a fresh refresh or new-resource creation.'
     }
     $uniqueRefreshResourceNames = @($RefreshResourceNames | Select-Object -Unique)
     if ($uniqueRefreshResourceNames.Count -ne $RefreshResourceNames.Count) {
         throw 'Exact refresh resource selection contains duplicates.'
     }
-    $resources = @($resources | Where-Object { $RefreshResourceNames -ccontains $_.Name })
+    $resources = @($allResources | Where-Object { $RefreshResourceNames -ccontains $_.Name })
     if ($resources.Count -ne $RefreshResourceNames.Count) {
         throw 'Exact refresh resource selection did not resolve every requested resource.'
     }
 }
+if ($CreateNewResources) {
+    $newResourceAllowlist = @(
+        'os_/bso/candidate-console-environment.js',
+        'os_/bso/candidate-console-policy.js'
+    )
+    if ($resources.Count -ne 2 -or
+        @($resources | Where-Object { $_.Name -notin $newResourceAllowlist }).Count -ne 0 -or
+        @($resources | ForEach-Object Name | Select-Object -Unique).Count -ne 2) {
+        throw 'New-resource creation is restricted to the two exact Candidate Console configuration resources.'
+    }
+}
+function Assert-ExternalResourcePath {
+    param([Parameter(Mandatory)][string]$Path)
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    $relativePath = [IO.Path]::GetRelativePath($repositoryRoot, $fullPath)
+    if ($relativePath -eq '.' -or
+        (-not [IO.Path]::IsPathRooted($relativePath) -and
+         $relativePath -notmatch '^\.\.(\\|$)')) {
+        throw 'Generated environment files must remain outside the repository.'
+    }
+    if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
+        throw 'An external generated environment file is missing.'
+    }
+    return $fullPath
+}
+
+$hasEnvironmentResource = $resources.Name -ccontains 'os_/bso/candidate-console-environment.js'
+$hasHtmlResource = $resources.Name -ccontains 'os_/bso/candidate-console.html'
+$environmentConfiguration = $null
+$configurationHash = $null
+if ($hasEnvironmentResource -or $hasHtmlResource) {
+    if ([string]::IsNullOrWhiteSpace($EnvironmentConfigurationPath)) {
+        throw 'The selected configuration or HTML refresh requires an externally generated environment configuration.'
+    }
+    $EnvironmentConfigurationPath = Assert-ExternalResourcePath -Path $EnvironmentConfigurationPath
+    $configurationSource = [IO.File]::ReadAllText($EnvironmentConfigurationPath)
+    $configurationMatch = [regex]::Match(
+        $configurationSource,
+        '(?s)const configuration = (?<json>\{.*?\});'
+    )
+    if (-not $configurationMatch.Success) {
+        throw 'The external environment configuration does not match the generated resource format.'
+    }
+    try { $environmentConfiguration = $configurationMatch.Groups['json'].Value | ConvertFrom-Json }
+    catch { throw 'The external environment configuration is invalid JSON.' }
+    if ([string]$environmentConfiguration.mode -cne 'DEV' -or
+        [string]$environmentConfiguration.environmentId -ine $target.EnvironmentId -or
+        [string]$environmentConfiguration.organizationId -ine $target.OrganizationId -or
+        [string]$environmentConfiguration.organizationUrl.TrimEnd('/') -cne $target.OrganizationUrl -or
+        $environmentConfiguration.candidateCoreEnabled -ne $true -or
+        $environmentConfiguration.syntheticDataOnly -ne $true -or
+        $environmentConfiguration.devDirectWriteFallbackEnabled -isnot [bool] -or
+        [string]$environmentConfiguration.diagnosticsMode -notin @('OFF', 'SAFE')) {
+        throw 'The generated environment configuration does not match the guarded DEV policy.'
+    }
+    $configurationHash = [Convert]::ToHexString(
+        [Security.Cryptography.SHA256]::HashData([IO.File]::ReadAllBytes($EnvironmentConfigurationPath))
+    ).ToLowerInvariant()
+    if ($hasEnvironmentResource) {
+        $environmentResource = @($resources | Where-Object Name -CEQ 'os_/bso/candidate-console-environment.js')
+        if ($environmentResource.Count -ne 1) {
+            throw 'The environment configuration resource selection is ambiguous.'
+        }
+        $environmentResource[0].Path = $EnvironmentConfigurationPath
+    }
+} elseif (-not [string]::IsNullOrWhiteSpace($EnvironmentConfigurationPath)) {
+    throw 'An external environment configuration is accepted only for its resource or its matching HTML refresh.'
+}
+if ($hasHtmlResource) {
+    if ([string]::IsNullOrWhiteSpace($EnvironmentHtmlPath)) {
+        throw 'The HTML refresh requires an externally generated cache-busted HTML file.'
+    }
+    $EnvironmentHtmlPath = Assert-ExternalResourcePath -Path $EnvironmentHtmlPath
+    $htmlResource = @($resources | Where-Object Name -CEQ 'os_/bso/candidate-console.html')
+    if ($htmlResource.Count -ne 1) {
+        throw 'The HTML resource selection is ambiguous.'
+    }
+    $templateHtml = [IO.File]::ReadAllText($htmlResource[0].Path)
+    $configScriptPattern = 'candidate-console-environment\.js\?v=[0-9a-f]+'
+    if ([regex]::Matches($templateHtml, $configScriptPattern).Count -ne 1) {
+        throw 'Source HTML must contain exactly one versioned environment configuration script.'
+    }
+    $expectedHtml = [regex]::Replace(
+        $templateHtml,
+        $configScriptPattern,
+        "candidate-console-environment.js?v=$($configurationHash.Substring(0, 12))"
+    )
+    if ([IO.File]::ReadAllText($EnvironmentHtmlPath) -cne $expectedHtml) {
+        throw 'Generated HTML differs from the checked-in source except for the verified environment cache token.'
+    }
+    $htmlResource[0].Path = $EnvironmentHtmlPath
+} elseif (-not [string]::IsNullOrWhiteSpace($EnvironmentHtmlPath)) {
+    throw 'An external HTML resource is accepted only when that exact HTML resource is selected.'
+}
 $publishLabel = "srapp + $($resources.Count) exact web resources scoped PublishXml"
+$finalDispatchName = if ($CreateNewResources) { $publishLabel } else { 'srapp sitemap + scoped PublishXml' }
 foreach ($resource in $resources) {
     $resource.Path = [IO.Path]::GetFullPath($resource.Path)
     if (-not (Test-Path -LiteralPath $resource.Path -PathType Leaf)) {
@@ -381,7 +509,7 @@ try {
     if ($Continue) {
         $script:Journal = Get-Content -LiteralPath $EvidencePath -Raw | ConvertFrom-Json
         $journalNames = @($script:Journal.Dispatches | ForEach-Object { [string]$_.Name })
-        $expectedJournalNames = @($resources | ForEach-Object { [string]$_.Name }) + 'srapp sitemap + scoped PublishXml'
+        $expectedJournalNames = @($resources | ForEach-Object { [string]$_.Name }) + $finalDispatchName
         if ($script:Journal.Result -cne 'DISPATCHING' -or
             [string]$script:Journal.Environment -cne $target.EnvironmentName -or
             [string]$script:Journal.AppUniqueName -cne $target.AppUniqueName -or
@@ -445,6 +573,9 @@ try {
     if ([string]::IsNullOrWhiteSpace($etag)) { throw 'Fresh Site Map ETag is unavailable.' }
     $proposed = if ($RefreshExisting) {
         Assert-ExistingSiteMapNode -Xml ([string]$siteMap.sitemapxml)
+    } elseif ($CreateNewResources) {
+        [void](Assert-ExistingSiteMapNode -Xml ([string]$siteMap.sitemapxml))
+        [pscustomobject]@{ Xml = [string]$siteMap.sitemapxml }
     } else {
         Assert-SiteMapNode -Xml ([string]$siteMap.sitemapxml)
     }
@@ -505,6 +636,20 @@ try {
     }
 
     if (-not $Apply -and -not $Continue) {
+        if ($CreateNewResources) {
+            [ordered]@{
+                Result = 'CANDIDATE_CONSOLE_CONFIG_RESOURCES_PREFLIGHT_READY'
+                Environment = $target.EnvironmentName
+                AppUniqueName = $target.AppUniqueName
+                SolutionUniqueName = $target.SolutionUniqueName
+                ResourceNames = @($resources | ForEach-Object Name)
+                ExistingNavigation = 'Candidate Management navigation is verified and will not be changed'
+                ResourceCountExisting = @($existing.value).Count
+                Writes = 0
+                AutomaticRetries = 0
+            } | ConvertTo-Json -Depth 8
+            return
+        }
         if ($RefreshExisting) {
             [ordered]@{
                 Result = 'CANDIDATE_CONSOLE_REFRESH_PREFLIGHT_READY'
@@ -722,7 +867,7 @@ try {
         })
       }
       $script:Journal.Dispatches.Add([ordered]@{
-        Name = 'srapp sitemap + scoped PublishXml'
+        Name = $finalDispatchName
         State = 'PLANNED'
         HttpStatus = $null
         WebResourceId = $null
@@ -821,8 +966,8 @@ try {
         Save-Journal
     }
 
-    $lastEntry = @($script:Journal.Dispatches | Where-Object Name -CEQ 'srapp sitemap + scoped PublishXml')[0]
-    if (-not $Continue) {
+    $lastEntry = @($script:Journal.Dispatches | Where-Object Name -CEQ $finalDispatchName)[0]
+    if (-not $Continue -and -not $CreateNewResources) {
       $lastEntry.State = 'DISPATCH_RESERVED'
       $script:Journal.SiteMapPatch = 'DISPATCH_RESERVED'
       Save-Journal
@@ -837,6 +982,9 @@ try {
       Save-Journal
       Assert-UnpublishedSiteMap -ExpectedXml $proposed.Xml
       $script:Journal.SiteMapPatch = 'GET_RECONCILED_DRAFT'
+      Save-Journal
+    } elseif ($CreateNewResources) {
+      $script:Journal.SiteMapPatch = 'NOT_REQUIRED_EXISTING_NAVIGATION_RECONCILED'
       Save-Journal
     }
 

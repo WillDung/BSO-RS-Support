@@ -14,7 +14,6 @@
     100010001: "No Answer",
     100010002: "Call Back Requested"
   };
-  const DEV_ORIGIN = "https://org14938ec2.crm4.dynamics.com";
   const STATUS = {
     needCall: 100010000,
     answered: 100010001,
@@ -128,6 +127,7 @@
   let resultRetryBlockedCandidateId = null;
   let currentRows = [];
   let busy = false;
+  let environmentPolicy = Object.freeze({ allowed: false, reason: "CONFIGURATION_MISSING" });
   const CORE_API_ACTIONS = new Set([
     "CreateCandidate", "UpdateCandidate", "RecordCall", "ProceedToScheduling",
     "MarkRound1Scheduled", "RecordPass", "RecordFail", "RequestReschedule", "CancelRound1"
@@ -161,33 +161,58 @@
     notice.hidden = false;
   }
 
-  function isTargetDevEnvironment() {
+  function resolveEnvironmentPolicy() {
     try {
-      return new URL(globalContext().getClientUrl()).origin.toLowerCase() === DEV_ORIGIN;
+      const context = globalContext();
+      const policy = window.BsoRsCandidateConsolePolicy;
+      if (!policy || typeof policy.resolve !== "function") {
+        return Object.freeze({ allowed: false, reason: "CONFIGURATION_POLICY_UNAVAILABLE" });
+      }
+      return policy.resolve(window.BsoRsCandidateConsoleConfiguration, {
+        organizationUrl: context.getClientUrl(),
+        organizationId: context.organizationSettings.organizationId
+      });
     } catch {
-      return false;
+      return Object.freeze({ allowed: false, reason: "CONFIGURATION_CONTEXT_UNAVAILABLE" });
     }
   }
 
+  function isCandidateCoreEnabled() {
+    return environmentPolicy.allowed === true;
+  }
+
+  function isDevConfiguration() {
+    return isCandidateCoreEnabled() && environmentPolicy.mode === "DEV";
+  }
+
   function isDevFallbackEnabled() {
-    return isTargetDevEnvironment() && $("dev-fallback-toggle").checked;
+    return environmentPolicy.directWriteFallbackAvailable === true &&
+      $("dev-fallback-toggle").checked;
   }
 
   function updateWorkflowPathLabel() {
-    const supportedEnvironment = isTargetDevEnvironment();
+    const supportedEnvironment = isCandidateCoreEnabled();
     const fallback = isDevFallbackEnabled();
     $("workflow-path-badge").textContent = !supportedEnvironment
-      ? "UNSUPPORTED ENVIRONMENT"
+      ? environmentPolicy.reason === "BLOCK_UNRECOGNIZED_ENVIRONMENT"
+        ? "BLOCK_UNRECOGNIZED_ENVIRONMENT"
+        : "CONFIGURATION BLOCKED"
       : fallback
       ? "DEV DIRECT-WRITE FALLBACK"
       : "CANDIDATE CORE PATH";
+    $("environment-mode-badge").textContent = supportedEnvironment
+      ? `${environmentPolicy.mode} — ${environmentPolicy.syntheticDataOnly ? "SYNTHETIC DATA ONLY" : "REAL-DATA MODE"}`
+      : "ENVIRONMENT CONFIGURATION REQUIRED";
+    $("real-data-badge").textContent = supportedEnvironment && !environmentPolicy.syntheticDataOnly
+      ? "NON-SYNTHETIC MODE CONFIGURED — REAL DATA NOT APPROVED"
+      : "REAL DATA PROHIBITED";
     document.querySelectorAll("[data-workflow-label]").forEach((label) => {
       label.textContent = !supportedEnvironment
-        ? "Unavailable outside VN LMV IT"
+        ? "Unavailable until environment configuration is valid"
         : fallback ? "DEV direct-write fallback" : "Candidate Core / os_sr_cact";
     });
-    $("dev-fallback-control").hidden = !supportedEnvironment;
-    $("dev-fallback-toggle").disabled = busy || !supportedEnvironment;
+    $("dev-fallback-control").hidden = environmentPolicy.directWriteFallbackAvailable !== true;
+    $("dev-fallback-toggle").disabled = busy || environmentPolicy.directWriteFallbackAvailable !== true;
   }
 
   function currentUserId() {
@@ -199,7 +224,7 @@
     return userId.replace(/[{}]/g, "");
   }
 
-  function isSyntheticCandidate(candidate) {
+  function isSyntheticCandidateMarkers(candidate) {
     return Boolean(candidate &&
       typeof candidate[TABLES.candidate.name] === "string" &&
       candidate[TABLES.candidate.name].startsWith("[SYNTHETIC-E2E]") &&
@@ -207,7 +232,18 @@
       /^[^@\s]+@[^@\s]+\.invalid$/i.test(candidate[TABLES.candidate.email]));
   }
 
+  function isCandidateAllowedByDataMode(candidate) {
+    return isCandidateCoreEnabled() &&
+      (!environmentPolicy.syntheticDataOnly || isSyntheticCandidateMarkers(candidate));
+  }
+
+  function isSyntheticInput(name, email) {
+    return typeof name === "string" && name.startsWith("[SYNTHETIC-E2E]") &&
+      typeof email === "string" && /^[^@\s]+@[^@\s]+\.invalid$/i.test(email);
+  }
+
   function logSafeFailure(category, error) {
+    if (environmentPolicy.diagnosticsMode !== "SAFE") return;
     const numericCode = Number(error && error.errorCode);
     const code = Number.isFinite(numericCode) && numericCode !== 0
       ? `:0x${(numericCode >>> 0).toString(16).padStart(8, "0").toUpperCase()}`
@@ -244,7 +280,8 @@
 
   function setBusy(value) {
     busy = value;
-    $("dev-fallback-toggle").disabled = value || !isTargetDevEnvironment();
+    $("dev-fallback-toggle").disabled =
+      value || environmentPolicy.directWriteFallbackAvailable !== true;
     document.querySelectorAll("button[data-action]").forEach((button) => {
       button.disabled = value ||
         (button.id === "submit-call" && !selectedCandidate) ||
@@ -312,7 +349,7 @@
   }
 
   async function invokeCandidateCore(action, values = {}, correlationId = newCorrelationId()) {
-    if (!isTargetDevEnvironment()) throw new Error("CANDIDATE_CORE_ENVIRONMENT_REJECTED");
+    if (!isCandidateCoreEnabled()) throw new Error("CANDIDATE_CORE_ENVIRONMENT_REJECTED");
     if (!CORE_API_ACTIONS.has(action)) throw new Error("CANDIDATE_CORE_ACTION_INVALID");
     const request = { ...values, ActionType: action, CorrelationId: correlationId };
     const parameterNames = Object.keys(request);
@@ -374,7 +411,7 @@
       candidate[c.correlation] === correlationId &&
       candidate[c.name] === expectedName &&
       candidate[c.email] === expectedEmail &&
-      isSyntheticCandidate(candidate)
+      isCandidateAllowedByDataMode(candidate)
     );
     if (matches.length !== 1 || matches[0][c.status] !== STATUS.needCall ||
         !matches[0][c.number]) {
@@ -517,13 +554,17 @@
 
   async function refreshCandidates() {
     const c = TABLES.candidate;
-    const query = `?$select=${[
+    const select = `?$select=${[
       c.id, c.number, c.name, c.email, c.phone, c.status, c.position, c.source,
       "createdon", "_ownerid_value"
-    ].join(",")}&$filter=${encodeURIComponent(
-      `endswith(${c.email},'.invalid')`
-    )}&$orderby=createdon desc`;
-    const rows = (await retrieveAll(c.logicalName, query)).filter(isSyntheticCandidate);
+    ].join(",")}`;
+    const syntheticFilter = environmentPolicy.syntheticDataOnly
+      ? `&$filter=${encodeURIComponent(`endswith(${c.email},'.invalid')`)}`
+      : "";
+    const rows = (await retrieveAll(
+      c.logicalName,
+      `${select}${syntheticFilter}&$orderby=createdon desc`
+    )).filter(isCandidateAllowedByDataMode);
     renderCandidateRows(rows);
   }
 
@@ -668,7 +709,7 @@
     }
     const canSchedule = selectedCandidate &&
       selectedCandidate[TABLES.candidate.status] === STATUS.waitingManualScheduling &&
-      isSyntheticCandidate(selectedCandidate) &&
+      isCandidateAllowedByDataMode(selectedCandidate) &&
       activeSchedules.length === 0 &&
       proposedSchedules.length <= 1 &&
       !unknownScheduleStates;
@@ -677,7 +718,7 @@
       scheduleRetryBlockedCandidateId === candidateId;
     const canRecord = selectedCandidate &&
       selectedCandidate[TABLES.candidate.status] === STATUS.round1Scheduled &&
-      isSyntheticCandidate(selectedCandidate) &&
+      isCandidateAllowedByDataMode(selectedCandidate) &&
       activeSchedules.length === 1 &&
       proposedSchedules.length === 0 &&
       !unknownScheduleStates &&
@@ -701,7 +742,7 @@
     }
     const canManage = Boolean(selectedCandidate &&
       selectedCandidate[TABLES.candidate.status] === STATUS.round1Scheduled &&
-      isSyntheticCandidate(selectedCandidate) &&
+      isCandidateAllowedByDataMode(selectedCandidate) &&
       activeSchedules.length === 1 &&
       proposedSchedules.length === 0 &&
       !unknownScheduleStates &&
@@ -733,7 +774,7 @@
   function canManageSchedule() {
     return Boolean(selectedCandidate &&
       selectedCandidate[TABLES.candidate.status] === STATUS.round1Scheduled &&
-      isSyntheticCandidate(selectedCandidate) &&
+      isCandidateAllowedByDataMode(selectedCandidate) &&
       scheduleRows.filter(isActiveSchedule).length === 1 &&
       !scheduleRows.some((row) => !isKnownScheduleState(row)) &&
       !scheduleRows.some((row) => row[TABLES.interview.status] === SCHEDULE_STATUS.proposed) &&
@@ -766,7 +807,7 @@
       $("submit-call").disabled = busy;
       const canMoveToWaiting = candidate[TABLES.candidate.status] === STATUS.answered;
       const canSchedule = candidate[TABLES.candidate.status] === STATUS.waitingManualScheduling &&
-        isSyntheticCandidate(candidate);
+        isCandidateAllowedByDataMode(candidate);
       $("waiting-status-button").hidden = !canMoveToWaiting;
       $("waiting-status-button").disabled = busy || !canMoveToWaiting;
       $("schedule-round1-button").hidden = !canSchedule;
@@ -830,7 +871,7 @@
     if (busy || !selectedCandidate) return;
     if (mode === "reschedule" ? !canManageSchedule() :
         selectedCandidate[TABLES.candidate.status] !== STATUS.waitingManualScheduling ||
-        !isSyntheticCandidate(selectedCandidate) ||
+        !isCandidateAllowedByDataMode(selectedCandidate) ||
         scheduleRows.filter(isActiveSchedule).length > 0) {
       showNotice(mode === "reschedule"
         ? "Reschedule Round 1 requires exactly one active, pending Round 1 schedule."
@@ -923,7 +964,7 @@
   function canRecordInterviewResult() {
     return Boolean(selectedCandidate &&
       selectedCandidate[TABLES.candidate.status] === STATUS.round1Scheduled &&
-      isSyntheticCandidate(selectedCandidate) &&
+      isCandidateAllowedByDataMode(selectedCandidate) &&
       selectedSchedule &&
       isActiveSchedule(selectedSchedule) &&
       isPendingInterviewResult(selectedSchedule) &&
@@ -947,8 +988,8 @@
     const c = TABLES.candidate;
     const candidateId = normalizeGuid(selectedCandidate[c.id]);
     const result = Number($("interview-result-choice").value);
-    if (!isTargetDevEnvironment() || !isSyntheticCandidate(selectedCandidate)) {
-      showNotice("Interview results are limited to synthetic candidates in VN LMV IT.", true);
+    if (!isCandidateCoreEnabled() || !isCandidateAllowedByDataMode(selectedCandidate)) {
+      showNotice("Interview results are unavailable for this candidate under the configured data mode.", true);
       return;
     }
     if (![INTERVIEW_RESULT.pass, INTERVIEW_RESULT.fail].includes(result)) {
@@ -991,8 +1032,8 @@
     const history = TABLES.history;
     const candidateId = normalizeGuid(selectedCandidate[c.id]);
     const scheduleId = normalizeGuid(selectedSchedule[interview.id]);
-    if (!isTargetDevEnvironment() || !isSyntheticCandidate(selectedCandidate)) {
-      showNotice("Interview results are limited to synthetic candidates in VN LMV IT.", true);
+    if (!isDevConfiguration() || !isCandidateAllowedByDataMode(selectedCandidate)) {
+      showNotice("Interview results are unavailable for this candidate under the configured data mode.", true);
       return;
     }
     const result = Number($("interview-result-choice").value);
@@ -1014,7 +1055,7 @@
         candidateId,
         `?$select=${[c.id, c.name, c.email, c.status].join(",")}`
       );
-      if (!isSyntheticCandidate(current) || current[c.status] !== STATUS.round1Scheduled) {
+      if (!isCandidateAllowedByDataMode(current) || current[c.status] !== STATUS.round1Scheduled) {
         await reconcileAfterFailure(candidateId);
         showNotice("Candidate is no longer Round 1 Scheduled. No interview result was written.", true);
         return;
@@ -1075,7 +1116,7 @@
         candidateId,
         `?$select=${[c.id, c.name, c.email, c.status].join(",")}`
       );
-      if (!isSyntheticCandidate(beforeStatusUpdate) ||
+      if (!isCandidateAllowedByDataMode(beforeStatusUpdate) ||
           beforeStatusUpdate[c.status] !== STATUS.round1Scheduled) {
         throw new Error("DEV_DIRECT_WRITE_CANDIDATE_STATUS_CHANGED_AFTER_RESULT");
       }
@@ -1142,8 +1183,8 @@
     hideNotice();
     const c = TABLES.candidate;
     const candidateId = normalizeGuid(selectedCandidate[c.id]);
-    if (!isTargetDevEnvironment() || !isSyntheticCandidate(selectedCandidate)) {
-      showNotice("Scheduling is limited to synthetic candidates in VN LMV IT.", true);
+    if (!isCandidateCoreEnabled() || !isCandidateAllowedByDataMode(selectedCandidate)) {
+      showNotice("Scheduling is unavailable for this candidate under the configured data mode.", true);
       return;
     }
     const start = localDateTime($("scheduling-date").value, $("scheduling-time").value);
@@ -1218,8 +1259,8 @@
       showNotice("Candidate reference is invalid. Refresh the list and select the Candidate again.", true);
       return;
     }
-    if (!isTargetDevEnvironment() || !isSyntheticCandidate(selectedCandidate)) {
-      showNotice("Scheduling is limited to synthetic candidates in VN LMV IT.", true);
+    if (!isDevConfiguration() || !isCandidateAllowedByDataMode(selectedCandidate)) {
+      showNotice("Scheduling is unavailable for this candidate under the configured data mode.", true);
       return;
     }
     if (selectedCandidate[c.status] !== STATUS.waitingManualScheduling) {
@@ -1250,7 +1291,7 @@
         candidateId,
         `?$select=${[c.id, c.name, c.email, c.status].join(",")}`
       );
-      if (!isSyntheticCandidate(current)) {
+      if (!isCandidateAllowedByDataMode(current)) {
         showNotice("Scheduling is limited to [SYNTHETIC-E2E] candidates with .invalid email addresses.", true);
         return;
       }
@@ -1329,7 +1370,7 @@
         candidateId,
         `?$select=${[c.id, c.name, c.email, c.status].join(",")}`
       );
-      if (!isSyntheticCandidate(beforeStatusUpdate) ||
+      if (!isCandidateAllowedByDataMode(beforeStatusUpdate) ||
           beforeStatusUpdate[c.status] !== STATUS.waitingManualScheduling) {
         throw new Error("DEV_DIRECT_WRITE_CANDIDATE_STATUS_CHANGED_AFTER_SCHEDULE");
       }
@@ -1403,8 +1444,8 @@
       showNotice("Choose a future date and an End Time later than the Start Time on the same date.", true);
       return;
     }
-    if (!isTargetDevEnvironment() || !isSyntheticCandidate(selectedCandidate)) {
-      showNotice("Rescheduling is limited to synthetic candidates in VN LMV IT.", true);
+    if (!isDevConfiguration() || !isCandidateAllowedByDataMode(selectedCandidate)) {
+      showNotice("Rescheduling is unavailable for this candidate under the configured data mode.", true);
       return;
     }
 
@@ -1423,7 +1464,7 @@
         candidateId,
         `?$select=${[c.id, c.name, c.email, c.status].join(",")}`
       );
-      if (!isSyntheticCandidate(current) || current[c.status] !== STATUS.round1Scheduled) {
+      if (!isCandidateAllowedByDataMode(current) || current[c.status] !== STATUS.round1Scheduled) {
         await reconcileAfterFailure(candidateId);
         showNotice("Reschedule is available only while the synthetic Candidate is Round 1 Scheduled.", true);
         return;
@@ -1516,7 +1557,7 @@
         candidateId,
         `?$select=${[c.id, c.name, c.email, c.status].join(",")}`
       );
-      if (!isSyntheticCandidate(beforeStatusUpdate) ||
+      if (!isCandidateAllowedByDataMode(beforeStatusUpdate) ||
           beforeStatusUpdate[c.status] !== STATUS.round1Scheduled) {
         throw new Error("DEV_DIRECT_WRITE_CANDIDATE_STATUS_CHANGED_DURING_RESCHEDULE");
       }
@@ -1585,8 +1626,8 @@
       showNotice("Enter a Cancellation Reason.", true);
       return;
     }
-    if (!isTargetDevEnvironment() || !isSyntheticCandidate(selectedCandidate)) {
-      showNotice("Cancellation is limited to synthetic candidates in VN LMV IT.", true);
+    if (!isCandidateCoreEnabled() || !isCandidateAllowedByDataMode(selectedCandidate)) {
+      showNotice("Cancellation is unavailable for this candidate under the configured data mode.", true);
       return;
     }
     setBusy(true);
@@ -1623,8 +1664,8 @@
       showNotice("Enter a Cancellation Reason.", true);
       return;
     }
-    if (!isTargetDevEnvironment() || !isSyntheticCandidate(selectedCandidate)) {
-      showNotice("Cancellation is limited to synthetic candidates in VN LMV IT.", true);
+    if (!isDevConfiguration() || !isCandidateAllowedByDataMode(selectedCandidate)) {
+      showNotice("Cancellation is unavailable for this candidate under the configured data mode.", true);
       return;
     }
 
@@ -1641,7 +1682,7 @@
         candidateId,
         `?$select=${[c.id, c.name, c.email, c.status].join(",")}`
       );
-      if (!isSyntheticCandidate(current) || current[c.status] !== STATUS.round1Scheduled) {
+      if (!isCandidateAllowedByDataMode(current) || current[c.status] !== STATUS.round1Scheduled) {
         await reconcileAfterFailure(candidateId);
         showNotice("Cancel Round 1 is available only while the synthetic Candidate is Round 1 Scheduled.", true);
         return;
@@ -1692,7 +1733,7 @@
         candidateId,
         `?$select=${[c.id, c.name, c.email, c.status].join(",")}`
       );
-      if (!isSyntheticCandidate(beforeStatusUpdate) ||
+      if (!isCandidateAllowedByDataMode(beforeStatusUpdate) ||
           beforeStatusUpdate[c.status] !== STATUS.round1Scheduled) {
         throw new Error("DEV_DIRECT_WRITE_CANDIDATE_STATUS_CHANGED_DURING_CANCELLATION");
       }
@@ -1753,12 +1794,12 @@
   }
 
   async function showCallPanel(candidate) {
-    if (!isSyntheticCandidate(candidate)) {
-      showNotice("DEV direct write is limited to [SYNTHETIC-E2E] candidates with .invalid email addresses.", true);
+    if (!isCandidateAllowedByDataMode(candidate)) {
+      showNotice("This action is unavailable for the selected candidate under the configured data mode.", true);
       return;
     }
     if ([STATUS.offerExtended, STATUS.candidateFailed].includes(candidate[TABLES.candidate.status])) {
-      showNotice("No further workflow actions are available for this Candidate in the current DEV scope.", true);
+      showNotice("No further workflow actions are available for this Candidate.", true);
       return;
     }
     if (await openCandidate(candidate[TABLES.candidate.id])) {
@@ -1778,13 +1819,12 @@
       showNotice("Candidate Name and Email are required.", true);
       return;
     }
-    if (!candidateName.startsWith("[SYNTHETIC-E2E]") ||
-        !/^[^@\s]+@[^@\s]+\.invalid$/i.test(candidateEmail)) {
-      showNotice("Candidate Core accepts only [SYNTHETIC-E2E] names and reserved .invalid email addresses.", true);
+    if (environmentPolicy.syntheticDataOnly && !isSyntheticInput(candidateName, candidateEmail)) {
+      showNotice("The configured data mode accepts only synthetic names and reserved .invalid email addresses.", true);
       return;
     }
-    if (!isTargetDevEnvironment()) {
-      showNotice("Candidate Core is available only in VN LMV IT.", true);
+    if (!isCandidateCoreEnabled()) {
+      showNotice("Candidate Core is unavailable until valid environment configuration is loaded.", true);
       return;
     }
 
@@ -1834,8 +1874,8 @@
       showNotice("This DEV console accepts only [SYNTHETIC-E2E] names and reserved .invalid email addresses.", true);
       return;
     }
-    if (!isTargetDevEnvironment()) {
-      showNotice("DEV direct writes are available only in VN LMV IT.", true);
+    if (!isDevConfiguration()) {
+      showNotice("DEV direct writes are unavailable in this environment.", true);
       return;
     }
     setBusy(true);
@@ -1874,7 +1914,7 @@
         candidateId,
         `?$select=${[c.id, c.number, c.name, c.email, c.phone, c.status, c.position, c.source, "createdon", "_ownerid_value"].join(",")}`
       );
-      if (!isSyntheticCandidate(candidate) || candidate[c.status] !== STATUS.needCall ||
+      if (!isCandidateAllowedByDataMode(candidate) || candidate[c.status] !== STATUS.needCall ||
           !candidate[c.number]) {
         throw new Error("DEV_DIRECT_WRITE_CANDIDATE_READBACK_INVALID");
       }
@@ -1913,8 +1953,8 @@
       showNotice("Candidate reference is invalid. Refresh the list and select the Candidate again.", true);
       return;
     }
-    if (!isTargetDevEnvironment() || !isSyntheticCandidate(selectedCandidate)) {
-      showNotice("Candidate Core calls are limited to synthetic candidates in VN LMV IT.", true);
+    if (!isCandidateCoreEnabled() || !isCandidateAllowedByDataMode(selectedCandidate)) {
+      showNotice("Candidate Core is unavailable for this candidate under the configured data mode.", true);
       return;
     }
     const outcome = Number($("call-outcome").value);
@@ -1962,11 +2002,11 @@
       showNotice("Candidate reference is invalid. Refresh the list and select the Candidate again.", true);
       return;
     }
-    if (!isTargetDevEnvironment()) {
-      showNotice("DEV direct writes are available only in VN LMV IT.", true);
+    if (!isDevConfiguration()) {
+      showNotice("DEV direct writes are unavailable in this environment.", true);
       return;
     }
-    if (!isSyntheticCandidate(selectedCandidate)) {
+    if (!isCandidateAllowedByDataMode(selectedCandidate)) {
       showNotice("DEV direct write is limited to [SYNTHETIC-E2E] candidates with .invalid email addresses.", true);
       return;
     }
@@ -1985,7 +2025,7 @@
         candidateId,
         `?$select=${[c.id, c.name, c.email, c.status].join(",")}`
       );
-      if (!isSyntheticCandidate(current)) {
+      if (!isCandidateAllowedByDataMode(current)) {
         showNotice("DEV direct write is limited to [SYNTHETIC-E2E] candidates with .invalid email addresses.", true);
         return;
       }
@@ -2056,8 +2096,8 @@
     hideNotice();
     const c = TABLES.candidate;
     const candidateId = normalizeGuid(selectedCandidate[c.id]);
-    if (!isTargetDevEnvironment() || !isSyntheticCandidate(selectedCandidate)) {
-      showNotice("Candidate Core transitions are limited to synthetic candidates in VN LMV IT.", true);
+    if (!isCandidateCoreEnabled() || !isCandidateAllowedByDataMode(selectedCandidate)) {
+      showNotice("Candidate Core is unavailable for this candidate under the configured data mode.", true);
       return;
     }
     if (selectedCandidate[c.status] !== STATUS.answered) {
@@ -2094,8 +2134,8 @@
       showNotice("Candidate reference is invalid. Refresh the list and select the Candidate again.", true);
       return;
     }
-    if (!isTargetDevEnvironment() || !isSyntheticCandidate(selectedCandidate)) {
-      showNotice("This transition is available only for synthetic candidates in VN LMV IT.", true);
+    if (!isDevConfiguration() || !isCandidateAllowedByDataMode(selectedCandidate)) {
+      showNotice("This transition is unavailable for this candidate under the configured data mode.", true);
       return;
     }
 
@@ -2108,7 +2148,7 @@
         candidateId,
         `?$select=${[c.id, c.name, c.email, c.status].join(",")}`
       );
-      if (!isSyntheticCandidate(current)) {
+      if (!isCandidateAllowedByDataMode(current)) {
         showNotice("This transition is limited to [SYNTHETIC-E2E] candidates with .invalid email addresses.", true);
         return;
       }
@@ -2218,11 +2258,17 @@
 
   async function initialize() {
     bindEvents();
+    environmentPolicy = resolveEnvironmentPolicy();
     updateWorkflowPathLabel();
-    if (!isTargetDevEnvironment()) {
+    if (!isCandidateCoreEnabled()) {
       $("create-button").disabled = true;
       $("refresh-button").disabled = true;
-      showNotice("Candidate Management is available only in VN LMV IT.", true);
+      document.querySelectorAll("button[data-action]").forEach((button) => {
+        button.disabled = true;
+      });
+      showNotice(environmentPolicy.reason === "BLOCK_UNRECOGNIZED_ENVIRONMENT"
+        ? "BLOCK_UNRECOGNIZED_ENVIRONMENT"
+        : "Candidate Management is blocked because environment configuration is missing or invalid.", true);
       return;
     }
     let loadStage = "the model-driven app context";

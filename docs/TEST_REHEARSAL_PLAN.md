@@ -1,6 +1,6 @@
 # Test Environment Rehearsal Plan
 
-**Status:** Proposed; not executed. No approved Test environment or target-specific configuration is established. Current gate: `TEST_TARGET_APPROVAL_REQUIRED`.
+**Status:** Proposed; not executed. No approved Test environment or target-specific configuration is established. Current gate: `TEST_TARGET_APPROVAL_REQUIRED`. The offline [`Test-BsoRsTestRehearsalGate.ps1`](../scripts/Test-BsoRsTestRehearsalGate.ps1) validates external approval evidence and a managed-artifact hash only; it performs no authentication, import, or runtime test.
 
 This plan does not authorize an environment connection, import, role change, integration enablement, real-data use, or Production operation. It is an executable sequence only after the owner approves a Test target, release artifact, and test identity. Follow [Master Production Rules](../MASTER_PRODUCTION_RULES.md), [ALM Deployment](ALM_DEPLOYMENT.md), the [Rollback Plan](ROLLBACK_PLAN.md), and the [Test Strategy](TEST_STRATEGY.md).
 
@@ -11,16 +11,16 @@ Record each item as `PASS`, `FAIL`, or `NOT VERIFIED`; stop on any failed gate.
 - Owner-approved Test environment URL, environment ID, organization ID, region, licensing, capacity, backup/recovery posture, and DLP/privacy policy.
 - Fresh PAC `org who` and Dataverse `WhoAmI` agree with the approved Test target. Do not select or switch environments as part of this plan.
 - Approved solution unique name, publisher/prefix, managed package hash, dependencies, and change/release approval.
-- Candidate Console environment configuration generated outside the repository and verified for the approved Test target. Require `mode=TEST`, Candidate Core enabled only if approved, `syntheticDataOnly=true`, fallback disabled, and diagnostics `OFF` unless separately approved.
+- Candidate Console environment configuration generated outside the repository and verified for the approved Test target. Require `mode=TEST`, Candidate Core enabled, `syntheticDataOnly=true`, fallback disabled, and diagnostics `OFF`; the release-profile generator rejects deviations.
 - Approved BSO-only Test identity manually authenticated in the browser. Confirm exact app, effective role, Candidate Core handler and DEV fallback state. Never request or automate credentials.
 - Required audit, privacy, retention, access, DLP, support, and incident-response approvals recorded. These remain external prerequisites until independently verified.
 
 ## 2. Source and release preparation
 
-1. Export the existing project Solution as unmanaged from the approved development environment; unpack it separately with PAC. Preserve a full source snapshot and compare it with authored source.
-2. Inventory all components, dependencies, environment variables, connection references, security roles, flows, web resources, plug-in packages, and app navigation. Mark each component `VERIFIED`, `DOCUMENTED ONLY`, `PROPOSED`, or `UNKNOWN`.
-3. Inspect the export for target-specific URLs/IDs, credentials, personal data, unintended components, obsolete resources, and generated binaries. Keep environment-specific configuration and evidence outside version control.
-4. Build a managed release candidate only from the reconciled full Solution source. Record package hash, source revision, component inventory, and validation results. Do not claim a release candidate exists until the artifact is built and reviewed.
+1. Use the retained 72-root export mapping in [SOLUTION_COMPONENT_INVENTORY.json](SOLUTION_COMPONENT_INVENTORY.json); do not re-export or connect for this offline source task. The canonical source intentionally retains 20 releasable roots and excludes 50 inactive guard steps, two assembly roots, and the temporary DEV API.
+2. Run [`Build-BsoRsPortableSolution.ps1`](../scripts/Build-BsoRsPortableSolution.ps1) for the unmanaged source round-trip. This does not produce a managed promotion artifact.
+3. Generate any target-specific Candidate Console configuration outside the repository from an approved external profile. Do not copy the DEV-generated configuration or use identifiers embedded in historical evidence.
+4. Build a managed release candidate only from reconciled source through an approved Test environment workflow. Current gate: `MANAGED_BUILD_REQUIRES_APPROVED_TEST_ENVIRONMENT`; the DEV-origin managed export is not acceptable.
 5. Confirm that deployment does not change the canonical workflow, operation receipt idempotency, Candidate ownership, actor attribution, fail-closed scheduling, email idempotency, audit, privacy, or ALM boundaries.
 
 ## 3. Controlled Test rehearsal

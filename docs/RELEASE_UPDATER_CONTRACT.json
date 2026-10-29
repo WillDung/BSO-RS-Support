@@ -1,0 +1,36 @@
+{
+  "status": "DEFINED_NOT_DISPATCHED",
+  "target": {
+    "mode": "TEST",
+    "organizationUrl": null,
+    "environmentId": null,
+    "organizationId": null,
+    "pacWhoAmIAgreementRequired": true,
+    "approvedTestTargetEvidenceRequired": true
+  },
+  "package": {
+    "uniqueName": "os_sr_cact_pkg",
+    "version": "1.0.0",
+    "sha256": "dbf6087203508c8a0016fede8bea2c77a3734a9e294b407197faa08235203b91",
+    "existingIdentityRequired": true,
+    "createAllowed": false
+  },
+  "dispatch": {
+    "maximumPackageUpdates": 1,
+    "automaticRetries": 0,
+    "handlerPatchAllowed": false,
+    "guardPatchAllowed": false,
+    "legacyAssemblyMutationAllowed": false,
+    "signingAllowed": false
+  },
+  "ambiguousOutcome": {
+    "automaticResendAllowed": false,
+    "reconciliationMethods": [
+      "GET existing package by immutable identity",
+      "GET package-backed assembly and handler relationship",
+      "GET Custom API metadata",
+      "GET all 50 ProtectCandidateCore registrations and confirm inactive"
+    ],
+    "inconclusiveClassification": "PACKAGE_UPDATE_OUTCOME_UNCERTAIN_STOP"
+  }
+}

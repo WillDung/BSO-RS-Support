@@ -1,0 +1,25 @@
+{
+  "solutionUniqueName": "os_sr_bso_rs_support",
+  "solutionVersion": "1.0.0.0",
+  "activeCandidateCore": {
+    "packageUniqueName": "os_sr_cact_pkg",
+    "packageVersion": "1.0.0",
+    "assemblyTypeName": "os_sr_cact.ApplyCandidateAction",
+    "sourceType": "FileStore",
+    "publicKeyToken": null,
+    "packageSha256": "dbf6087203508c8a0016fede8bea2c77a3734a9e294b407197faa08235203b91",
+    "assemblySha256": "05e983e86290bb70ba82b73177c21dc3a1d87fd14f0d4aeea39af062ed0a721a",
+    "source": "../solutions/pluginpackages/os_sr_cact_pkg/package/os_sr_cact_pkg.nupkg"
+  },
+  "releaseConstraints": {
+    "updateExistingPackageOnly": true,
+    "createPluginPackage": false,
+    "handlerPatch": false,
+    "guardPatch": false,
+    "legacyAssemblyMutation": false,
+    "signing": false,
+    "automaticRetries": 0,
+    "ambiguousWrite": "GET_ONLY_RECONCILIATION_NO_RESEND",
+    "managedBuild": "MANAGED_BUILD_REQUIRES_APPROVED_TEST_ENVIRONMENT"
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "profiles": {
+    "DEV": {
+      "organizationUrl": null,
+      "environmentId": null,
+      "organizationId": null,
+      "candidateCoreEnabled": true,
+      "syntheticDataOnly": true,
+      "devDirectWriteFallbackEnabled": false,
+      "diagnosticsMode": "OFF",
+      "targetStatus": "EXTERNAL_TARGET_AND_OWNER_APPROVAL_REQUIRED"
+    },
+    "TEST": {
+      "organizationUrl": null,
+      "environmentId": null,
+      "organizationId": null,
+      "candidateCoreEnabled": true,
+      "syntheticDataOnly": true,
+      "devDirectWriteFallbackEnabled": false,
+      "diagnosticsMode": "OFF",
+      "targetStatus": "APPROVED_TEST_TARGET_REQUIRED"
+    },
+    "PROD": {
+      "organizationUrl": null,
+      "environmentId": null,
+      "organizationId": null,
+      "candidateCoreEnabled": true,
+      "syntheticDataOnly": true,
+      "devDirectWriteFallbackEnabled": false,
+      "diagnosticsMode": "OFF",
+      "targetStatus": "PRODUCTION_READINESS_REVIEW_REQUIRED"
+    }
+  },
+  "managedBuild": "MANAGED_BUILD_REQUIRES_APPROVED_TEST_ENVIRONMENT"
+}

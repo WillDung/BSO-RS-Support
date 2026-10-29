@@ -84,8 +84,53 @@ try {
     }
     Assert-Test ($rejected -and -not (Test-Path -LiteralPath $rejectedOutputPath)) `
         'Reject non-synthetic DEV configuration before producing a file'
+
+    $releaseOutputPath = Join-Path ([IO.Path]::GetTempPath()) "release-$tempName.js"
+    $releaseHtmlPath = Join-Path ([IO.Path]::GetTempPath()) "release-$tempName.html"
+    & $generatorPath `
+        -Mode TEST `
+        -OrganizationUrl 'https://test.example.invalid' `
+        -EnvironmentId '11111111-1111-4111-8111-111111111111' `
+        -OrganizationId '22222222-2222-4222-8222-222222222222' `
+        -OutputConfigurationPath $releaseOutputPath `
+        -OutputHtmlPath $releaseHtmlPath `
+        -ReleaseProfile | Out-Null
+    $releaseText = [IO.File]::ReadAllText($releaseOutputPath)
+    $releaseMatch = [regex]::Match($releaseText, '(?s)const configuration = (?<json>\{.*?\});')
+    $releaseConfiguration = $releaseMatch.Groups['json'].Value | ConvertFrom-Json
+    Assert-Test ($releaseMatch.Success -and
+        $releaseConfiguration.candidateCoreEnabled -eq $true -and
+        $releaseConfiguration.syntheticDataOnly -eq $true -and
+        $releaseConfiguration.devDirectWriteFallbackEnabled -eq $false -and
+        $releaseConfiguration.diagnosticsMode -ceq 'OFF') `
+        'Emit a fail-closed synthetic TEST release profile'
+    Remove-Item -LiteralPath $releaseOutputPath, $releaseHtmlPath
+
+    $releaseProfileFailures = @(
+        @{ Name = 'Candidate Core disabled'; Options = @{ CandidateCoreEnabled = $false } },
+        @{ Name = 'non-synthetic mode'; Options = @{ SyntheticDataOnly = $false } },
+        @{ Name = 'DEV direct-write fallback'; Options = @{ DevDirectWriteFallbackEnabled = $true } },
+        @{ Name = 'diagnostics enabled'; Options = @{ DiagnosticsMode = 'SAFE' } }
+    )
+    foreach ($case in $releaseProfileFailures) {
+        $arguments = @{
+            Mode = 'TEST'
+            OrganizationUrl = 'https://test.example.invalid'
+            EnvironmentId = '11111111-1111-4111-8111-111111111111'
+            OrganizationId = '22222222-2222-4222-8222-222222222222'
+            OutputConfigurationPath = $rejectedOutputPath
+            OutputHtmlPath = $rejectedHtmlPath
+            ReleaseProfile = $true
+        }
+        foreach ($key in $case.Options.Keys) { $arguments[$key] = $case.Options[$key] }
+        $rejected = $false
+        try { & $generatorPath @arguments } catch { $rejected = $true }
+        Assert-Test ($rejected -and -not (Test-Path -LiteralPath $rejectedOutputPath)) `
+            "Reject release profile with $($case.Name)"
+    }
 } finally {
-    foreach ($path in @($outputPath, $htmlOutputPath, $rejectedOutputPath, $rejectedHtmlPath)) {
+    foreach ($path in @($outputPath, $htmlOutputPath, $rejectedOutputPath, $rejectedHtmlPath,
+        $releaseOutputPath, $releaseHtmlPath)) {
         if (-not [string]::IsNullOrWhiteSpace([string]$path) -and
             (Test-Path -LiteralPath $path)) {
             Remove-Item -LiteralPath $path

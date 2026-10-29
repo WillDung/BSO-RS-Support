@@ -34,6 +34,10 @@ The SDK harness targets .NET Framework 4.8 (Windows runtime); the deployed assem
 
 Approved automated test source and synthetic fixtures. Separate unit, integration, authorization, concurrency, failure-recovery, UAT, and production smoke evidence. Never include real candidate data, CVs, credentials, or production exports. No business-application acceptance tests are claimed. See [Test Strategy](../docs/TEST_STRATEGY.md) and [Acceptance Criteria](../docs/ACCEPTANCE_CRITERIA.md).
 
+## Release source checks
+
+[BsoRsReleaseSource.Tests.ps1](BsoRsReleaseSource.Tests.ps1) validates the retained 72-root mapping and 20-root release disposition, portable fail-closed profiles, package and rollback hashes, release-updater contract, source leak assertions, and the PAC unmanaged pack/unpack round-trip. It runs locally only; it performs no environment operations. [Build-BsoRsPortableSolution.ps1](../scripts/Build-BsoRsPortableSolution.ps1) writes an unmanaged source archive outside the repository and deliberately stops before managed promotion. [Test-BsoRsTestRehearsalGate.ps1](../scripts/Test-BsoRsTestRehearsalGate.ps1) only validates externally supplied approval evidence and a managed-artifact hash; it is not an environment runner and never authenticates or imports. No approved Test target is established.
+
 ## Reference Provisioning
 
 [ReferenceTableProvisioning.Tests.ps1](ReferenceTableProvisioning.Tests.ps1) is a dependency-free PowerShell 7.4+ assertion harness. Run `& ./tests/ReferenceTableProvisioning.Tests.ps1` from the repository root. It uses only synthetic metadata and mocked transport; it does not authenticate, acquire tokens, invoke Apply, or make HTTP calls. Plain script assertions are not registered with VS Code's test-discovery API.

@@ -51,7 +51,8 @@ Assert-Test ($sdk -match 'Operation Receipt child write' -and $sdk -match 'Call 
     $sdk -match 'Status History child write' -and $sdk -match 'Candidate Answered update') `
     'SDK tests accept legitimate Candidate, Call Log, History, and Receipt child writes by action'
 Assert-Test ($sdk -match 'MVP operation does not create, persist, return, trace, or require the superseded marker' -and
-    $sdk -match 'Candidate Core writes use SYSTEM without requiring ProtectCandidateCore interception' -and
+    $sdk -match 'Candidate Core handler obtains its SYSTEM service after validating API context' -and
+    $sdk -match 'packageApiParent\.ServiceFactorySelections\.Contains\(null\)' -and
     $plugin -match 'CreateOrganizationService\(null\)') 'SDK tests verify marker independence and the matrix-constrained SYSTEM path'
 Assert-Test ($plugin -match 'RegisteredWriteCode\(context\.MessageName, context\.PrimaryEntityName\)' -and
     $plugin -match 'context\.MessageName == "Associate"' -and

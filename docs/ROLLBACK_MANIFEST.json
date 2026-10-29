@@ -1,0 +1,11 @@
+{
+  "status": "ROLLBACK_ONLY_NOT_ACTIVE",
+  "componentType": 91,
+  "assemblyName": "os_sr_cact",
+  "publicKeyToken": "d73b02688ba7f9aa",
+  "artifactDisposition": "Binary excluded from canonical source because it contains machine-specific build-path data.",
+  "sha256": "089deb40816e7fd6d80d117ba3894b5d5dadbcf65ac8111e25bb0520ff6feb85",
+  "recoverySource": "Retained managed DEV-origin export in session-local evidence; not a promotion artifact.",
+  "mutationAllowed": false,
+  "activationAllowed": false
+}

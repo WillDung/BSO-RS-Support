@@ -7,6 +7,7 @@ param(
     [Parameter(Mandatory)][string]$OrganizationId,
     [Parameter(Mandatory)][string]$OutputConfigurationPath,
     [Parameter(Mandatory)][string]$OutputHtmlPath,
+    [switch]$ReleaseProfile,
     [bool]$CandidateCoreEnabled = $true,
     [bool]$SyntheticDataOnly = $true,
     [switch]$DevDirectWriteFallbackEnabled,
@@ -21,6 +22,11 @@ if ($Mode -ne 'PROD' -and -not $SyntheticDataOnly) {
 }
 if ($Mode -ne 'DEV' -and $DevDirectWriteFallbackEnabled) {
     throw 'Direct-write fallback can be configured only for DEV.'
+}
+if ($ReleaseProfile -and
+    (-not $CandidateCoreEnabled -or -not $SyntheticDataOnly -or
+     $DevDirectWriteFallbackEnabled -or $DiagnosticsMode -cne 'OFF')) {
+    throw 'Release profiles require Candidate Core, synthetic-only mode, fallback disabled, and diagnostics Off.'
 }
 
 $parsedEnvironmentId = [Guid]::Empty
@@ -110,6 +116,7 @@ $generatedHtml = [regex]::Replace(
 [pscustomobject]@{
     Result = 'CANDIDATE_CONSOLE_ENVIRONMENT_CONFIG_CREATED'
     Mode = $Mode
+    ReleaseProfile = [bool]$ReleaseProfile
     CandidateCoreEnabled = $CandidateCoreEnabled
     SyntheticDataOnly = $SyntheticDataOnly
     DevDirectWriteFallbackEnabled = [bool]$DevDirectWriteFallbackEnabled

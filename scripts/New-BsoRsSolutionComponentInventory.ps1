@@ -81,7 +81,7 @@ $components = foreach ($root in $roots) {
                 $disposition = 'ROLLBACK_ONLY_SIGNED_ASSEMBLY_NOT_RETAINED'
                 $sourceMapping = 'Rollback manifest only; binary excluded from canonical source.'
             } else {
-                $disposition = 'PACKAGE_BACKED_ASSEMBLY_MANAGED_BY_EXISTING_PACKAGE_UPDATER'
+                $disposition = 'PACKAGE_BACKED_ASSEMBLY_RELEASED_AS_PACKAGE_ARTIFACT'
                 $sourceMapping = 'pluginpackages/os_sr_cact_pkg/pluginpackage.xml; package/os_sr_cact_pkg.nupkg'
             }
         }
@@ -123,10 +123,28 @@ $counts = @($components | Group-Object { [int]$_['type'] } | Sort-Object { [int]
         count = [int]$group.Count
     }
 })
+$allApiFiles = @(Get-ChildItem -LiteralPath (Join-Path $ExportFolder 'customapis') -Recurse -File)
+$coreApiFiles = @(Get-ChildItem -LiteralPath (Join-Path $ExportFolder 'customapis\os_sr_cact') -Recurse -File)
+$temporaryApiFiles = @(Get-ChildItem -LiteralPath (Join-Path $ExportFolder 'customapis\os_sr_devcs') -Recurse -File)
+$entityMetadataFiles = @(Get-ChildItem -LiteralPath (Join-Path $ExportFolder 'Entities') -Recurse -File)
+$webResourceMetadataFiles = @(Get-ChildItem -LiteralPath (Join-Path $ExportFolder 'WebResources') -Filter '*.data.xml' -File -Recurse)
 $inventory = [ordered]@{
-    provenance = 'Unmanaged PAC export unpacked 2026-10-29; 72 root components; target identifiers excluded.'
+    provenance = 'Unmanaged PAC export unpacked 2026-10-29; 72 root components; environment URL and environment/organization identifiers excluded. Structural component IDs are retained where supplied by the export.'
     rootComponentCount = $components.Count
     countsByType = $counts
+    additionalSourceAreas = [ordered]@{
+        customApiFilesInExport = $allApiFiles.Count
+        retainedCandidateCoreApiFiles = $coreApiFiles.Count
+        excludedTemporaryDevApiFiles = $temporaryApiFiles.Count
+        entityMetadataFiles = $entityMetadataFiles.Count
+        webResourceMetadataFiles = $webResourceMetadataFiles.Count
+        pluginPackageArtifacts = 1
+    }
+    exportCoverage = [ordered]@{
+        topLevelFolders = @((Get-ChildItem -LiteralPath $ExportFolder -Directory | Sort-Object Name | ForEach-Object Name))
+        interpretation = 'Folder inventory describes this Solution export only; it does not establish tenant-wide absence of integrations or resources.'
+        noTopLevelFolderFor = @('CloudFlows', 'ConnectionReferences', 'EnvironmentVariableDefinitions')
+    }
     releaseDisposition = [ordered]@{
         retainedReleaseRoots = 20
         excludedInactiveProtectCandidateCoreSteps = 50

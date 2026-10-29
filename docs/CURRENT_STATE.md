@@ -1,5 +1,13 @@
 # Current State
 
+## ALM source reconciliation; managed promotion blocked (2026-10-29)
+
+**Status:** `PRODUCTION_READINESS_BLOCKED_TECHNICAL_AND_EXTERNAL`. The retained DEV unmanaged export has been reconciled into the existing [`solutions/`](../solutions/) tree and mapped in [SOLUTION_COMPONENT_INVENTORY.json](SOLUTION_COMPONENT_INVENTORY.json). The export contains 72 roots: 20 releasable roots are retained in canonical source; 50 inactive `ProtectCandidateCore` registrations and both PluginAssembly root registrations are deliberately excluded. Temporary `os_sr_devcs` API content and the signed rollback assembly binary are not retained. The active package-backed assembly is governed by the existing unsigned package artifact; the accepted package and embedded assembly hashes are recorded in [RELEASE_ARTIFACTS.json](RELEASE_ARTIFACTS.json). The signed legacy assembly is rollback-only, hash-pinned, and unmodified.
+
+The local [`Build-BsoRsPortableSolution.ps1`](../scripts/Build-BsoRsPortableSolution.ps1) source pack/unpack round-trip passed with 20 roots and the accepted package bytes. Candidate Console web-resource source remains in one authoritative tree; generated DEV configuration was not copied. Portable profiles contain no target URLs or identifiers and require Candidate Core on, synthetic-only mode, fallback off, and diagnostics Off. The full export and managed DEV-origin archive remain outside the repository as evidence.
+
+**Remaining blockers:** `TEST_TARGET_APPROVAL_REQUIRED`; no approved Test target or owner-approved release evidence is present. `MANAGED_BUILD_REQUIRES_APPROVED_TEST_ENVIRONMENT`; the DEV-origin managed export is not a promotion artifact. The existing-package release updater is defined only as a contract and is not yet a production-grade, tested dispatcher with explicit target/identity reconciliation and GET-only ambiguous-result recovery. Audit/privacy/DLP, backup/recovery, and Test identity/business acceptance gates remain external and unverified. The offline Test rehearsal gate performs no authentication or import. No Test/Production operation, additional DEV business-data test, role/audit change, package deployment, commit, or push occurred in this source-preparation scope.
+
 ## Phase 5B security acceptance completed in DEV (2026-10-29)
 
 **Status:** `PHASE_5B_BSO_SECURITY_ACCEPTED_IN_DEV`. The previously proven Receipt ownership defect was corrected by removing the explicit initiating-user `ownerid` from Receipt creation; the SYSTEM-backed Receipt remains append-only, actor binding remains in the request fingerprint, and Candidate ownership/business actor attribution remains with the initiating BSO.

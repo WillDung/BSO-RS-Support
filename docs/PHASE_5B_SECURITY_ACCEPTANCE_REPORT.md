@@ -1,5 +1,17 @@
 # Phase 5B role assignment and security acceptance - 28 October 2026
 
+## 29 October 2026 continuation - browser authentication pending
+
+**Current status:** `PHASE_5B_BROWSER_ACCEPTANCE_PENDING_MANUAL_IDENTITY_AUTH`. This continuation does not pass Phase 5B and supersedes neither the historical 28 October evidence below nor its security conclusions for the prior approved account.
+
+The owner newly approved a second test identity for VN LMV IT. Exact identity is kept out of this repository; no credentials were requested, captured, or stored. Fresh pre-assignment inventory resolved one enabled, licensed, interactive system user in the BSO role's Business Unit. It had no direct roles, only its default owner team, and no conflicting effective customization, publishing, role-administration, or protected Candidate/Call/History/Schedule Create/Write privileges.
+
+The existing `BSO-RS Support - BSO` role was assigned directly once with PAC; retries were zero. Immediate Dataverse readback confirmed the direct assignment. Post-assignment role inventory showed that role as the only direct role and no additional team roles; read-only effective privilege inspection found no conflicting privilege names. `srapp` already included the BSO role alongside its pre-existing System Administrator and System Customizer app associations, so this continuation made no app-association write and did not publish.
+
+The integrated browser opened at Microsoft sign-in. Manual authentication by the approved test identity was not completed because the owner was unavailable to respond. Consequently, browser WhoAmI, `CANDIDATE CORE PATH`/fallback state under that identity, synthetic Candidate lifecycle, reference reads, direct Candidate/Call/History/Schedule negative requests, and acceptance-scope reconciliation were not performed. No direct-write result is claimed, and no other account or administrator session was used as a substitute. No additional user/team roles, memberships, privileges, app associations, or business data were changed.
+
+The next required action is for the owner to manually authenticate the browser as the approved identity and confirm that exact `srapp` session is ready. Continue only after browser WhoAmI matches the approved system user. The existing approved scope remains VN LMV IT only; real data and Production deployment remain prohibited.
+
 ## Result
 
 ```text

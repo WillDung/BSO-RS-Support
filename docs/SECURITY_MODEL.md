@@ -1,5 +1,13 @@
 # Security Model
 
+## Phase 5B approved identity inventory; browser gate pending (29 October 2026)
+
+**Result:** `PHASE_5B_BROWSER_ACCEPTANCE_PENDING_MANUAL_IDENTITY_AUTH`; no security pass is claimed. In VN LMV IT the newly owner-approved identity was verified enabled, licensed, interactive, and in the existing BSO role's Business Unit. Before assignment it had no direct role and only its default owner team; read-only effective privilege inspection found no conflicting administrative or protected-table Create/Write privileges.
+
+The existing `BSO-RS Support - BSO` role was directly assigned once, with zero retries and immediate direct-association readback. Post-assignment effective privilege inspection found no conflicting privileges. The role was already associated with `srapp`; no app-role write or publication was needed. No other role or team membership changed.
+
+The browser remained at Microsoft sign-in and manual authentication as the approved identity was not completed. Browser WhoAmI, Candidate Core positive actions, reference reads, and all direct protected-write negatives remain unverified/unattempted. Do not use another authenticated identity or PAC administrator context as a substitute. Exact identity is omitted from repository documentation. See the [Phase 5B report](PHASE_5B_SECURITY_ACCEPTANCE_REPORT.md). `REAL_DATA_STILL_PROHIBITED`.
+
 ## Phase 5B effective-access gate (28 October 2026)
 
 **Result:** `BSO_SECURITY_ACCEPTANCE_BLOCKED_BY_PREEXISTING_ELEVATED_ACCESS`; `PHASE_5B_ROLE_ASSIGNED_SECURITY_ACCEPTANCE_BLOCKED_BY_ELEVATED_ACCESS`. The one explicitly approved account was assigned `BSO-RS Support - BSO` directly, once with zero retries and immediate readback. The app association now includes that role alongside the preserved System Administrator/System Customizer roles. No other user/team assignment or privilege change occurred.

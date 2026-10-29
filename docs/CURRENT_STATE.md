@@ -1,5 +1,13 @@
 # Current State
 
+## Phase 5B clean identity assigned; browser acceptance pending (2026-10-29)
+
+**Status:** `PHASE_5B_BROWSER_ACCEPTANCE_PENDING_MANUAL_IDENTITY_AUTH`; not a security pass. Fresh VN LMV IT read-only inventory resolved the newly owner-approved test identity as enabled, licensed, interactive, and in the BSO role's Business Unit. Before assignment it had no direct roles and only its default owner team, with no effective conflicting customization, publish, role-management, or protected Candidate/Call/History/Schedule write privileges.
+
+Under the explicit owner authorization, `BSO-RS Support - BSO` was assigned directly in one PAC invocation, with zero retries; immediate Dataverse readback confirmed the direct assignment. Post-assignment effective privileges contained no conflicting privilege names. The role was already associated with `srapp`, so no app association write was needed. No additional roles or team memberships were changed.
+
+The integrated browser was at Microsoft sign-in when inspected, and the owner was unavailable to complete manual authentication. Browser WhoAmI therefore has not been verified for this identity. No Candidate Core lifecycle, reference-selector, direct-write negative, or post-test reconciliation was performed under this account. Do not treat this assignment or metadata inventory as Phase 5B security acceptance. Exact identity is omitted from repository documentation. `REAL_DATA_STILL_PROHIBITED`; no Production work, role removal, team change, commit, or push.
+
 ## Phase 5B role assigned; least-privilege acceptance blocked (2026-10-28)
 
 **Status:** `PHASE_5B_ROLE_ASSIGNED_SECURITY_ACCEPTANCE_BLOCKED_BY_ELEVATED_ACCESS`; not a security pass. Under explicit owner approval, exactly the approved Phase 5B account received the existing `BSO-RS Support - BSO` role directly using one PAC assignment invocation, zero retries, and immediate server readback. Only that existing role was also added to `srapp` access; System Administrator/System Customizer app associations were preserved, with no publication or app-content change.

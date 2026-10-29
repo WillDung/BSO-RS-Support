@@ -10,6 +10,10 @@ Do not blindly rerun Apply after any partial registration. Use the retained jour
 
 Scripts here support reviewed build, validation, migration, and ALM tasks. They must be safe by default, avoid embedded credentials and personal data, clearly identify environment effects, and include verification instructions.
 
+## Existing Candidate Core package update
+
+[Update-BsoRsCandidatePluginPackage.ps1](Update-BsoRsCandidatePluginPackage.ps1) is the canonical one-shot dispatcher for the existing `os_sr_cact_pkg`; do not use the historical package-create runner for release updates. `Plan` validates the frozen local unsigned package offline. `Apply` is gated by external target/release evidence, PAC/Dataverse identity agreement, and read-only package/handler/API/guard/legacy reconciliation; it reserves a new journal before one structured `pac plugin push`, permits zero retries, and never creates a package or changes handler, guard, legacy assembly, signing, trace, Profiler, or publication state. `Reconcile` accepts only a matching ambiguous/reserved journal, validates target identity fingerprints before connecting, performs GET-only reconciliation, and never resends. Offline tests do not establish deployment or target approval.
+
 ## Candidate Console scoped refresh
 
 [Deploy-BsoRsCandidateConsole.ps1](Deploy-BsoRsCandidateConsole.ps1) supports an existing-resource refresh with `-RefreshExisting`. `-RefreshResourceNames` can narrow that mode to exact existing resources from the fixed Candidate Console allowlist; it is rejected outside a fresh refresh and cannot be combined with continuation. The selected resource IDs alone are included in scoped `PublishXml` alongside `srapp`; the refresh does not patch the sitemap. Without the selector, its default existing-resource set remains the original three Candidate Console resources. Every selected resource is read back and reconciled, automatic retries are zero, and uncertain writes stop without retry.

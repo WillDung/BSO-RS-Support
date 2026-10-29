@@ -1,7 +1,8 @@
 {
-  "status": "OFFLINE_CONTRACT_VERIFIED_DISPATCHER_NOT_IMPLEMENTED",
+  "status": "OFFLINE_DISPATCHER_IMPLEMENTED_NOT_EXECUTED",
   "target": {
-    "mode": "TEST",
+    "mode": "TEST_OR_PROD",
+    "supportedModes": ["TEST", "PROD"],
     "organizationUrl": null,
     "environmentId": null,
     "organizationId": null,
@@ -10,7 +11,9 @@
     "isProductionBusinessRuntimeMustBeFalse": true,
     "targetEvidenceExternalOnly": true,
     "pacWhoAmIAgreementRequired": true,
-    "approvedTestTargetEvidenceRequired": true
+    "approvedTestTargetEvidenceRequired": true,
+    "approvedProductionTargetEvidenceRequired": true,
+    "productionApprovalMustBeIndependent": true
   },
   "package": {
     "uniqueName": "os_sr_cact_pkg",
@@ -24,6 +27,9 @@
     "modifiedOnRequired": false
   },
   "dispatch": {
+    "command": "pac plugin push",
+    "existingPackageOnly": true,
+    "argumentListMustBeStructured": true,
     "maximumPackageUpdates": 1,
     "automaticRetries": 0,
     "ambiguousOutcomeStopsBeforeAnyResend": true,
@@ -39,18 +45,20 @@
   },
   "ambiguousOutcome": {
     "automaticResendAllowed": false,
+    "reconciliationMode": "GET_ONLY",
     "reconciliationMethods": [
       "GET existing package by immutable identity",
       "GET package-backed assembly and handler relationship",
       "GET Custom API metadata",
       "GET all 50 ProtectCandidateCore registrations and confirm inactive"
     ],
-    "inconclusiveClassification": "PACKAGE_UPDATE_OUTCOME_UNCERTAIN_STOP"
+    "inconclusiveClassification": "READ_ONLY_RECONCILIATION_COMPLETE_OUTCOME_STILL_AMBIGUOUS"
   },
   "offlineValidation": {
-    "classification": "PACKAGE_RELEASE_UPDATER_OFFLINE_READY",
-    "validatedContractOnly": true,
-    "dispatcherImplemented": false,
+    "classification": "PACKAGE_RELEASE_UPDATER_OFFLINE_READY_IMPLEMENTED",
+    "validatedContractOnly": false,
+    "dispatcherImplemented": true,
+    "focusedOfflineAssertions": 20,
     "packagePushPerformed": false
   }
 }

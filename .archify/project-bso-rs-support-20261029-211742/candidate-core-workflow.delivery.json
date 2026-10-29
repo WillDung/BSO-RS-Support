@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "5dd3b797-772b-4195-a914-f694086840c2",
+  "status": "current",
+  "command": "deliver",
+  "type": "lifecycle",
+  "input": "C:\\Users\\vnDunNgo\\dev\\BSO-RS-Support\\.archify\\project-bso-rs-support-20261029-211742\\candidate-core.lifecycle.json",
+  "output": "C:\\Users\\vnDunNgo\\dev\\BSO-RS-Support\\.archify\\project-bso-rs-support-20261029-211742\\candidate-core-workflow.html",
+  "specification": {
+    "sha256": "e032fe7f9ba3f57d98d692abe41306772f4b40a8b5630920afacff63311e8f66",
+    "bytes": 6810
+  },
+  "artifact": {
+    "sha256": "2624638ec33253cb12f63137ce96d2bfefb421ce4f0d8e5c952b3ae7f62c8bdf",
+    "bytes": 846195
+  }
+}

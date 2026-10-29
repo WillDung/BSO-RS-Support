@@ -1,0 +1,172 @@
+{
+  "schema_version": 3,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "Candidate Core workflow",
+    "subtitle": "Canonical Candidate states and DEV-verified transitions; manual schedule evidence is not external booking.",
+    "output": ".archify/project-bso-rs-support-20261029-211742/candidate-core-workflow.html",
+    "quality_profile": "showcase",
+    "visual_preset": "signal-flow",
+    "repository": {
+      "url": "https://github.com/WillDung/BSO-RS-Support.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "f9d359e658593207399d9b2dc54e67aceba2e1b6"
+    },
+    "views": [
+      {
+        "id": "happy-path",
+        "label": "Canonical path",
+        "focus": ["need_call", "candidate_answered", "waiting_manual", "round1_scheduled", "offer_extended"]
+      },
+      {
+        "id": "call-branches",
+        "label": "Call outcomes",
+        "focus": ["need_call", "no_answer", "callback", "candidate_answered"]
+      },
+      {
+        "id": "schedule-outcomes",
+        "label": "Schedule outcomes",
+        "focus": ["waiting_manual", "round1_scheduled", "offer_extended", "candidate_failed"]
+      }
+    ]
+  },
+  "mainPath": ["need_call", "candidate_answered", "waiting_manual", "round1_scheduled", "offer_extended"],
+  "states": [
+    {
+      "id": "need_call",
+      "type": "start",
+      "label": "Need Call",
+      "tag": "initial; DEV verified",
+      "step": "01",
+      "sources": [
+        { "path": "docs/BUSINESS_WORKFLOWS.md", "line": 56, "end_line": 56 },
+        { "path": "docs/PHASE_3A_CANDIDATE_TABLE_PROVISIONING_REPORT.md", "line": 28, "end_line": 37 }
+      ]
+    },
+    {
+      "id": "no_answer",
+      "type": "neutral",
+      "label": "No Answer",
+      "sublabel": "Call Log only; status unchanged",
+      "tag": "Verified behavior",
+      "sources": [
+        { "path": "docs/BUSINESS_WORKFLOWS.md", "line": 32, "end_line": 38 },
+        { "path": "docs/PHASE_5A_CANDIDATE_CORE_ACCEPTANCE_REPORT.md", "line": 31, "end_line": 38 }
+      ]
+    },
+    {
+      "id": "callback",
+      "type": "neutral",
+      "label": "Call Back",
+      "sublabel": "Call Log only; status unchanged",
+      "tag": "Verified contract",
+      "sources": [
+        { "path": "docs/BUSINESS_WORKFLOWS.md", "line": 32, "end_line": 38 },
+        { "path": "docs/PHASE_3C_CANDIDATE_CORE_API_PLUGIN_REPORT.md", "line": 70, "end_line": 78 }
+      ]
+    },
+    {
+      "id": "candidate_answered",
+      "type": "active",
+      "label": "Answered",
+      "tag": "Verified DEV",
+      "step": "02",
+      "sources": [
+        { "path": "docs/BUSINESS_WORKFLOWS.md", "line": 32, "end_line": 50 },
+        { "path": "docs/PHASE_5B_SECURITY_ACCEPTANCE_REPORT.md", "line": 13, "end_line": 15 }
+      ]
+    },
+    {
+      "id": "waiting_manual",
+      "type": "waiting",
+      "label": "Waiting",
+      "tag": "manual queue; verified",
+      "step": "03",
+      "sources": [
+        { "path": "docs/BUSINESS_WORKFLOWS.md", "line": 18, "end_line": 18 },
+        { "path": "docs/PHASE_3C_CANDIDATE_CORE_API_PLUGIN_REPORT.md", "line": 62, "end_line": 68 }
+      ]
+    },
+    {
+      "id": "round1_scheduled",
+      "type": "active",
+      "label": "Scheduled",
+      "tag": "manual evidence; verified",
+      "step": "04",
+      "sources": [
+        { "path": "docs/DATA_MODEL.md", "line": 37, "end_line": 54 },
+        { "path": "docs/PHASE_5B_SECURITY_ACCEPTANCE_REPORT.md", "line": 13, "end_line": 15 }
+      ]
+    },
+    {
+      "id": "offer_extended",
+      "type": "success",
+      "label": "Offer",
+      "tag": "Phase 5A DEV accepted",
+      "step": "05",
+      "sources": [
+        { "path": "docs/BUSINESS_WORKFLOWS.md", "line": 46, "end_line": 53 },
+        { "path": "docs/PHASE_5A_CANDIDATE_CORE_ACCEPTANCE_REPORT.md", "line": 31, "end_line": 38 }
+      ]
+    },
+    {
+      "id": "candidate_failed",
+      "type": "failure",
+      "label": "Failed",
+      "tag": "Phase 5A DEV accepted",
+      "sources": [
+        { "path": "docs/BUSINESS_WORKFLOWS.md", "line": 46, "end_line": 53 },
+        { "path": "docs/PHASE_5A_CANDIDATE_CORE_ACCEPTANCE_REPORT.md", "line": 31, "end_line": 38 }
+      ]
+    }
+  ],
+  "transitions": [
+    { "id": "need-call-no-answer", "from": "need_call", "to": "no_answer", "label": "No Answer" },
+    { "id": "no-answer-return", "from": "no_answer", "to": "need_call", "label": "status unchanged" },
+    { "id": "need-call-callback", "from": "need_call", "to": "callback", "label": "Call Back" },
+    { "id": "callback-return", "from": "callback", "to": "need_call", "label": "status unchanged" },
+    { "id": "need-call-answered", "from": "need_call", "to": "candidate_answered", "variant": "emphasis" },
+    { "id": "answered-to-waiting", "from": "candidate_answered", "to": "waiting_manual" },
+    { "id": "waiting-to-scheduled", "from": "waiting_manual", "to": "round1_scheduled", "variant": "emphasis" },
+    { "id": "scheduled-to-offer", "from": "round1_scheduled", "to": "offer_extended", "label": "Pass", "variant": "emphasis" },
+    { "id": "scheduled-to-failed", "from": "round1_scheduled", "to": "candidate_failed", "label": "Fail" },
+    {
+      "id": "scheduled-to-need-call",
+      "from": "round1_scheduled",
+      "to": "need_call",
+      "label": "Reschedule / Cancel",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Call outcomes",
+      "items": [
+        "Canonical states: Need Call Candidate, Candidate Answered, Waiting Manual Scheduling, Round 1 Scheduled, Offer Extended, Candidate Failed.",
+        "Call Back is the Call Back Requested outcome.",
+        "Answered creates one Call Log, advances status, and adds one Status History row atomically.",
+        "No Answer and Call Back Requested create a Call Log only; Candidate remains Need Call Candidate.",
+        "Every state-changing operation uses a caller-generated CorrelationId and must be idempotent."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "DEV evidence",
+      "items": [
+        "Phase 5B verified the BSO lifecycle through Round 1 Scheduled and four matching Operation Receipts.",
+        "Phase 5A verified Pass, Fail, reschedule, and cancellation branches in DEV.",
+        "Direct protected-table writes were denied; real candidate data remains prohibited."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Scheduling boundary",
+      "items": [
+        "A Round 1 Schedule row is manual workflow evidence, not a calendar availability check or external booking.",
+        "External booking is a separate planned boundary; unknown, failed, or stale availability blocks it."
+      ]
+    }
+  ]
+}

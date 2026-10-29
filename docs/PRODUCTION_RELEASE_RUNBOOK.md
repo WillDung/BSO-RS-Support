@@ -20,12 +20,15 @@ Before any Production connection or write, the release owner must verify and rec
 
 The offline [solution import gate](../scripts/Test-BsoRsSolutionImportGate.ps1) validates supplied approval evidence and a managed-artifact SHA-256 without connecting or importing. It is not a Production deployment runner. Missing Production evidence returns `PRODUCTION_APPROVAL_REQUIRED`.
 
+The existing-package [Candidate Core package updater](../scripts/Update-BsoRsCandidatePluginPackage.ps1) is a separate, bounded dispatcher. Its offline `Plan` mode validates the pinned local artifact without connecting. `Apply` requires the same explicit Production approval evidence and target identity checks, updates only the one matching existing `os_sr_cact_pkg` through a single `pac plugin push`, and performs read-only topology reconciliation. `Reconcile` never dispatches and is GET-only. The updater does not approve Production, perform a Solution import, or authorize this runbook's gates; its implementation and offline tests do not establish that any Production target is approved or that a deployment occurred.
+
 ## Controlled import contract
 
 When and only when separately authorized:
 
 - Require an explicit target argument and fresh target identity agreement before any write.
 - Import only the exact pinned managed artifact. Do not select the DEV-origin review archive.
+- For the separate existing `os_sr_cact_pkg` update, invoke only the bounded package updater after the same Production gates pass; never create a new PluginPackage or alter handler, guard, legacy assembly, signing, trace, or Profiler state.
 - Do not use `PublishAllXml`, force overwrite, skip dependency checks, or an unapproved upgrade mode.
 - Use zero retries for an ambiguous write. Stop and reconcile read-only; never resend an uncertain import.
 - Reconcile Solution identity/version/state, publisher, root and included components, `srapp` and Site Map, web-resource hashes, target configuration, package identity/hash evidence where supported, Custom API handler topology, and all 50 guard registrations remaining inactive.

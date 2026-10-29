@@ -1,0 +1,248 @@
+{
+  "schema_version": 1,
+  "diagram_type": "tree",
+  "meta": {
+    "title": "BSO-RS-Support development status",
+    "subtitle": "Status as documented at repository revision f9d359e; current DEV evidence is not Production readiness.",
+    "output": ".archify/project-bso-rs-support-20261029-211742/development-status.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/WillDung/BSO-RS-Support.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "f9d359e658593207399d9b2dc54e67aceba2e1b6"
+    }
+  },
+  "layout": {
+    "direction": "right",
+    "gapX": 42,
+    "gapY": 34,
+    "nodeW": 176,
+    "nodeMaxW": 250
+  },
+  "nodes": [
+    {
+      "id": "project_status",
+      "label": "Project status",
+      "sublabel": "Candidate Core: DEV accepted; Production blocked",
+      "sources": [
+        { "path": "docs/CURRENT_STATE.md", "line": 1, "end_line": 11 },
+        { "path": "docs/PHASE_5B_SECURITY_ACCEPTANCE_REPORT.md", "line": 3, "end_line": 31 }
+      ]
+    },
+    {
+      "id": "implemented",
+      "label": "Implemented",
+      "parent": "project_status",
+      "sublabel": "Working local or DEV components",
+      "sources": [
+        { "path": "docs/CURRENT_STATE.md", "line": 39, "end_line": 45 },
+        { "path": "docs/PHASE_3C_CANDIDATE_CORE_API_PLUGIN_REPORT.md", "line": 56, "end_line": 68 }
+      ]
+    },
+    {
+      "id": "console_impl",
+      "label": "Candidate Console",
+      "parent": "implemented",
+      "sublabel": "DEV web resource; Candidate Core path active",
+      "sources": [
+        { "path": "docs/CURRENT_STATE.md", "line": 39, "end_line": 45 }
+      ]
+    },
+    {
+      "id": "api_impl",
+      "label": "Custom API + plug-in",
+      "parent": "implemented",
+      "sublabel": "os_sr_cact + package-backed handler",
+      "sources": [
+        { "path": "docs/PHASE_3C_CANDIDATE_CORE_API_PLUGIN_REPORT.md", "line": 7, "end_line": 11 },
+        { "path": "docs/PHASE_5B_SECURITY_ACCEPTANCE_REPORT.md", "line": 7, "end_line": 10 }
+      ]
+    },
+    {
+      "id": "storage_impl",
+      "label": "Candidate Core metadata",
+      "parent": "implemented",
+      "sublabel": "Candidate / Call / History / Schedule / Receipt",
+      "sources": [
+        { "path": "docs/DATA_MODEL.md", "line": 3, "end_line": 3 },
+        { "path": "docs/DATA_MODEL.md", "line": 37, "end_line": 54 },
+        { "path": "docs/DATA_MODEL.md", "line": 66, "end_line": 72 }
+      ]
+    },
+    {
+      "id": "verified",
+      "label": "Verified",
+      "parent": "project_status",
+      "sublabel": "Acceptance evidence; DEV scope",
+      "sources": [
+        { "path": "docs/PHASE_5B_SECURITY_ACCEPTANCE_REPORT.md", "line": 13, "end_line": 31 }
+      ]
+    },
+    {
+      "id": "bso_acceptance",
+      "label": "BSO Candidate Core path",
+      "parent": "verified",
+      "sublabel": "Synthetic lifecycle to Round 1 Scheduled",
+      "sources": [
+        { "path": "docs/PHASE_5B_SECURITY_ACCEPTANCE_REPORT.md", "line": 13, "end_line": 15 }
+      ]
+    },
+    {
+      "id": "write_denials",
+      "label": "Direct-write boundary",
+      "parent": "verified",
+      "sublabel": "Five protected writes denied",
+      "sources": [
+        { "path": "docs/PHASE_5B_SECURITY_ACCEPTANCE_REPORT.md", "line": 17, "end_line": 29 }
+      ]
+    },
+    {
+      "id": "branches_verified",
+      "label": "Workflow branches",
+      "parent": "verified",
+      "sublabel": "Pass / Fail / reschedule / cancel accepted in DEV",
+      "sources": [
+        { "path": "docs/PHASE_5A_CANDIDATE_CORE_ACCEPTANCE_REPORT.md", "line": 31, "end_line": 38 }
+      ]
+    },
+    {
+      "id": "offline_checks",
+      "label": "Offline validation",
+      "parent": "verified",
+      "sublabel": "Documented suites; not a Production deployment",
+      "sources": [
+        { "path": "docs/CURRENT_STATE.md", "line": 9, "end_line": 11 },
+        { "path": "docs/PHASE_5B_SECURITY_ACCEPTANCE_REPORT.md", "line": 29, "end_line": 31 }
+      ]
+    },
+    {
+      "id": "blocked",
+      "label": "Blocked",
+      "parent": "project_status",
+      "sublabel": "Required gates not satisfied",
+      "sources": [
+        { "path": "docs/CURRENT_STATE.md", "line": 5, "end_line": 11 }
+      ]
+    },
+    {
+      "id": "production_gate",
+      "label": "Production promotion",
+      "parent": "blocked",
+      "sublabel": "No approved release target / artifact",
+      "sources": [
+        { "path": "docs/CURRENT_STATE.md", "line": 5, "end_line": 11 }
+      ]
+    },
+    {
+      "id": "package_updater",
+      "label": "One-shot package updater",
+      "parent": "blocked",
+      "sublabel": "PKG-001; legacy create-only path is not a release updater",
+      "sources": [
+        { "path": "docs/CURRENT_STATE.md", "line": 5, "end_line": 5 }
+      ]
+    },
+    {
+      "id": "external_governance",
+      "label": "External readiness",
+      "parent": "blocked",
+      "sublabel": "Audit, Test target, identity/security approvals",
+      "sources": [
+        { "path": "docs/CURRENT_STATE.md", "line": 9, "end_line": 11 },
+        { "path": "docs/PHASE_3C_CANDIDATE_CORE_API_PLUGIN_REPORT.md", "line": 50, "end_line": 54 }
+      ]
+    },
+    {
+      "id": "planned",
+      "label": "Planned",
+      "parent": "project_status",
+      "sublabel": "Requirements / target components; not asserted deployed",
+      "sources": [
+        { "path": "docs/ARCHITECTURE.md", "line": 41, "end_line": 43 }
+      ]
+    },
+    {
+      "id": "calendar_email",
+      "label": "Calendar + email integration",
+      "parent": "planned",
+      "sublabel": "Identity, idempotency, reconciliation required",
+      "sources": [
+        { "path": "docs/BUSINESS_WORKFLOWS.md", "line": 58, "end_line": 81 }
+      ]
+    },
+    {
+      "id": "careers_sync",
+      "label": "Careers synchronization",
+      "parent": "planned",
+      "sublabel": "Proxy contract / access require validation",
+      "sources": [
+        { "path": "docs/BUSINESS_WORKFLOWS.md", "line": 83, "end_line": 85 }
+      ]
+    },
+    {
+      "id": "document_storage",
+      "label": "CV binary storage",
+      "parent": "planned",
+      "sublabel": "SharePoint approach unresolved",
+      "sources": [
+        { "path": "docs/ARCHITECTURE.md", "line": 41, "end_line": 43 },
+        { "path": "docs/ARCHITECTURE.md", "line": 53, "end_line": 55 }
+      ]
+    },
+    {
+      "id": "unknown",
+      "label": "Unknown",
+      "parent": "project_status",
+      "sublabel": "Repository does not establish the fact",
+      "sources": [
+        { "path": "docs/ARCHITECTURE.md", "line": 49, "end_line": 55 }
+      ]
+    },
+    {
+      "id": "connector_identity",
+      "label": "Connector identity",
+      "parent": "unknown",
+      "sublabel": "Microsoft 365 sender / organizer mapping",
+      "sources": [
+        { "path": "docs/ARCHITECTURE.md", "line": 49, "end_line": 51 }
+      ]
+    },
+    {
+      "id": "external_access",
+      "label": "External service access",
+      "parent": "unknown",
+      "sublabel": "Calendar and careers connectivity not verified",
+      "sources": [
+        { "path": "docs/ARCHITECTURE.md", "line": 32, "end_line": 34 },
+        { "path": "docs/BUSINESS_WORKFLOWS.md", "line": 83, "end_line": 85 }
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Implemented vs verified",
+      "items": [
+        "Implemented describes present local / DEV components; verified cites the acceptance evidence recorded in project reports.",
+        "Candidate Core has DEV acceptance only; it is not Production release approval."
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Blocked means gated",
+      "items": [
+        "Production readiness is blocked by PKG-001 plus external environment, security, audit, and approval prerequisites.",
+        "No real candidate data, tenant access, deployment, or release operation was performed to create this visualization."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Unknown is explicit",
+      "items": [
+        "Connector identity and external service access remain unresolved in the repository evidence.",
+        "Planned components are requirements or target architecture, not evidence that resources exist."
+      ]
+    }
+  ]
+}

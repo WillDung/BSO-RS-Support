@@ -1,0 +1,217 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "architecture",
+  "quality": "showcase",
+  "specification": {
+    "path": "C:\\Users\\vnDunNgo\\dev\\BSO-RS-Support\\.archify\\project-bso-rs-support-20261029-211742\\architecture.snapshot.json",
+    "sha256": "c5edfc11043ada78444dc5f6343004f169704aac2c61e64ac1e5606e81a6bc9b",
+    "bytes": 12109
+  },
+  "artifact": {
+    "path": "C:\\Users\\vnDunNgo\\dev\\BSO-RS-Support\\.archify\\project-bso-rs-support-20261029-211742\\architecture.html",
+    "sha256": "da5a2e1c65e59799c106499faccbf1ce289748c5de65d6af33a26508c75d9039",
+    "bytes": 877737
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "C:\\Users\\vnDunNgo\\dev\\BSO-RS-Support\\.archify\\project-bso-rs-support-20261029-211742\\review-4\\architecture.finalize.json",
+    "summaryReceipt": "C:\\Users\\vnDunNgo\\dev\\BSO-RS-Support\\.archify\\project-bso-rs-support-20261029-211742\\review-4\\architecture.finalize-summary.json",
+    "browserCheckReceipt": "C:\\Users\\vnDunNgo\\dev\\BSO-RS-Support\\.archify\\project-bso-rs-support-20261029-211742\\review-4\\architecture.browser-check.json"
+  },
+  "update": {
+    "status": "current",
+    "installedVersion": "3.2.0",
+    "availableVersion": "3.2.0",
+    "releaseNotes": null,
+    "checkedAt": "2026-10-29T14:24:08.966Z",
+    "source": "cache",
+    "noticeRequired": false,
+    "noticeText": null
+  },
+  "visualReview": "not-requested",
+  "durationMs": 8165,
+  "browserCheck": {
+    "requested": true,
+    "ran": true
+  },
+  "visualReviewRecommendation": {
+    "action": "inspect-route-readability",
+    "signals": {
+      "resolvedCrossovers": 2,
+      "routesOverSuggestedBends": 8
+    },
+    "reason": "Automated gates passed, but crossings or detours still need perceptual review before claiming visual quality.",
+    "affectedRoutes": {
+      "crossings": [
+        {
+          "left": {
+            "id": "authorization-to-api",
+            "from": "bso_authorization",
+            "to": "candidate_api",
+            "label": "execute privilege",
+            "collectionIndex": 3,
+            "artifactIndex": 4
+          },
+          "right": {
+            "id": "references-to-console",
+            "from": "reference_data",
+            "to": "candidate_console",
+            "label": "reference selectors",
+            "collectionIndex": 9,
+            "artifactIndex": 10
+          },
+          "point": [
+            677.3000000000001,
+            228.5
+          ]
+        },
+        {
+          "left": {
+            "id": "plugin-to-receipts",
+            "from": "candidate_plugin",
+            "to": "operation_receipts",
+            "label": "append-only receipt",
+            "collectionIndex": 8,
+            "artifactIndex": 9
+          },
+          "right": {
+            "id": "orchestration-to-careers",
+            "from": "orchestration",
+            "to": "careers",
+            "label": "proposed",
+            "collectionIndex": 12,
+            "artifactIndex": 13
+          },
+          "point": [
+            1200,
+            572
+          ]
+        }
+      ],
+      "detours": [
+        {
+          "relationship": {
+            "id": "bso-to-app",
+            "from": "bso_user",
+            "to": "srapp",
+            "label": "interactive use",
+            "collectionIndex": 0,
+            "artifactIndex": 1
+          },
+          "bends": 3,
+          "stretch": 1.319
+        },
+        {
+          "relationship": {
+            "id": "app-to-console",
+            "from": "srapp",
+            "to": "candidate_console",
+            "label": "Candidate Management",
+            "collectionIndex": 1,
+            "artifactIndex": 2
+          },
+          "bends": 3,
+          "stretch": 1.314
+        },
+        {
+          "relationship": {
+            "id": "console-to-api",
+            "from": "candidate_console",
+            "to": "candidate_api",
+            "label": "authorized action",
+            "collectionIndex": 2,
+            "artifactIndex": 3
+          },
+          "bends": 3,
+          "stretch": 1.277
+        },
+        {
+          "relationship": {
+            "id": "api-to-plugin",
+            "from": "candidate_api",
+            "to": "candidate_plugin",
+            "label": "registered handler",
+            "collectionIndex": 4,
+            "artifactIndex": 5
+          },
+          "bends": 3,
+          "stretch": 1.298
+        },
+        {
+          "relationship": {
+            "id": "plugin-to-history",
+            "from": "candidate_plugin",
+            "to": "call_history",
+            "label": "call + transition evidence",
+            "collectionIndex": 6,
+            "artifactIndex": 7
+          },
+          "bends": 3,
+          "stretch": 1.246
+        },
+        {
+          "relationship": {
+            "id": "plugin-to-receipts",
+            "from": "candidate_plugin",
+            "to": "operation_receipts",
+            "label": "append-only receipt",
+            "collectionIndex": 8,
+            "artifactIndex": 9
+          },
+          "bends": 3,
+          "stretch": 1.086
+        },
+        {
+          "relationship": {
+            "id": "references-to-console",
+            "from": "reference_data",
+            "to": "candidate_console",
+            "label": "reference selectors",
+            "collectionIndex": 9,
+            "artifactIndex": 10
+          },
+          "bends": 3,
+          "stretch": 1
+        },
+        {
+          "relationship": {
+            "id": "orchestration-to-careers",
+            "from": "orchestration",
+            "to": "careers",
+            "label": "proposed",
+            "collectionIndex": 12,
+            "artifactIndex": 13
+          },
+          "bends": 4,
+          "stretch": 1.226
+        }
+      ],
+      "truncated": false
+    },
+    "hints": [
+      "bso_authorization → candidate_api crosses reference_data → candidate_console: move the node of whichever is a branch, return, or second entrance to the other side of the main path, so that relationship runs through an empty corridor.",
+      "candidate_plugin → operation_receipts crosses orchestration → careers: move the node of whichever is a branch, return, or second entrance to the other side of the main path, so that relationship runs through an empty corridor.",
+      "bso_user → srapp needs 3 bends: move node bso_user or srapp so they share a row or column with matching centers, or sit diagonally with a clear corner.",
+      "srapp → candidate_console needs 3 bends: move node srapp or candidate_console so they share a row or column with matching centers, or sit diagonally with a clear corner.",
+      "candidate_console → candidate_api needs 3 bends: move node candidate_console or candidate_api so they share a row or column with matching centers, or sit diagonally with a clear corner.",
+      "candidate_api → candidate_plugin needs 3 bends: move node candidate_api or candidate_plugin so they share a row or column with matching centers, or sit diagonally with a clear corner.",
+      "candidate_plugin → call_history needs 3 bends: move node candidate_plugin or call_history so they share a row or column with matching centers, or sit diagonally with a clear corner.",
+      "candidate_plugin → operation_receipts needs 3 bends: move node candidate_plugin or operation_receipts so they share a row or column with matching centers, or sit diagonally with a clear corner."
+    ],
+    "repair": "Trace these relationships at the desktop viewport. For Architecture, use references/architecture-layout-repair.md: reflow a blocked main path or tangled connected scene, and repair an isolated defect locally only when the surrounding composition is accepted. Preserve all semantic content and user-fixed geometry. Rerun finalize once after the edit."
+  }
+}

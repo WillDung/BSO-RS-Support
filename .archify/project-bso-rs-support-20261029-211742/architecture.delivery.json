@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "0c724843-f9e2-4f86-9b08-a46b41967c1e",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "C:\\Users\\vnDunNgo\\dev\\BSO-RS-Support\\.archify\\project-bso-rs-support-20261029-211742\\architecture.snapshot.json",
+  "output": "C:\\Users\\vnDunNgo\\dev\\BSO-RS-Support\\.archify\\project-bso-rs-support-20261029-211742\\architecture.html",
+  "specification": {
+    "sha256": "c5edfc11043ada78444dc5f6343004f169704aac2c61e64ac1e5606e81a6bc9b",
+    "bytes": 12109
+  },
+  "artifact": {
+    "sha256": "da5a2e1c65e59799c106499faccbf1ce289748c5de65d6af33a26508c75d9039",
+    "bytes": 877737
+  }
+}

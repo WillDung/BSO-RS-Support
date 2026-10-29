@@ -141,7 +141,8 @@ $releaseToolPaths = @(
     $releaseInputs.releaseTooling.testRehearsalGate,
     $releaseInputs.releaseTooling.solutionImportGate,
     $releaseInputs.releaseTooling.configurationGenerator,
-    $releaseInputs.releaseTooling.inventoryGenerator
+    $releaseInputs.releaseTooling.inventoryGenerator,
+    $releaseInputs.releaseTooling.packageUpdater
 )
 $releaseToolLines = foreach ($relativeTool in $releaseToolPaths) {
     $fullToolPath = Join-Path $docs ($relativeTool.Replace('/', '\'))
@@ -157,6 +158,8 @@ Assert-Test ((Get-FileSha256 -Path (Join-Path $solutions 'release-profiles.json'
     $releaseInputs.environmentPolicy.portableProfileSourceSha256 -and
     (Get-FileSha256 -Path (Join-Path $solutions 'pluginpackages\os_sr_cact_pkg\package\os_sr_cact_pkg.nupkg')) -ceq
         $releaseInputs.candidateCore.packageSha256 -and
+    (Get-FileSha256 -Path (Join-Path $root 'scripts\Update-BsoRsCandidatePluginPackage.ps1')) -ceq
+        $releaseInputs.releaseTooling.packageUpdaterSha256 -and
     (Get-Fingerprint -Lines $releaseToolLines) -ceq $releaseInputs.releaseTooling.toolFingerprint) `
     'Verify pinned environment-policy, package, and release-tooling inputs'
 foreach ($resource in $releaseInputs.candidateConsole.PSObject.Properties) {
@@ -165,7 +168,7 @@ foreach ($resource in $releaseInputs.candidateConsole.PSObject.Properties) {
         "Verify frozen Candidate Console resource hash: $($resource.Name)"
 }
 
-Assert-Test ($updaterContract.status -ceq 'OFFLINE_CONTRACT_VERIFIED_DISPATCHER_NOT_IMPLEMENTED' -and
+Assert-Test ($updaterContract.status -ceq 'OFFLINE_DISPATCHER_IMPLEMENTED_NOT_EXECUTED' -and
     $updaterContract.target.pacWhoAmIAgreementRequired -eq $true -and
     $updaterContract.target.approvedTestTargetEvidenceRequired -eq $true -and
     $updaterContract.package.exactExistingPackageLookupRequired -eq $true -and
@@ -177,15 +180,17 @@ Assert-Test ($updaterContract.status -ceq 'OFFLINE_CONTRACT_VERIFIED_DISPATCHER_
     $updaterContract.dispatch.signingKeyPathAllowed -eq $false -and
     $updaterContract.dispatch.legacyAssemblyWriteAllowed -eq $false -and
     $updaterContract.dispatch.protectCandidateCoreMutationAllowed -eq $false) `
-    'Verify the package-updater offline contract while disclosing that no dispatcher exists'
+    'Verify the one-shot package-updater contract and zero-retry target gates'
 $legacyPackageScript = Get-Content -LiteralPath (Join-Path $root 'scripts\Deploy-BsoRsCandidatePluginPackage.ps1') -Raw
 Assert-Test ($legacyPackageScript -match "Invoke-PackageRequest -Method POST -Path 'pluginpackages'" -and
     $legacyPackageScript -notmatch "Invoke-PackageRequest -Method PATCH -Path 'pluginpackages'|Method = 'PATCH'\s+Path = 'pluginpackages'") `
     'Diagnose the legacy package-create path rather than treating it as an updater'
-Assert-Test ($updaterContract.offlineValidation.classification -ceq 'PACKAGE_RELEASE_UPDATER_OFFLINE_READY' -and
-    $updaterContract.offlineValidation.dispatcherImplemented -eq $false -and
-    $updaterContract.offlineValidation.packagePushPerformed -eq $false) `
-    'Limit PACKAGE_RELEASE_UPDATER_OFFLINE_READY to contract assertions, not a live updater claim'
+Assert-Test ($updaterContract.offlineValidation.classification -ceq 'PACKAGE_RELEASE_UPDATER_OFFLINE_READY_IMPLEMENTED' -and
+    $updaterContract.offlineValidation.dispatcherImplemented -eq $true -and
+    $updaterContract.offlineValidation.packagePushPerformed -eq $false -and
+    (Test-Path -LiteralPath (Join-Path $root 'scripts\Update-BsoRsCandidatePluginPackage.ps1')) -and
+    (Test-Path -LiteralPath (Join-Path $root 'tests\BsoRsCandidatePackageUpdater.Tests.ps1'))) `
+    'Distinguish local updater implementation from any live package update'
 
 Assert-Test ($importContract.import.publishAllXml -eq $false -and
     $importContract.import.forceOverwrite -eq $false -and
@@ -232,11 +237,12 @@ Write-Output "BSO-RS production-readiness offline checks passed: $passed"
     SourceInventory = 'SOLUTION_COMPONENT_COUNT_SEMANTICS_RECONCILED'
     PortableConfiguration = 'PORTABLE_ENVIRONMENT_CONFIGURATION_OFFLINE_VERIFIED'
     ManagedArtifact = 'MANAGED_RELEASE_ARTIFACT_REQUIRES_APPROVED_TEST_REHEARSAL'
-    PackageUpdater = 'PACKAGE_RELEASE_UPDATER_OFFLINE_READY'
-    PackageUpdaterDispatcher = 'NOT_IMPLEMENTED'
+    PackageUpdater = 'PACKAGE_RELEASE_UPDATER_OFFLINE_READY_IMPLEMENTED'
+    PackageUpdaterDispatcher = 'IMPLEMENTED_NOT_EXECUTED'
+    RemainingBlockers = 'EXTERNAL_GATES_ONLY'
     SolutionImportGate = 'SOLUTION_IMPORT_GATE_OFFLINE_READY'
     TestRehearsal = 'TEST_REHEARSAL_RUNNER_READY_TARGET_REQUIRED'
     RollbackPlan = 'ROLLBACK_PLAN_OFFLINE_READY'
     TestTarget = 'TEST_TARGET_APPROVAL_REQUIRED'
-    TechnicalBlocker = 'PKG-001'
+    ClosedTechnicalBlocker = 'PKG-001'
 }

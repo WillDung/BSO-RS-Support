@@ -76,6 +76,7 @@ if ($approval.mode -cne 'TEST' -or
         'PRE_REHEARSAL_INVENTORY',
         'APPROVED_SOLUTION_IMPORT_OR_UPDATE',
         'TARGET_CONFIGURATION',
+        'CANDIDATE_CORE_PACKAGE_UPDATER_PREFLIGHT',
         'CANDIDATE_CORE_PACKAGE_RECONCILIATION',
         'BSO_ROLE_AND_APP_ACCESS',
         'EXACT_SRAPP_BROWSER_ACCEPTANCE',
@@ -85,5 +86,6 @@ if ($approval.mode -cne 'TEST' -or
         'ROLLBACK_AND_RECOVERY_EXERCISE',
         'FINAL_READ_ONLY_RECONCILIATION'
     )
+    CandidateCorePackageUpdater = '../scripts/Update-BsoRsCandidatePluginPackage.ps1'
     Note = 'This gate validates supplied evidence only. It does not authenticate, connect, import, assign roles, or run browser/runtime tests.'
 }

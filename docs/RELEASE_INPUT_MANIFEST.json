@@ -58,15 +58,17 @@
     "builder": "../scripts/Build-BsoRsPortableSolution.ps1",
     "builderSha256": "fd5e7dbb3320c3593e6ccf1d7a5d93eb2144e4a5ed1f5b7b6a12adba582e5d95",
     "testRehearsalGate": "../scripts/Test-BsoRsTestRehearsalGate.ps1",
-    "testRehearsalGateSha256": "ddc591a67ccdc896064a4b6c4539020df685528b7591cfd672b2b1d26190c186",
+    "testRehearsalGateSha256": "abfad311de13c6d51a4fc4146f5027748d8933ea14b9c998a672041b4f2b0f52",
     "solutionImportGate": "../scripts/Test-BsoRsSolutionImportGate.ps1",
     "solutionImportGateSha256": "2ab3fac36b9da39a0711ed1423aa32bcb3cd8d533e77cb481aa4284afe4010e3",
     "configurationGenerator": "../scripts/New-BsoRsCandidateConsoleEnvironmentConfig.ps1",
     "configurationGeneratorSha256": "f8d5892a94d89163b0b0945841ee981cc40e1b9091f78ec4a55ba3d744d9f5b4",
     "inventoryGenerator": "../scripts/New-BsoRsSolutionComponentInventory.ps1",
     "inventoryGeneratorSha256": "a144af8d8a99147c01c638749835750ba71d86e60ec2a66687777cb4cab55c5a",
+    "packageUpdater": "../scripts/Update-BsoRsCandidatePluginPackage.ps1",
+    "packageUpdaterSha256": "1a97d71e9ebfe41f02838bbb380630025c577c4ab2f66f7f45360974717e8f38",
     "toolFingerprintAlgorithm": "SHA256_OF_UTF8_SORTED_LINES_RELATIVE_PATH_PIPE_FILE_SHA256",
-    "toolFingerprint": "96b21a49cf49b59c9c4d6987b7d39e40f1f14f8a179f197f4323c762d873f82a"
+    "toolFingerprint": "956fed59defe00ef1a621e738747fbb5d6b07ae0d325f32b928999af49a8870d"
   },
   "devOriginReviewArtifact": {
     "disposition": "DEV_ORIGIN_REVIEW_ARTIFACT_NOT_RELEASEABLE",

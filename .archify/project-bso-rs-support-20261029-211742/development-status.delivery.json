@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "a76e33c0-e088-4837-85f2-c7752e242972",
+  "status": "current",
+  "command": "deliver",
+  "type": "tree",
+  "input": "C:\\Users\\vnDunNgo\\dev\\BSO-RS-Support\\.archify\\project-bso-rs-support-20261029-211742\\development-status.snapshot.json",
+  "output": "C:\\Users\\vnDunNgo\\dev\\BSO-RS-Support\\.archify\\project-bso-rs-support-20261029-211742\\development-status.html",
+  "specification": {
+    "sha256": "5283246fbf995c47f7aedbc81c7a30b4e4901da86725508d11f81cceb0a0121e",
+    "bytes": 8473
+  },
+  "artifact": {
+    "sha256": "b5e423e47962dbeb26f9084e18991f9a6721e76fa4cc4004ad747fc037b58aeb",
+    "bytes": 871943
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "tree",
+  "quality": "showcase",
+  "specification": {
+    "path": "C:\\Users\\vnDunNgo\\dev\\BSO-RS-Support\\.archify\\project-bso-rs-support-20261029-211742\\development-status.snapshot.json",
+    "sha256": "50acee0e24bb6f5db88ba9e22975de3c19d1e86dee0665d6cfa2a457c147f6e1",
+    "bytes": 8473
+  },
+  "artifact": {
+    "path": "C:\\Users\\vnDunNgo\\dev\\BSO-RS-Support\\.archify\\project-bso-rs-support-20261029-211742\\development-status.html",
+    "sha256": "cab13cd94c979b84f669fb43658e31b0d20b8943e69005dbfd705cb3b794a879",
+    "bytes": 871943
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "C:\\Users\\vnDunNgo\\dev\\BSO-RS-Support\\.archify\\project-bso-rs-support-20261029-211742\\development-status.finalize.json",
+    "summaryReceipt": "C:\\Users\\vnDunNgo\\dev\\BSO-RS-Support\\.archify\\project-bso-rs-support-20261029-211742\\development-status.finalize-summary.json",
+    "browserCheckReceipt": "C:\\Users\\vnDunNgo\\dev\\BSO-RS-Support\\.archify\\project-bso-rs-support-20261029-211742\\development-status.browser-check.json"
+  },
+  "update": {
+    "status": "current",
+    "installedVersion": "3.2.0",
+    "availableVersion": "3.2.0",
+    "releaseNotes": null,
+    "checkedAt": "2026-10-29T14:24:08.966Z",
+    "source": "cache",
+    "noticeRequired": false,
+    "noticeText": null
+  },
+  "visualReview": "not-requested",
+  "durationMs": 7154,
+  "browserCheck": {
+    "requested": true,
+    "ran": true
+  }
+}

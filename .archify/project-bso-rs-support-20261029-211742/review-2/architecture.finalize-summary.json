@@ -1,0 +1,134 @@
+{
+  "schemaVersion": 1,
+  "ok": false,
+  "command": "finalize",
+  "status": "fail",
+  "type": "architecture",
+  "quality": "showcase",
+  "specification": {
+    "path": "C:\\Users\\vnDunNgo\\dev\\BSO-RS-Support\\.archify\\project-bso-rs-support-20261029-211742\\architecture.snapshot.json",
+    "sha256": "cf1653a0e24aa126c2adb1fa6a35a7a16e459f5369659c72ae665293264fca1b",
+    "bytes": 12106
+  },
+  "artifact": {
+    "path": "C:\\Users\\vnDunNgo\\dev\\BSO-RS-Support\\.archify\\project-bso-rs-support-20261029-211742\\architecture.html",
+    "sha256": "9b61435c6581ae05a5e83347293880d7fced71db59a5b2f397e4cdc4308ec6ab",
+    "bytes": 877737
+  },
+  "gates": {
+    "validate": "fail",
+    "deliver": "not-run",
+    "check": "not-run",
+    "browser-check": "not-run"
+  },
+  "failedStage": "validate",
+  "diagnostics": [
+    {
+      "code": "clean-flow/edge-through-node",
+      "severity": "error",
+      "message": "[clean-flow/edge-through-node] architecture connections[9] id \"references-to-console\" \"reference_data\" -> \"candidate_console\" crosses component \"entra_identity\" (unrelated to this relationship) on segment 0 [225, 102] -> [201, 102] (2px clearance) — if the authored fromSide/toSide are not required by the user, remove them so the renderer can re-plan; otherwise preserve that intent and adjust fromSide/toSide, set route/via, or move the component.",
+      "subject": {
+        "diagramType": "architecture",
+        "collection": "connections",
+        "index": 9,
+        "id": "references-to-console",
+        "from": "reference_data",
+        "to": "candidate_console"
+      },
+      "evidence": {
+        "obstacleKind": "component",
+        "obstacleId": "entra_identity",
+        "segmentIndex": 0,
+        "from": [
+          225,
+          102
+        ],
+        "to": [
+          201,
+          102
+        ],
+        "clearancePx": 2
+      },
+      "supportedFixes": [
+        "if the authored fromSide/toSide are not required by the user, remove them so the renderer can re-plan; otherwise preserve that intent and adjust fromSide/toSide, set route/via, or move the component"
+      ]
+    },
+    {
+      "code": "layout/component-overlap",
+      "severity": "error",
+      "message": "Components \"reference_data\" and \"entra_identity\" are less than 8px apart — move one or shrink its size.\n  \"reference_data\" [225, 65, 190, 74]; \"entra_identity\" [35, 90, 195, 78]\n  Suggested fix: move \"entra_identity\" pos to [423, 90] (right of \"reference_data\") or [35, 147] (below)",
+      "subject": {
+        "diagramType": "architecture",
+        "nodeId": "reference_data"
+      },
+      "evidence": {
+        "otherId": "entra_identity",
+        "minimumGapPx": 8,
+        "boxes": [
+          {
+            "id": "reference_data",
+            "type": "database",
+            "label": "Reference tables",
+            "x": 225,
+            "y": 65,
+            "width": 190,
+            "height": 74,
+            "pos": [
+              225,
+              65
+            ]
+          },
+          {
+            "id": "entra_identity",
+            "type": "security",
+            "label": "Entra identity",
+            "x": 35,
+            "y": 90,
+            "width": 195,
+            "height": 78,
+            "pos": [
+              35,
+              90
+            ]
+          }
+        ]
+      },
+      "supportedFixes": [
+        "move component \"entra_identity\" pos to [423, 90] (right of \"reference_data\")",
+        "or move component \"entra_identity\" pos to [35, 147] (below)",
+        "or shrink \"reference_data\" or \"entra_identity\" while keeping every label and sublabel readable"
+      ]
+    }
+  ],
+  "diagnosticSummary": {
+    "total": 2,
+    "shown": 2,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "C:\\Users\\vnDunNgo\\dev\\BSO-RS-Support\\.archify\\project-bso-rs-support-20261029-211742\\review-2\\architecture.finalize.json",
+    "summaryReceipt": "C:\\Users\\vnDunNgo\\dev\\BSO-RS-Support\\.archify\\project-bso-rs-support-20261029-211742\\review-2\\architecture.finalize-summary.json"
+  },
+  "update": {
+    "status": "current",
+    "installedVersion": "3.2.0",
+    "availableVersion": "3.2.0",
+    "releaseNotes": null,
+    "checkedAt": "2026-10-29T14:24:08.966Z",
+    "source": "cache",
+    "noticeRequired": false,
+    "noticeText": null
+  },
+  "visualReview": "not-requested",
+  "durationMs": 1971,
+  "browserCheck": {
+    "requested": true,
+    "ran": false
+  },
+  "nextAction": {
+    "action": "edit-in-place",
+    "candidate": "C:\\Users\\vnDunNgo\\dev\\BSO-RS-Support\\.archify\\project-bso-rs-support-20261029-211742\\architecture.snapshot.json",
+    "constraint": "Preserve all semantics and user-fixed geometry. Use references/architecture-layout-repair.md to choose a local repair or connected-scene reflow; edit the existing candidate.",
+    "then": "finalize-once"
+  }
+}

@@ -84,8 +84,10 @@ Assert-Test ($rollback.status -ceq 'ROLLBACK_ONLY_NOT_ACTIVE' -and
     $rollback.sha256 -ceq
     '089deb40816e7fd6d80d117ba3894b5d5dadbcf65ac8111e25bb0520ff6feb85') `
     'Signed rollback assembly is hash-pinned and prohibited from activation or mutation'
-Assert-Test ($updater.status -ceq 'OFFLINE_CONTRACT_VERIFIED_DISPATCHER_NOT_IMPLEMENTED' -and
-    $updater.target.mode -ceq 'TEST' -and
+Assert-Test ($updater.status -ceq 'OFFLINE_DISPATCHER_IMPLEMENTED_NOT_EXECUTED' -and
+    $updater.target.mode -ceq 'TEST_OR_PROD' -and
+    @($updater.target.supportedModes) -contains 'TEST' -and
+    @($updater.target.supportedModes) -contains 'PROD' -and
     $null -eq $updater.target.organizationUrl -and
     $null -eq $updater.target.environmentId -and
     $null -eq $updater.target.organizationId -and
@@ -93,7 +95,11 @@ Assert-Test ($updater.status -ceq 'OFFLINE_CONTRACT_VERIFIED_DISPATCHER_NOT_IMPL
     $updater.dispatch.maximumPackageUpdates -eq 1 -and
     $updater.dispatch.automaticRetries -eq 0 -and
     $updater.ambiguousOutcome.automaticResendAllowed -eq $false -and
-    $updater.ambiguousOutcome.inconclusiveClassification -ceq 'PACKAGE_UPDATE_OUTCOME_UNCERTAIN_STOP') `
+    $updater.ambiguousOutcome.reconciliationMode -ceq 'GET_ONLY' -and
+    $updater.ambiguousOutcome.inconclusiveClassification -ceq 'READ_ONLY_RECONCILIATION_COMPLETE_OUTCOME_STILL_AMBIGUOUS' -and
+    $updater.offlineValidation.classification -ceq 'PACKAGE_RELEASE_UPDATER_OFFLINE_READY_IMPLEMENTED' -and
+    $updater.offlineValidation.dispatcherImplemented -eq $true -and
+    $updater.offlineValidation.packagePushPerformed -eq $false) `
     'Release updater contract is existing-package-only and never resends ambiguous writes'
 Assert-Test ($profiles.managedBuild -ceq 'MANAGED_RELEASE_ARTIFACT_REQUIRES_APPROVED_TEST_REHEARSAL' -and
     $artifact.releaseConstraints.managedBuild -ceq 'MANAGED_RELEASE_ARTIFACT_REQUIRES_APPROVED_TEST_REHEARSAL') `
@@ -102,7 +108,9 @@ Assert-Test ($profiles.managedBuild -ceq 'MANAGED_RELEASE_ARTIFACT_REQUIRES_APPR
 $gateResult = @(& $gatePath)
 Assert-Test ($gateResult.Result -ceq 'TEST_REHEARSAL_RUNNER_READY_TARGET_REQUIRED' -and
     $gateResult.Gate -ceq 'TEST_TARGET_APPROVAL_REQUIRED' -and
-    $gateResult.NetworkOperations -eq 0 -and $gateResult.Imports -eq 0) `
+    $gateResult.NetworkOperations -eq 0 -and $gateResult.Imports -eq 0 -and
+    $gateSource.Contains("CandidateCorePackageUpdater = '../scripts/Update-BsoRsCandidatePluginPackage.ps1'") -and
+    $gateSource.Contains("'CANDIDATE_CORE_PACKAGE_UPDATER_PREFLIGHT'")) `
     'Offline Test gate stops without target evidence and performs no connection or import'
 Assert-Test ($gateSource -notmatch '\bpac\b|Invoke-WebRequest|Invoke-RestMethod|solution import') `
     'Test rehearsal gate has no network or import execution path'

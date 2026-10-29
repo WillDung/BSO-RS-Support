@@ -1,10 +1,14 @@
 {
-  "status": "DEFINED_NOT_DISPATCHED",
+  "status": "OFFLINE_CONTRACT_VERIFIED_DISPATCHER_NOT_IMPLEMENTED",
   "target": {
     "mode": "TEST",
     "organizationUrl": null,
     "environmentId": null,
     "organizationId": null,
+    "environmentDisplayNameRequired": true,
+    "regionRequired": true,
+    "isProductionBusinessRuntimeMustBeFalse": true,
+    "targetEvidenceExternalOnly": true,
     "pacWhoAmIAgreementRequired": true,
     "approvedTestTargetEvidenceRequired": true
   },
@@ -12,12 +16,22 @@
     "uniqueName": "os_sr_cact_pkg",
     "version": "1.0.0",
     "sha256": "dbf6087203508c8a0016fede8bea2c77a3734a9e294b407197faa08235203b91",
+    "localPackageHashPinRequired": true,
+    "exactExistingPackageLookupRequired": true,
     "existingIdentityRequired": true,
-    "createAllowed": false
+    "createAllowed": false,
+    "serverReadablePackageBytesRequired": false,
+    "modifiedOnRequired": false
   },
   "dispatch": {
     "maximumPackageUpdates": 1,
     "automaticRetries": 0,
+    "ambiguousOutcomeStopsBeforeAnyResend": true,
+    "explicitTargetArgumentRequired": true,
+    "expectedOrganizationAndEnvironmentEvidenceRequired": true,
+    "signingKeyPathAllowed": false,
+    "legacyAssemblyWriteAllowed": false,
+    "protectCandidateCoreMutationAllowed": false,
     "handlerPatchAllowed": false,
     "guardPatchAllowed": false,
     "legacyAssemblyMutationAllowed": false,
@@ -32,5 +46,11 @@
       "GET all 50 ProtectCandidateCore registrations and confirm inactive"
     ],
     "inconclusiveClassification": "PACKAGE_UPDATE_OUTCOME_UNCERTAIN_STOP"
+  },
+  "offlineValidation": {
+    "classification": "PACKAGE_RELEASE_UPDATER_OFFLINE_READY",
+    "validatedContractOnly": true,
+    "dispatcherImplemented": false,
+    "packagePushPerformed": false
   }
 }

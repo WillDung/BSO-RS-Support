@@ -84,7 +84,7 @@ Assert-Test ($rollback.status -ceq 'ROLLBACK_ONLY_NOT_ACTIVE' -and
     $rollback.sha256 -ceq
     '089deb40816e7fd6d80d117ba3894b5d5dadbcf65ac8111e25bb0520ff6feb85') `
     'Signed rollback assembly is hash-pinned and prohibited from activation or mutation'
-Assert-Test ($updater.status -ceq 'DEFINED_NOT_DISPATCHED' -and
+Assert-Test ($updater.status -ceq 'OFFLINE_CONTRACT_VERIFIED_DISPATCHER_NOT_IMPLEMENTED' -and
     $updater.target.mode -ceq 'TEST' -and
     $null -eq $updater.target.organizationUrl -and
     $null -eq $updater.target.environmentId -and
@@ -95,12 +95,13 @@ Assert-Test ($updater.status -ceq 'DEFINED_NOT_DISPATCHED' -and
     $updater.ambiguousOutcome.automaticResendAllowed -eq $false -and
     $updater.ambiguousOutcome.inconclusiveClassification -ceq 'PACKAGE_UPDATE_OUTCOME_UNCERTAIN_STOP') `
     'Release updater contract is existing-package-only and never resends ambiguous writes'
-Assert-Test ($profiles.managedBuild -ceq 'MANAGED_BUILD_REQUIRES_APPROVED_TEST_ENVIRONMENT' -and
-    $artifact.releaseConstraints.managedBuild -ceq 'MANAGED_BUILD_REQUIRES_APPROVED_TEST_ENVIRONMENT') `
+Assert-Test ($profiles.managedBuild -ceq 'MANAGED_RELEASE_ARTIFACT_REQUIRES_APPROVED_TEST_REHEARSAL' -and
+    $artifact.releaseConstraints.managedBuild -ceq 'MANAGED_RELEASE_ARTIFACT_REQUIRES_APPROVED_TEST_REHEARSAL') `
     'Managed promotion remains blocked without an approved Test environment'
 
 $gateResult = @(& $gatePath)
-Assert-Test ($gateResult.Result -ceq 'TEST_TARGET_APPROVAL_REQUIRED' -and
+Assert-Test ($gateResult.Result -ceq 'TEST_REHEARSAL_RUNNER_READY_TARGET_REQUIRED' -and
+    $gateResult.Gate -ceq 'TEST_TARGET_APPROVAL_REQUIRED' -and
     $gateResult.NetworkOperations -eq 0 -and $gateResult.Imports -eq 0) `
     'Offline Test gate stops without target evidence and performs no connection or import'
 Assert-Test ($gateSource -notmatch '\bpac\b|Invoke-WebRequest|Invoke-RestMethod|solution import') `
@@ -129,7 +130,7 @@ try {
     $buildOutput = @(& $buildPath -OutputPath $temporaryZip)
     Assert-Test ($LASTEXITCODE -eq 0 -and $buildOutput.Result -ceq 'UNMANAGED_SOURCE_ROUNDTRIP_PASS' -and
         $buildOutput.RootComponents -eq 20 -and
-        $buildOutput.ManagedRelease -ceq 'MANAGED_BUILD_REQUIRES_APPROVED_TEST_ENVIRONMENT') `
+        $buildOutput.ManagedRelease -ceq 'MANAGED_RELEASE_ARTIFACT_REQUIRES_APPROVED_TEST_REHEARSAL') `
         'PAC pack/unpack round-trip passes with the pinned package'
 } finally {
     if (Test-Path -LiteralPath $temporaryZip) {

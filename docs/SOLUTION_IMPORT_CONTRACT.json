@@ -1,0 +1,44 @@
+{
+  "status": "OFFLINE_CONTRACT_DEFINED_NOT_EXECUTED",
+  "target": {
+    "mode": "TEST_OR_PROD",
+    "explicitTargetArgumentRequired": true,
+    "environmentDisplayNameRequired": true,
+    "organizationUrlRequired": true,
+    "environmentIdRequired": true,
+    "organizationIdRequired": true,
+    "pacWhoAmIAgreementRequired": true,
+    "targetIdentityGuardBeforeAnyWrite": true,
+    "testMustNotBeProductionBusinessRuntime": true
+  },
+  "artifact": {
+    "managedOnly": true,
+    "sha256PinRequired": true,
+    "solutionUniqueName": "os_sr_bso_rs_support",
+    "solutionVersion": "1.0.0.0",
+    "devOriginReviewArtifactAllowed": false,
+    "canonicalReleaseInputManifestRequired": true
+  },
+  "import": {
+    "publishAllXml": false,
+    "forceOverwrite": false,
+    "dependencyBypass": false,
+    "retriesOnAmbiguousWrite": 0,
+    "blindOverwriteAllowed": false,
+    "postImportReadOnlyReconciliationMandatory": true
+  },
+  "productionApprovalGates": [
+    "productionTargetApprovalEvidence",
+    "governanceGateComplete",
+    "migrationDecisionComplete",
+    "backupRecoveryGateComplete",
+    "securityOwnerApprovalComplete",
+    "releaseApprovalEvidence"
+  ],
+  "offlineGate": {
+    "script": "../scripts/Test-BsoRsSolutionImportGate.ps1",
+    "networkOperations": 0,
+    "imports": 0,
+    "status": "PREFLIGHT_ONLY"
+  }
+}

@@ -174,7 +174,7 @@ try {
         RootComponents = $packedSignatures.Count
         PackageSha256 = $packageHash
         PackageAssemblySha256 = $packageAssemblyHash
-        ManagedRelease = 'MANAGED_BUILD_REQUIRES_APPROVED_TEST_ENVIRONMENT'
+        ManagedRelease = 'MANAGED_RELEASE_ARTIFACT_REQUIRES_APPROVED_TEST_REHEARSAL'
         OutputPath = $outputFullPath
     }
 } catch {

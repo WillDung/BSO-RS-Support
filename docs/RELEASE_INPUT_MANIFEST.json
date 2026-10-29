@@ -1,0 +1,93 @@
+{
+  "manifestVersion": 1,
+  "status": "FROZEN_OFFLINE_SOURCE_INPUTS_NOT_A_RELEASE_APPROVAL",
+  "solution": {
+    "uniqueName": "os_sr_bso_rs_support",
+    "version": "1.0.0.0",
+    "packageType": "Managed",
+    "managedArtifactStatus": "MANAGED_RELEASE_ARTIFACT_REQUIRES_APPROVED_TEST_REHEARSAL"
+  },
+  "canonicalSource": {
+    "rootManifest": "../solutions/Other/Solution.xml",
+    "rootManifestSha256": "8b2254ce6c94ae7216b3b2e629298b0211958fb7a7aa8f0383b8fc58ccb31cfd",
+    "sourceFileCount": 285,
+    "sourceFingerprintAlgorithm": "SHA256_OF_UTF8_SORTED_LINES_RELATIVE_PATH_PIPE_FILE_SHA256",
+    "sourceFingerprint": "a58a6ef9ae81652fae3b2fedfc90e06feb5f16f88035ce9beb842aebcaf094d1",
+    "rootComponentFingerprint": "96b5a9e96fb5d5f6ecd619ed42762477c67651e8159168e9b5a8063445e48c3f",
+    "rootComponentCount": 20,
+    "sourceInventory": "SOLUTION_COMPONENT_INVENTORY.json"
+  },
+  "candidateCore": {
+    "packageFileName": "os_sr_cact_pkg.nupkg",
+    "packageUniqueName": "os_sr_cact_pkg",
+    "packageVersion": "1.0.0",
+    "packageSha256": "dbf6087203508c8a0016fede8bea2c77a3734a9e294b407197faa08235203b91",
+    "embeddedAssemblyTypeName": "os_sr_cact.ApplyCandidateAction",
+    "embeddedAssemblySha256": "05e983e86290bb70ba82b73177c21dc3a1d87fd14f0d4aeea39af062ed0a721a",
+    "publicKeyToken": null,
+    "sourceType": "FileStore",
+    "customApiHandlerTypeName": "os_sr_cact.ApplyCandidateAction",
+    "protectCandidateCoreDisposition": "ALL_50_STEPS_INACTIVE_AND_EXCLUDED",
+    "referenceTopology": {
+      "existingPackageOnly": true,
+      "newPackageAllowed": false,
+      "handlerRemapAllowed": false,
+      "guardMutationAllowed": false,
+      "legacyAssemblyMutationAllowed": false
+    }
+  },
+  "candidateConsole": {
+    "candidate-console-environment.js": "39135f67e4c96959bc0cb983c3b986bdfed1966df34432713180fe11ac0d6c1f",
+    "candidate-console-policy.js": "0cecccb9377cebef716ecc41672f34feb7cf4970549a23864f9c943e5aada78b",
+    "candidate-console.html": "0f1203de2cf2c0e1dc487d9f1db289e19fa9c199d4b6d61aceb29e84c989791c",
+    "candidate-console.js": "768b61cd2b60695b2312376cdb33f482350c5e235a544c0742641470cde66669",
+    "candidate-console.css": "6681994a0d57e46ed1b3f0be291556fba37be262f822c8b483d31d00f1130fde"
+  },
+  "environmentPolicy": {
+    "portableProfileSource": "../solutions/release-profiles.json",
+    "portableProfileSourceSha256": "41325b65d7117399013acce084a067d5279ff3f9229367e6838967e76b6f98b8",
+    "checkedInConfiguration": "UNCONFIGURED",
+    "targetBoundConfigurationGeneration": "EXTERNAL_APPROVED_INPUTS_REQUIRED",
+    "candidateCoreEnabledForReleaseProfile": true,
+    "syntheticDataOnly": true,
+    "devDirectWriteFallbackEnabled": false,
+    "diagnosticsMode": "OFF"
+  },
+  "releaseTooling": {
+    "pacCliVersion": "2.13.1+g251dee1",
+    "builder": "../scripts/Build-BsoRsPortableSolution.ps1",
+    "builderSha256": "fd5e7dbb3320c3593e6ccf1d7a5d93eb2144e4a5ed1f5b7b6a12adba582e5d95",
+    "testRehearsalGate": "../scripts/Test-BsoRsTestRehearsalGate.ps1",
+    "testRehearsalGateSha256": "ddc591a67ccdc896064a4b6c4539020df685528b7591cfd672b2b1d26190c186",
+    "solutionImportGate": "../scripts/Test-BsoRsSolutionImportGate.ps1",
+    "solutionImportGateSha256": "2ab3fac36b9da39a0711ed1423aa32bcb3cd8d533e77cb481aa4284afe4010e3",
+    "configurationGenerator": "../scripts/New-BsoRsCandidateConsoleEnvironmentConfig.ps1",
+    "configurationGeneratorSha256": "f8d5892a94d89163b0b0945841ee981cc40e1b9091f78ec4a55ba3d744d9f5b4",
+    "inventoryGenerator": "../scripts/New-BsoRsSolutionComponentInventory.ps1",
+    "inventoryGeneratorSha256": "a144af8d8a99147c01c638749835750ba71d86e60ec2a66687777cb4cab55c5a",
+    "toolFingerprintAlgorithm": "SHA256_OF_UTF8_SORTED_LINES_RELATIVE_PATH_PIPE_FILE_SHA256",
+    "toolFingerprint": "96b21a49cf49b59c9c4d6987b7d39e40f1f14f8a179f197f4323c762d873f82a"
+  },
+  "devOriginReviewArtifact": {
+    "disposition": "DEV_ORIGIN_REVIEW_ARTIFACT_NOT_RELEASEABLE",
+    "sha256": "48ff2d69452a4602a2ab0f725c5854a2d81e44eca77bd8067a47ad1b40d55611",
+    "selectableForTestOrProduction": false
+  },
+  "targetEvidence": {
+    "testUrl": null,
+    "testEnvironmentId": null,
+    "testOrganizationId": null,
+    "productionUrl": null,
+    "productionEnvironmentId": null,
+    "productionOrganizationId": null,
+    "userIdentities": null,
+    "secrets": null
+  },
+  "releaseConstraints": {
+    "noEnvironmentOperationAuthorized": true,
+    "managedArtifactMustBeBuiltFromCanonicalSourceThroughApprovedTestWorkflow": true,
+    "retriesOnAmbiguousWrites": 0,
+    "publishAllXml": false,
+    "realDataAllowed": false
+  }
+}

@@ -20,6 +20,11 @@
     "signing": false,
     "automaticRetries": 0,
     "ambiguousWrite": "GET_ONLY_RECONCILIATION_NO_RESEND",
-    "managedBuild": "MANAGED_BUILD_REQUIRES_APPROVED_TEST_ENVIRONMENT"
+    "managedBuild": "MANAGED_RELEASE_ARTIFACT_REQUIRES_APPROVED_TEST_REHEARSAL"
+  },
+  "devOriginReviewArtifact": {
+    "disposition": "DEV_ORIGIN_REVIEW_ARTIFACT_NOT_RELEASEABLE",
+    "sha256": "48ff2d69452a4602a2ab0f725c5854a2d81e44eca77bd8067a47ad1b40d55611",
+    "selectableForTestOrProduction": false
   }
 }

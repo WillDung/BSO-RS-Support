@@ -152,6 +152,97 @@ $inventory = [ordered]@{
         packageBackedAssemblyManagedSeparately = 1
         temporaryDevCustomApiExcluded = 'os_sr_devcs'
     }
+    countSemantics = [ordered]@{
+        exportRoots = $components.Count
+        canonicalSolutionRoots = 20
+        excludedRoots = 52
+        canonicalRootsByType = @(
+            [ordered]@{ type = 1; typeName = 'Entity'; count = 10 }
+            [ordered]@{ type = 9; typeName = 'OptionSet'; count = 2 }
+            [ordered]@{ type = 20; typeName = 'SecurityRole'; count = 1 }
+            [ordered]@{ type = 61; typeName = 'WebResource'; count = 5 }
+            [ordered]@{ type = 62; typeName = 'AppModuleSiteMap'; count = 1 }
+            [ordered]@{ type = 80; typeName = 'AppModule'; count = 1 }
+        )
+        excludedRootsByType = @(
+            [ordered]@{
+                type = 91
+                typeName = 'PluginAssembly'
+                count = 2
+                disposition = 'one signed rollback-only root excluded; active package-backed assembly is delivered through the retained package artifact'
+            }
+            [ordered]@{
+                type = 92
+                typeName = 'SdkMessageProcessingStep'
+                count = 50
+                disposition = 'inactive ProtectCandidateCore registrations excluded to prevent reactivation'
+            }
+        )
+        additionalSourceNotRootCounts = [ordered]@{
+            customApiFiles = $allApiFiles.Count
+            entityMetadataFiles = $entityMetadataFiles.Count
+            webResourceMetadataFiles = $webResourceMetadataFiles.Count
+            candidateCorePackageArtifacts = 1
+        }
+        explanation = 'The 72 count is the retained unmanaged export RootComponent inventory. The 20 count is the canonical Solution.xml root set after excluding 50 inactive guard steps and both PluginAssembly roots. The accepted unsigned package is retained separately with its PluginPackage metadata and is not an additional RootComponent in the 20-root manifest. Custom API, entity, and web-resource metadata files are included source details rather than separate counted roots.'
+    }
+    requiredCapabilityDisposition = @(
+        [ordered]@{
+            capability = 'srapp AppModule'
+            classification = 'CANONICAL_SOURCE'
+            evidence = 'AppModules/srapp/AppModule.xml'
+        }
+        [ordered]@{
+            capability = 'srapp Site Map and navigation'
+            classification = 'CANONICAL_SOURCE'
+            evidence = 'AppModuleSiteMaps/srapp/AppModuleSiteMap.xml'
+        }
+        [ordered]@{
+            capability = 'Candidate Console HTML, JavaScript, and CSS'
+            classification = 'CANONICAL_SOURCE'
+            evidence = 'CandidateConsole/WebResources/os_/bso and matching WebResources metadata'
+        }
+        [ordered]@{
+            capability = 'Environment configuration and policy'
+            classification = 'DEPLOYMENT_TIME_CONFIGURATION'
+            evidence = 'Unconfigured source template and canonical policy are retained; target-bound configuration and its HTML cache token are generated outside the repository from explicit approved target inputs.'
+        }
+        [ordered]@{
+            capability = 'Candidate, Call Log, Candidate Status History, Interview Schedule, Operation Receipt, Position, Candidate Source, TA Directory, Location'
+            classification = 'CANONICAL_SOURCE'
+            evidence = 'Entity roots and Entity.xml metadata under Entities/'
+        }
+        [ordered]@{
+            capability = 'Choices, relationships, alternate keys, forms, and views'
+            classification = 'CANONICAL_SOURCE'
+            evidence = 'OptionSets/ and included entity metadata files; checked by source completeness tests.'
+        }
+        [ordered]@{
+            capability = 'BSO security-role definition'
+            classification = 'CANONICAL_SOURCE'
+            evidence = 'Roles/BSO-RS Support - BSO.xml'
+        }
+        [ordered]@{
+            capability = 'Candidate Core Custom API metadata'
+            classification = 'CANONICAL_SOURCE'
+            evidence = 'customapis/os_sr_cact and retained Candidate Core API files'
+        }
+        [ordered]@{
+            capability = 'Candidate Core package and package-backed handler reference topology'
+            classification = 'CANONICAL_SOURCE'
+            evidence = 'pluginpackages/os_sr_cact_pkg/pluginpackage.xml and the pinned unsigned package; Custom API metadata retains the handler binding.'
+        }
+        [ordered]@{
+            capability = 'Signed legacy Candidate Core assembly'
+            classification = 'ROLLBACK_ONLY'
+            evidence = 'Hash-pinned in ROLLBACK_MANIFEST.json; binary excluded from canonical source.'
+        }
+        [ordered]@{
+            capability = 'Email, Teams, calendar/free-busy, room, SharePoint/CV, and LEGO Careers integrations'
+            classification = 'EXTERNAL_DEPENDENCY'
+            evidence = 'No integration roots appear in this Solution export; launch inclusion remains a product decision.'
+        }
+    )
     components = @($components)
 }
 

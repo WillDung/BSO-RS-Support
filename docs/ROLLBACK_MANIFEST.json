@@ -7,5 +7,59 @@
   "sha256": "089deb40816e7fd6d80d117ba3894b5d5dadbcf65ac8111e25bb0520ff6feb85",
   "recoverySource": "Retained managed DEV-origin export in session-local evidence; not a promotion artifact.",
   "mutationAllowed": false,
-  "activationAllowed": false
+  "activationAllowed": false,
+  "rollbackPlan": {
+    "offlinePlanStatus": "ROLLBACK_PLAN_OFFLINE_READY",
+    "runtimeRollbackStatus": "ROLLBACK_EVIDENCE_REQUIRED_BEFORE_IMPORT",
+    "decisionTree": [
+      {
+        "predicate": "PRE_IMPORT_BACKUP_AND_READ_ONLY_BASELINE_VERIFIED",
+        "ifFalse": "STOP_BEFORE_IMPORT"
+      },
+      {
+        "predicate": "PRIOR_APPROVED_MANAGED_SOLUTION_IDENTITY_AND_SHA256_VERIFIED",
+        "ifFalse": "STOP_BEFORE_IMPORT"
+      },
+      {
+        "predicate": "PRIOR_EXISTING_CANDIDATE_CORE_PACKAGE_ARTIFACT_AND_SHA256_VERIFIED",
+        "ifFalse": "STOP_BEFORE_PACKAGE_UPDATE"
+      },
+      {
+        "predicate": "PRIOR_CANDIDATE_CONSOLE_RESOURCE_HASHES_AND_CONFIGURATION_CAPTURED",
+        "ifFalse": "STOP_BEFORE_WEB_RESOURCE_UPDATE"
+      },
+      {
+        "predicate": "TARGET_SPECIFIC_CONFIGURATION_RESTORATION_PLAN_APPROVED",
+        "ifFalse": "STOP_BEFORE_RELEASE"
+      },
+      {
+        "predicate": "CUSTOM_API_HANDLER_PACKAGE_TOPOLOGY_AND_API_CONTRACT_RECONCILIATION_DEFINED",
+        "ifFalse": "STOP_BEFORE_RELEASE"
+      },
+      {
+        "predicate": "CANDIDATE_CORE_ONLY_PROTECTED_WRITE_PATH_AND_FIVE_DIRECT_WRITE_DENIALS_PRESERVED",
+        "ifFalse": "STOP_AND_ESCALATE_SECURITY_FAILURE"
+      },
+      {
+        "predicate": "POST_ROLLBACK_SYNTHETIC_SMOKE_AND_READ_ONLY_RECONCILIATION_APPROVED",
+        "ifFalse": "STOP_BEFORE_ROLLBACK"
+      }
+    ],
+    "forbiddenRecovery": [
+      "reactivate ProtectCandidateCore",
+      "automatically remap handler to the signed legacy assembly",
+      "modify or activate the legacy signed assembly",
+      "blindly resend an ambiguous package update",
+      "delete business data to simulate rollback"
+    ],
+    "evidence": {
+      "preImportBackupReference": null,
+      "priorApprovedManagedSolutionSha256": null,
+      "priorCandidateCorePackageSha256": null,
+      "priorCandidateConsoleResourceSha256": null,
+      "priorConfigurationHash": null,
+      "targetRecoveryOwnerEvidence": null,
+      "runtimeRecoveryRehearsed": false
+    }
+  }
 }

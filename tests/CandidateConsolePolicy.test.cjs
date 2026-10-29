@@ -139,7 +139,15 @@ test("invalid or unconfigured policies fail closed", () => {
     "BLOCK_UNRECOGNIZED_ENVIRONMENT"
   );
   assert.equal(
+    policy.resolve(configuration({ mode: "STAGING" }), runtime()).reason,
+    "BLOCK_UNRECOGNIZED_ENVIRONMENT"
+  );
+  assert.equal(
     policy.resolve(configuration({ candidateCoreEnabled: false }), runtime()).reason,
+    "CONFIGURATION_INVALID"
+  );
+  assert.equal(
+    policy.resolve(configuration({ organizationId: "" }), runtime()).reason,
     "CONFIGURATION_INVALID"
   );
   assert.equal(

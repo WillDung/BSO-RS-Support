@@ -1,6 +1,23 @@
 # Product Decisions and Open Items
 
-This log separates explicit product rules from choices requiring confirmation. Statuses reflect the supplied materials and repository evidence through 23 October 2026; a design proposal is not approval.
+This log separates explicit product rules from choices requiring confirmation. Statuses reflect repository and acceptance evidence through 29 October 2026; a design proposal is not approval.
+
+## Production readiness decisions still open (29 October 2026)
+
+No approved decision is recorded for the following scope. Keep each unresolved item as `PRODUCT_DECISION_REQUIRED`; do not infer a launch decision from design requirements or prior DEV acceptance.
+
+| Topic | Current disposition | Required decision |
+|---|---|---|
+| Outlook/email | `PRODUCT_DECISION_REQUIRED` | Decide whether email dispatch is in initial launch; if enabled, approve connector identity, sender, DLP, idempotency, privacy, and recovery controls. |
+| Teams | `PRODUCT_DECISION_REQUIRED` | Decide initial-launch inclusion and meeting-link/organizer behavior. |
+| Calendar/free-busy | `PRODUCT_DECISION_REQUIRED` | Decide when external availability and booking are enabled; approve identity, access, and uncertain-outcome handling. |
+| Rooms | `PRODUCT_DECISION_REQUIRED` | Decide whether offline room resource availability is in the initial enabled scope. |
+| SharePoint/CV | `PRODUCT_DECISION_REQUIRED` | Decide whether CV binary storage is needed; approve access, retention, scanning, and whether URL-only remains the launch model. |
+| LEGO Careers | `PRODUCT_DECISION_REQUIRED` | Decide initial-launch inclusion; confirm proxy API contract and owner before implementation. |
+| ATSugg migration | `MIGRATION_DECISION_REQUIRED` | Approve either `GREENFIELD_NO_IMPORT` or `MIGRATION_REQUIRED`. No ATSugg data was inspected. |
+| Production support/recovery ownership | `OWNER_REQUIRED` | Assign deployment, rollback, support, monitoring, incident escalation, and backup/restore validation owners; decide recovery objectives. |
+
+These are external business/organizational decisions, not local implementation defects. See [Readiness Blocker Ledger](READINESS_BLOCKER_LEDGER.md) and [Production Release Runbook](PRODUCTION_RELEASE_RUNBOOK.md).
 
 ## Established product rules
 

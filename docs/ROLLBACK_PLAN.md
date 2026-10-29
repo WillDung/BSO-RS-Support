@@ -1,12 +1,14 @@
 # BSO-RS-Support Rollback Plan
 
-**Status:** Proposed and not rehearsed. No rollback artifact or downstream recovery operation is claimed to exist. This plan is not authorization to change an environment.
+**Status:** `ROLLBACK_PLAN_OFFLINE_READY`; runtime rollback remains `ROLLBACK_EVIDENCE_REQUIRED_BEFORE_IMPORT`. The decision tree and stop predicates are specified, but no downstream backup, prior approved managed Solution, prior package artifact, target configuration capture, or recovery rehearsal is claimed to exist. This plan is not authorization to change an environment.
 
 ## Preconditions
 
 Before any Test or Production release, record the approved target, release change, recovery owner, recovery window, restore point, expected data impact, and exact rollback authority. Retain the prior reviewed managed Solution, package and web-resource hashes, dependency inventory, configuration policy, and a protected deployment journal outside the repository. Validate that the selected recovery method is supported for that environment before the release begins.
 
 Do not proceed if the prior release cannot be identified exactly, the backup/restore posture is unknown, the rollback package or configuration is unverified, or external email/calendar/SharePoint effects cannot be reconciled.
+
+The `rollbackPlan.decisionTree` in [ROLLBACK_MANIFEST.json](ROLLBACK_MANIFEST.json) is the authoritative predicate list. Before import, require a verified pre-import backup and baseline; exact prior approved managed Solution identity/hash; prior existing Candidate Core package identity/hash; Candidate Console resource and configuration hashes; approved configuration restoration procedure; current Custom API/package/handler topology; preserved Candidate Core-only protected write path and five direct-write denials; and an approved synthetic post-rollback smoke plus read-only reconciliation. The evidence fields are deliberately null until supplied and verified for the target.
 
 ## Stop and preserve evidence
 
@@ -35,6 +37,7 @@ Do not proceed if the prior release cannot be identified exactly, the backup/res
 - Preserve the active package-backed handler and Custom API contract. Do not create a new PluginPackage, patch the handler or guard, modify the separate signed legacy rollback assembly, reactivate `ProtectCandidateCore`, inspect signing keys, enable Profiler, or change PluginTraceLog.
 - Require immediate read-only topology reconciliation. If artifact identity or outcome is uncertain, stop; do not resend.
 - A prior package artifact and release-specific one-shot rollback procedure have not been independently established for this ALM continuation. Do not infer the legacy signed assembly is an approved package rollback.
+- `ModifiedOn` may be recorded when available but is not a mandatory success predicate. Server-readable package bytes are not assumed; use supported deployment acknowledgement and topology reconciliation without claiming a server-side content hash.
 
 ## External side effects and data
 
@@ -47,10 +50,11 @@ Use synthetic records only. Do not use this plan to restore or reconcile real ca
 Recovery is accepted only after:
 
 - the exact target and artifact identities are independently reconciled;
+- a pre-import backup/baseline and prior approved release artifact set were verified;
 - the Candidate Console and approved app load under the intended test identity;
 - Candidate Core remains the only approved protected business-write path;
 - direct protected writes remain denied by standard Dataverse privileges;
 - synthetic workflow, idempotency, audit, privacy, and recovery checks pass; and
 - no unexpected external side effects or unexplained record changes remain.
 
-Production recovery requires separate incident, business, security, and change-control authorization. Current disposition: `ROLLBACK_PLAN_PROPOSED_NOT_REHEARSED`.
+Production recovery requires separate incident, business, security, and change-control authorization. The current offline plan is ready; actual rollback remains blocked until its external evidence fields are populated and recovery is rehearsed.

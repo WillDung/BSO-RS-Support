@@ -85,6 +85,21 @@ try {
     Assert-Test ($rejected -and -not (Test-Path -LiteralPath $rejectedOutputPath)) `
         'Reject non-synthetic DEV configuration before producing a file'
 
+    $rejected = $false
+    try {
+        & $generatorPath `
+            -Mode STAGING `
+            -OrganizationUrl 'https://test.example.invalid' `
+            -EnvironmentId '11111111-1111-4111-8111-111111111111' `
+            -OrganizationId '22222222-2222-4222-8222-222222222222' `
+            -OutputConfigurationPath $rejectedOutputPath `
+            -OutputHtmlPath $rejectedHtmlPath
+    } catch {
+        $rejected = $true
+    }
+    Assert-Test ($rejected -and -not (Test-Path -LiteralPath $rejectedOutputPath)) `
+        'Reject unknown environment modes before producing target configuration'
+
     $releaseOutputPath = Join-Path ([IO.Path]::GetTempPath()) "release-$tempName.js"
     $releaseHtmlPath = Join-Path ([IO.Path]::GetTempPath()) "release-$tempName.html"
     & $generatorPath `
@@ -105,6 +120,29 @@ try {
         $releaseConfiguration.diagnosticsMode -ceq 'OFF') `
         'Emit a fail-closed synthetic TEST release profile'
     Remove-Item -LiteralPath $releaseOutputPath, $releaseHtmlPath
+
+    $devReleaseOutputPath = Join-Path ([IO.Path]::GetTempPath()) "release-dev-$tempName.js"
+    $devReleaseHtmlPath = Join-Path ([IO.Path]::GetTempPath()) "release-dev-$tempName.html"
+    & $generatorPath `
+        -Mode DEV `
+        -OrganizationUrl 'https://dev.example.invalid' `
+        -EnvironmentId '11111111-1111-4111-8111-111111111111' `
+        -OrganizationId '22222222-2222-4222-8222-222222222222' `
+        -OutputConfigurationPath $devReleaseOutputPath `
+        -OutputHtmlPath $devReleaseHtmlPath `
+        -ReleaseProfile | Out-Null
+    $devReleaseText = [IO.File]::ReadAllText($devReleaseOutputPath)
+    $devReleaseMatch = [regex]::Match($devReleaseText, '(?s)const configuration = (?<json>\{.*?\});')
+    $devReleaseConfiguration = $devReleaseMatch.Groups['json'].Value | ConvertFrom-Json
+    Assert-Test ($devReleaseMatch.Success -and $devReleaseConfiguration.mode -ceq 'DEV' -and
+        $devReleaseConfiguration.environmentId -ceq '11111111-1111-4111-8111-111111111111' -and
+        $devReleaseConfiguration.organizationId -ceq '22222222-2222-4222-8222-222222222222' -and
+        $devReleaseConfiguration.candidateCoreEnabled -eq $true -and
+        $devReleaseConfiguration.syntheticDataOnly -eq $true -and
+        $devReleaseConfiguration.devDirectWriteFallbackEnabled -eq $false -and
+        $devReleaseConfiguration.diagnosticsMode -ceq 'OFF') `
+        'Bind DEV release configuration to explicit target evidence and keep fallback disabled'
+    Remove-Item -LiteralPath $devReleaseOutputPath, $devReleaseHtmlPath
 
     $releaseProfileFailures = @(
         @{ Name = 'Candidate Core disabled'; Options = @{ CandidateCoreEnabled = $false } },
@@ -130,7 +168,7 @@ try {
     }
 } finally {
     foreach ($path in @($outputPath, $htmlOutputPath, $rejectedOutputPath, $rejectedHtmlPath,
-        $releaseOutputPath, $releaseHtmlPath)) {
+        $releaseOutputPath, $releaseHtmlPath, $devReleaseOutputPath, $devReleaseHtmlPath)) {
         if (-not [string]::IsNullOrWhiteSpace([string]$path) -and
             (Test-Path -LiteralPath $path)) {
             Remove-Item -LiteralPath $path

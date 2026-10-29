@@ -10,6 +10,10 @@ Do not blindly rerun Apply after any partial registration. Use the retained jour
 
 Scripts here support reviewed build, validation, migration, and ALM tasks. They must be safe by default, avoid embedded credentials and personal data, clearly identify environment effects, and include verification instructions.
 
+## Candidate Console scoped refresh
+
+[Deploy-BsoRsCandidateConsole.ps1](Deploy-BsoRsCandidateConsole.ps1) supports an existing-resource refresh with `-RefreshExisting`. `-RefreshResourceNames` can narrow that mode to exact existing resources from the fixed Candidate Console allowlist; it is rejected outside a fresh refresh and cannot be combined with continuation. The selected resource IDs alone are included in scoped `PublishXml` alongside `srapp`; the refresh does not patch the sitemap. Without the selector, the existing three-resource refresh behavior is unchanged. Every selected resource is read back and reconciled, automatic retries are zero, and uncertain writes stop without retry.
+
 ## Phase 5A Candidate Core runtime acceptance
 
 [Test-BsoRsCandidateCorePhase5A.ps1](Test-BsoRsCandidateCorePhase5A.ps1) is a separate, bounded VN LMV IT runtime runner; it does not reuse the historical Phase 3D guard-focused runner. `PlanOnly` verifies the active PAC/Az identity, `os_sr_cact` execution privilege, entity metadata, active `[DEV]` TA/Location references, and zero-row gates for fresh synthetic `.invalid` Candidates and operation correlations. `Apply` is explicitly pinned to VN LMV IT, allows exactly 27 Custom API POSTs with zero retries, reserves each call in a new evidence journal, and writes only through `os_sr_cact`. The matrix covers Answered, No Answer, Call Back Requested, Waiting Manual Scheduling, Schedule, Pass, Fail, Reschedule, Cancel, identical/conflicting replay, and stale ExpectedStatus; it reads back only the four synthetic Candidates and their related records. It does not create, delete, publish, assign roles, or inspect/reopen ProtectCandidateCore registrations. An uncertain or rejected unexpected operation stops the run; do not reuse an evidence path or automatically rerun a partially dispatched matrix.

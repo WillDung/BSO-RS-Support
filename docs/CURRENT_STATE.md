@@ -1,5 +1,11 @@
 # Current State
 
+## Phase 5B browser parser refreshed; CreateCandidate localized to Receipt create (2026-10-29)
+
+**Status:** `PHASE_5B_CANDIDATE_CORE_FAILURE:RECEIPT_CREATE`; sanitized Dataverse code `0x80040299`. Phase 5B is not accepted. The existing scoped Candidate Console refresh workflow updated only `os_/bso/candidate-console.js`, then only `os_/bso/candidate-console.html` after a browser reload proved its served cache token was stale. Each exact resource received one PATCH and one scoped `PublishXml` for `srapp` plus that resource; sitemap patches, package deployment, schema/security changes, and retries were zero. Published GET readback reconciled both resources. The current local JS SHA-256 is `82a252c25d5c33b557ff41a8b339f3879c6dff3d7d54f53bf8cba43c7f138ea4`; its HTML cache token is `82a252c25d5c`.
+
+After a cache-bypassing reload, the exact `srapp` browser loaded that JS token and matching full hash; Candidate Core was active, DEV fallback was off, and fresh WhoAmI confirmed VN LMV IT. Exactly one fresh synthetic CreateCandidate was submitted. The HTTP 400 response had only the expected `error.code` and `error.message` shape; a safe allowlist match in `error.message` returned `RECEIPT_CREATE:0x80040299`, and the updated UI displayed that category/code without raw fault text. Read-only reconciliation found **0 Candidates / 0 Call Logs / 0 Status Histories / 0 Interview Schedules / 0 related Operation Receipts** for this synthetic attempt. The Receipt schema/key and Candidate Core contract reconciliation passed; source inspection found no deterministic defect established by this stage/code. Do not retry or make a speculative repair. No lifecycle continuation or five direct-write negatives followed. Real data and Production remain prohibited.
+
 ## Phase 5B safe-stage correction deployed; runtime stage not surfaced (2026-10-29)
 
 **Status:** `PHASE_5B_CANDIDATE_CORE_FAILURE:SAFE_STAGE_UNAVAILABLE`; Phase 5B is not accepted. The local Candidate Core source now classifies CreateCandidate validation, caller-reference, Receipt read, Candidate create/readback, Receipt create, and response failures as `CANDIDATE_CORE_OPERATION_REJECTED:CREATE_CANDIDATE:<STAGE>:<SANITIZED_CODE>`. The console parser and SDK regression were updated locally; the Candidate Console web resource itself was not deployed.

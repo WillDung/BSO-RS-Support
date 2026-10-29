@@ -246,6 +246,14 @@ Assert-Test ($publishCalls.Count -eq 2 -and
     $deployment.Contains('PUBLISHED_GET_RECONCILED') -and
     $deployment.Contains('PUBLISH_ACCEPTED_RECONCILIATION_FAILED')) `
     'Require exact published-resource GET reconciliation after each scoped PublishXml'
+$resourceSelection = $deployment.IndexOf('$resources = @($resources | Where-Object { $RefreshResourceNames -ccontains $_.Name })')
+$publishLabel = $deployment.IndexOf('$publishLabel = "srapp + $($resources.Count) exact web resources scoped PublishXml"')
+Assert-Test ($deployment.Contains('[string[]]$RefreshResourceNames = @()') -and
+    $deployment.Contains('if (-not $RefreshExisting -or $Continue)') -and
+    $resourceSelection -ge 0 -and $publishLabel -gt $resourceSelection -and
+    $deployment.Contains('$publishEntry = @($script:Journal.Dispatches | Where-Object Name -CEQ $publishLabel)[0]') -and
+    $deployment.Contains('foreach ($resourceId in $script:Journal.ResourceIds)')) `
+    'Allow an exact existing-resource refresh and scope PublishXml to only selected web resources'
 
 $hash = (Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $version = [regex]::Match($html, 'candidate-console\.js\?v=([0-9a-f]+)')

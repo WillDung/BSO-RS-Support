@@ -4,6 +4,8 @@ param(
     [switch]$Apply,
     [switch]$Continue,
     [switch]$RefreshExisting,
+    [ValidateSet('os_/bso/candidate-console.html', 'os_/bso/candidate-console.css', 'os_/bso/candidate-console.js')]
+    [string[]]$RefreshResourceNames = @(),
     [Parameter(Mandatory)][string]$EnvironmentName,
     [Parameter(Mandatory)][string]$OrganizationUrl,
     [Parameter(Mandatory)][string]$ExpectedEnvironmentId,
@@ -65,6 +67,20 @@ if ($EnvironmentName -cne $target.EnvironmentName -or
     ($RefreshExisting -and -not $Apply -and (Test-Path -LiteralPath $EvidencePath))) {
     throw 'Candidate Console target or new evidence path is not exact.'
 }
+if ($RefreshResourceNames.Count -gt 0) {
+    if (-not $RefreshExisting -or $Continue) {
+        throw 'Exact resource selection is supported only by a fresh existing-resource refresh.'
+    }
+    $uniqueRefreshResourceNames = @($RefreshResourceNames | Select-Object -Unique)
+    if ($uniqueRefreshResourceNames.Count -ne $RefreshResourceNames.Count) {
+        throw 'Exact refresh resource selection contains duplicates.'
+    }
+    $resources = @($resources | Where-Object { $RefreshResourceNames -ccontains $_.Name })
+    if ($resources.Count -ne $RefreshResourceNames.Count) {
+        throw 'Exact refresh resource selection did not resolve every requested resource.'
+    }
+}
+$publishLabel = "srapp + $($resources.Count) exact web resources scoped PublishXml"
 foreach ($resource in $resources) {
     $resource.Path = [IO.Path]::GetFullPath($resource.Path)
     if (-not (Test-Path -LiteralPath $resource.Path -PathType Leaf)) {
@@ -440,7 +456,7 @@ try {
     if ($RefreshExisting) {
         if (@($existing.value).Count -ne $resources.Count -or
             @($existing.value | Where-Object { $_.name -notin @($resources | ForEach-Object Name) }).Count -ne 0) {
-            throw 'Refresh requires exactly the three existing Candidate Console web resources.'
+            throw 'Refresh requires exactly the selected existing Candidate Console web resources.'
         }
         foreach ($resource in $resources) {
             $matches = @($existing.value | Where-Object name -CEQ $resource.Name)
@@ -547,7 +563,7 @@ try {
             })
         }
         $script:Journal.Dispatches.Add([ordered]@{
-            Name = 'srapp + three web resources scoped PublishXml'
+            Name = $publishLabel
             State = 'PLANNED'
             HttpStatus = $null
             WebResourceId = $null
@@ -612,7 +628,7 @@ try {
         }
         [void]$webresourceXml.Append('</webresources>')
         $parameterXml = "<importexportxml>$($webresourceXml.ToString())<appmodules><appmodule>$($target.AppId)</appmodule></appmodules></importexportxml>"
-        $publishEntry = @($script:Journal.Dispatches | Where-Object Name -CEQ 'srapp + three web resources scoped PublishXml')[0]
+        $publishEntry = @($script:Journal.Dispatches | Where-Object Name -CEQ $publishLabel)[0]
         $publishEntry.State = 'DISPATCH_RESERVED'
         $script:Journal.PublishXml = 'DISPATCH_RESERVED'
         Save-Journal
@@ -639,7 +655,7 @@ try {
             WebResourcePatchCount = $script:Counts.PATCH
             SitemapPatchCount = 0
             PublishXmlCount = 1
-            PublishXmlScope = 'srapp + three exact web resources'
+            PublishXmlScope = "srapp + $($resources.Count) exact web resources"
             PublishedWebResourceReadback = 'GET_RECONCILED'
             AutomaticRetries = 0
             EvidencePath = $EvidencePath

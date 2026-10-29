@@ -1,5 +1,15 @@
 # Phase 5B role assignment and security acceptance - 28 October 2026
 
+## 29 October 2026 continuation - Candidate Console refreshed; Receipt create failure localized
+
+**Current status:** `PHASE_5B_CANDIDATE_CORE_FAILURE:RECEIPT_CREATE`; sanitized Dataverse code `0x80040299`. This is not a Phase 5B pass.
+
+The local parser already recognized the safe Candidate Core stage format, but the live HTML still referenced the previous JavaScript cache token. The existing scoped Candidate Console refresh workflow first patched only `os_/bso/candidate-console.js`, then patched only `os_/bso/candidate-console.html` after reload proved its served token stale. Each exact resource was patched once and published in a separate scoped `PublishXml` alongside `srapp`; published GET readback reconciled each. No package, sitemap, schema, role, guard, or other resource changes occurred; retries were zero. The current JS SHA-256 is `82a252c25d5c33b557ff41a8b339f3879c6dff3d7d54f53bf8cba43c7f138ea4`; the HTML cache token is `82a252c25d5c`.
+
+A cache-bypassing reload of exact `srapp` confirmed the HTML requested the matching JS, the returned JS bytes matched the local full SHA-256, Candidate Core was active, DEV fallback was off, and fresh WhoAmI matched VN LMV IT. Exactly one fresh synthetic CreateCandidate was submitted. It returned HTTP 400 / `0x80040265`; the sanitized response contained only top-level `error` with `code` and `message`. An allowlisted match from `error.message` was `RECEIPT_CREATE:0x80040299`, and the updated UI surfaced that stage/code without raw fault text.
+
+Read-only aggregate reconciliation for this synthetic attempt found **0 Candidates / 0 Call Logs / 0 Status Histories / 0 Interview Schedules / 0 related Operation Receipts**. The existing Receipt schema/key and Candidate Core contract reconciled exactly with zero writes. Source review confirms the `CreateReceipt` payload corresponds to the documented Receipt columns, but the stage/code and available evidence do not prove a deterministic source defect. No package update, second Candidate Core call, lifecycle continuation, or direct-write negative test is authorized by the evidence in this continuation. Phase 5B remains blocked; real data remains prohibited and Production deployment remains out of scope.
+
 ## 29 October 2026 continuation - safe-stage correction deployment and stop
 
 **Current status:** `PHASE_5B_CANDIDATE_CORE_FAILURE:SAFE_STAGE_UNAVAILABLE`; this is not a Phase 5B pass. Local Candidate Core changes classify CreateCandidate failures as `CANDIDATE_CORE_OPERATION_REJECTED:CREATE_CANDIDATE:<STAGE>:<SANITIZED_CODE>`, including input and reference validation as well as Receipt read, Candidate create/readback, Receipt create, and response. The Candidate Console parser was updated locally to understand that shape, and SDK regressions were added. The web resource itself was not deployed.

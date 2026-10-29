@@ -1,5 +1,13 @@
 # Current State
 
+## Phase 5B App Opener read baseline corrected; app metadata gateway blocked (2026-10-29)
+
+**Status:** `PHASE_5B_SRAPP_BASELINE_CORRECTED_ACCEPTANCE_PENDING_GATEWAY`. The authenticated browser WhoAmI now matches the approved test identity in VN LMV IT. Live comparison found 81 privileges on the predefined App Opener role, 25 on BSO before correction, and 72 App Opener privileges absent from BSO (35 read-only and 37 non-read/mutating entries). Only three read privileges demonstrated as blockers by browser errors were added to `BSO-RS Support - BSO`: `prvReadEntity`, `prvReadAttribute`, and `prvReadRelationship`, each at the App Opener role's live Global depth. Retries: zero per one-shot privilege addition.
+
+Role/effective-access readback confirmed all three privileges at matching App Opener depth; the BSO role still has no Candidate, Call Log, Status History, or Interview Schedule Create/Write privileges. The test identity's only direct role remains BSO, its only team remains the default owner team, and no effective publish/customization-write, role-management, or protected business-write conflict was found. The BSO role was already on `srapp`; no app access association changed. The other App Opener delta was not copied.
+
+After correcting `prvReadEntity` and `prvReadAttribute`, the next browser-reported blocker was `prvReadRelationship`; that denial cleared on reload. Four bounded reload attempts then returned HTTP 502 during model-driven metadata retrieval; the latest browser log at 09:13:14 identified `GetClientMetadata`. No new specific privilege denial was present, so no additional privileges were granted. Browser WhoAmI succeeded, but `srapp` did not finish loading; Candidate Core path/fallback state, Candidate lifecycle, reference selectors, direct-write negatives, and acceptance-scope reconciliation remain pending. This is not a Phase 5B pass. No Candidate/business data was written. `REAL_DATA_STILL_PROHIBITED`; no Production work, user/team role changes, package deployment, commit, or push.
+
 ## Phase 5B clean identity assigned; browser acceptance pending (2026-10-29)
 
 **Status:** `PHASE_5B_BROWSER_ACCEPTANCE_PENDING_MANUAL_IDENTITY_AUTH`; not a security pass. Fresh VN LMV IT read-only inventory resolved the newly owner-approved test identity as enabled, licensed, interactive, and in the BSO role's Business Unit. Before assignment it had no direct roles and only its default owner team, with no effective conflicting customization, publish, role-management, or protected Candidate/Call/History/Schedule write privileges.

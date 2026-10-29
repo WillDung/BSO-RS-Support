@@ -1,5 +1,13 @@
 # Security Model
 
+## Phase 5B App Opener read-baseline reconciliation (29 October 2026)
+
+**Status:** `PHASE_5B_SRAPP_BASELINE_CORRECTED_ACCEPTANCE_PENDING_GATEWAY`; security acceptance is incomplete. Browser WhoAmI matched the approved test identity and VN LMV IT. The live App Opener role has 81 privileges; the BSO role had 25 before correction and lacked 72 App Opener entries (35 read-only, 37 other/mutating). The browser explicitly reported missing `prvReadEntity`, then `prvReadAttribute`, then `prvReadRelationship`. Each was verified present in App Opener at Global depth and absent in BSO before adding; only these three were added, at the exact App Opener depth. The other App Opener delta—including process mutation, assignment, append/share, workflow, and other non-read privileges—was not copied.
+
+Readback confirms those three BSO privileges at Global depth and effective for the approved identity. BSO still has no protected Candidate, Call Log, Status History, or Interview Schedule Create/Write privilege. Effective privilege inventory shows no customization/publish-write, role administration, or protected business-write conflict. Direct role remains only BSO; team membership remains only the default owner team. `srapp` already includes BSO, so app-role associations were untouched.
+
+After the three corrections, the browser no longer reported the prior privilege denials, but four reload attempts returned HTTP 502 during model-driven metadata retrieval; the latest browser log at 09:13:14 identified `GetClientMetadata`. No further missing privilege was identified, so no broader baseline grant was made. Candidate Core positive actions, reference reads, and direct-write negative tests were not performed. Browser access is not yet accepted and this is not a Phase 5B pass. Exact identity remains omitted from repository documentation. `REAL_DATA_STILL_PROHIBITED`.
+
 ## Phase 5B approved identity inventory; browser gate pending (29 October 2026)
 
 **Result:** `PHASE_5B_BROWSER_ACCEPTANCE_PENDING_MANUAL_IDENTITY_AUTH`; no security pass is claimed. In VN LMV IT the newly owner-approved identity was verified enabled, licensed, interactive, and in the existing BSO role's Business Unit. Before assignment it had no direct role and only its default owner team; read-only effective privilege inspection found no conflicting administrative or protected-table Create/Write privileges.

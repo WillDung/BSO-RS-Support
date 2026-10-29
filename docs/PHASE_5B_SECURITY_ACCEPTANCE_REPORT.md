@@ -1,5 +1,39 @@
 # Phase 5B role assignment and security acceptance - 28 October 2026
 
+## 29 October 2026 continuation - App Opener read baseline and gateway block
+
+**Current status:** `PHASE_5B_SRAPP_BASELINE_CORRECTED_ACCEPTANCE_PENDING_GATEWAY`. This update follows the 29 October approved-identity assignment record below. It does not claim Phase 5B acceptance.
+
+The approved browser session returned WhoAmI for the exact approved Dataverse user and VN LMV IT organization. No credentials were requested, captured, or stored.
+
+### Read-only App Opener comparison
+
+Live `RetrieveRolePrivilegesRole` inspection found **81** privileges on the predefined App Opener role and **25** on `BSO-RS Support - BSO` before correction. The BSO role lacked **72** entries from the App Opener set: **35 read-only** and **37 non-read/mutating** entries. The user-directed scope excluded workflow/process and other mutating privileges, customization/create/write/delete, publish, solution/role administration, environment administration, and unrelated business-table privileges.
+
+The browser successively reported these exact missing App Opener baseline privileges:
+
+| Privilege | Browser required depth | App Opener depth | BSO correction |
+|---|---|---|---|
+| `prvReadEntity` | Basic | Global | Added at Global |
+| `prvReadAttribute` | Basic | Global | Added at Global |
+| `prvReadRelationship` | Basic | Global | Added at Global |
+
+Each was absent from BSO and present on App Opener before its one-shot addition. Each `AddPrivilegesRole` invocation returned HTTP 204, used zero retries, and had readback confirming Global depth. The `prvReadRelationship` denial cleared after reload. Effective privileges increased to 28 and include the three read privileges.
+
+Final role/effective-access readback confirms:
+
+- The approved identity has only the BSO role directly and remains in only its default owner team.
+- `srapp` already associates BSO; System Administrator/System Customizer associations remain unchanged and do not imply those roles are held by this identity.
+- BSO has no Candidate, Call Log, Status History, or Interview Schedule Create/Write privilege.
+- No effective customization/publish-write, role administration, or protected business-write conflicts were detected.
+- No additional user/team role, app association, or membership change occurred.
+
+### Browser result and remaining gates
+
+After the three observed privilege corrections, four bounded reload attempts returned HTTP 502 during model-driven metadata retrieval; the latest browser log at 09:13:14 identified `GetClientMetadata`. No new specific privilege denial was observed, so no additional App Opener privileges were granted. The app did not finish loading. Candidate Core path and fallback state, the synthetic positive lifecycle, reference-selector reads, the five direct-write negatives, and acceptance-scope reconciliation were not performed. No Candidate or other business record was created. This is an app-platform gateway blocker, not evidence of Candidate-table Read denial and not a Phase 5B security pass.
+
+Continue only when the exact `srapp` browser can load under the approved identity. If a new explicit missing privilege is then reported, compare it with live App Opener and grant only that exact baseline privilege at matching depth if within the approved non-mutating scope. Preserve the no-direct-write invariant. Exact identity is not recorded in this repository; real data and Production deployment remain prohibited.
+
 ## 29 October 2026 continuation - browser authentication pending
 
 **Current status:** `PHASE_5B_BROWSER_ACCEPTANCE_PENDING_MANUAL_IDENTITY_AUTH`. This continuation does not pass Phase 5B and supersedes neither the historical 28 October evidence below nor its security conclusions for the prior approved account.

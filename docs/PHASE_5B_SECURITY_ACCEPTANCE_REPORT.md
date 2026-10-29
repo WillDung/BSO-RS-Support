@@ -2,7 +2,7 @@
 
 ## 29 October 2026 continuation - App Opener read baseline and gateway block
 
-**Current status:** `PHASE_5B_SRAPP_BASELINE_CORRECTED_ACCEPTANCE_PENDING_GATEWAY`. This update follows the 29 October approved-identity assignment record below. It does not claim Phase 5B acceptance.
+**Current status:** `PHASE_5B_SECURITY_ACCEPTANCE_PENDING`. This update follows the 29 October approved-identity assignment record below. It does not claim Phase 5B acceptance.
 
 The approved browser session returned WhoAmI for the exact approved Dataverse user and VN LMV IT organization. No credentials were requested, captured, or stored.
 
@@ -30,7 +30,22 @@ Final role/effective-access readback confirms:
 
 ### Browser result and remaining gates
 
-After the three observed privilege corrections, four bounded reload attempts returned HTTP 502 during model-driven metadata retrieval; the latest browser log at 09:13:14 identified `GetClientMetadata`. No new specific privilege denial was observed, so no additional App Opener privileges were granted. The app did not finish loading. Candidate Core path and fallback state, the synthetic positive lifecycle, reference-selector reads, the five direct-write negatives, and acceptance-scope reconciliation were not performed. No Candidate or other business record was created. This is an app-platform gateway blocker, not evidence of Candidate-table Read denial and not a Phase 5B security pass.
+After the three observed privilege corrections, later bounded reloads continued returning HTTP 502 during model-driven metadata retrieval; the latest browser log at 09:22:54 identified `GetClientMetadata`. No new specific denial was observed in the bootstrap error, so no additional App Opener privileges were granted. The app did not finish loading. Candidate Core path and fallback state, the synthetic positive lifecycle, reference-selector reads, the five direct-write negatives, and acceptance-scope reconciliation were not performed. No Candidate or other business record was created. This is not evidence of Candidate-table Read denial and not a Phase 5B security pass.
+
+### 29 October 2026 read-only isolation diagnostics
+
+The shared browser remained on the exact approved `srapp` URL and was the same previously validated test-account session. A later reload reproduced the `AppContextLoader` / `GetClientMetadata` HTTP 502 at 09:22:54 local time. The visible details contained a generic IIS-style gateway error page and the UCI `AppContextLoader` stack; browser tooling did not expose the failing network response event, so the exact failing request host/path category, response content type/headers, Microsoft request identifiers, and request timing were not captured. The console shows the failure about 0.9 seconds after reload began, which is not an authoritative request-duration measurement.
+
+Read-only same-session endpoint checks:
+
+| Check | Result | Interpretation |
+|---|---|---|
+| Dataverse `WhoAmI` | HTTP 200, JSON with expected response shape | Authenticated Dataverse data-plane reachability works in this browser session; no business write was made. |
+| Filtered app-module list for `srapp` | HTTP 200, JSON; app not returned | The app was not visible through this list query; this alone does not establish app absence. |
+| GET exact app module | HTTP 403, Dataverse error `0x80040220`, names `prvReadAppModule` | A distinct app-module metadata read is denied to this identity. It is not proven to be the cause of `GetClientMetadata` 502. |
+| GET app role associations | HTTP 403 | No role-association contents were obtained; the prior verified app association was not changed. |
+
+No InPrivate/Incognito or alternate-browser context, alternate corporate network path, or separately authenticated administrator control session was available in the shared browser tools. Therefore neither `502_REPRODUCES_ACROSS_CLEAN_BROWSER_CONTEXTS`, `502_BROWSER_CACHE_SPECIFIC`, `SRAPP_METADATA_PLATFORM_OR_NETWORK_BLOCKER`, nor `SRAPP_METADATA_USER_CONTEXT_BLOCKER` is established. The exact-appmodule `prvReadAppModule` denial warrants read-only comparison with the live App Opener baseline and effective BSO role only after the same-app administrator control is available; **no privilege correction is authorized or made based on the 502**. No role, app, package, guard, Candidate Core, or data state was changed.
 
 Continue only when the exact `srapp` browser can load under the approved identity. If a new explicit missing privilege is then reported, compare it with live App Opener and grant only that exact baseline privilege at matching depth if within the approved non-mutating scope. Preserve the no-direct-write invariant. Exact identity is not recorded in this repository; real data and Production deployment remain prohibited.
 

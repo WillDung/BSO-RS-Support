@@ -212,7 +212,10 @@
     const code = Number.isFinite(numericCode) && numericCode !== 0
       ? `:0x${(numericCode >>> 0).toString(16).padStart(8, "0").toUpperCase()}`
       : "";
-    console.error(`${category}${code}`);
+    const operationFailure = error && typeof error.operationFailure === "string"
+      ? `:${error.operationFailure}`
+      : "";
+    console.error(`${category}${code}${operationFailure}`);
   }
 
   function failureMessage(category, partial = false) {
@@ -343,6 +346,16 @@
       if (typeof errorCode === "string" && /^0x[0-9a-f]{8}$/i.test(errorCode)) {
         error.errorCode = Number.parseInt(errorCode.slice(2), 16);
       }
+      const errorMessage = result && result.error && result.error.message;
+      const operationFailure = typeof errorMessage === "string"
+        ? errorMessage.match(/CANDIDATE_CORE_OPERATION_REJECTED:(RECEIPT_READ|CANDIDATE_CREATE|CANDIDATE_READBACK|RECEIPT_CREATE|RESPONSE):(0x[0-9a-f]{8}|TIMEOUT|PLUGIN_EXECUTION|INVALID_OPERATION|SERVICE_FAULT|OTHER)/i)
+        : null;
+      if (operationFailure) {
+        const safeCode = operationFailure[2].startsWith("0x")
+          ? `0x${operationFailure[2].slice(2).toUpperCase()}`
+          : operationFailure[2];
+        error.operationFailure = `${operationFailure[1]}:${safeCode}`;
+      }
       throw error;
     }
     if (!result || !["Applied", "DuplicateReplay"].includes(result.ResultCode)) {
@@ -387,7 +400,10 @@
       showNotice(`${action} failed or its outcome is uncertain. Current server state could not be fully refreshed; do not retry until it is reconciled.`, true);
       return;
     }
-    showNotice(`${action} failed or its outcome is uncertain. Current server state was refreshed; verify it before retrying.`, true);
+    const operationFailure = error && typeof error.operationFailure === "string"
+      ? ` (${error.operationFailure})`
+      : "";
+    showNotice(`${action} failed or its outcome is uncertain${operationFailure}. Current server state was refreshed; verify it before retrying.`, true);
   }
 
   function assertCandidateCoreStatus(result, expectedStatus) {

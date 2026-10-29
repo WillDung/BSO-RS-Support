@@ -1,5 +1,28 @@
 # Current State
 
+## Phase 5B Candidate Core service identity correction (2026-10-29)
+
+**Status:** `PHASE_5B_SECURITY_ACCEPTANCE_PENDING`; the security acceptance is not passed. The previously observed app bootstrap issue is superseded: the approved identity can now open exact `srapp` and reach Candidate Management. Live role readback shows the existing BSO role contains 60 privileges, including the selected App Opener baseline and Candidate Core execute privilege. Candidate, Call Log, Status History, Interview Schedule, and Operation Receipt Create/Write/Delete remain absent.
+
+One synthetic Candidate Core CreateCandidate request returned HTTP 400 / `0x80040265`. GET-only reconciliation found **0 Candidates / 0 Call Logs / 0 Status Histories / 0 Interview Schedules / 0 CreateCandidate Receipts** for the attempt. No retry or direct-write negative test was performed.
+
+Static source audit found:
+
+| Operation | Protected table | Access | Service identity in audited source |
+|---|---|---|---|
+| CreateCandidate receipt lookup | Operation Receipt | Read | SYSTEM |
+| CreateCandidate Candidate Create | Candidate | Write | SYSTEM |
+| CreateCandidate Candidate readback in handler | None | None | None |
+| CreateCandidate receipt persistence | Operation Receipt | Write | SYSTEM |
+| Candidate state read for other operations/replay | Candidate | Read | Initiating user |
+| Scheduling/result/reschedule schedule lookup/readback | Interview Schedule | Read | Initiating user |
+| Candidate, Call, History, Schedule, and Receipt mutations | Protected tables | Write | SYSTEM |
+| Position/Source/TA/Location reference validation | Reference tables | Read | Initiating user |
+
+`CANDIDATE_CORE_CALLER_CONTEXT_STORAGE_DEFECT_PROVEN`. Local source now routes protected Candidate and Interview Schedule reads through SYSTEM. SYSTEM checks the initiating user's effective `ReadAccess` using `RetrievePrincipalAccess` before Candidate data or full schedule data is retrieved; schedule discovery queries return IDs only before the access check. Reference validation remains caller-context. Candidate ownership and actor attribution remain the initiating user; Receipt storage remains SYSTEM-only. The canonical `ActionType -> mutation` matrix is unchanged. CreateCandidate diagnostics are restricted to allowlisted stages and sanitized codes/categories; raw error text, IDs, names, email, payload, and tokens are not exposed.
+
+Offline Candidate Core engine/SDK and Phase 5A/3C PowerShell suites pass; the unsigned Candidate Core package project builds. This does **not** validate the live update. The live VN LMV IT assembly is signed, while no compatible signing key was available in this session; the unsigned output is not eligible for an in-place assembly update. No environment write, package deployment, or browser retry occurred. Required remaining gates include a compatible protected local build/review, one bounded existing-assembly update if authorized and validated, one BSO diagnostic CreateCandidate attempt, the positive workflow lifecycle, and five one-shot Dataverse privilege-denied writes. `REAL_DATA_STILL_PROHIBITED`; no Production deployment, commit, or push.
+
 ## Phase 5B App Opener read baseline corrected; app metadata gateway blocked (2026-10-29)
 
 **Status:** `PHASE_5B_SECURITY_ACCEPTANCE_PENDING`. The authenticated browser WhoAmI now matches the approved test identity in VN LMV IT. Live comparison found 81 privileges on the predefined App Opener role, 25 on BSO before correction, and 72 App Opener privileges absent from BSO (35 read-only and 37 non-read/mutating entries). Only three read privileges demonstrated as blockers by browser errors were added to `BSO-RS Support - BSO`: `prvReadEntity`, `prvReadAttribute`, and `prvReadRelationship`, each at the App Opener role's live Global depth. Retries: zero per one-shot privilege addition.

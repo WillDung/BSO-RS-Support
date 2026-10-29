@@ -54,8 +54,11 @@ $plugin = Get-Content -Raw (Join-Path $root 'solutions\CandidateCore\DataversePl
 Assert-Test ($plugin -match 'context.UserId != context.InitiatingUserId' -and
     $plugin -match 'CreateOrganizationService\(context.InitiatingUserId\)' -and
     $plugin -match 'CreateOrganizationService\(null\)' -and
-    $plugin -match 'new DataverseStore\(callerService, systemService, context, trace\)') `
-    'API context remains caller-bound while SYSTEM is explicitly scoped to Candidate Core'
+    $plugin -match 'new DataverseStore\(systemService, context, trace, request.Action' -and
+    $plugin -match 'RetrievePrincipalAccessRequest' -and
+    $plugin -match 'systemService\.Retrieve\("os_sr_cand"' -and
+    $plugin -notmatch 'callerService\.Retrieve\("os_sr_cand"|callerService\.RetrieveMultiple\(query\)') `
+    'API remains caller-bound while all protected storage is SYSTEM-scoped and caller read access is checked'
 Assert-Test ($plugin -match 'CandidateOperation\.AllowsMutation' -and
     $plugin -match 'EnsureAllowedMutation' -and
     $plugin -match 'systemService\.Create' -and $plugin -match 'systemService\.Execute') `

@@ -40,6 +40,12 @@ Assert-Test ($coreInvoke.Contains('const parameterNames = Object.keys(request);'
     $coreInvoke.Contains('CORE_API_PARAMETER_NAMES.has(name)') -and
     $coreInvoke.Contains('const request = { ...values, ActionType: action, CorrelationId: correlationId };')) `
     'Allow only supported actions and declared request fields; keep caller values from overriding action identity'
+Assert-Test ($coreInvoke.Contains('CANDIDATE_CORE_OPERATION_REJECTED:') -and
+    $coreInvoke.Contains('CANDIDATE_CREATE|CANDIDATE_READBACK|RECEIPT_CREATE') -and
+    $coreInvoke.Contains('error.operationFailure =') -and
+    $script.Contains('CANDIDATE_CORE_${action}_FAILED') -and
+    -not $coreInvoke.Contains('console.error(errorMessage)')) `
+    'Expose only allowlisted Candidate Core stage/code diagnostics and never log raw server error text'
 foreach ($action in @(
     'CreateCandidate', 'RecordCall', 'ProceedToScheduling', 'MarkRound1Scheduled',
     'RecordPass', 'RecordFail', 'RequestReschedule', 'CancelRound1'

@@ -1,5 +1,43 @@
 # Phase 5B role assignment and security acceptance - 28 October 2026
 
+## 29 October 2026 continuation - Candidate Core storage boundary
+
+**Current status:** `PHASE_5B_SECURITY_ACCEPTANCE_PENDING`. The approved BSO identity can reach Candidate Management in exact `srapp`. The BSO role retains the App Opener baseline and Candidate Core execute privilege; no protected-table Create/Write/Delete or Operation Receipt privileges were granted. `ProtectCandidateCore` remains inactive. No additional role, app, or team changes occurred.
+
+One synthetic Candidate Core CreateCandidate call returned HTTP 400 / `0x80040265`. Read-only reconciliation found **0 Candidates / 0 Call Logs / 0 Status Histories / 0 Interview Schedules / 0 CreateCandidate Receipts** for the attempt. The call was not retried. No direct-write negative tests were run.
+
+### Static source audit
+
+| Operation stage | Table | Access | Organization service | Identity |
+|---|---|---|---|---|
+| CreateCandidate: receipt lookup | Operation Receipt | Read | `systemService` | SYSTEM |
+| CreateCandidate: Candidate persistence | Candidate | Write | `systemService` | SYSTEM |
+| CreateCandidate: handler Candidate readback | None | None | None | None |
+| CreateCandidate: receipt persistence | Operation Receipt | Write | `systemService` | SYSTEM |
+| Operation Receipt update | Operation Receipt | Update | No supported Candidate Core path | Not applicable; receipts are append-only |
+| Other operation/replay: candidate state | Candidate | Read | `callerService` in audited source | Initiating user |
+| Scheduling/result/reschedule/cancel: schedule query/readback | Interview Schedule | Read | `callerService` in audited source | Initiating user |
+| Candidate, Call Log, Status History, Interview Schedule, Receipt mutations | Protected tables | Write | `systemService` | SYSTEM |
+| Position/Source/TA/Location validation | Reference tables | Read | `callerService` | Initiating user |
+
+The Candidate Core SDK adapter is the `CandidateCore.Package.csproj` that links `DataversePlugin.cs` and `Operation.cs`; the local `DataverseStore` is the Receipt store and Candidate/schedule repository. No separate adapter or repository implementation was found.
+
+`CANDIDATE_CORE_CALLER_CONTEXT_STORAGE_DEFECT_PROVEN`. The local source correction moves protected Candidate and Interview Schedule reads/readbacks to `systemService`. Candidate access is checked through SYSTEM `RetrievePrincipalAccess` before retrieval; schedule lookup first reads IDs only, checks initiating-user `ReadAccess` for each ID, then retrieves schedule details through SYSTEM. Reference validation remains caller-context. Candidate, Call, History, Schedule, and Receipt writes remain SYSTEM; owner and actor fields remain the initiating user; Candidate Number is not supplied by the plug-in and remains server-generated. The immutable ActionType-to-mutation matrix is unchanged and no caller-provided entity/table/attribute can select a SYSTEM write.
+
+CreateCandidate stage failures now produce only `CANDIDATE_CORE_OPERATION_REJECTED:<STAGE>:<CODE_OR_CATEGORY>`, with stage restricted to `RECEIPT_READ`, `CANDIDATE_CREATE`, `CANDIDATE_READBACK`, `RECEIPT_CREATE`, or `RESPONSE`. The console extracts and displays/logs only that allowlisted diagnostic; raw response text is not logged.
+
+### Validation and deployment disposition
+
+- Candidate Core engine tests: **177 passed**.
+- Candidate Core SDK adapter/storage tests: **335 passed**.
+- Candidate Console checks: **52 passed**.
+- Phase 5A API-input/runtime/security boundary checks: **9 / 19 / 10 passed**.
+- Phase 3C Receipt/deployment checks: **27 / 31 passed**.
+- Phase 3D-R4 package/deployment checks: **12 / 29 passed**.
+- Unsigned `CandidateCore.Package.csproj` build: **passed**, version `1.0.0.0`, no strong-name public key.
+
+The live VN LMV IT plug-in assembly is signed. No compatible signing key was available in this session; the unsigned local build cannot safely update that live assembly identity. Therefore **no package update, environment write, browser diagnostic retry, or direct-write test was performed**. The source change is local and not deployed; the live `0x80040265` cause remains undiagnosed. Phase 5B is not accepted. The next step is to make the existing compatible signing identity available through the approved protected local build process (do not transmit or commit the key), then re-run package/deployment preflight before any one-shot in-place update. After a successful deployment readback, perform only the single authorized synthetic diagnostic CreateCandidate attempt and stop on failure.
+
 ## 29 October 2026 continuation - App Opener read baseline and gateway block
 
 **Current status:** `PHASE_5B_SECURITY_ACCEPTANCE_PENDING`. This update follows the 29 October approved-identity assignment record below. It does not claim Phase 5B acceptance.

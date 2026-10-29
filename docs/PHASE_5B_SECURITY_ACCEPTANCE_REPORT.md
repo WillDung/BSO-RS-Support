@@ -1,16 +1,46 @@
 # Phase 5B role assignment and security acceptance - 28 October 2026
 
-## 29 October 2026 continuation - Receipt ownership defect proven; local correction validated
+## 29 October 2026 continuation - Phase 5B BSO security accepted in DEV
 
-**Current status:** `PHASE_5B_RECEIPT_OWNERSHIP_FIX_LOCAL_VALIDATED_NOT_DEPLOYED`; Phase 5B is not accepted. Static inspection confirmed that the `CreateReceipt` Entity passed to the SYSTEM storage service explicitly set `ownerid` to the initiating BSO user. The live stage was `RECEIPT_CREATE:0x80040299` (`TargetPrincipalLacksReadPrivilege`), matching that caller-owned target on a UserOwned infrastructure table. No Receipt privilege was granted.
+**Result:** `PHASE_5B_BSO_SECURITY_ACCEPTED_IN_DEV`. The Receipt ownership defect was proven in source and corrected by removing the explicit initiating-user Receipt `ownerid`; Candidate ownership and explicit business actor fields were preserved. The Receipt remains SYSTEM-backed, append-only, and actor-bound through the request fingerprint.
+
+### Package deployment evidence
+
+The existing unsigned `os_sr_cact_pkg` v1.0.0 was updated exactly once in VN LMV IT with the locally validated artifact; PAC reported success with zero retries. Immediate readback retained the same package identity, package-backed File Store assembly and `os_sr_cact.ApplyCandidateAction` handler, and unchanged Custom API metadata. All 50 `ProtectCandidateCore` steps remained inactive, PluginTraceLog remained Off, no active Candidate Core Profiler wrapper was found, and the separate signed rollback assembly remained untouched. The package record's `ModifiedOn` did not advance in readback, and Dataverse did not expose server-side package bytes. The successful PAC response and unchanged topology are the available deployment evidence; no retry or server-side byte-hash claim was made.
+
+Local artifact hashes: `.nupkg` SHA-256 `dbf6087203508c8a0016fede8bea2c77a3734a9e294b407197faa08235203b91`; embedded and built DLL SHA-256 `05e983e86290bb70ba82b73177c21dc3a1d87fd14f0d4aeea39af062ed0a721a`.
+
+### Positive BSO Candidate Core acceptance
+
+In the same approved BSO browser session and exact `srapp`, fresh WhoAmI was successful for VN LMV IT, Candidate Core was active, and DEV direct-write fallback was off. One fresh synthetic Candidate completed Create Candidate → Record Call = Answered → Waiting Manual Scheduling → Schedule Round 1. Candidate status reached **Round 1 Scheduled** and its owner remained the initiating BSO. Call Log, Status History, Interview Schedule, and reference selectors were visible. Read-only reconciliation found **four Operation Receipts**, one for each successful Candidate Core operation. The schedule evidence was manual; no calendar availability check or external booking was performed.
+
+### Five direct-write negative tests
+
+Each operation below was attempted once outside Candidate Core under the same BSO browser session. Dataverse denied every attempt through standard privilege enforcement:
+
+| Direct operation | Result |
+|---|---|
+| Candidate Create | Denied (`prvCreateos_sr_cand`) |
+| Candidate Update | Denied (`prvWriteos_sr_cand`) |
+| Call Log Create | Denied (`prvCreateos_sr_call`) |
+| Status History Create | Denied (`prvCreateos_sr_csh`) |
+| Interview Schedule Create | Denied (`prvCreateos_sr_intv`) |
+
+No operation succeeded; no retries or privilege changes followed. This satisfies the Phase 5B invariant: Candidate Core business writes succeeded while all five direct protected writes were denied. Final classifications: `CANDIDATE_CORE_RECEIPT_OWNERSHIP_BOUNDARY_VERIFIED`; `CANDIDATE_CORE_SYSTEM_STORAGE_BOUNDARY_VERIFIED`; `CANDIDATE_CORE_EXECUTION_ALLOWED`; `DIRECT_PROTECTED_WRITES_DENIED_BY_DATAVERSE_ROLE`; `REFERENCE_READ_ACCESS_VERIFIED`; `ACTIVE_HANDLER_UNSIGNED_PACKAGE_BACKED`; `PROTECTCANDIDATECORE_SUPERSEDED_AND_INACTIVE`; `REAL_DATA_STILL_PROHIBITED`. Phase 5B is accepted in DEV only. `PRODUCTION_READINESS_REVIEW_REQUIRED`; no Production deployment was started.
+
+Local validation before deployment passed: Candidate Core engine **177**; SDK/storage/SYSTEM-boundary **346**; Receipt/idempotency **27**; Phase 5A runtime/API-input/security **19/9/10**; Phase 5B security **12**; package integrity **12**; and PowerShell parsing **19 scripts**. The unsigned package rebuilt successfully. Final documentation-scope privacy/link/diff checks are recorded in the current project status.
+
+## Historical checkpoint - Receipt ownership defect proven; local correction validated (2026-10-29)
+
+At this checkpoint, `PHASE_5B_RECEIPT_OWNERSHIP_FIX_LOCAL_VALIDATED_NOT_DEPLOYED`; Phase 5B was not yet accepted. Static inspection confirmed that the `CreateReceipt` Entity passed to the SYSTEM storage service explicitly set `ownerid` to the initiating BSO user. The live stage was `RECEIPT_CREATE:0x80040299` (`TargetPrincipalLacksReadPrivilege`), matching that caller-owned target on a UserOwned infrastructure table. No Receipt privilege was granted.
 
 The local correction removes only the explicit Receipt `ownerid` assignment and no longer reads Receipt owner as actor attribution. The initiating actor remains included in the existing versioned request fingerprint, so identical replay remains actor-bound and conflicting replay remains rejected. Candidate ownership remains the initiating BSO user; existing explicit actor fields on Call Log, Status History, scheduling, and result evidence were not changed. The Receipt remains append-only with no Update operation.
 
 Validation passed: engine 177; SDK/storage/SYSTEM-boundary 346; Receipt plan/idempotency 27; Phase 5A runtime/API-input/security suites 19/9/10; Phase 5B security suite 12; unsigned package integrity 12; PowerShell parsing 19 scripts. The rebuilt local package remains unsigned. At report time, no package update or post-fix runtime call had occurred; no Phase 5B pass or lifecycle/direct-write acceptance is claimed. `REAL_DATA_STILL_PROHIBITED`.
 
-## 29 October 2026 continuation - Candidate Console refreshed; Receipt create failure localized
+## Historical checkpoint - Candidate Console refreshed; Receipt create failure localized (29 October 2026)
 
-**Current status:** `PHASE_5B_CANDIDATE_CORE_FAILURE:RECEIPT_CREATE`; sanitized Dataverse code `0x80040299`. This is not a Phase 5B pass.
+**Status at that checkpoint:** `PHASE_5B_CANDIDATE_CORE_FAILURE:RECEIPT_CREATE`; sanitized Dataverse code `0x80040299`. This was not yet a Phase 5B pass.
 
 The local parser already recognized the safe Candidate Core stage format, but the live HTML still referenced the previous JavaScript cache token. The existing scoped Candidate Console refresh workflow first patched only `os_/bso/candidate-console.js`, then patched only `os_/bso/candidate-console.html` after reload proved its served token stale. Each exact resource was patched once and published in a separate scoped `PublishXml` alongside `srapp`; published GET readback reconciled each. No package, sitemap, schema, role, guard, or other resource changes occurred; retries were zero. The current JS SHA-256 is `82a252c25d5c33b557ff41a8b339f3879c6dff3d7d54f53bf8cba43c7f138ea4`; the HTML cache token is `82a252c25d5c`.
 
@@ -18,17 +48,17 @@ A cache-bypassing reload of exact `srapp` confirmed the HTML requested the match
 
 Read-only aggregate reconciliation for this synthetic attempt found **0 Candidates / 0 Call Logs / 0 Status Histories / 0 Interview Schedules / 0 related Operation Receipts**. The existing Receipt schema/key and Candidate Core contract reconciled exactly with zero writes. Source review confirms the `CreateReceipt` payload corresponds to the documented Receipt columns, but the stage/code and available evidence do not prove a deterministic source defect. No package update, second Candidate Core call, lifecycle continuation, or direct-write negative test is authorized by the evidence in this continuation. Phase 5B remains blocked; real data remains prohibited and Production deployment remains out of scope.
 
-## 29 October 2026 continuation - safe-stage correction deployment and stop
+## Historical checkpoint - safe-stage correction deployment and stop (29 October 2026)
 
-**Current status:** `PHASE_5B_CANDIDATE_CORE_FAILURE:SAFE_STAGE_UNAVAILABLE`; this is not a Phase 5B pass. Local Candidate Core changes classify CreateCandidate failures as `CANDIDATE_CORE_OPERATION_REJECTED:CREATE_CANDIDATE:<STAGE>:<SANITIZED_CODE>`, including input and reference validation as well as Receipt read, Candidate create/readback, Receipt create, and response. The Candidate Console parser was updated locally to understand that shape, and SDK regressions were added. The web resource itself was not deployed.
+**Status at that checkpoint:** `PHASE_5B_CANDIDATE_CORE_FAILURE:SAFE_STAGE_UNAVAILABLE`; this was not yet a Phase 5B pass. Local Candidate Core changes classify CreateCandidate failures as `CANDIDATE_CORE_OPERATION_REJECTED:CREATE_CANDIDATE:<STAGE>:<SANITIZED_CODE>`, including input and reference validation as well as Receipt read, Candidate create/readback, Receipt create, and response. The Candidate Console parser was updated locally to understand that shape, and SDK regressions were added. The web resource itself was not deployed at that checkpoint.
 
 After local validation, the existing unsigned `os_sr_cact_pkg` v1.0.0 was updated once with PAC CLI `pac plugin push`; retries were zero. PAC returned success. The package identity/version remained the same and its `ModifiedOn` advanced. Immediate GET-only reconciliation confirmed the same package-backed File Store assembly and `ApplyCandidateAction` type, the same Custom API handler relationship and contract metadata, all 50 `ProtectCandidateCore` registrations Disabled, PluginTraceLog Off, no active Candidate Core Profiler wrapper, and the separate signed Database rollback assembly unchanged. Package bytes were not exposed for server-side hashing. Local artifact SHA-256 values: package `64b3212e38d72296f07b57f7f4c12e3ae4b3b2cbed72bf4510b47eef5aeaeebd`; embedded and built DLL `eaa124d4a9a1cdb2cb3372ee8bae4c5ac244e0ef4f7bb46aa236d11e2c3acb79`.
 
-The already-open exact `srapp` browser page remained on Candidate Management; a fresh browser WhoAmI returned HTTP 200 for VN LMV IT. Candidate Core remained active and DEV direct-write fallback was unchecked. Exactly one new fresh synthetic CreateCandidate was submitted after deployment. It returned HTTP 400 / `0x80040265`. The visible console still reported only `CANDIDATE_CORE_CreateCandidate_FAILED:0x80040265`; no safe internal stage was surfaced. The Candidate list refreshed without showing the synthetic record. No further Candidate Core call, lifecycle continuation, receipt check, or direct-write negative test followed. Do not infer the failing internal stage from `0x80040265`; no deterministic storage defect is proven. Phase 5B remains pending, real data remains prohibited, and Production deployment remains out of scope.
+At that checkpoint, the already-open exact `srapp` browser page remained on Candidate Management; a fresh browser WhoAmI returned HTTP 200 for VN LMV IT. Candidate Core remained active and DEV direct-write fallback was unchecked. Exactly one new fresh synthetic CreateCandidate was submitted after deployment. It returned HTTP 400 / `0x80040265`. The visible console still reported only `CANDIDATE_CORE_CreateCandidate_FAILED:0x80040265`; no safe internal stage was surfaced. The Candidate list refreshed without showing the synthetic record. No further Candidate Core call, lifecycle continuation, receipt check, or direct-write negative test followed. Do not infer the failing internal stage from `0x80040265`; no deterministic storage defect was proven then. Phase 5B was still pending at that checkpoint; real data remained prohibited, and Production deployment remained out of scope.
 
-## 29 October 2026 continuation - existing unsigned package deployed; Candidate Core acceptance blocked
+## Historical checkpoint - existing unsigned package deployed; Candidate Core acceptance blocked (29 October 2026)
 
-**Current status:** `PHASE_5B_SECURITY_ACCEPTANCE_PENDING`; not a security pass. Fresh PAC identity verification matched VN LMV IT. Read-only topology reconciliation found exactly one existing `os_sr_cact_pkg` v1.0.0; the active `os_sr_cact` Custom API handler remained `os_sr_cact.ApplyCandidateAction` in its package-backed File Store assembly with an empty public-key token. The separate signed Database assembly remained the rollback artifact and was not modified.
+**Status at that checkpoint:** `PHASE_5B_SECURITY_ACCEPTANCE_PENDING`; not yet a security pass. Fresh PAC identity verification matched VN LMV IT. Read-only topology reconciliation found exactly one existing `os_sr_cact_pkg` v1.0.0; the active `os_sr_cact` Custom API handler remained `os_sr_cact.ApplyCandidateAction` in its package-backed File Store assembly with an empty public-key token. The separate signed Database assembly remained the rollback artifact and was not modified.
 
 The existing package was updated once with the locally rebuilt unsigned artifact. An initial PAC command used a nonexistent package ID and returned before an update; after a fresh exact-name lookup, the single valid update succeeded. The existing package identity/version remained unchanged and its `ModifiedOn` advanced from 28 to 29 October 2026. The active handler relationship and Custom API metadata remained unchanged. The local package SHA-256 is `758adef7e3a3704e4e500c6cf19d493f0840e0c853a6055dcfa43854cbb85c44`; the embedded and current Release DLL SHA-256 is `74c1c0642159a38d5c703ad16fd5485a9a50adab0238b34207418f87c84a1ed4`. Dataverse package bytes were not required for reconciliation. All **50/50** `ProtectCandidateCore` registrations remained Disabled. Organization PluginTraceLog remained Off; no active Plugin Profiler wrapper was found. No signing key was inspected or used.
 
@@ -36,9 +66,9 @@ The exact `srapp` browser session returned WhoAmI HTTP 200 for the BSO-role test
 
 Exactly one fresh synthetic CreateCandidate request was sent through Candidate Management / `os_sr_cact`. It returned HTTP 400 / `0x80040265`. The browser console exposed `CANDIDATE_CORE_CreateCandidate_FAILED` but did **not** expose an allowlisted internal stage or sanitized stage category. The UI refreshed its candidate list and showed no synthetic candidate. No retry occurred. Per the stop rule, no further Candidate action was attempted: Answered, Waiting Manual Scheduling, Round 1 scheduling, receipt verification, TA/Location selector verification, and all five direct-write negatives remain unperformed. Phase 5B is blocked at the Candidate Core CreateCandidate runtime gate, not accepted. Real data remains prohibited; no Production work, role changes, commit, or push occurred.
 
-## 29 October 2026 continuation - Candidate Core storage boundary (predeployment audit)
+## Historical checkpoint - Candidate Core storage boundary predeployment audit (29 October 2026)
 
-**Current status:** `PHASE_5B_SECURITY_ACCEPTANCE_PENDING`. The approved BSO identity can reach Candidate Management in exact `srapp`. The BSO role retains the App Opener baseline and Candidate Core execute privilege; no protected-table Create/Write/Delete or Operation Receipt privileges were granted. `ProtectCandidateCore` remains inactive. No additional role, app, or team changes occurred.
+**Status at that checkpoint:** `PHASE_5B_SECURITY_ACCEPTANCE_PENDING`. The approved BSO identity could reach Candidate Management in exact `srapp`. The BSO role retained the App Opener baseline and Candidate Core execute privilege; no protected-table Create/Write/Delete or Operation Receipt privileges were granted. `ProtectCandidateCore` remained inactive. No additional role, app, or team changes occurred.
 
 One synthetic Candidate Core CreateCandidate call returned HTTP 400 / `0x80040265`. Read-only reconciliation found **0 Candidates / 0 Call Logs / 0 Status Histories / 0 Interview Schedules / 0 CreateCandidate Receipts** for the attempt. The call was not retried. No direct-write negative tests were run.
 
@@ -58,7 +88,7 @@ One synthetic Candidate Core CreateCandidate call returned HTTP 400 / `0x8004026
 
 The Candidate Core SDK adapter is the `CandidateCore.Package.csproj` that links `DataversePlugin.cs` and `Operation.cs`; the local `DataverseStore` is the Receipt store and Candidate/schedule repository. No separate adapter or repository implementation was found.
 
-`CANDIDATE_CORE_CALLER_CONTEXT_STORAGE_DEFECT_PROVEN`. The local source correction moves protected Candidate and Interview Schedule reads/readbacks to `systemService`. Candidate access is checked through SYSTEM `RetrievePrincipalAccess` before retrieval; schedule lookup first reads IDs only, checks initiating-user `ReadAccess` for each ID, then retrieves schedule details through SYSTEM. Reference validation remains caller-context. Candidate, Call, History, Schedule, and Receipt writes remain SYSTEM; owner and actor fields remain the initiating user; Candidate Number is not supplied by the plug-in and remains server-generated. The immutable ActionType-to-mutation matrix is unchanged and no caller-provided entity/table/attribute can select a SYSTEM write.
+`CANDIDATE_CORE_CALLER_CONTEXT_STORAGE_DEFECT_PROVEN`. The local source correction moves protected Candidate and Interview Schedule reads/readbacks to `systemService`. Candidate access is checked through SYSTEM `RetrievePrincipalAccess` before retrieval; schedule lookup first reads IDs only, checks initiating-user `ReadAccess` for each ID, then retrieves schedule details through SYSTEM. Reference validation remains caller-context. Candidate, Call, History, Schedule, and Receipt writes remain SYSTEM; Candidate ownership and business actor fields remain the initiating user. The later Receipt ownership correction supersedes the earlier Receipt-owner actor attribution. Candidate Number is not supplied by the plug-in and remains server-generated. The immutable ActionType-to-mutation matrix is unchanged and no caller-provided entity/table/attribute can select a SYSTEM write.
 
 CreateCandidate stage failures now produce only `CANDIDATE_CORE_OPERATION_REJECTED:<STAGE>:<CODE_OR_CATEGORY>`, with stage restricted to `RECEIPT_READ`, `CANDIDATE_CREATE`, `CANDIDATE_READBACK`, `RECEIPT_CREATE`, or `RESPONSE`. The console extracts and displays/logs only that allowlisted diagnostic; raw response text is not logged.
 
@@ -72,11 +102,11 @@ CreateCandidate stage failures now produce only `CANDIDATE_CORE_OPERATION_REJECT
 - Phase 3D-R4 package/deployment checks: **12 / 29 passed**.
 - Unsigned `CandidateCore.Package.csproj` build: **passed**, version `1.0.0.0`, no strong-name public key.
 
-At the time of this predeployment audit, the active handler was incorrectly believed to be the signed Database assembly. Later live topology reconciliation showed that the active handler was already package-backed by the existing unsigned File Store package, so signing-key availability was not a blocker. The package update and one synthetic diagnostic attempt are recorded in the current section above. Phase 5B remains pending; the live CreateCandidate failure is not resolved and no direct-write negative test has been performed.
+At the time of this predeployment audit, the active handler was incorrectly believed to be the signed Database assembly. Later live topology reconciliation showed that the active handler was already package-backed by the existing unsigned File Store package, so signing-key availability was not a blocker. The package update and one synthetic diagnostic attempt are recorded in the current section above. Phase 5B was still pending at that audit; the then-live CreateCandidate failure had not been resolved and no direct-write negative test had been performed.
 
-## 29 October 2026 continuation - App Opener read baseline and gateway block
+## Historical checkpoint - App Opener read baseline and gateway block (29 October 2026)
 
-**Current status:** `PHASE_5B_SECURITY_ACCEPTANCE_PENDING`. This update follows the 29 October approved-identity assignment record below. It does not claim Phase 5B acceptance.
+**Status at that checkpoint:** `PHASE_5B_SECURITY_ACCEPTANCE_PENDING`. This update followed the 29 October approved-identity assignment record below and did not claim Phase 5B acceptance.
 
 The approved browser session returned WhoAmI for the exact approved Dataverse user and VN LMV IT organization. No credentials were requested, captured, or stored.
 
@@ -123,9 +153,9 @@ No InPrivate/Incognito or alternate-browser context, alternate corporate network
 
 Continue only when the exact `srapp` browser can load under the approved identity. If a new explicit missing privilege is then reported, compare it with live App Opener and grant only that exact baseline privilege at matching depth if within the approved non-mutating scope. Preserve the no-direct-write invariant. Exact identity is not recorded in this repository; real data and Production deployment remain prohibited.
 
-## 29 October 2026 continuation - browser authentication pending
+## Historical checkpoint - browser authentication pending (29 October 2026)
 
-**Current status:** `PHASE_5B_BROWSER_ACCEPTANCE_PENDING_MANUAL_IDENTITY_AUTH`. This continuation does not pass Phase 5B and supersedes neither the historical 28 October evidence below nor its security conclusions for the prior approved account.
+**Status at that checkpoint:** `PHASE_5B_BROWSER_ACCEPTANCE_PENDING_MANUAL_IDENTITY_AUTH`. This continuation did not pass Phase 5B and superseded neither the historical 28 October evidence below nor its security conclusions for the prior approved account.
 
 The owner newly approved a second test identity for VN LMV IT. Exact identity is kept out of this repository; no credentials were requested, captured, or stored. Fresh pre-assignment inventory resolved one enabled, licensed, interactive system user in the BSO role's Business Unit. It had no direct roles, only its default owner team, and no conflicting effective customization, publishing, role-administration, or protected Candidate/Call/History/Schedule Create/Write privileges.
 

@@ -348,7 +348,7 @@
       }
       const errorMessage = result && result.error && result.error.message;
       const operationFailure = typeof errorMessage === "string"
-        ? errorMessage.match(/CANDIDATE_CORE_OPERATION_REJECTED:(RECEIPT_READ|CANDIDATE_CREATE|CANDIDATE_READBACK|RECEIPT_CREATE|RESPONSE):(0x[0-9a-f]{8}|TIMEOUT|PLUGIN_EXECUTION|INVALID_OPERATION|SERVICE_FAULT|OTHER)/i)
+        ? errorMessage.match(/CANDIDATE_CORE_OPERATION_REJECTED:(?:CREATE_CANDIDATE:)?(INPUT_VALIDATION|REFERENCE_VALIDATION|RECEIPT_READ|CANDIDATE_CREATE|CANDIDATE_READBACK|RECEIPT_CREATE|RESPONSE):(0x[0-9a-f]{8}|TIMEOUT|PLUGIN_EXECUTION|INVALID_OPERATION|SERVICE_FAULT|OTHER|REFERENCE_NOT_AVAILABLE)/i)
         : null;
       if (operationFailure) {
         const safeCode = operationFailure[2].startsWith("0x")

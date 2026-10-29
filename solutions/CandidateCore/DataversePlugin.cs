@@ -19,7 +19,7 @@ namespace os_sr_cact
             var context = (IPluginExecutionContext)serviceProvider.GetService(typeof(IPluginExecutionContext));
             var trace = (ITracingService)serviceProvider.GetService(typeof(ITracingService));
             string? action = null;
-            var createCandidateStage = "RECEIPT_READ";
+            var createCandidateStage = "INPUT_VALIDATION";
             try
             {
                 if (context.MessageName == DevCandidateSlice.MessageName)
@@ -30,10 +30,14 @@ namespace os_sr_cact
                 if (context.MessageName != "os_sr_cact" || context.Stage != 30 || context.Mode != 0 ||
                     !context.IsInTransaction || context.UserId != context.InitiatingUserId || context.Depth != 1)
                     throw new OperationError("UNSUPPORTED_EXECUTION_CONTEXT");
+                if (context.InputParameters.TryGetValue("ActionType", out var actionValue) &&
+                    actionValue is string inputAction && inputAction == "CreateCandidate")
+                    action = inputAction;
                 var factory = (IOrganizationServiceFactory)serviceProvider.GetService(typeof(IOrganizationServiceFactory));
                 var callerService = factory.CreateOrganizationService(context.InitiatingUserId);
                 var request = CandidateActionInputAdapter.Create(context.InitiatingUserId, context.InputParameters, DateTime.UtcNow);
                 action = request.Action;
+                if (action == "CreateCandidate") createCandidateStage = "REFERENCE_VALIDATION";
                 ValidateCallerReferences(callerService, request, trace);
                 var systemService = factory.CreateOrganizationService(null);
                 var store = new DataverseStore(systemService, context, trace, request.Action,
@@ -49,9 +53,10 @@ namespace os_sr_cact
             }
             catch (OperationError error)
             {
-                if (action == "CreateCandidate" &&
-                    TryFormatCreateCandidateFailure(error.Message, createCandidateStage, out var diagnostic))
+                if (action == "CreateCandidate")
                 {
+                    var diagnostic = FormatCreateCandidateFailure(
+                        error.Message, createCandidateStage);
                     trace.Trace("os_sr_cact rejected code={0}", diagnostic);
                     throw new InvalidPluginExecutionException(diagnostic);
                 }
@@ -63,7 +68,7 @@ namespace os_sr_cact
                 if (action == "CreateCandidate")
                 {
                     var diagnostic = string.Format(CultureInfo.InvariantCulture,
-                        "CANDIDATE_CORE_OPERATION_REJECTED:{0}:0x{1:X8}",
+                        "CANDIDATE_CORE_OPERATION_REJECTED:CREATE_CANDIDATE:{0}:0x{1:X8}",
                         createCandidateStage, error.Detail.ErrorCode);
                     trace.Trace("os_sr_cact rejected code={0}", diagnostic);
                     throw new InvalidPluginExecutionException(diagnostic);
@@ -74,15 +79,22 @@ namespace os_sr_cact
                     error.Detail.ErrorCode == unchecked((int)0x80060882) ? "ROW_VERSION_CONFLICT" : "DATAVERSE_OPERATION_REJECTED";
                 throw new InvalidPluginExecutionException(code);
             }
+            catch (Exception)
+            {
+                if (action != "CreateCandidate") throw;
+                var diagnostic = FormatCreateCandidateFailure("CANDIDATE_CORE_FAILURE:OTHER",
+                    createCandidateStage);
+                trace.Trace("os_sr_cact rejected code={0}", diagnostic);
+                throw new InvalidPluginExecutionException(diagnostic);
+            }
         }
 
-        private static bool TryFormatCreateCandidateFailure(
-            string errorMessage, string stage, out string diagnostic)
+        private static string FormatCreateCandidateFailure(string errorMessage, string stage)
         {
-            diagnostic = "";
-            if (stage != "RECEIPT_READ" && stage != "CANDIDATE_CREATE" &&
+            if (stage != "INPUT_VALIDATION" && stage != "REFERENCE_VALIDATION" &&
+                stage != "RECEIPT_READ" && stage != "CANDIDATE_CREATE" &&
                 stage != "CANDIDATE_READBACK" && stage != "RECEIPT_CREATE" && stage != "RESPONSE")
-                return false;
+                stage = "RESPONSE";
 
             var parts = errorMessage.Split(':');
             string? safeCode = null;
@@ -99,11 +111,22 @@ namespace os_sr_cact
             {
                 safeCode = parts[2];
             }
+            else if (errorMessage.StartsWith("REFERENCE_NOT_AVAILABLE:", StringComparison.Ordinal))
+            {
+                safeCode = "REFERENCE_NOT_AVAILABLE";
+            }
+            else if (parts.Length > 0 && parts[0].Length <= 64 &&
+                parts[0][0] >= 'A' && parts[0][0] <= 'Z' &&
+                parts[0].All(character =>
+                    character == '_' || character >= 'A' && character <= 'Z' ||
+                    character >= '0' && character <= '9'))
+            {
+                safeCode = parts[0];
+            }
 
-            if (safeCode == null) return false;
-            diagnostic = string.Format(CultureInfo.InvariantCulture,
-                "CANDIDATE_CORE_OPERATION_REJECTED:{0}:{1}", stage, safeCode);
-            return true;
+            safeCode ??= "INVALID_OPERATION";
+            return string.Format(CultureInfo.InvariantCulture,
+                "CANDIDATE_CORE_OPERATION_REJECTED:CREATE_CANDIDATE:{0}:{1}", stage, safeCode);
         }
 
         private static void ValidateCallerReferences(
@@ -132,6 +155,10 @@ namespace os_sr_cact
                 {
                     trace.Trace("CC_REFERENCE_VALIDATION_FAILED:{0}:0x{1:X8}",
                         reference.Input, error.Detail.ErrorCode);
+                    if (request.Action == "CreateCandidate")
+                        throw new OperationError(
+                            "DATAVERSE_OPERATION_REJECTED:REFERENCE_VALIDATION:0x" +
+                            error.Detail.ErrorCode.ToString("X8", CultureInfo.InvariantCulture), error);
                     throw new OperationError("REFERENCE_NOT_AVAILABLE:" + reference.Input, error);
                 }
             }

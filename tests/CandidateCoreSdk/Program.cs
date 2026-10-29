@@ -331,7 +331,7 @@ internal static class Program
         unsupportedFault.FaultErrorCode = unchecked((int)0x80040265);
         unsupportedFault.FaultMessage = "DIRECT_WRITE_GUARD_REJECTED:UNSUPPORTED_PROTECTED_WRITE";
         Reject(() => new ApplyCandidateAction().Execute(unsupportedFault),
-            "CANDIDATE_CORE_OPERATION_REJECTED:CANDIDATE_CREATE:0x80040265");
+            "CANDIDATE_CORE_OPERATION_REJECTED:CREATE_CANDIDATE:CANDIDATE_CREATE:0x80040265");
         var unknownWriteTarget = new Entity("os_sr_oprc", Guid.NewGuid());
         var unknownActionParent = CreateGuardParent("os_sr_cact",
             new ParameterCollection { ["ActionType"] = "SENSITIVE_SENTINEL " + Actor.ToString("D") },
@@ -382,7 +382,7 @@ internal static class Program
         candidateCreateFault.FaultOnCreateTable = "os_sr_cand";
         candidateCreateFault.FaultMessage = "SENSITIVE_SENTINEL " + Actor.ToString("D");
         var candidateFaultMessage = Reject(() => new ApplyCandidateAction().Execute(candidateCreateFault),
-            "CANDIDATE_CORE_OPERATION_REJECTED:CANDIDATE_CREATE:0x80040220");
+            "CANDIDATE_CORE_OPERATION_REJECTED:CREATE_CANDIDATE:CANDIDATE_CREATE:0x80040220");
         Check(candidateCreateFault.ServiceOperations.SequenceEqual(new[]
             { "RetrieveMultiple:os_sr_oprc", "Create:os_sr_cand" }) &&
             candidateCreateFault.Receipt == null,
@@ -395,7 +395,7 @@ internal static class Program
         receiptReadFault.FaultOnRetrieveMultipleTable = "os_sr_oprc";
         receiptReadFault.FaultMessage = "SENSITIVE_SENTINEL " + Actor.ToString("D");
         var receiptReadMessage = Reject(() => new ApplyCandidateAction().Execute(receiptReadFault),
-            "CANDIDATE_CORE_OPERATION_REJECTED:RECEIPT_READ:0x80040220");
+            "CANDIDATE_CORE_OPERATION_REJECTED:CREATE_CANDIDATE:RECEIPT_READ:0x80040220");
         Check(receiptReadFault.ServiceOperations.SequenceEqual(new[] { "RetrieveMultiple:os_sr_oprc" }) &&
             receiptReadFault.CreatedCandidates == 0 &&
             !receiptReadMessage.Contains("SENSITIVE_SENTINEL") &&
@@ -407,7 +407,7 @@ internal static class Program
         candidateReadbackFault.FaultErrorCode = unchecked((int)0x80040222);
         var candidateReadbackMessage = Reject(
             () => new ApplyCandidateAction().Execute(candidateReadbackFault),
-            "CANDIDATE_CORE_OPERATION_REJECTED:CANDIDATE_READBACK:0x80040222");
+            "CANDIDATE_CORE_OPERATION_REJECTED:CREATE_CANDIDATE:CANDIDATE_READBACK:0x80040222");
         Check(candidateReadbackFault.CreatedCandidates == 1 &&
             candidateReadbackFault.Receipt != null &&
             !candidateReadbackMessage.Contains(Actor.ToString("D")),
@@ -416,7 +416,7 @@ internal static class Program
         receiptCreateFault.FaultOnCreateTable = "os_sr_oprc";
         receiptCreateFault.FaultErrorCode = unchecked((int)0x80040221);
         var receiptFaultMessage = Reject(() => new ApplyCandidateAction().Execute(receiptCreateFault),
-            "CANDIDATE_CORE_OPERATION_REJECTED:RECEIPT_CREATE:0x80040221");
+            "CANDIDATE_CORE_OPERATION_REJECTED:CREATE_CANDIDATE:RECEIPT_CREATE:0x80040221");
         Check(receiptCreateFault.ServiceOperations.SequenceEqual(new[]
             { "RetrieveMultiple:os_sr_oprc", "Create:os_sr_cand", "Create:os_sr_oprc" }),
             "Receipt Create fault terminates after the failing final service operation");
@@ -428,7 +428,7 @@ internal static class Program
         legacyGuardFault.FaultErrorCode = unchecked((int)0x80040265);
         legacyGuardFault.FaultMessage = "DIRECT_CANDIDATE_CORE_WRITE_BLOCKED";
         var legacyGuardMessage = Reject(() => new ApplyCandidateAction().Execute(legacyGuardFault),
-            "CANDIDATE_CORE_OPERATION_REJECTED:CANDIDATE_CREATE:0x80040265");
+            "CANDIDATE_CORE_OPERATION_REJECTED:CREATE_CANDIDATE:CANDIDATE_CREATE:0x80040265");
         Check(legacyGuardFault.ServiceOperations.SequenceEqual(new[]
             { "RetrieveMultiple:os_sr_oprc", "Create:os_sr_cand" }) &&
             !legacyGuardMessage.Contains("DIRECT_CANDIDATE_CORE_WRITE_BLOCKED"),
@@ -450,11 +450,19 @@ internal static class Program
         var unknownFailure = CreateCandidateHost();
         unknownFailure.UnknownFailureOnCreateTable = "os_sr_cand";
         var unknownFailureMessage = Reject(() => new ApplyCandidateAction().Execute(unknownFailure),
-            "CANDIDATE_CORE_OPERATION_REJECTED:CANDIDATE_CREATE:INVALID_OPERATION");
+            "CANDIDATE_CORE_OPERATION_REJECTED:CREATE_CANDIDATE:CANDIDATE_CREATE:INVALID_OPERATION");
         Check(unknownFailure.ServiceOperations.SequenceEqual(new[]
             { "RetrieveMultiple:os_sr_oprc", "Create:os_sr_cand" }) &&
             !unknownFailureMessage.Contains("SENSITIVE_SENTINEL"),
             "Unknown service exception is categorized, sanitized, and terminates immediately");
+        var invalidCreateInput = CreateCandidateHost();
+        invalidCreateInput.Input["CandidateName"] = new string('x', 201);
+        var invalidCreateMessage = Reject(
+            () => new ApplyCandidateAction().Execute(invalidCreateInput),
+            "CANDIDATE_CORE_OPERATION_REJECTED:CREATE_CANDIDATE:INPUT_VALIDATION:TEXT_TOO_LONG");
+        Check(invalidCreateInput.ServiceOperations.Count == 0 &&
+            !invalidCreateMessage.Contains(Actor.ToString("D")),
+            "CreateCandidate input failures are safely classified before any storage access");
         Check(CandidateOperation.AllowsMutation("MarkRound1Scheduled", "INTERVIEW_SCHEDULE_CREATE") &&
             CandidateOperation.AllowsMutation("RecordPass", "INTERVIEW_SCHEDULE_UPDATE") &&
             CandidateOperation.AllowsMutation("RecordFail", "CANDIDATE_UPDATE") &&
@@ -522,11 +530,12 @@ internal static class Program
         inaccessibleReference.Input["PositionId"] = Guid.NewGuid();
         inaccessibleReference.ReferenceReadFailureTable = "os_sr_pos";
         var referenceFailure = Reject(() => new ApplyCandidateAction().Execute(inaccessibleReference),
-            "REFERENCE_NOT_AVAILABLE:PositionId");
+            "CANDIDATE_CORE_OPERATION_REJECTED:CREATE_CANDIDATE:REFERENCE_VALIDATION:0x80040220");
         Check(!inaccessibleReference.ServiceFactorySelections.Contains(null) &&
             !inaccessibleReference.ServiceOperations.Any(operation => operation.StartsWith("Create:", StringComparison.Ordinal)) &&
-            !referenceFailure.Contains("SENSITIVE_SENTINEL"),
-            "Caller-inaccessible reference is rejected before SYSTEM service creation or business writes");
+            !referenceFailure.Contains("SENSITIVE_SENTINEL") &&
+            !referenceFailure.Contains("PositionId"),
+            "Caller reference lookup faults expose only their safe stage and code before SYSTEM storage");
         var inactiveScheduleReference = new Host(-1) { Status = ActionRequest.Waiting };
         SetScheduleAction(inactiveScheduleReference, "MarkRound1Scheduled", ActionRequest.Waiting);
         inactiveScheduleReference.InactiveReferenceTable = "os_sr_ta";
@@ -588,7 +597,8 @@ internal static class Program
 
             var invalidHost = CreateCandidateHost();
             invalidHost.Input[parameter] = "not-a-guid";
-            Reject(() => new ApplyCandidateAction().Execute(invalidHost), "INVALID_GUID_PARAMETER:" + parameter);
+            Reject(() => new ApplyCandidateAction().Execute(invalidHost),
+                "CANDIDATE_CORE_OPERATION_REJECTED:CREATE_CANDIDATE:INPUT_VALIDATION:INVALID_GUID_PARAMETER");
             Check(invalidHost.CreatedCandidates == 0 && invalidHost.Receipt == null,
                 "SDK invalid " + parameter + " rejected before any create");
         }
@@ -851,7 +861,7 @@ internal static class Program
             host.FaultErrorCode = unchecked((int)0x80040265);
             host.FaultMessage = "DIRECT_WRITE_GUARD_REJECTED:CANDIDATE_CREATE:TRUSTED_PARENT:" + predicate;
             Reject(() => new ApplyCandidateAction().Execute(host),
-                "CANDIDATE_CORE_OPERATION_REJECTED:CANDIDATE_CREATE:0x80040265");
+                "CANDIDATE_CORE_OPERATION_REJECTED:CREATE_CANDIDATE:CANDIDATE_CREATE:0x80040265");
         }
         foreach (var mutation in new (string Property, object Value, string Predicate)[]
         {

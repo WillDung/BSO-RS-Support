@@ -15,6 +15,7 @@ $releaseInputs = Get-Content -LiteralPath (Join-Path $docs 'RELEASE_INPUT_MANIFE
 $rollback = Get-Content -LiteralPath (Join-Path $docs 'ROLLBACK_MANIFEST.json') -Raw | ConvertFrom-Json
 $canonicalSourceModule = Join-Path $root 'scripts\BsoRsCanonicalSourceFingerprint.psm1'
 Import-Module $canonicalSourceModule -Force
+$targetAuthorizationModule = Join-Path $root 'scripts\BsoRsTestTargetAuthorization.psm1'
 $passed = 0
 
 function Assert-Test {
@@ -141,7 +142,8 @@ $releaseToolPaths = @(
     $releaseInputs.releaseTooling.configurationGenerator,
     $releaseInputs.releaseTooling.inventoryGenerator,
     $releaseInputs.releaseTooling.packageUpdater,
-    $releaseInputs.releaseTooling.canonicalSourceFingerprintTool
+    $releaseInputs.releaseTooling.canonicalSourceFingerprintTool,
+    $releaseInputs.releaseTooling.testTargetAuthorizationValidator
 )
 $releaseToolLines = foreach ($relativeTool in $releaseToolPaths) {
     $fullToolPath = Join-Path $docs ($relativeTool.Replace('/', '\'))
@@ -162,6 +164,8 @@ Assert-Test ((Get-FileSha256 -Path (Join-Path $solutions 'release-profiles.json'
         $releaseInputs.releaseTooling.packageUpdaterSha256 -and
     (Get-FileSha256 -Path (Join-Path $root 'scripts\BsoRsCanonicalSourceFingerprint.psm1')) -ceq
         $releaseInputs.releaseTooling.canonicalSourceFingerprintToolSha256 -and
+    (Get-FileSha256 -Path (Join-Path $root 'scripts\BsoRsTestTargetAuthorization.psm1')) -ceq
+        $releaseInputs.releaseTooling.testTargetAuthorizationValidatorSha256 -and
     (Get-Fingerprint -Lines $releaseToolLines) -ceq $releaseInputs.releaseTooling.toolFingerprint) `
     'Verify pinned environment-policy, package, and release-tooling inputs'
 foreach ($resource in $releaseInputs.candidateConsole.PSObject.Properties) {
@@ -208,6 +212,44 @@ Assert-Test ($testGateSource -notmatch '\bpac\b|Invoke-WebRequest|Invoke-RestMet
     $importGateSource -notmatch '\bpac\b|Invoke-WebRequest|Invoke-RestMethod|solution import') `
     'Offline Test and import gates contain no connection or import execution path'
 
+$authorizationEvidencePath = Join-Path ([IO.Path]::GetTempPath()) "bso-rs-target-authorization-$([Guid]::NewGuid().ToString('N')).json"
+$authorizationEvidence = [ordered]@{
+    purpose = 'BSO-RS-Support Test rehearsal'
+    targetDisplayName = 'LMV BI DEV'
+    authorizationScope = 'BOUNDED_TEST_REHEARSAL'
+    syntheticDataPermitted = $true
+    productionOperationsProhibited = $true
+    unrelatedEnvironmentResourcesProhibited = $true
+    approvalSource = 'Explicit owner instruction in current project/session'
+    approvalStatus = 'APPROVED'
+}
+try {
+    [IO.File]::WriteAllText(
+        $authorizationEvidencePath,
+        (ConvertTo-Json -InputObject $authorizationEvidence -Depth 4),
+        [Text.UTF8Encoding]::new($false)
+    )
+    $authorizedTestResult = & $testGatePath -TestTargetAuthorizationEvidencePath $authorizationEvidencePath
+    Assert-Test ($authorizedTestResult.Result -ceq 'TEST_TARGET_APPROVAL_EVIDENCE_SATISFIED' -and
+        $authorizedTestResult.Gate -ceq 'TEST_RELEASE_READINESS_EVIDENCE_REQUIRED' -and
+        $authorizedTestResult.NetworkOperations -eq 0 -and
+        $authorizedTestResult.Imports -eq 0 -and
+        $authorizedTestResult.RequiredNextEvidence -contains 'APPROVED_TEST_MANAGED_ARTIFACT') `
+        'Recognize owner authorization while keeping release artifact and recovery gates distinct'
+
+    $authorizedImportResult = & $importGatePath -Mode TEST `
+        -TestTargetAuthorizationEvidencePath $authorizationEvidencePath
+    Assert-Test ($authorizedImportResult.Result -ceq 'TEST_TARGET_APPROVAL_EVIDENCE_SATISFIED' -and
+        $authorizedImportResult.Gate -ceq 'TEST_RELEASE_READINESS_EVIDENCE_REQUIRED' -and
+        $authorizedImportResult.NetworkOperations -eq 0 -and
+        $authorizedImportResult.Imports -eq 0) `
+        'Do not label the owner authorization missing when the import gate lacks separate release evidence'
+} finally {
+    if (Test-Path -LiteralPath $authorizationEvidencePath) {
+        Remove-Item -LiteralPath $authorizationEvidencePath -Force
+    }
+}
+
 $missingTestResult = & $testGatePath
 Assert-Test ($missingTestResult.Result -ceq 'TEST_REHEARSAL_RUNNER_READY_TARGET_REQUIRED' -and
     $missingTestResult.Gate -ceq 'TEST_TARGET_APPROVAL_REQUIRED' -and
@@ -243,8 +285,8 @@ Write-Output "BSO-RS production-readiness offline checks passed: $passed"
     PackageUpdaterDispatcher = 'IMPLEMENTED_NOT_EXECUTED'
     RemainingBlockers = 'EXTERNAL_GATES_ONLY'
     SolutionImportGate = 'SOLUTION_IMPORT_GATE_OFFLINE_READY'
-    TestRehearsal = 'TEST_REHEARSAL_RUNNER_READY_TARGET_REQUIRED'
+    TestRehearsal = 'TEST_RELEASE_READINESS_EVIDENCE_REQUIRED'
     RollbackPlan = 'ROLLBACK_PLAN_OFFLINE_READY'
-    TestTarget = 'TEST_TARGET_APPROVAL_REQUIRED'
+    TestTarget = 'TEST_TARGET_APPROVAL_EVIDENCE_SATISFIED'
     ClosedTechnicalBlocker = 'PKG-001'
 }

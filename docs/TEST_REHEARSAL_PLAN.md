@@ -1,34 +1,34 @@
 # Test Environment Rehearsal Plan
 
-**Status (updated 2026-11-01):** The owner-authorized target identity was reconciled as VN LMV BI (DEV), an enabled European Sandbox distinct from VN LMV IT Production. Effective Solution import authorization for the connected deployment identity was not independently verified. Read-only baseline found no BSO-RS-Support Solution, `srapp`, project tables, Candidate Core Custom API, or Candidate Core package. A manual pre-deployment environment checkpoint was created and read back. No Solution import or Candidate Core runtime test occurred. Offline forensic review established that the former aggregate source check included ignored build outputs; the corrected 171-file Git-index source inventory is pinned and repeatable, and `RELEASE_INPUT_INTEGRITY_RESTORED` closes that source blocker only. The rehearsal has not resumed. No releaseable managed artifact, target-specific TEST configuration, structured approval evidence, or verified effective Solution-import authorization is available. The offline [`Test-BsoRsTestRehearsalGate.ps1`](../scripts/Test-BsoRsTestRehearsalGate.ps1) validates the required evidence and managed-artifact hash; the offline Solution import gate returns `TEST_TARGET_APPROVAL_REQUIRED` without them. The target identity is reconciled, but the complete entry gate and rehearsal are not deployment-ready.
+**Status (updated 2026-11-01):** The owner has explicitly authorized the bounded `LMV BI DEV` Test rehearsal; a sanitized session-local descriptor now validates as `TEST_TARGET_APPROVAL_EVIDENCE_SATISFIED`. This is not a claim that the complete release/import approval pack is complete. VN LMV BI (DEV) was previously reconciled as an enabled European Sandbox distinct from VN LMV IT Production, and a read-only baseline found no BSO-RS-Support Solution, `srapp`, project tables, Candidate Core Custom API, or Candidate Core package. A manual pre-deployment checkpoint was created and read back in the earlier qualification, but the exact target URL/IDs and checkpoint reference were not available in the current bounded continuation. A tenant-wide CLI result was not used for reconciliation. Post-integrity target WhoAmI, checkpoint readback, import-permission evidence, and current baseline are therefore `NOT VERIFIED`; no Test import or runtime test occurred. Offline forensic review established that the former aggregate source check included ignored build outputs; the corrected 171-file Git-index source inventory is pinned and repeatable, and `RELEASE_INPUT_INTEGRITY_RESTORED` closes that source blocker. A releaseable managed artifact, target-specific TEST configuration, effective import permission, and separate release/recovery/governance evidence remain unavailable. The offline [`Test-BsoRsTestRehearsalGate.ps1`](../scripts/Test-BsoRsTestRehearsalGate.ps1) reports owner authorization separately from these remaining gates.
 
-This plan does not authorize an environment connection, import, role change, integration enablement, real-data use, or Production operation. It is an executable sequence only after the owner approves a Test target, release artifact, and test identity. Follow [Master Production Rules](../MASTER_PRODUCTION_RULES.md), [ALM Deployment](ALM_DEPLOYMENT.md), the [Rollback Plan](ROLLBACK_PLAN.md), and the [Test Strategy](TEST_STRATEGY.md).
+The owner authorization applies only to the bounded LMV BI DEV Test rehearsal. It does not waive target requalification, import permission, artifact provenance, deployment identity, BSO test identity, recovery, governance, or release gates, and it does not authorize Production, unrelated environment resources, or real data. Follow [Master Production Rules](../MASTER_PRODUCTION_RULES.md), [ALM Deployment](ALM_DEPLOYMENT.md), the [Rollback Plan](ROLLBACK_PLAN.md), and the [Test Strategy](TEST_STRATEGY.md).
 
 ## 1. Test target approval pack
 
-The owner must supply and approve all of the following before the gate can proceed. Do not invent values; do not store target identifiers or real identities in canonical source:
+Owner authorization for the bounded rehearsal is recorded separately in sanitized session-local evidence. The following distinct target, release, identity, and recovery evidence is still required before an import; do not invent values or store target identifiers/real identities in canonical source:
 
 - Environment display name, exact organization URL, Environment ID, Organization ID, and region.
-- Explicit confirmation that the environment is not Production business runtime.
-- Authorized deployment identity and approval to import/update BSO-RS-Support.
-- Approval to assign/use an appropriate clean BSO Test identity.
+- Fresh bounded confirmation that the environment is not Production business runtime.
+- Verified deployment identity and effective permission to import/update BSO-RS-Support.
+- A selected clean BSO Test identity and its separately verified approval/readiness.
 - Synthetic-data authorization.
 - Rollback/cleanup owner, pre-import backup/recovery evidence, and change/release approval.
 - Approved managed-artifact hash, Solution unique name/version, and source provenance other than the DEV-origin review archive.
 
-The external evidence file must not contain credentials or tokens. Gate output omits target identifiers, identities, and local evidence paths.
+Evidence files must not contain credentials or tokens. The owner authorization descriptor does not include environment IDs/URLs, personal identities, tickets, or secrets. Gate output omits target identifiers, identities, and local evidence paths.
 
 ## 2. Entry gates
 
 Record each item as `PASS`, `FAIL`, or `NOT VERIFIED`; stop on any failed gate.
 
-- Owner-approved Test environment display name, URL, environment ID, organization ID, region, licensing, capacity, backup/recovery posture, and DLP/privacy policy.
+- Previously authorized Test target requalified by its exact display name, URL, environment ID, organization ID, and region; verify licensing, capacity, backup/recovery posture, and DLP/privacy policy independently.
 - Explicit evidence that the target is not Production business runtime.
 - Fresh PAC `org who` and Dataverse `WhoAmI` agree with the approved Test target. Do not select or switch environments as part of this plan.
 - Approved solution unique name, publisher/prefix, managed package hash, dependencies, and change/release approval.
 - Candidate Console environment configuration generated outside the repository and verified for the approved Test target. Require `mode=TEST`, Candidate Core enabled, `syntheticDataOnly=true`, fallback disabled, and diagnostics `OFF`; the release-profile generator rejects deviations.
 - Approved BSO-only Test identity manually authenticated in the browser. Confirm exact app, effective role, Candidate Core handler and DEV fallback state. Never request or automate credentials.
-- Required audit, privacy, retention, access, DLP, support, and incident-response approvals recorded. These remain external prerequisites until independently verified.
+- Required audit, privacy, retention, access, DLP, support, and incident-response approvals recorded. These remain external prerequisites until independently verified; owner authorization permits synthetic data only.
 
 ## 3. Source and release preparation
 
@@ -75,7 +75,8 @@ Final disposition must be one of:
 
 - `TEST_REHEARSAL_ACCEPTED`
 - `TEST_REHEARSAL_FAILED:<SAFE_STAGE>`
-- `TEST_TARGET_APPROVAL_REQUIRED`
+- `TEST_TARGET_APPROVAL_EVIDENCE_SATISFIED` (owner authorization only; not full import approval)
+- `TEST_RELEASE_READINESS_EVIDENCE_REQUIRED`
 - `TEST_REHEARSAL_NOT_VERIFIED`
 
 Test acceptance is not Production approval. Production requires a separate readiness review and release authorization.

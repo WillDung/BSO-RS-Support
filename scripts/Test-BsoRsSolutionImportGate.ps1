@@ -2,6 +2,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][ValidateSet('TEST', 'PROD')][string]$Mode,
+    [string]$TestTargetAuthorizationEvidencePath,
     [string]$ApprovalEvidencePath,
     [string]$ManagedArtifactPath
 )
@@ -9,8 +10,31 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+if ($Mode -ceq 'TEST' -and -not [string]::IsNullOrWhiteSpace($TestTargetAuthorizationEvidencePath)) {
+    Import-Module (Join-Path $PSScriptRoot 'BsoRsTestTargetAuthorization.psm1') -Force
+    $targetAuthorization = Get-BsoRsTestTargetAuthorizationEvidence -Path $TestTargetAuthorizationEvidencePath
+} else {
+    $targetAuthorization = $null
+}
+
 if ([string]::IsNullOrWhiteSpace($ApprovalEvidencePath) -or
     [string]::IsNullOrWhiteSpace($ManagedArtifactPath)) {
+    if ($null -ne $targetAuthorization) {
+        [pscustomobject]@{
+            Result = $targetAuthorization.Status
+            Gate = 'TEST_RELEASE_READINESS_EVIDENCE_REQUIRED'
+            OwnerAuthorization = $targetAuthorization.Status
+            RequiredNextEvidence = @(
+                'BOUNDED_TARGET_REQUALIFICATION',
+                'APPROVED_TEST_MANAGED_ARTIFACT',
+                'RELEASE_AND_RECOVERY_APPROVAL_EVIDENCE'
+            )
+            NetworkOperations = 0
+            Imports = 0
+        }
+        return
+    }
+
     [pscustomobject]@{
         Result = if ($Mode -ceq 'TEST') { 'TEST_TARGET_APPROVAL_REQUIRED' } else { 'PRODUCTION_APPROVAL_REQUIRED' }
         NetworkOperations = 0

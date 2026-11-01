@@ -1,6 +1,7 @@
 #requires -Version 7.4
 [CmdletBinding()]
 param(
+    [string]$TestTargetAuthorizationEvidencePath,
     [string]$TestApprovalEvidencePath,
     [string]$ManagedArtifactPath
 )
@@ -8,8 +9,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-if ([string]::IsNullOrWhiteSpace($TestApprovalEvidencePath) -or
-    [string]::IsNullOrWhiteSpace($ManagedArtifactPath)) {
+if ([string]::IsNullOrWhiteSpace($TestTargetAuthorizationEvidencePath)) {
     [pscustomobject]@{
         Result = 'TEST_REHEARSAL_RUNNER_READY_TARGET_REQUIRED'
         Gate = 'TEST_TARGET_APPROVAL_REQUIRED'
@@ -20,9 +20,30 @@ if ([string]::IsNullOrWhiteSpace($TestApprovalEvidencePath) -or
     return
 }
 
+Import-Module (Join-Path $PSScriptRoot 'BsoRsTestTargetAuthorization.psm1') -Force
+$targetAuthorization = Get-BsoRsTestTargetAuthorizationEvidence -Path $TestTargetAuthorizationEvidencePath
+
+if ([string]::IsNullOrWhiteSpace($TestApprovalEvidencePath) -or
+    [string]::IsNullOrWhiteSpace($ManagedArtifactPath)) {
+    [pscustomobject]@{
+        Result = $targetAuthorization.Status
+        Gate = 'TEST_RELEASE_READINESS_EVIDENCE_REQUIRED'
+        OwnerAuthorization = $targetAuthorization.Status
+        RequiredNextEvidence = @(
+            'BOUNDED_TARGET_REQUALIFICATION',
+            'APPROVED_TEST_MANAGED_ARTIFACT',
+            'RELEASE_AND_RECOVERY_APPROVAL_EVIDENCE'
+        )
+        NetworkOperations = 0
+        Imports = 0
+        RuntimeTests = 0
+    }
+    return
+}
+
 if (-not (Test-Path -LiteralPath $TestApprovalEvidencePath -PathType Leaf) -or
     -not (Test-Path -LiteralPath $ManagedArtifactPath -PathType Leaf)) {
-    throw 'Test approval evidence and a managed artifact must both exist before gate validation.'
+    throw 'Release approval evidence and a managed artifact must both exist before gate validation.'
 }
 
 $approval = Get-Content -LiteralPath $TestApprovalEvidencePath -Raw | ConvertFrom-Json

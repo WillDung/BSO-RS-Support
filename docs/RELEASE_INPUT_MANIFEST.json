@@ -58,9 +58,11 @@
     "builder": "../scripts/Build-BsoRsPortableSolution.ps1",
     "builderSha256": "fd5e7dbb3320c3593e6ccf1d7a5d93eb2144e4a5ed1f5b7b6a12adba582e5d95",
     "testRehearsalGate": "../scripts/Test-BsoRsTestRehearsalGate.ps1",
-    "testRehearsalGateSha256": "abfad311de13c6d51a4fc4146f5027748d8933ea14b9c998a672041b4f2b0f52",
+    "testRehearsalGateSha256": "f7f51ef3debee43e33d0bd96ca079c6d939ea44b6f2f5be61a6dd14a518ecda5",
     "solutionImportGate": "../scripts/Test-BsoRsSolutionImportGate.ps1",
-    "solutionImportGateSha256": "2ab3fac36b9da39a0711ed1423aa32bcb3cd8d533e77cb481aa4284afe4010e3",
+    "solutionImportGateSha256": "62c49335b926840e2c0cfa9a01d49de5b5222b52bb1f81c2a784b24f53f54bf8",
+    "testTargetAuthorizationValidator": "../scripts/BsoRsTestTargetAuthorization.psm1",
+    "testTargetAuthorizationValidatorSha256": "c8071bfe9803ee0c779b7cf470af89e3d47c30b32ec2b6e0405075c67008b7e0",
     "configurationGenerator": "../scripts/New-BsoRsCandidateConsoleEnvironmentConfig.ps1",
     "configurationGeneratorSha256": "f8d5892a94d89163b0b0945841ee981cc40e1b9091f78ec4a55ba3d744d9f5b4",
     "inventoryGenerator": "../scripts/New-BsoRsSolutionComponentInventory.ps1",
@@ -70,7 +72,7 @@
     "canonicalSourceFingerprintTool": "../scripts/BsoRsCanonicalSourceFingerprint.psm1",
     "canonicalSourceFingerprintToolSha256": "3ef2e540fb93198d37a83c7d657f37284db2544400554858b0045b7a15b3a658",
     "toolFingerprintAlgorithm": "SHA256_OF_UTF8_SORTED_LINES_RELATIVE_PATH_PIPE_FILE_SHA256",
-    "toolFingerprint": "7791a61cf0c856b394248bb503a228cc44de2c2755d145f787fc141f2a6a5045"
+    "toolFingerprint": "14e1a408becdc9f2c6a1b7a406844cb665b925bf70d668e17b3a8d46c3513d7d"
   },
   "devOriginReviewArtifact": {
     "disposition": "DEV_ORIGIN_REVIEW_ARTIFACT_NOT_RELEASEABLE",

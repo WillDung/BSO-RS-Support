@@ -1,5 +1,13 @@
 # Current State
 
+## Test target qualification and rehearsal stop (2026-11-01)
+
+**Status:** `RELEASE_INPUT_INTEGRITY_FAILURE`; no Test deployment or runtime acceptance occurred. The owner-authorized `LMV BI DEV` target was resolved to **VN LMV BI (DEV)**, an enabled European Sandbox distinct from VN LMV IT Production. Tenant discovery and an explicit-target PAC `org who` agreed on the target identity. Effective Solution import authorization for the connected deployment identity was not independently verified. Target URL and IDs, the connected identity, and the backup identifier are intentionally omitted from repository documentation.
+
+Read-only baseline found no `os_sr_bso_rs_support` Solution, `srapp`, project `os_sr_` custom tables, `os_sr_cact`, or `os_sr_cact_pkg`. A manual pre-deployment environment recovery checkpoint was created and read back successfully; the platform-reported expiry is 8 November 2026. No Solution import, package dispatch, target configuration, role change, Candidate Core call, or business-data write was performed.
+
+Frozen release verification confirmed the canonical source file count, root `Solution.xml` hash, portable-profile hash, Candidate Console resource hashes, release-tool fingerprint, and accepted unsigned Candidate Core package hash. However, the aggregate canonical source fingerprint does not match `RELEASE_INPUT_MANIFEST.json`, while the `solutions/` worktree has no changes. Per the release gate, this is `RELEASE_INPUT_INTEGRITY_FAILURE`; the manifest was not edited and no artifact was generated or deployed. A releaseable managed artifact and target-specific TEST configuration also remain unavailable. The Test import gate returned `TEST_TARGET_APPROVAL_REQUIRED` because structured approval evidence and a managed artifact were not supplied. Target identity is reconciled, but the complete Test entry gate and rehearsal are not deployment-ready.
+
 ## Production readiness offline remediation (2026-10-29)
 
 **Status:** `PRODUCTION_READINESS_BLOCKED_EXTERNAL_GATES_ONLY`. The bounded existing-package updater is implemented and offline-validated as `PACKAGE_RELEASE_UPDATER_OFFLINE_READY_IMPLEMENTED`; it has not been used to update a package in this task. The legacy [Deploy-BsoRsCandidatePluginPackage.ps1](../scripts/Deploy-BsoRsCandidatePluginPackage.ps1) remains a historical package-create path and must not be used as the release updater. The managed promotion artifact, approved Test rehearsal, Production target and release approvals, governance decisions, migration/integration choices, and operational owners remain external gates.

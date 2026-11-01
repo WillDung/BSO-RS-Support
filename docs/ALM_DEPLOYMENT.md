@@ -2,6 +2,14 @@
 
 **Status:** Proposed wider delivery approach. Phase 1B created the Publisher and initially empty unmanaged Solution in VN LMV IT Production for internal IT development. On 19 October 2026, separately approved Phase 1D-C created only `os_sr_ta`; independent metadata reads verified schema and Solution inclusion. See [Current State](CURRENT_STATE.md). No pipelines, environment variables, connection references, or other project tables were created.
 
+## Test target qualification and stop (2026-11-01)
+
+The owner-authorized `LMV BI DEV` target was resolved to VN LMV BI (DEV), an enabled European Sandbox distinct from VN LMV IT Production. Tenant discovery and explicit-target PAC `org who` agreed on the target. Effective Solution import authorization for the connected deployment identity was not independently verified. The target URL, environment/organization IDs, backup identifier, and connected identity are omitted from this repository.
+
+Read-only baseline did not find the BSO-RS-Support Solution, `srapp`, project `os_sr_` custom tables, Candidate Core Custom API, or Candidate Core package. A labeled manual pre-deployment environment recovery checkpoint was created and read back; platform readback reported expiry on 8 November 2026. This was the only environment write. No Solution import, package update, target configuration, role change, business-data write, or runtime acceptance occurred.
+
+Release preparation stopped at `RELEASE_INPUT_INTEGRITY_FAILURE`: the pinned source file count, root Solution manifest hash, portable profile, Candidate Console resources, release-tool fingerprint, and accepted unsigned package hash matched, but the aggregate canonical source fingerprint did not. The `solutions/` worktree was clean, and the frozen release manifest was not changed. No releaseable managed artifact or target-specific TEST configuration was available. Resume only after the canonical-source discrepancy is reconciled and the remaining Test release, deployment-identity, BSO-identity, recovery, security, and approval gates are satisfied. This qualification is not deployment acceptance.
+
 Phase 1D-D Apply was explicitly approved on 20 October 2026 for Position, Candidate Source, and Location. The first `os_sr_pos` creation POST returned HTTP 401. Read-only reconciliation found no Position metadata and verified that only TA remains in the project inventory. The sequence stopped; no further Apply calls, retries, role changes, audit changes, or data writes occurred. Do not attempt recovery until the cause of the 401 is resolved and an operator-approved retry plan is recorded.
 
 ## Phase 1B Resource Record

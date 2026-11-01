@@ -126,9 +126,13 @@ Assert-Test (-not (Test-Path -LiteralPath (Join-Path $solutions 'SdkMessageProce
     -not (Test-Path -LiteralPath (Join-Path $solutions 'customapis\os_sr_devcs'))) `
     'Canonical source excludes inactive guards, the signed assembly, and temporary DEV API'
 
-$sourceFiles = Get-ChildItem -LiteralPath $solutions -Recurse -File |
-    Where-Object { $_.Extension -in @('.xml', '.json', '.js', '.html', '.css') }
-$releaseText = ($sourceFiles | ForEach-Object { [IO.File]::ReadAllText($_.FullName) }) -join "`n"
+$canonicalSourceModule = Join-Path $root 'scripts\BsoRsCanonicalSourceFingerprint.psm1'
+Import-Module $canonicalSourceModule -Force
+$canonicalSourceInventory = Get-BsoRsCanonicalSourceInventory -RepositoryRoot $root
+$sourceFiles = @($canonicalSourceInventory.Files | Where-Object {
+    [IO.Path]::GetExtension($_.FullPath) -in @('.xml', '.json', '.js', '.html', '.css')
+})
+$releaseText = ($sourceFiles | ForEach-Object { [IO.File]::ReadAllText($_.FullPath) }) -join "`n"
 Assert-Test ($releaseText -notmatch '(?i)\bVN LMV IT\b|https://[a-z0-9-]+\.crm\d+\.dynamics\.com|organizationUrl:\s*"https?://' -and
     $releaseText -notmatch '(?i)\bBearer\s+[A-Za-z0-9._~-]{20,}|client_secret\s*[:=]|password\s*[:=]') `
     'Canonical release source contains no DEV target configuration or credential-like values'

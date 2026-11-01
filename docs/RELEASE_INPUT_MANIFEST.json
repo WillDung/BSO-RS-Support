@@ -10,9 +10,9 @@
   "canonicalSource": {
     "rootManifest": "../solutions/Other/Solution.xml",
     "rootManifestSha256": "8b2254ce6c94ae7216b3b2e629298b0211958fb7a7aa8f0383b8fc58ccb31cfd",
-    "sourceFileCount": 285,
-    "sourceFingerprintAlgorithm": "SHA256_OF_UTF8_SORTED_LINES_RELATIVE_PATH_PIPE_FILE_SHA256",
-    "sourceFingerprint": "a58a6ef9ae81652fae3b2fedfc90e06feb5f16f88035ce9beb842aebcaf094d1",
+    "sourceFileCount": 171,
+    "sourceFingerprintAlgorithm": "SHA256_OF_UTF8_SORTED_GIT_INDEX_LINES_RELATIVE_PATH_PIPE_RAW_FILE_SHA256",
+    "sourceFingerprint": "b648815421f1444b00cddb940b644c3042bef102b549d5af3431595955f88710",
     "rootComponentFingerprint": "96b5a9e96fb5d5f6ecd619ed42762477c67651e8159168e9b5a8063445e48c3f",
     "rootComponentCount": 20,
     "sourceInventory": "SOLUTION_COMPONENT_INVENTORY.json"
@@ -67,8 +67,10 @@
     "inventoryGeneratorSha256": "a144af8d8a99147c01c638749835750ba71d86e60ec2a66687777cb4cab55c5a",
     "packageUpdater": "../scripts/Update-BsoRsCandidatePluginPackage.ps1",
     "packageUpdaterSha256": "1a97d71e9ebfe41f02838bbb380630025c577c4ab2f66f7f45360974717e8f38",
+    "canonicalSourceFingerprintTool": "../scripts/BsoRsCanonicalSourceFingerprint.psm1",
+    "canonicalSourceFingerprintToolSha256": "3ef2e540fb93198d37a83c7d657f37284db2544400554858b0045b7a15b3a658",
     "toolFingerprintAlgorithm": "SHA256_OF_UTF8_SORTED_LINES_RELATIVE_PATH_PIPE_FILE_SHA256",
-    "toolFingerprint": "956fed59defe00ef1a621e738747fbb5d6b07ae0d325f32b928999af49a8870d"
+    "toolFingerprint": "7791a61cf0c856b394248bb503a228cc44de2c2755d145f787fc141f2a6a5045"
   },
   "devOriginReviewArtifact": {
     "disposition": "DEV_ORIGIN_REVIEW_ARTIFACT_NOT_RELEASEABLE",

@@ -13,6 +13,8 @@ $importContract = Get-Content -LiteralPath (Join-Path $docs 'SOLUTION_IMPORT_CON
 $updaterContract = Get-Content -LiteralPath (Join-Path $docs 'RELEASE_UPDATER_CONTRACT.json') -Raw | ConvertFrom-Json
 $releaseInputs = Get-Content -LiteralPath (Join-Path $docs 'RELEASE_INPUT_MANIFEST.json') -Raw | ConvertFrom-Json
 $rollback = Get-Content -LiteralPath (Join-Path $docs 'ROLLBACK_MANIFEST.json') -Raw | ConvertFrom-Json
+$canonicalSourceModule = Join-Path $root 'scripts\BsoRsCanonicalSourceFingerprint.psm1'
+Import-Module $canonicalSourceModule -Force
 $passed = 0
 
 function Assert-Test {
@@ -124,14 +126,10 @@ function Get-Fingerprint {
     param([Parameter(Mandatory)][string[]]$Lines)
     [Array]::Sort($Lines, [StringComparer]::Ordinal)
     [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData(
-        [Text.Encoding]::UTF8.GetBytes(($Lines -join "`n"))
+        [Text.UTF8Encoding]::new($false).GetBytes(($Lines -join "`n"))
     )).ToLowerInvariant()
 }
-$sourceFiles = @(Get-ChildItem -LiteralPath $solutions -Recurse -File)
-$sourceFingerprintLines = foreach ($file in $sourceFiles) {
-    $relative = [IO.Path]::GetRelativePath($solutions, $file.FullName).Replace('\', '/')
-    "$relative|$(Get-FileSha256 -Path $file.FullName)"
-}
+$sourceInventory = Get-BsoRsCanonicalSourceInventory -RepositoryRoot $root
 $rootFingerprintLines = foreach ($rootComponent in $roots) {
     '{0}|{1}|{2}' -f $rootComponent.GetAttribute('type'),
         $rootComponent.GetAttribute('id'), $rootComponent.GetAttribute('schemaName')
@@ -142,14 +140,16 @@ $releaseToolPaths = @(
     $releaseInputs.releaseTooling.solutionImportGate,
     $releaseInputs.releaseTooling.configurationGenerator,
     $releaseInputs.releaseTooling.inventoryGenerator,
-    $releaseInputs.releaseTooling.packageUpdater
+    $releaseInputs.releaseTooling.packageUpdater,
+    $releaseInputs.releaseTooling.canonicalSourceFingerprintTool
 )
 $releaseToolLines = foreach ($relativeTool in $releaseToolPaths) {
     $fullToolPath = Join-Path $docs ($relativeTool.Replace('/', '\'))
     "$relativeTool|$(Get-FileSha256 -Path $fullToolPath)"
 }
-Assert-Test ($sourceFiles.Count -eq $releaseInputs.canonicalSource.sourceFileCount -and
-    (Get-Fingerprint -Lines $sourceFingerprintLines) -ceq $releaseInputs.canonicalSource.sourceFingerprint -and
+Assert-Test ($sourceInventory.FileCount -eq $releaseInputs.canonicalSource.sourceFileCount -and
+    $sourceInventory.Algorithm -ceq $releaseInputs.canonicalSource.sourceFingerprintAlgorithm -and
+    $sourceInventory.Fingerprint -ceq $releaseInputs.canonicalSource.sourceFingerprint -and
     (Get-Fingerprint -Lines $rootFingerprintLines) -ceq $releaseInputs.canonicalSource.rootComponentFingerprint -and
     (Get-FileSha256 -Path (Join-Path $solutions 'Other\Solution.xml')) -ceq
         $releaseInputs.canonicalSource.rootManifestSha256) `
@@ -160,6 +160,8 @@ Assert-Test ((Get-FileSha256 -Path (Join-Path $solutions 'release-profiles.json'
         $releaseInputs.candidateCore.packageSha256 -and
     (Get-FileSha256 -Path (Join-Path $root 'scripts\Update-BsoRsCandidatePluginPackage.ps1')) -ceq
         $releaseInputs.releaseTooling.packageUpdaterSha256 -and
+    (Get-FileSha256 -Path (Join-Path $root 'scripts\BsoRsCanonicalSourceFingerprint.psm1')) -ceq
+        $releaseInputs.releaseTooling.canonicalSourceFingerprintToolSha256 -and
     (Get-Fingerprint -Lines $releaseToolLines) -ceq $releaseInputs.releaseTooling.toolFingerprint) `
     'Verify pinned environment-policy, package, and release-tooling inputs'
 foreach ($resource in $releaseInputs.candidateConsole.PSObject.Properties) {

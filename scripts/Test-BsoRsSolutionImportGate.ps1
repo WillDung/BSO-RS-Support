@@ -76,16 +76,31 @@ $requiredCommonApproval = $approval.mode -ceq $Mode -and
     $approval.artifactReleaseable -eq $true -and
     $approval.managedArtifactSha256 -ceq $artifactHash -and
     $approval.importApproved -eq $true -and
-    $approval.releaseApprovalEvidencePresent -eq $true -and
-    $approval.backupRecoveryGateComplete -eq $true -and
-    $approval.securityOwnerApprovalComplete -eq $true -and
-    $approval.governanceGateComplete -eq $true -and
-    $approval.migrationDecisionComplete -eq $true
+    $approval.backupRecoveryGateComplete -eq $true
+
+$securityApproval = $approval.PSObject.Properties['securityOwnerApprovalComplete']
+$governanceApproval = $approval.PSObject.Properties['governanceGateComplete']
+$migrationApproval = $approval.PSObject.Properties['migrationDecisionComplete']
+$productionApprovalComplete = $Mode -cne 'PROD' -or (
+    $null -ne $securityApproval -and $securityApproval.Value -eq $true -and
+    $null -ne $governanceApproval -and $governanceApproval.Value -eq $true -and
+    $null -ne $migrationApproval -and $migrationApproval.Value -eq $true -and
+    $approval.releaseApprovalEvidencePresent -eq $true
+)
+
+$testEnvironmentPolicyStatus = $approval.PSObject.Properties['testEnvironmentPolicyStatus']
+$testEnvironmentPolicyEvidence = $approval.PSObject.Properties['testEnvironmentPolicyEvidenceVerified']
+$testEnvironmentProhibited = $Mode -ceq 'TEST' -and
+    $null -ne $testEnvironmentPolicyStatus -and
+    $testEnvironmentPolicyStatus.Value -ceq 'PROHIBITED' -and
+    $null -ne $testEnvironmentPolicyEvidence -and
+    $testEnvironmentPolicyEvidence.Value -eq $true
 
 if (-not $requiredCommonApproval -or
+    -not $productionApprovalComplete -or
+    $testEnvironmentProhibited -or
     ($Mode -ceq 'TEST' -and (
         $approval.isProductionBusinessRuntime -ne $false -or
-        $approval.testIdentityApproved -ne $true -or
         $approval.candidateCoreEnabled -ne $true -or
         $approval.syntheticDataOnly -ne $true -or
         $approval.devDirectWriteFallbackEnabled -ne $false -or

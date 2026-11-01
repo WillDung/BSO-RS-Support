@@ -31,8 +31,7 @@ if ([string]::IsNullOrWhiteSpace($TestApprovalEvidencePath) -or
         OwnerAuthorization = $targetAuthorization.Status
         RequiredNextEvidence = @(
             'BOUNDED_TARGET_REQUALIFICATION',
-            'APPROVED_TEST_MANAGED_ARTIFACT',
-            'RELEASE_AND_RECOVERY_APPROVAL_EVIDENCE'
+            'APPROVED_TEST_MANAGED_ARTIFACT'
         )
         NetworkOperations = 0
         Imports = 0
@@ -67,7 +66,6 @@ if ($approval.mode -cne 'TEST' -or
     $approval.isProductionBusinessRuntime -ne $false -or
     $approval.ownerApproved -ne $true -or
     $approval.importApproved -ne $true -or
-    $approval.testIdentityApproved -ne $true -or
     $approval.authorizedDeploymentIdentityApproved -ne $true -or
     $approval.rollbackCleanupOwnerApproved -ne $true -or
     $approval.pacWhoAmIAgreement -ne $true -or

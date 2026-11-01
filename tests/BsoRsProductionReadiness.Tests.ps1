@@ -204,6 +204,13 @@ Assert-Test ($importContract.import.publishAllXml -eq $false -and
     $importContract.import.retriesOnAmbiguousWrite -eq 0 -and
     $importContract.import.postImportReadOnlyReconciliationMandatory -eq $true) `
     'Require no PublishAllXml, blind overwrite, dependency bypass, or ambiguous retry'
+Assert-Test ($importContract.boundedTestRehearsal.productionGovernanceGatesApply -eq $false -and
+    $importContract.boundedTestRehearsal.realDataAllowed -eq $false -and
+    $releaseInputs.releaseConstraints.boundedTestRehearsalAuthorized -eq $true -and
+    $releaseInputs.releaseConstraints.testDeploymentIdentityUseApproved -eq $true -and
+    $releaseInputs.releaseConstraints.testRecoveryProcedureApproved -eq $true -and
+    $releaseInputs.releaseConstraints.productionOperationsAuthorized -eq $false) `
+    'Separate bounded Test authorization from Production-only gates and real-data restrictions'
 $testGatePath = Join-Path $root 'scripts\Test-BsoRsTestRehearsalGate.ps1'
 $importGatePath = Join-Path $root 'scripts\Test-BsoRsSolutionImportGate.ps1'
 $testGateSource = Get-Content -LiteralPath $testGatePath -Raw
@@ -244,6 +251,110 @@ try {
         $authorizedImportResult.NetworkOperations -eq 0 -and
         $authorizedImportResult.Imports -eq 0) `
         'Do not label the owner authorization missing when the import gate lacks separate release evidence'
+
+    $managedArtifactPath = Join-Path ([IO.Path]::GetTempPath()) "bso-rs-test-artifact-hash-fixture-$([Guid]::NewGuid().ToString('N')).txt"
+    $testApprovalPath = Join-Path ([IO.Path]::GetTempPath()) "bso-rs-test-approval-$([Guid]::NewGuid().ToString('N')).json"
+    $testApprovalArtifactBytes = [Text.Encoding]::UTF8.GetBytes('synthetic hash fixture; not a solution package')
+    [IO.File]::WriteAllBytes($managedArtifactPath, $testApprovalArtifactBytes)
+    $testApproval = [ordered]@{
+        mode = 'TEST'
+        environmentDisplayName = 'LMV BI DEV'
+        region = 'EMEA'
+        environmentId = '11111111-1111-4111-8111-111111111111'
+        organizationId = '22222222-2222-4222-8222-222222222222'
+        organizationUrl = 'https://test.example.invalid'
+        isProductionBusinessRuntime = $false
+        ownerApproved = $true
+        importApproved = $true
+        authorizedDeploymentIdentityApproved = $true
+        pacWhoAmIAgreement = $true
+        dataverseWhoAmIAgreement = $true
+        targetIdentityVerified = $true
+        candidateCoreEnabled = $true
+        syntheticDataOnly = $true
+        devDirectWriteFallbackEnabled = $false
+        diagnosticsMode = 'OFF'
+        solutionUniqueName = 'os_sr_bso_rs_support'
+        solutionVersion = '1.0.0.0'
+        artifactOrigin = 'APPROVED_TEST_BUILD'
+        artifactReleaseable = $true
+        managedArtifactSha256 = (Get-FileHash -LiteralPath $managedArtifactPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        releaseApprovalEvidencePresent = $false
+        backupRecoveryGateComplete = $true
+        rollbackCleanupOwnerApproved = $true
+    }
+    try {
+        [IO.File]::WriteAllText(
+            $testApprovalPath,
+            (ConvertTo-Json -InputObject $testApproval -Depth 4),
+            [Text.UTF8Encoding]::new($false)
+        )
+        $testImportReady = & $importGatePath -Mode TEST `
+            -TestTargetAuthorizationEvidencePath $authorizationEvidencePath `
+            -ApprovalEvidencePath $testApprovalPath `
+            -ManagedArtifactPath $managedArtifactPath
+        Assert-Test ($testImportReady.Result -ceq 'TEST_IMPORT_PREFLIGHT_READY_NOT_EXECUTED' -and
+            $testImportReady.NetworkOperations -eq 0 -and
+            $testImportReady.Imports -eq 0) `
+            'Allow bounded synthetic Test import without Production governance, migration, or BSO identity approvals'
+
+        [IO.File]::WriteAllText(
+            $testApprovalPath,
+            (ConvertTo-Json -InputObject $testApproval -Depth 4),
+            [Text.UTF8Encoding]::new($false)
+        )
+        $testRehearsalReady = & $testGatePath `
+            -TestTargetAuthorizationEvidencePath $authorizationEvidencePath `
+            -TestApprovalEvidencePath $testApprovalPath `
+            -ManagedArtifactPath $managedArtifactPath
+        Assert-Test ($testRehearsalReady.Result -ceq 'TEST_REHEARSAL_PREFLIGHT_READY_NOT_EXECUTED' -and
+            $testRehearsalReady.NetworkOperations -eq 0 -and
+            $testRehearsalReady.Imports -eq 0 -and
+            $testRehearsalReady.RuntimeTests -eq 0) `
+            'Keep clean BSO test identity selection after managed topology reconciliation'
+
+        $testApproval.testEnvironmentPolicyStatus = 'PROHIBITED'
+        $testApproval.testEnvironmentPolicyEvidenceVerified = $true
+        [IO.File]::WriteAllText(
+            $testApprovalPath,
+            (ConvertTo-Json -InputObject $testApproval -Depth 4),
+            [Text.UTF8Encoding]::new($false)
+        )
+        $testPolicyRejected = $false
+        try {
+            $null = & $importGatePath -Mode TEST `
+                -TestTargetAuthorizationEvidencePath $authorizationEvidencePath `
+                -ApprovalEvidencePath $testApprovalPath `
+                -ManagedArtifactPath $managedArtifactPath
+        } catch {
+            $testPolicyRejected = $_.Exception.Message -like '*does not satisfy the explicit target, artifact, and release gates*'
+        }
+        Assert-Test $testPolicyRejected 'Block Test import only when verified environment policy prohibits synthetic operation'
+
+        $testApproval.mode = 'PROD'
+        $testApproval.isProductionBusinessRuntime = $true
+        $testApproval.productionApprovalEvidencePresent = $true
+        [IO.File]::WriteAllText(
+            $testApprovalPath,
+            (ConvertTo-Json -InputObject $testApproval -Depth 4),
+            [Text.UTF8Encoding]::new($false)
+        )
+        $productionGateRejected = $false
+        try {
+            $null = & $importGatePath -Mode PROD `
+                -ApprovalEvidencePath $testApprovalPath `
+                -ManagedArtifactPath $managedArtifactPath
+        } catch {
+            $productionGateRejected = $_.Exception.Message -like '*does not satisfy the explicit target, artifact, and release gates*'
+        }
+        Assert-Test $productionGateRejected 'Continue requiring separate Production security, governance, and migration approvals'
+    } finally {
+        foreach ($path in @($testApprovalPath, $managedArtifactPath)) {
+            if (Test-Path -LiteralPath $path) {
+                Remove-Item -LiteralPath $path -Force
+            }
+        }
+    }
 } finally {
     if (Test-Path -LiteralPath $authorizationEvidencePath) {
         Remove-Item -LiteralPath $authorizationEvidencePath -Force

@@ -1,12 +1,14 @@
 # BSO-RS-Support Rollback Plan
 
-**Status:** `ROLLBACK_PLAN_OFFLINE_READY`; runtime rollback remains `ROLLBACK_EVIDENCE_REQUIRED_BEFORE_IMPORT`. The decision tree and stop predicates are specified, but no downstream backup, prior approved managed Solution, prior package artifact, target configuration capture, or recovery rehearsal is claimed to exist. This plan is not authorization to change an environment.
+**Status:** `ROLLBACK_PLAN_OFFLINE_READY`; the owner explicitly approved use of the existing LMV BI DEV pre-deployment checkpoint/recovery procedure for the bounded BSO-RS-Support Test rehearsal (`TEST_RECOVERY_PROCEDURE_APPROVED_FOR_BOUNDED_REHEARSAL`). This does not establish a safe bootstrap cleanup path or authorize routine whole-environment restore. No bootstrap import has occurred.
 
 ## Preconditions
 
-Before any Test or Production release, record the approved target, release change, recovery owner, recovery window, restore point, expected data impact, and exact rollback authority. Retain the prior reviewed managed Solution, package and web-resource hashes, dependency inventory, configuration policy, and a protected deployment journal outside the repository. Validate that the selected recovery method is supported for that environment before the release begins.
+Before any Test or Production release, record the approved target, recovery window, restore point, expected data impact, and exact rollback authority. For the bounded Test rehearsal, the owner authorization covers BSO-RS-Support recovery using the existing checkpoint and the current deployment identity's existing privileges. Retain the reviewed managed Solution, package and web-resource hashes, dependency inventory, configuration policy, and a protected deployment journal outside the repository. Validate that any component-scoped recovery method is supported before use.
 
-Do not proceed if the prior release cannot be identified exactly, the backup/restore posture is unknown, the rollback package or configuration is unverified, or external email/calendar/SharePoint effects cannot be reconciled.
+Do not proceed if the checkpoint is no longer valid, the rollback package or configuration is unverified, or external email/calendar/SharePoint effects cannot be reconciled. The current bootstrap is stopped because no safe BSO-only teardown is established.
+
+Use component-scoped recovery first. Do not use whole-environment restore as routine cleanup. It is permitted only after a material failed BSO-RS-Support rehearsal, while the existing checkpoint is valid, and when impact to unrelated LMV BI DEV resources is explicitly proven acceptable under the existing recovery contract. A managed or unmanaged Solution delete is not presumed to remove all component customizations; specifically, deleting an unmanaged Solution removes its container but leaves customizations in the Default Solution.
 
 The `rollbackPlan.decisionTree` in [ROLLBACK_MANIFEST.json](ROLLBACK_MANIFEST.json) is the authoritative predicate list. Before import, require a verified pre-import backup and baseline; exact prior approved managed Solution identity/hash; prior existing Candidate Core package identity/hash; Candidate Console resource and configuration hashes; approved configuration restoration procedure; current Custom API/package/handler topology; preserved Candidate Core-only protected write path and five direct-write denials; and an approved synthetic post-rollback smoke plus read-only reconciliation. The evidence fields are deliberately null until supplied and verified for the target.
 
@@ -29,7 +31,7 @@ The `rollbackPlan.decisionTree` in [ROLLBACK_MANIFEST.json](ROLLBACK_MANIFEST.js
 
 - Use only the prior reviewed managed package and the approved environment recovery/import procedure. Reconcile Solution identity, version, components, dependencies, app state, and data impact after recovery.
 - A managed Solution rollback is not assumed to undo data changes or external side effects. Do not delete business records to simulate rollback.
-- The full Solution export and a tested prior managed artifact are not currently present in this workspace; this recovery path is **not ready**.
+- The full Solution export and a tested prior managed artifact are not currently present in this workspace; this recovery path is **not ready**. The pre-rehearsal target baseline is empty for BSO-RS-Support, so cleanup must restore that exact state without affecting other resources.
 
 ### Candidate Core package
 

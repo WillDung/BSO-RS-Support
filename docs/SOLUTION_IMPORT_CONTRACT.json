@@ -35,6 +35,14 @@
     "securityOwnerApprovalComplete",
     "releaseApprovalEvidence"
   ],
+  "boundedTestRehearsal": {
+    "ownerAuthorizationStatus": "TEST_TARGET_APPROVAL_EVIDENCE_SATISFIED",
+    "deploymentIdentityUseStatus": "TEST_DEPLOYMENT_IDENTITY_USE_APPROVED_FOR_BOUNDED_REHEARSAL",
+    "recoveryProcedureStatus": "TEST_RECOVERY_PROCEDURE_APPROVED_FOR_BOUNDED_REHEARSAL",
+    "productionGovernanceGatesApply": false,
+    "environmentPolicyProhibitionBlocksImportOnlyWhenVerified": true,
+    "realDataAllowed": false
+  },
   "offlineGate": {
     "script": "../scripts/Test-BsoRsSolutionImportGate.ps1",
     "networkOperations": 0,

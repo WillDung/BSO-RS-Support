@@ -281,26 +281,53 @@ Assert-Test ($deployment.Contains('[switch]$PublishOnly') -and
     $deployment.Contains('($PublishOnly -and (-not $Apply -or -not $RefreshExisting -or -not $ReleaseNeutralProfile') -and
     $deployment.Contains("'os_/bso/candidate-console-environment.js' = '58e03dc262b790b7431f34ca5554422fc86f0d62f6e8b6160805a6b2d906335c'") -and
     $deployment.Contains("'os_/bso/candidate-console.html' = '1fe0782fd56432eca75959e412bc15e109b51818eeae4251846bcb8bbe61dbd9'") -and
+    $deployment.Contains("'docs\SOLUTION_COMPONENT_INVENTORY.json'") -and
+    $deployment.Contains("'docs\RELEASE_INPUT_MANIFEST.json'") -and
+    $deployment.Contains("'solutions\Other\Solution.xml'") -and
+    $deployment.Contains('$canonicalCandidateConsoleNames.Count -ne 5') -and
+    $deployment.Contains('CANDIDATE_CONSOLE_RESOURCE_INVENTORY_DRIFT') -and
+    $deployment.Contains('$runtimeCandidateConsoleNames') -and
+    $deployment.Contains('Get-ChildItem -LiteralPath') -and
     $publishOnlyBlock -and
     -not $publishOnlyBlock.Contains('-Method PATCH') -and
-    $publishOnlyBlock.Contains('$state.Source -cne ''Unpublished''') -and
-    $publishOnlyBlock.Contains('CANDIDATE_CONSOLE_SOURCE_CONTENT_DRIFT') -and
-    $publishOnlyBlock.Contains('MANAGED_ARTIFACT_SOURCE_QUALIFICATION_FAILED:UNEXPECTED_UNPUBLISHED_RESOURCE') -and
+    $publishOnlyBlock.Contains('$state.Source -ceq ''Unpublished''') -and
+    $publishOnlyBlock.Contains('$publishResourceIds.Add($resourceId)') -and
+    $publishOnlyBlock.Contains('CANDIDATE_CONSOLE_SOURCE_CONTENT_DRIFT:$($resource.Name)') -and
     $publishOnlyBlock.Contains('Stop-PublishOnlyPreflight') -and
     $publishOnlyBlock.Contains('TargetedResourceCount = $resources.Count') -and
-    $publishOnlyBlock.Contains('$assetName.Substring($assetName.LastIndexOf(''/'') + 1)') -and
     $publishOnlyBlock.Contains('ResourcePatchCount = $script:Counts.PATCH') -and
+    $publishOnlyBlock.Contains('ResourcePostCount = 0') -and
+    $publishOnlyBlock.Contains('$script:Counts.POST -ne [int]$publishAttempted') -and
+    $publishOnlyBlock.Contains('PublishXmlCount = [int]$publishAttempted') -and
     $publishOnlyBlock.Contains('CANDIDATE_CONSOLE_PUBLICATION_OUTCOME_AMBIGUOUS') -and
-    $publishOnlyBlock.Contains('CANDIDATE_CONSOLE_SOURCE_BASELINE_RECONCILED')) `
-    'Require exact accepted hashes and source publication mismatch before a zero-PATCH scoped publish with GET-only reconciliation'
+    $publishOnlyBlock.Contains('CANDIDATE_CONSOLE_FULL_PUBLICATION_SET_RECONCILED') -and
+    $publishOnlyBlock.Contains('$script:Journal.PrePublishHashes[$resource.Name] -cne $state.EffectiveSha256') -and
+    $publishOnlyBlock.Contains('SolutionMembershipUnchanged = $true') -and
+    $publishOnlyBlock.Contains('SiteMapPatchCount = 0')) `
+    'Inspect and pin the complete Candidate Console set, publish only matching unpublished resources once, then reconcile every hash'
+$publishOnlyPostCalls = [regex]::Matches(
+    $publishOnlyBlock,
+    "Invoke-DataverseRequest -Method POST -Path 'PublishXml'"
+)
+$hashGateIndex = $publishOnlyBlock.IndexOf('if ($state.EffectiveSha256 -cne $expectedHash)')
+$publishDispatchIndex = $publishOnlyBlock.IndexOf("Invoke-DataverseRequest -Method POST -Path 'PublishXml'")
+Assert-Test ($publishOnlyPostCalls.Count -eq 1 -and
+    $hashGateIndex -ge 0 -and $publishDispatchIndex -gt $hashGateIndex -and
+    $publishOnlyBlock.Contains('CANDIDATE_CONSOLE_PUBLICATION_OUTCOME_AMBIGUOUS') -and
+    $publishOnlyBlock.Contains('AMBIGUOUS_RESPONSE_GET_RECONCILED') -and
+    $publishOnlyBlock.Contains('ResourcePostCount = 0') -and
+    $publishOnlyBlock.Contains('$script:Counts.POST -ne [int]$publishAttempted')) `
+    'Reserve at most one PublishXml after integrity gates and reconcile ambiguous outcomes without retry'
 $resourceSelection = $deployment.IndexOf('$resources = @($allResources | Where-Object { $RefreshResourceNames -ccontains $_.Name })')
 $publishLabel = $deployment.IndexOf('$publishLabel = "srapp + $($resources.Count) exact web resources scoped PublishXml"')
 Assert-Test ($deployment.Contains('[string[]]$RefreshResourceNames = @()') -and
     $deployment.Contains('if ($Continue -or (-not $RefreshExisting -and -not $CreateNewResources))') -and
+    $deployment.Contains('$RefreshResourceNames.Count -ne 5') -and
+    $deployment.Contains('$selectedResourceNames') -and
     $resourceSelection -ge 0 -and $publishLabel -gt $resourceSelection -and
     $deployment.Contains('$publishEntry = @($script:Journal.Dispatches | Where-Object Name -CEQ $publishLabel)[0]') -and
     $deployment.Contains('foreach ($resourceId in $script:Journal.ResourceIds)')) `
-    'Allow exact existing-resource refreshes and scope PublishXml to only selected web resources'
+    'Require the complete five-resource selection and scope PublishXml to only pending canonical web resources'
 Assert-Test ($deployment.Contains('[switch]$CreateNewResources') -and
     $deployment.Contains('New-resource creation is restricted to the two exact Candidate Console configuration resources.') -and
     $deployment.Contains('$environmentConfiguration.environmentId -ine $target.EnvironmentId') -and
@@ -312,6 +339,7 @@ Assert-Test ($deployment.Contains('[switch]$CreateNewResources') -and
     'Restrict creation to the two configuration resources and verify the external DEV configuration before dispatch'
 Assert-Test ($deployment.Contains('[switch]$ReleaseNeutralProfile') -and
     $deployment.Contains('Release-neutral refresh is restricted to the existing environment configuration and matching HTML resources.') -and
+    $deployment.Contains('if ($ReleaseNeutralProfile -and -not $PublishOnly)') -and
     $deployment.Contains("if (`$ReleaseNeutralProfile -and -not `$PublishOnly -and `$effective.Source -cne 'Published' -and") -and
     $deployment.Contains('Release-neutral source baseline contains an unpublished resource; stop without refresh.') -and
     $deployment.Contains('EffectiveSource -cne ''Published'' -or -not $_.PublishedMatchesEffective') -and

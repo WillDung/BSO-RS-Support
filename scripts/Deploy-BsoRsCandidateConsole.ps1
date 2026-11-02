@@ -5,6 +5,7 @@ param(
     [switch]$Continue,
     [switch]$RefreshExisting,
     [switch]$ReleaseNeutralProfile,
+    [switch]$PublishOnly,
     [switch]$CreateNewResources,
     [ValidateSet(
         'os_/bso/candidate-console.html',
@@ -40,6 +41,10 @@ $target = [ordered]@{
     WebResourceEntitySet = 'webresourceset'
     WebResourceObjectTypeCode = 61
     NavigationId = 'subarea_bso_candidate_management'
+}
+$acceptedPublicationHashes = @{
+    'os_/bso/candidate-console-environment.js' = '58e03dc262b790b7431f34ca5554422fc86f0d62f6e8b6160805a6b2d906335c'
+    'os_/bso/candidate-console.html' = '1fe0782fd56432eca75959e412bc15e109b51818eeae4251846bcb8bbe61dbd9'
 }
 $allResources = @(
     [pscustomobject]@{
@@ -94,6 +99,8 @@ if ($EnvironmentName -cne $target.EnvironmentName -or
     $ExpectedEnvironmentId -ine $target.EnvironmentId -or
     $ExpectedOrganizationId -ine $target.OrganizationId -or
     ($RefreshExisting -and $CreateNewResources) -or
+    ($PublishOnly -and (-not $Apply -or -not $RefreshExisting -or -not $ReleaseNeutralProfile -or
+        $Continue -or $CreateNewResources -or $RefreshResourceNames.Count -ne 2)) -or
     ($CreateNewResources -and ($Continue -or $RefreshResourceNames.Count -ne 2)) -or
     -not [IO.Path]::IsPathFullyQualified($EvidencePath) -or
     $relativeEvidencePath -eq '.' -or
@@ -283,6 +290,22 @@ function Save-Journal {
     }
 }
 
+function Stop-PublishOnlyPreflight {
+    param([Parameter(Mandatory)][string]$FailureCode)
+    if ($null -ne $script:Journal -and $script:Journal.PublishXml -ceq 'NOT_DISPATCHED') {
+        $script:Journal.Result = 'PUBLISH_ONLY_PREFLIGHT_BLOCKED'
+        $script:Journal.PreflightFailure = $FailureCode
+        $script:Journal.RequestCounts = $script:Counts
+        foreach ($entry in $script:Journal.Dispatches) {
+            if ($entry.State -in @('PLANNED', 'PREPUBLISH_GET_RECONCILED')) {
+                $entry.State = 'BLOCKED_BEFORE_DISPATCH'
+            }
+        }
+        Save-Journal
+    }
+    throw $FailureCode
+}
+
 function Invoke-DataverseRequest {
     param(
         [Parameter(Mandatory)][ValidateSet('GET', 'POST', 'PATCH')][string]$Method,
@@ -363,6 +386,43 @@ function Get-EffectiveWebResource {
     [pscustomobject]@{ Source = 'Published'; Row = $published }
 }
 
+function Get-ExactWebResourceState {
+    param(
+        [Parameter(Mandatory)][pscustomobject]$Resource,
+        [Parameter(Mandatory)][string]$ResourceId
+    )
+    $effective = Get-EffectiveWebResource -ResourceId $ResourceId
+    $published = Get-DataverseJson -Path (
+        "$($target.WebResourceEntitySet)($ResourceId)?" +
+        "%24select=webresourceid,name,displayname,webresourcetype,content"
+    )
+    foreach ($row in @($effective.Row, $published)) {
+        if ([string]$row.webresourceid -ine $ResourceId -or
+            [string]$row.name -cne $Resource.Name -or
+            [string]$row.displayname -cne $Resource.DisplayName -or
+            [int]$row.webresourcetype -ne $Resource.Type) {
+            throw 'Candidate Console web resource identity changed during publish-only reconciliation.'
+        }
+    }
+    try {
+        $effectiveBytes = [Convert]::FromBase64String([string]$effective.Row.content)
+        $publishedBytes = [Convert]::FromBase64String([string]$published.content)
+    } catch {
+        throw 'Candidate Console web resource content is invalid during publish-only reconciliation.'
+    }
+    [pscustomobject]@{
+        Source = $effective.Source
+        EffectiveSha256 = [Convert]::ToHexString(
+            [Security.Cryptography.SHA256]::HashData($effectiveBytes)
+        ).ToLowerInvariant()
+        PublishedSha256 = [Convert]::ToHexString(
+            [Security.Cryptography.SHA256]::HashData($publishedBytes)
+        ).ToLowerInvariant()
+        PublishedMatchesEffective = [Convert]::ToBase64String($effectiveBytes) -ceq
+            [Convert]::ToBase64String($publishedBytes)
+    }
+}
+
 function Assert-PublishedWebResourceReadback {
     foreach ($resource in $resources) {
         $entries = @($script:Journal.Dispatches | Where-Object Name -CEQ $resource.Name)
@@ -393,11 +453,15 @@ function Assert-PublishedWebResourceReadback {
 
 function Assert-PacTarget {
     $output = @(& pac org who --json 2>&1)
-    if ($LASTEXITCODE -ne 0) { throw 'PAC identity check failed; no sign-in or environment switch was attempted.' }
+    if ($LASTEXITCODE -ne 0) {
+        if ($PublishOnly) { throw 'MANAGED_ARTIFACT_SOURCE_QUALIFICATION_FAILED' }
+        throw 'PAC identity check failed; no sign-in or environment switch was attempted.'
+    }
     $identity = ($output -join "`n") | ConvertFrom-Json
     if ([string]$identity.OrgUrl.TrimEnd('/') -cne $target.OrganizationUrl -or
         [string]$identity.EnvironmentId -ine $target.EnvironmentId -or
         [string]$identity.OrgId -ine $target.OrganizationId) {
+        if ($PublishOnly) { throw 'MANAGED_ARTIFACT_SOURCE_QUALIFICATION_FAILED' }
         throw 'PAC identity differs from the fixed Candidate Console target.'
     }
     $identity
@@ -602,22 +666,31 @@ try {
     $who = Get-DataverseJson -Path 'WhoAmI'
     if ([string]$who.UserId -ine [string]$pac.UserId -or
         [string]$who.OrganizationId -ine $target.OrganizationId) {
+        if ($PublishOnly) { throw 'MANAGED_ARTIFACT_SOURCE_QUALIFICATION_FAILED' }
         throw 'Dataverse WhoAmI differs from PAC identity or expected organization.'
     }
     $solutionRows = Get-DataverseJson -Path "solutions?%24select=solutionid,uniquename,_publisherid_value&%24filter=uniquename eq '$($target.SolutionUniqueName)'"
-    if (@($solutionRows.value).Count -ne 1) { throw 'Expected existing project Solution is absent or duplicated.' }
+    if (@($solutionRows.value).Count -ne 1) {
+        if ($PublishOnly) { throw 'MANAGED_ARTIFACT_SOURCE_QUALIFICATION_FAILED' }
+        throw 'Expected existing project Solution is absent or duplicated.'
+    }
     $publisher = Get-DataverseJson -Path "publishers($($solutionRows.value[0]._publisherid_value))?%24select=publisherid,customizationprefix"
-    if ($publisher.customizationprefix -cne 'os') { throw 'Existing project Solution Publisher prefix differs from os.' }
+    if ($publisher.customizationprefix -cne 'os') {
+        if ($PublishOnly) { throw 'MANAGED_ARTIFACT_SOURCE_QUALIFICATION_FAILED' }
+        throw 'Existing project Solution Publisher prefix differs from os.'
+    }
     $appRows = Get-DataverseJson -Path "appmodules?%24select=appmoduleid,uniquename,name,statecode,componentstate&%24filter=uniquename eq '$($target.AppUniqueName)'"
     if (@($appRows.value).Count -ne 1 -or
         [string]$appRows.value[0].appmoduleid -ine $target.AppId -or
         [string]$appRows.value[0].name -cne 'BSO-RS-Support' -or
         [int]$appRows.value[0].statecode -ne 0) {
+        if ($PublishOnly) { throw 'MANAGED_ARTIFACT_SOURCE_QUALIFICATION_FAILED' }
         throw 'Existing srapp identity or active state differs from the approved app.'
     }
     $siteMap = Get-DataverseJson -Path "sitemaps($($target.SiteMapId))?%24select=sitemapid,sitemapnameunique,isappaware,componentstate,sitemapxml"
     if ([string]$siteMap.sitemapnameunique -cne $target.SiteMapUniqueName -or
         -not $siteMap.isappaware -or [int]$siteMap.componentstate -ne 0) {
+        if ($PublishOnly) { throw 'MANAGED_ARTIFACT_SOURCE_QUALIFICATION_FAILED' }
         throw 'Existing srapp Site Map identity or published state is not exact.'
     }
     $siteMapResponse = Invoke-DataverseRequest -Method GET -Path "sitemaps($($target.SiteMapId))?%24select=sitemapid,sitemapnameunique,isappaware,componentstate,sitemapxml"
@@ -647,7 +720,7 @@ try {
             $resourceId = [string]$matches[0].webresourceid
             $effective = Get-EffectiveWebResource -ResourceId $resourceId
             $readback = $effective.Row
-            if ($ReleaseNeutralProfile -and $effective.Source -cne 'Published' -and
+            if ($ReleaseNeutralProfile -and -not $PublishOnly -and $effective.Source -cne 'Published' -and
                 [string]::IsNullOrWhiteSpace($BaselineSnapshotPath)) {
                 throw 'Release-neutral source baseline contains an unpublished resource; stop without refresh.'
             }
@@ -818,6 +891,7 @@ try {
             ResourceIds = @()
             SiteMapPatch = 'NOT_DISPATCHED'
             PublishXml = 'NOT_DISPATCHED'
+            PrePublishHashes = [ordered]@{}
             RequestCounts = $script:Counts
             AutomaticRetries = 0
         }
@@ -836,6 +910,221 @@ try {
             WebResourceId = $null
         })
         Save-Journal
+
+        if ($PublishOnly) {
+            $releaseManifest = Get-Content -LiteralPath (
+                Join-Path $repositoryRoot 'docs\RELEASE_INPUT_MANIFEST.json'
+            ) -Raw | ConvertFrom-Json
+            $assetNames = @(
+                'os_/bso/candidate-console.js',
+                'os_/bso/candidate-console.css',
+                'os_/bso/candidate-console-policy.js'
+            )
+            $assetBaseline = [ordered]@{}
+            foreach ($resource in $resources) {
+                $entry = @($script:Journal.Dispatches | Where-Object Name -CEQ $resource.Name)[0]
+                $matches = @($existing.value | Where-Object name -CEQ $resource.Name)
+                if ($matches.Count -ne 1) {
+                    Stop-PublishOnlyPreflight 'MANAGED_ARTIFACT_SOURCE_QUALIFICATION_FAILED:RESOURCE_IDENTITY'
+                }
+                $resourceId = [string]$matches[0].webresourceid
+                $membership = Get-DataverseJson -Path (
+                    "solutioncomponents?%24select=objectid,componenttype&" +
+                    "%24filter=_solutionid_value eq $($solutionRows.value[0].solutionid) and objectid eq $resourceId"
+                )
+                if (@($membership.value | Where-Object {
+                    [int]$_.componenttype -eq $target.WebResourceObjectTypeCode -and
+                    [string]$_.objectid -ieq $resourceId
+                }).Count -ne 1) {
+                    Stop-PublishOnlyPreflight 'MANAGED_ARTIFACT_SOURCE_QUALIFICATION_FAILED:SOLUTION_MEMBERSHIP'
+                }
+                $state = Get-ExactWebResourceState -Resource $resource -ResourceId $resourceId
+                $expectedHash = [string]$acceptedPublicationHashes[$resource.Name]
+                if ($state.Source -cne 'Unpublished') {
+                    Stop-PublishOnlyPreflight 'MANAGED_ARTIFACT_SOURCE_QUALIFICATION_FAILED:PUBLICATION_STATE_CHANGED'
+                }
+                if ($state.EffectiveSha256 -cne $expectedHash -or
+                    $state.PublishedSha256 -cne $expectedHash -or
+                    -not $state.PublishedMatchesEffective) {
+                    Stop-PublishOnlyPreflight 'CANDIDATE_CONSOLE_SOURCE_CONTENT_DRIFT'
+                }
+                $entry.State = 'PREPUBLISH_GET_RECONCILED'
+                $entry.WebResourceId = $resourceId
+                $script:Journal.ResourceIds = @($script:Journal.ResourceIds) + $resourceId
+                $script:Journal.PrePublishHashes[$resource.Name] = $expectedHash
+                Save-Journal
+            }
+            if ($resources.Count -ne 2 -or
+                @($script:Journal.ResourceIds | Select-Object -Unique).Count -ne 2) {
+                Stop-PublishOnlyPreflight 'MANAGED_ARTIFACT_SOURCE_QUALIFICATION_FAILED:RESOURCE_SCOPE'
+            }
+
+            foreach ($assetName in $assetNames) {
+                $resource = @($allResources | Where-Object Name -CEQ $assetName)
+                if ($resource.Count -ne 1) {
+                    Stop-PublishOnlyPreflight 'MANAGED_ARTIFACT_SOURCE_QUALIFICATION_FAILED:ASSET_INVENTORY'
+                }
+                $localHash = [Convert]::ToHexString(
+                    [Security.Cryptography.SHA256]::HashData([IO.File]::ReadAllBytes($resource[0].Path))
+                ).ToLowerInvariant()
+                $assetFileName = $assetName.Substring($assetName.LastIndexOf('/') + 1)
+                $manifestHash = [string]$releaseManifest.candidateConsole.PSObject.Properties[$assetFileName].Value
+                if ($localHash -cne $manifestHash) {
+                    Stop-PublishOnlyPreflight 'RELEASE_INPUT_INTEGRITY_FAILURE'
+                }
+                $assetFilter = [Uri]::EscapeDataString("name eq '$assetName'")
+                $assetRows = Get-DataverseJson -Path (
+                    "$($target.WebResourceEntitySet)?%24select=webresourceid,name&%24filter=$assetFilter"
+                )
+                if (@($assetRows.value).Count -ne 1) {
+                    Stop-PublishOnlyPreflight 'MANAGED_ARTIFACT_SOURCE_QUALIFICATION_FAILED:ASSET_IDENTITY'
+                }
+                $assetId = [string]$assetRows.value[0].webresourceid
+                $state = Get-ExactWebResourceState -Resource $resource[0] -ResourceId $assetId
+                if ($state.Source -cne 'Published') {
+                    Stop-PublishOnlyPreflight 'MANAGED_ARTIFACT_SOURCE_QUALIFICATION_FAILED:UNEXPECTED_UNPUBLISHED_RESOURCE'
+                }
+                if ($state.EffectiveSha256 -cne $manifestHash -or
+                    $state.PublishedSha256 -cne $manifestHash -or
+                    -not $state.PublishedMatchesEffective) {
+                    Stop-PublishOnlyPreflight 'CANDIDATE_CONSOLE_SOURCE_CONTENT_DRIFT'
+                }
+                $assetBaseline[$assetName] = [ordered]@{
+                    WebResourceId = $assetId
+                    Sha256 = $manifestHash
+                }
+            }
+
+            $sitemapHashBefore = [Convert]::ToHexString(
+                [Security.Cryptography.SHA256]::HashData(
+                    [Text.UTF8Encoding]::new($false).GetBytes([string]$siteMap.sitemapxml)
+                )
+            ).ToLowerInvariant()
+            $siteMapPatchBefore = $script:Counts.PATCH
+            $script:Journal.UnchangedAssetBaseline = $assetBaseline
+            $script:Journal.SiteMapSha256Before = $sitemapHashBefore
+            $script:Journal.PublishXmlScope = "srapp + $($resources.Count) exact web resources"
+            $script:Journal.PatchCountBeforePublish = $script:Counts.PATCH
+            Save-Journal
+
+            $webresourceXml = [System.Text.StringBuilder]::new()
+            [void]$webresourceXml.Append('<webresources>')
+            foreach ($resourceId in $script:Journal.ResourceIds) {
+                [void]$webresourceXml.Append("<webresource>$resourceId</webresource>")
+            }
+            [void]$webresourceXml.Append('</webresources>')
+            $parameterXml = "<importexportxml>$($webresourceXml.ToString())<appmodules><appmodule>$($target.AppId)</appmodule></appmodules></importexportxml>"
+            if ($parameterXml -notmatch '^<importexportxml><webresources><webresource>[0-9a-fA-F-]{36}</webresource><webresource>[0-9a-fA-F-]{36}</webresource></webresources><appmodules><appmodule>[0-9a-fA-F-]{36}</appmodule></appmodules></importexportxml>$') {
+                Stop-PublishOnlyPreflight 'MANAGED_ARTIFACT_SOURCE_QUALIFICATION_FAILED:PUBLISH_SCOPE'
+            }
+            $publishEntry = @($script:Journal.Dispatches | Where-Object Name -CEQ $publishLabel)[0]
+            $publishEntry.State = 'DISPATCH_RESERVED'
+            $script:Journal.PublishXml = 'DISPATCH_RESERVED'
+            Save-Journal
+
+            $publishStatus = $null
+            try {
+                $publish = Invoke-DataverseRequest -Method POST -Path 'PublishXml' `
+                    -Body ([ordered]@{ ParameterXml = $parameterXml })
+                $publishStatus = [int]$publish.StatusCode
+            } catch {
+                $script:Journal.PublishXml = 'OUTCOME_AMBIGUOUS'
+                $publishEntry.State = 'OUTCOME_AMBIGUOUS'
+                Save-Journal
+            }
+            if ($null -ne $publishStatus) {
+                $publishEntry.HttpStatus = $publishStatus
+                $script:Journal.PublishXml = "RESPONSE_RECEIVED:$publishStatus"
+                Save-Journal
+            }
+
+            $reconciled = $true
+            try {
+                foreach ($resource in $resources) {
+                    $entry = @($script:Journal.Dispatches | Where-Object Name -CEQ $resource.Name)[0]
+                    $state = Get-ExactWebResourceState -Resource $resource -ResourceId ([string]$entry.WebResourceId)
+                    $expectedHash = [string]$acceptedPublicationHashes[$resource.Name]
+                    if ($state.Source -cne 'Published' -or
+                        $state.EffectiveSha256 -cne $expectedHash -or
+                        $state.PublishedSha256 -cne $expectedHash -or
+                        -not $state.PublishedMatchesEffective) {
+                        $reconciled = $false
+                    }
+                }
+                foreach ($assetName in $assetNames) {
+                    $resource = @($allResources | Where-Object Name -CEQ $assetName)[0]
+                    $asset = $assetBaseline[$assetName]
+                    $state = Get-ExactWebResourceState -Resource $resource -ResourceId ([string]$asset.WebResourceId)
+                    if ($state.Source -cne 'Published' -or
+                        $state.EffectiveSha256 -cne [string]$asset.Sha256 -or
+                        $state.PublishedSha256 -cne [string]$asset.Sha256 -or
+                        -not $state.PublishedMatchesEffective) {
+                        $reconciled = $false
+                    }
+                }
+                $siteMapAfter = Get-DataverseJson -Path (
+                    "sitemaps($($target.SiteMapId))?%24select=sitemapid,sitemapnameunique,isappaware,componentstate,sitemapxml"
+                )
+                $siteMapHashAfter = [Convert]::ToHexString(
+                    [Security.Cryptography.SHA256]::HashData(
+                        [Text.UTF8Encoding]::new($false).GetBytes([string]$siteMapAfter.sitemapxml)
+                    )
+                ).ToLowerInvariant()
+                $appAfter = Get-DataverseJson -Path (
+                    "appmodules?%24select=appmoduleid,uniquename,name,statecode,componentstate&" +
+                    "%24filter=uniquename eq '$($target.AppUniqueName)'"
+                )
+                if ($siteMapHashAfter -cne $sitemapHashBefore -or
+                    [string]$siteMapAfter.sitemapid -ine $target.SiteMapId -or
+                    [string]$siteMapAfter.sitemapnameunique -cne $target.SiteMapUniqueName -or
+                    @($appAfter.value).Count -ne 1 -or
+                    [string]$appAfter.value[0].appmoduleid -ine $target.AppId -or
+                    [string]$appAfter.value[0].uniquename -cne $target.AppUniqueName -or
+                    [string]$appAfter.value[0].name -cne 'BSO-RS-Support' -or
+                    [int]$appAfter.value[0].statecode -ne 0 -or
+                    $script:Counts.PATCH -ne $siteMapPatchBefore -or
+                    $script:Counts.POST -ne 1) {
+                    $reconciled = $false
+                }
+            } catch {
+                $reconciled = $false
+                $script:Journal.Reconciliation = 'GET_FAILED'
+            }
+            if (-not $reconciled) {
+                $script:Journal.Result = 'CANDIDATE_CONSOLE_PUBLICATION_OUTCOME_AMBIGUOUS'
+                $script:Journal.PublishXml = 'RECONCILIATION_FAILED'
+                Save-Journal
+                throw 'CANDIDATE_CONSOLE_PUBLICATION_OUTCOME_AMBIGUOUS'
+            }
+
+            $script:Journal.Result = 'CANDIDATE_CONSOLE_SOURCE_BASELINE_RECONCILED'
+            $script:Journal.PublishXml = if ($null -eq $publishStatus) {
+                'AMBIGUOUS_RESPONSE_GET_RECONCILED'
+            } else {
+                "GET_RECONCILED:$publishStatus"
+            }
+            $publishEntry.State = 'GET_RECONCILED'
+            $script:Journal.RequestCounts = $script:Counts
+            Save-Journal
+            [ordered]@{
+                Result = [string]$script:Journal.Result
+                Environment = $target.EnvironmentName
+                SolutionUniqueName = $target.SolutionUniqueName
+                AppUniqueName = $target.AppUniqueName
+                ResourceNames = @($resources | ForEach-Object Name)
+                TargetedResourceCount = $resources.Count
+                ResourcePatchCount = $script:Counts.PATCH
+                PublishXmlCount = 1
+                PublishXmlScope = $script:Journal.PublishXmlScope
+                AutomaticRetries = 0
+                PublishedState = 'GET_RECONCILED'
+                AcceptedHashesUnchanged = $true
+                UnchangedAssets = $assetNames
+                SiteMapUnchanged = $true
+                EvidencePath = $EvidencePath
+            } | ConvertTo-Json -Depth 8
+            return
+        }
 
         foreach ($resource in $resources) {
             $entry = @($script:Journal.Dispatches | Where-Object Name -CEQ $resource.Name)[0]

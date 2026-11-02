@@ -262,13 +262,37 @@ $deploymentPath = Join-Path $root 'scripts\Deploy-BsoRsCandidateConsole.ps1'
 $deployment = Get-Content -LiteralPath $deploymentPath -Raw
 $publishCalls = [regex]::Matches($deployment, "Invoke-DataverseRequest -Method POST -Path 'PublishXml'")
 $publishedReadbacks = [regex]::Matches($deployment, 'Assert-PublishedWebResourceReadback')
-Assert-Test ($publishCalls.Count -eq 2 -and
+Assert-Test ($publishCalls.Count -eq 3 -and
     $publishedReadbacks.Count -eq 3 -and
     $publishedReadbacks[1].Index -gt $publishCalls[0].Index -and
     $publishedReadbacks[2].Index -gt $publishCalls[1].Index -and
     $deployment.Contains('PUBLISHED_GET_RECONCILED') -and
     $deployment.Contains('PUBLISH_ACCEPTED_RECONCILIATION_FAILED')) `
     'Require exact published-resource GET reconciliation after each scoped PublishXml'
+$publishOnlyStart = $deployment.IndexOf('        if ($PublishOnly) {')
+$publishOnlyNextRefresh = $deployment.IndexOf(
+    "        foreach (`$resource in `$resources) {`r`n            `$entry = @(`$script:Journal.Dispatches | Where-Object Name -CEQ `$resource.Name)[0]`r`n            `$matches = @(`$existing.value | Where-Object name -CEQ `$resource.Name)",
+    $publishOnlyStart
+)
+$publishOnlyBlock = if ($publishOnlyStart -ge 0 -and $publishOnlyNextRefresh -gt $publishOnlyStart) {
+    $deployment.Substring($publishOnlyStart, $publishOnlyNextRefresh - $publishOnlyStart)
+} else { '' }
+Assert-Test ($deployment.Contains('[switch]$PublishOnly') -and
+    $deployment.Contains('($PublishOnly -and (-not $Apply -or -not $RefreshExisting -or -not $ReleaseNeutralProfile') -and
+    $deployment.Contains("'os_/bso/candidate-console-environment.js' = '58e03dc262b790b7431f34ca5554422fc86f0d62f6e8b6160805a6b2d906335c'") -and
+    $deployment.Contains("'os_/bso/candidate-console.html' = '1fe0782fd56432eca75959e412bc15e109b51818eeae4251846bcb8bbe61dbd9'") -and
+    $publishOnlyBlock -and
+    -not $publishOnlyBlock.Contains('-Method PATCH') -and
+    $publishOnlyBlock.Contains('$state.Source -cne ''Unpublished''') -and
+    $publishOnlyBlock.Contains('CANDIDATE_CONSOLE_SOURCE_CONTENT_DRIFT') -and
+    $publishOnlyBlock.Contains('MANAGED_ARTIFACT_SOURCE_QUALIFICATION_FAILED:UNEXPECTED_UNPUBLISHED_RESOURCE') -and
+    $publishOnlyBlock.Contains('Stop-PublishOnlyPreflight') -and
+    $publishOnlyBlock.Contains('TargetedResourceCount = $resources.Count') -and
+    $publishOnlyBlock.Contains('$assetName.Substring($assetName.LastIndexOf(''/'') + 1)') -and
+    $publishOnlyBlock.Contains('ResourcePatchCount = $script:Counts.PATCH') -and
+    $publishOnlyBlock.Contains('CANDIDATE_CONSOLE_PUBLICATION_OUTCOME_AMBIGUOUS') -and
+    $publishOnlyBlock.Contains('CANDIDATE_CONSOLE_SOURCE_BASELINE_RECONCILED')) `
+    'Require exact accepted hashes and source publication mismatch before a zero-PATCH scoped publish with GET-only reconciliation'
 $resourceSelection = $deployment.IndexOf('$resources = @($allResources | Where-Object { $RefreshResourceNames -ccontains $_.Name })')
 $publishLabel = $deployment.IndexOf('$publishLabel = "srapp + $($resources.Count) exact web resources scoped PublishXml"')
 Assert-Test ($deployment.Contains('[string[]]$RefreshResourceNames = @()') -and
@@ -288,7 +312,7 @@ Assert-Test ($deployment.Contains('[switch]$CreateNewResources') -and
     'Restrict creation to the two configuration resources and verify the external DEV configuration before dispatch'
 Assert-Test ($deployment.Contains('[switch]$ReleaseNeutralProfile') -and
     $deployment.Contains('Release-neutral refresh is restricted to the existing environment configuration and matching HTML resources.') -and
-    $deployment.Contains("if (`$ReleaseNeutralProfile -and `$effective.Source -cne 'Published' -and") -and
+    $deployment.Contains("if (`$ReleaseNeutralProfile -and -not `$PublishOnly -and `$effective.Source -cne 'Published' -and") -and
     $deployment.Contains('Release-neutral source baseline contains an unpublished resource; stop without refresh.') -and
     $deployment.Contains('EffectiveSource -cne ''Published'' -or -not $_.PublishedMatchesEffective') -and
     $deployment.Contains('CANDIDATE_CONSOLE_SOURCE_BASELINE_UNRECONCILED') -and

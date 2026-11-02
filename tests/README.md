@@ -2,7 +2,7 @@
 
 ## Candidate Console environment configuration
 
-- [Candidate Console static checks](CandidateConsole.Tests.ps1): `pwsh -NoProfile -File .\tests\CandidateConsole.Tests.ps1`; validates fail-closed configuration/policy wiring, the DEV-only fallback, synthetic-data filtering, exact scoped deployment selection, published/effective baseline snapshot guards, safe cache-busting, and existing workflow UI contracts.
+- [Candidate Console static checks](CandidateConsole.Tests.ps1): `pwsh -NoProfile -File .\tests\CandidateConsole.Tests.ps1`; validates fail-closed configuration/policy wiring, the DEV-only fallback, synthetic-data filtering, exact scoped deployment selection, one-shot publish-only accepted-hash guards, published/effective baseline snapshot guards, safe cache-busting, and existing workflow UI contracts.
 - [Candidate Console policy tests](CandidateConsolePolicy.test.cjs): `node --test .\tests\CandidateConsolePolicy.test.cjs`; eight offline tests cover default-unconfigured state, DEV/TEST/PROD fallback behavior, synthetic-only mode, runtime organization URL/ID matching, and fail-closed invalid configuration.
 - [Candidate Console configuration generator tests](CandidateConsoleConfiguration.Tests.ps1): `pwsh -NoProfile -File .\tests\CandidateConsoleConfiguration.Tests.ps1`; offline assertions use synthetic `.invalid` values, validate generated configuration and hash-busted HTML, and reject unsafe bound and release-neutral inputs. Temporary files are removed by the test. No PAC, authentication, or network calls occur.
 

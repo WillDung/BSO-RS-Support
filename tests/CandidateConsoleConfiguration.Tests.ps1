@@ -100,6 +100,56 @@ try {
     Assert-Test ($rejected -and -not (Test-Path -LiteralPath $rejectedOutputPath)) `
         'Reject unknown environment modes before producing target configuration'
 
+    $releaseNeutralOutputPath = Join-Path ([IO.Path]::GetTempPath()) "release-neutral-$tempName.js"
+    $releaseNeutralHtmlPath = Join-Path ([IO.Path]::GetTempPath()) "release-neutral-$tempName.html"
+    & $generatorPath `
+        -Mode UNCONFIGURED `
+        -CandidateCoreEnabled:$false `
+        -OutputConfigurationPath $releaseNeutralOutputPath `
+        -OutputHtmlPath $releaseNeutralHtmlPath | Out-Null
+    $releaseNeutralText = [IO.File]::ReadAllText($releaseNeutralOutputPath)
+    $releaseNeutralMatch = [regex]::Match($releaseNeutralText, '(?s)const configuration = (?<json>\{.*?\});')
+    $releaseNeutralConfiguration = $releaseNeutralMatch.Groups['json'].Value | ConvertFrom-Json
+    $releaseNeutralHash = (Get-FileHash -LiteralPath $releaseNeutralOutputPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $releaseNeutralHtml = [IO.File]::ReadAllText($releaseNeutralHtmlPath)
+    Assert-Test ($releaseNeutralMatch.Success -and
+        $releaseNeutralConfiguration.mode -ceq 'UNCONFIGURED' -and
+        $releaseNeutralConfiguration.environmentId -ceq '' -and
+        $releaseNeutralConfiguration.organizationId -ceq '' -and
+        $releaseNeutralConfiguration.organizationUrl -ceq '' -and
+        $releaseNeutralConfiguration.candidateCoreEnabled -eq $false -and
+        $releaseNeutralConfiguration.syntheticDataOnly -eq $true -and
+        $releaseNeutralConfiguration.devDirectWriteFallbackEnabled -eq $false -and
+        $releaseNeutralConfiguration.diagnosticsMode -ceq 'OFF' -and
+        $releaseNeutralHtml.Contains("candidate-console-environment.js?v=$($releaseNeutralHash.Substring(0, 12))")) `
+        'Generate an unbound, fail-closed release-neutral configuration and matching HTML cache token'
+    Remove-Item -LiteralPath $releaseNeutralOutputPath, $releaseNeutralHtmlPath
+
+    $releaseNeutralFailures = @(
+        @{ Name = 'Candidate Core enabled'; Options = @{ CandidateCoreEnabled = $true } },
+        @{ Name = 'organization URL binding'; Options = @{ OrganizationUrl = 'https://test.example.invalid' } },
+        @{ Name = 'environment ID binding'; Options = @{ EnvironmentId = '11111111-1111-4111-8111-111111111111' } },
+        @{ Name = 'non-synthetic mode'; Options = @{ SyntheticDataOnly = $false } },
+        @{ Name = 'DEV direct-write fallback'; Options = @{ DevDirectWriteFallbackEnabled = $true } },
+        @{ Name = 'diagnostics enabled'; Options = @{ DiagnosticsMode = 'SAFE' } },
+        @{ Name = 'release profile'; Options = @{ ReleaseProfile = $true } }
+    )
+    foreach ($case in $releaseNeutralFailures) {
+        $arguments = @{
+            Mode = 'UNCONFIGURED'
+            CandidateCoreEnabled = $false
+            OutputConfigurationPath = $rejectedOutputPath
+            OutputHtmlPath = $rejectedHtmlPath
+        }
+        foreach ($key in $case.Options.Keys) { $arguments[$key] = $case.Options[$key] }
+        $rejected = $false
+        try { & $generatorPath @arguments } catch { $rejected = $true }
+        Assert-Test ($rejected -and
+            -not (Test-Path -LiteralPath $rejectedOutputPath) -and
+            -not (Test-Path -LiteralPath $rejectedHtmlPath)) `
+            "Reject release-neutral configuration with $($case.Name)"
+    }
+
     $releaseOutputPath = Join-Path ([IO.Path]::GetTempPath()) "release-$tempName.js"
     $releaseHtmlPath = Join-Path ([IO.Path]::GetTempPath()) "release-$tempName.html"
     & $generatorPath `
@@ -168,6 +218,7 @@ try {
     }
 } finally {
     foreach ($path in @($outputPath, $htmlOutputPath, $rejectedOutputPath, $rejectedHtmlPath,
+        $releaseNeutralOutputPath, $releaseNeutralHtmlPath,
         $releaseOutputPath, $releaseHtmlPath, $devReleaseOutputPath, $devReleaseHtmlPath)) {
         if (-not [string]::IsNullOrWhiteSpace([string]$path) -and
             (Test-Path -LiteralPath $path)) {

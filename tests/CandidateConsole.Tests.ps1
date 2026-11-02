@@ -286,6 +286,26 @@ Assert-Test ($deployment.Contains('[switch]$CreateNewResources') -and
     $deployment.Contains('candidate-console-environment.js') -and
     $deployment.Contains('candidate-console-policy.js')) `
     'Restrict creation to the two configuration resources and verify the external DEV configuration before dispatch'
+Assert-Test ($deployment.Contains('[switch]$ReleaseNeutralProfile') -and
+    $deployment.Contains('Release-neutral refresh is restricted to the existing environment configuration and matching HTML resources.') -and
+    $deployment.Contains("if (`$ReleaseNeutralProfile -and `$effective.Source -cne 'Published' -and") -and
+    $deployment.Contains('Release-neutral source baseline contains an unpublished resource; stop without refresh.') -and
+    $deployment.Contains('EffectiveSource -cne ''Published'' -or -not $_.PublishedMatchesEffective') -and
+    $deployment.Contains('CANDIDATE_CONSOLE_SOURCE_BASELINE_UNRECONCILED') -and
+    $deployment.Contains('$environmentConfiguration.mode -cne ''UNCONFIGURED''') -and
+    $deployment.Contains('$environmentConfiguration.candidateCoreEnabled -ne $false') -and
+    $deployment.Contains('$environmentConfiguration.syntheticDataOnly -ne $true') -and
+    $deployment.Contains('$environmentConfiguration.devDirectWriteFallbackEnabled -ne $false') -and
+    $deployment.Contains('$environmentConfiguration.diagnosticsMode -cne ''OFF''')) `
+    'Permit only the exact fail-closed release-neutral configuration and HTML refresh'
+Assert-Test ($deployment.Contains('[string]$BaselineSnapshotPath') -and
+    $deployment.Contains('Baseline snapshot capture requires a new external path and a read-only release-neutral existing-resource preflight.') -and
+    $deployment.Contains('PublishedContentBase64 = [Convert]::ToBase64String($publishedBytes)') -and
+    $deployment.Contains('EffectiveContentBase64 = [Convert]::ToBase64String($remoteBytes)') -and
+    $deployment.Contains('EffectiveSource -cne ''Published'' -or -not $_.PublishedMatchesEffective') -and
+    $deployment.Contains('CANDIDATE_CONSOLE_SOURCE_BASELINE_UNRECONCILED') -and
+    $deployment.Contains('BaselineVersionsMatch = $baselineVersionsMatch')) `
+    'Capture exact published and effective resource bytes outside the repository and block on version drift'
 Assert-Test ($deployment.Contains('CANDIDATE_CONSOLE_CONFIG_RESOURCES_PREFLIGHT_READY') -and
     $deployment.Contains('if (-not $Continue -and -not $CreateNewResources -and -not $RefreshExisting)') -and
     $deployment.Contains('NOT_REQUIRED_EXISTING_NAVIGATION_RECONCILED') -and

@@ -4,6 +4,7 @@ param(
     [switch]$Apply,
     [switch]$Continue,
     [switch]$RefreshExisting,
+    [switch]$ReleaseNeutralProfile,
     [switch]$CreateNewResources,
     [ValidateSet(
         'os_/bso/candidate-console.html',
@@ -15,6 +16,7 @@ param(
     [string[]]$RefreshResourceNames = @(),
     [string]$EnvironmentConfigurationPath,
     [string]$EnvironmentHtmlPath,
+    [string]$BaselineSnapshotPath,
     [Parameter(Mandatory)][string]$EnvironmentName,
     [Parameter(Mandatory)][string]$OrganizationUrl,
     [Parameter(Mandatory)][string]$ExpectedEnvironmentId,
@@ -85,6 +87,7 @@ $script:Counts = @{ GET = 0; POST = 0; PATCH = 0 }
 $script:Journal = $null
 $script:JournalPath = $EvidencePath
 $script:RefreshContentChecks = [System.Collections.Generic.List[object]]::new()
+$script:RefreshBaselineResources = [System.Collections.Generic.List[object]]::new()
 
 if ($EnvironmentName -cne $target.EnvironmentName -or
     $OrganizationUrl.TrimEnd('/') -cne $target.OrganizationUrl -or
@@ -111,6 +114,31 @@ if ($RefreshResourceNames.Count -gt 0) {
     $resources = @($allResources | Where-Object { $RefreshResourceNames -ccontains $_.Name })
     if ($resources.Count -ne $RefreshResourceNames.Count) {
         throw 'Exact refresh resource selection did not resolve every requested resource.'
+    }
+}
+if ($ReleaseNeutralProfile) {
+    $releaseNeutralResourceNames = @(
+        'os_/bso/candidate-console-environment.js',
+        'os_/bso/candidate-console.html'
+    )
+    $selectedResourceNames = @($resources | ForEach-Object Name | Sort-Object)
+    $expectedResourceNames = @($releaseNeutralResourceNames | Sort-Object)
+    if (-not $RefreshExisting -or $Continue -or $CreateNewResources -or
+        $RefreshResourceNames.Count -ne 2 -or
+        [string]::Join('|', $selectedResourceNames) -cne [string]::Join('|', $expectedResourceNames)) {
+        throw 'Release-neutral refresh is restricted to the existing environment configuration and matching HTML resources.'
+    }
+}
+if (-not [string]::IsNullOrWhiteSpace($BaselineSnapshotPath)) {
+    $baselineFullPath = [IO.Path]::GetFullPath($BaselineSnapshotPath)
+    $relativeBaselinePath = [IO.Path]::GetRelativePath($repositoryRoot, $baselineFullPath)
+    if (-not $ReleaseNeutralProfile -or -not $RefreshExisting -or $Apply -or $Continue -or
+        $relativeBaselinePath -eq '.' -or
+        (-not [IO.Path]::IsPathRooted($relativeBaselinePath) -and
+         $relativeBaselinePath -notmatch '^\.\.(\\|$)') -or
+        (Test-Path -LiteralPath $baselineFullPath) -or
+        -not (Test-Path -LiteralPath (Split-Path -Parent $baselineFullPath) -PathType Container)) {
+        throw 'Baseline snapshot capture requires a new external path and a read-only release-neutral existing-resource preflight.'
     }
 }
 if ($CreateNewResources) {
@@ -158,7 +186,27 @@ if ($hasEnvironmentResource -or $hasHtmlResource) {
     }
     try { $environmentConfiguration = $configurationMatch.Groups['json'].Value | ConvertFrom-Json }
     catch { throw 'The external environment configuration is invalid JSON.' }
-    if ([string]$environmentConfiguration.mode -cne 'DEV' -or
+    if ($ReleaseNeutralProfile) {
+        $expectedConfigurationProperties = @(
+            'mode', 'environmentId', 'organizationId', 'organizationUrl',
+            'candidateCoreEnabled', 'syntheticDataOnly',
+            'devDirectWriteFallbackEnabled', 'diagnosticsMode'
+        )
+        $actualConfigurationProperties = @($environmentConfiguration.PSObject.Properties.Name | Sort-Object)
+        $expectedConfigurationProperties = @($expectedConfigurationProperties | Sort-Object)
+        if ([string]::Join('|', $actualConfigurationProperties) -cne
+                [string]::Join('|', $expectedConfigurationProperties) -or
+            [string]$environmentConfiguration.mode -cne 'UNCONFIGURED' -or
+            -not [string]::IsNullOrWhiteSpace([string]$environmentConfiguration.environmentId) -or
+            -not [string]::IsNullOrWhiteSpace([string]$environmentConfiguration.organizationId) -or
+            -not [string]::IsNullOrWhiteSpace([string]$environmentConfiguration.organizationUrl) -or
+            $environmentConfiguration.candidateCoreEnabled -ne $false -or
+            $environmentConfiguration.syntheticDataOnly -ne $true -or
+            $environmentConfiguration.devDirectWriteFallbackEnabled -ne $false -or
+            [string]$environmentConfiguration.diagnosticsMode -cne 'OFF') {
+            throw 'The generated environment configuration does not match the fail-closed release-neutral policy.'
+        }
+    } elseif ([string]$environmentConfiguration.mode -cne 'DEV' -or
         [string]$environmentConfiguration.environmentId -ine $target.EnvironmentId -or
         [string]$environmentConfiguration.organizationId -ine $target.OrganizationId -or
         [string]$environmentConfiguration.organizationUrl.TrimEnd('/') -cne $target.OrganizationUrl -or
@@ -599,6 +647,10 @@ try {
             $resourceId = [string]$matches[0].webresourceid
             $effective = Get-EffectiveWebResource -ResourceId $resourceId
             $readback = $effective.Row
+            if ($ReleaseNeutralProfile -and $effective.Source -cne 'Published' -and
+                [string]::IsNullOrWhiteSpace($BaselineSnapshotPath)) {
+                throw 'Release-neutral source baseline contains an unpublished resource; stop without refresh.'
+            }
             $membership = Get-DataverseJson -Path "solutioncomponents?%24select=objectid,componenttype&%24filter=_solutionid_value eq $($solutionRows.value[0].solutionid) and objectid eq $resourceId"
             if ([string]$readback.name -cne $resource.Name -or
                 [string]$readback.displayname -cne $resource.DisplayName -or
@@ -614,12 +666,46 @@ try {
             $localBytes = [IO.File]::ReadAllBytes($resource.Path)
             $remoteHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($remoteBytes)).ToLowerInvariant()
             $localHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($localBytes)).ToLowerInvariant()
+            $publishedHash = $null
+            $publishedMatchesEffective = $null
+            if (-not [string]::IsNullOrWhiteSpace($BaselineSnapshotPath)) {
+                $published = Get-DataverseJson -Path (
+                    "$($target.WebResourceEntitySet)($resourceId)?" +
+                    "%24select=webresourceid,name,displayname,webresourcetype,content"
+                )
+                if ([string]$published.webresourceid -ine $resourceId -or
+                    [string]$published.name -cne $resource.Name -or
+                    [string]$published.displayname -cne $resource.DisplayName -or
+                    [int]$published.webresourcetype -ne $resource.Type) {
+                    throw "Published resource identity differs from the effective source resource: $($resource.Name)"
+                }
+                try { $publishedBytes = [Convert]::FromBase64String([string]$published.content) }
+                catch { throw "Published resource content is not valid base64: $($resource.Name)" }
+                $publishedHash = [Convert]::ToHexString(
+                    [Security.Cryptography.SHA256]::HashData($publishedBytes)
+                ).ToLowerInvariant()
+                $publishedMatchesEffective = $publishedHash -ceq $remoteHash
+                $script:RefreshBaselineResources.Add([ordered]@{
+                    Name = $resource.Name
+                    WebResourceId = $resourceId
+                    DisplayName = $resource.DisplayName
+                    Type = $resource.Type
+                    EffectiveSource = $effective.Source
+                    EffectiveContentBase64 = [Convert]::ToBase64String($remoteBytes)
+                    EffectiveSha256 = $remoteHash
+                    PublishedContentBase64 = [Convert]::ToBase64String($publishedBytes)
+                    PublishedSha256 = $publishedHash
+                    PublishedMatchesEffective = $publishedMatchesEffective
+                })
+            }
             $script:RefreshContentChecks.Add([ordered]@{
                 Name = $resource.Name
                 Source = $effective.Source
                 ContentMatchesLocal = $remoteHash -ceq $localHash
                 LocalSha256 = $localHash
                 RemoteSha256 = $remoteHash
+                PublishedSha256 = $publishedHash
+                PublishedMatchesEffective = $publishedMatchesEffective
             })
         }
     } else {
@@ -655,8 +741,38 @@ try {
             return
         }
         if ($RefreshExisting) {
+            $baselineVersionsMatch = $true
+            if (-not [string]::IsNullOrWhiteSpace($BaselineSnapshotPath)) {
+                $snapshot = [ordered]@{
+                    SchemaVersion = 1
+                    CapturePurpose = 'VN LMV IT release-neutral Candidate Console source baseline'
+                    Environment = $target.EnvironmentName
+                    SolutionUniqueName = $target.SolutionUniqueName
+                    AppUniqueName = $target.AppUniqueName
+                    CapturedOnUtc = [DateTime]::UtcNow.ToString('o')
+                    AutomaticRetries = 0
+                    Resources = @($script:RefreshBaselineResources)
+                }
+                if (@($snapshot.Resources).Count -ne 2) {
+                    throw 'Baseline snapshot did not capture both exact selected resources.'
+                }
+                $baselineVersionsMatch = @(
+                    $snapshot.Resources | Where-Object {
+                        $_.EffectiveSource -cne 'Published' -or -not $_.PublishedMatchesEffective
+                    }
+                ).Count -eq 0
+                [IO.File]::WriteAllText(
+                    $baselineFullPath,
+                    (ConvertTo-Json -InputObject $snapshot -Depth 10),
+                    [Text.UTF8Encoding]::new($false)
+                )
+            }
             [ordered]@{
-                Result = 'CANDIDATE_CONSOLE_REFRESH_PREFLIGHT_READY'
+                Result = if (-not $baselineVersionsMatch) {
+                    'CANDIDATE_CONSOLE_SOURCE_BASELINE_UNRECONCILED'
+                } else {
+                    'CANDIDATE_CONSOLE_REFRESH_PREFLIGHT_READY'
+                }
                 Environment = $target.EnvironmentName
                 AppUniqueName = $target.AppUniqueName
                 SolutionUniqueName = $target.SolutionUniqueName
@@ -664,6 +780,8 @@ try {
                 ResourceNames = @($resources | ForEach-Object Name)
                 ResourceCountExisting = @($existing.value).Count
                 ContentChecks = @($script:RefreshContentChecks)
+                BaselineSnapshotCaptured = -not [string]::IsNullOrWhiteSpace($BaselineSnapshotPath)
+                BaselineVersionsMatch = $baselineVersionsMatch
                 Writes = 0
                 AutomaticRetries = 0
             } | ConvertTo-Json -Depth 8

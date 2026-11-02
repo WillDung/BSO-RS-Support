@@ -64,7 +64,7 @@
     "testTargetAuthorizationValidator": "../scripts/BsoRsTestTargetAuthorization.psm1",
     "testTargetAuthorizationValidatorSha256": "c8071bfe9803ee0c779b7cf470af89e3d47c30b32ec2b6e0405075c67008b7e0",
     "configurationGenerator": "../scripts/New-BsoRsCandidateConsoleEnvironmentConfig.ps1",
-    "configurationGeneratorSha256": "f8d5892a94d89163b0b0945841ee981cc40e1b9091f78ec4a55ba3d744d9f5b4",
+    "configurationGeneratorSha256": "b11e66b4d7c6f19b7ff8a8c5d691cba5a3e82dff1371f4bff8709628f0555791",
     "inventoryGenerator": "../scripts/New-BsoRsSolutionComponentInventory.ps1",
     "inventoryGeneratorSha256": "a144af8d8a99147c01c638749835750ba71d86e60ec2a66687777cb4cab55c5a",
     "packageUpdater": "../scripts/Update-BsoRsCandidatePluginPackage.ps1",
@@ -72,7 +72,7 @@
     "canonicalSourceFingerprintTool": "../scripts/BsoRsCanonicalSourceFingerprint.psm1",
     "canonicalSourceFingerprintToolSha256": "3ef2e540fb93198d37a83c7d657f37284db2544400554858b0045b7a15b3a658",
     "toolFingerprintAlgorithm": "SHA256_OF_UTF8_SORTED_LINES_RELATIVE_PATH_PIPE_FILE_SHA256",
-    "toolFingerprint": "e30859225c01f69338befbe742bed52435e93adbf1cfeae56c2a710d356456ef"
+    "toolFingerprint": "5dc534a316ae54beef758cef0e7c7e6d5a0519195c26e913085663e097283f0c"
   },
   "devOriginReviewArtifact": {
     "disposition": "DEV_ORIGIN_REVIEW_ARTIFACT_NOT_RELEASEABLE",

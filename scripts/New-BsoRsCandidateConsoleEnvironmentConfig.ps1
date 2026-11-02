@@ -1,10 +1,10 @@
 #requires -Version 7.4
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('DEV', 'TEST', 'PROD')][string]$Mode,
-    [Parameter(Mandatory)][string]$OrganizationUrl,
-    [Parameter(Mandatory)][string]$EnvironmentId,
-    [Parameter(Mandatory)][string]$OrganizationId,
+    [Parameter(Mandatory)][ValidateSet('DEV', 'TEST', 'PROD', 'UNCONFIGURED')][string]$Mode,
+    [string]$OrganizationUrl,
+    [string]$EnvironmentId,
+    [string]$OrganizationId,
     [Parameter(Mandatory)][string]$OutputConfigurationPath,
     [Parameter(Mandatory)][string]$OutputHtmlPath,
     [switch]$ReleaseProfile,
@@ -17,11 +17,27 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+$releaseNeutral = $Mode -ceq 'UNCONFIGURED'
 if ($Mode -ne 'PROD' -and -not $SyntheticDataOnly) {
     throw 'DEV and TEST configurations must remain synthetic-only.'
 }
 if ($Mode -ne 'DEV' -and $DevDirectWriteFallbackEnabled) {
     throw 'Direct-write fallback can be configured only for DEV.'
+}
+if ($releaseNeutral -and
+    (-not [string]::IsNullOrWhiteSpace($OrganizationUrl) -or
+     -not [string]::IsNullOrWhiteSpace($EnvironmentId) -or
+     -not [string]::IsNullOrWhiteSpace($OrganizationId) -or
+     $CandidateCoreEnabled -or -not $SyntheticDataOnly -or
+     $DevDirectWriteFallbackEnabled -or $DiagnosticsMode -cne 'OFF' -or
+     $ReleaseProfile)) {
+    throw 'UNCONFIGURED release-neutral configuration requires no target binding, Candidate Core disabled, synthetic-only mode, fallback disabled, diagnostics Off, and no release profile.'
+}
+if (-not $releaseNeutral -and
+    ([string]::IsNullOrWhiteSpace($OrganizationUrl) -or
+     [string]::IsNullOrWhiteSpace($EnvironmentId) -or
+     [string]::IsNullOrWhiteSpace($OrganizationId))) {
+    throw 'Bound DEV, TEST, and PROD configurations require an explicit URL, environment ID, and organization ID.'
 }
 if ($ReleaseProfile -and
     (-not $CandidateCoreEnabled -or -not $SyntheticDataOnly -or
@@ -31,19 +47,27 @@ if ($ReleaseProfile -and
 
 $parsedEnvironmentId = [Guid]::Empty
 $parsedOrganizationId = [Guid]::Empty
-if (-not [Guid]::TryParse($EnvironmentId, [ref]$parsedEnvironmentId) -or
-    -not [Guid]::TryParse($OrganizationId, [ref]$parsedOrganizationId)) {
-    throw 'Environment and organization IDs must be GUIDs.'
-}
+$organizationUrlValue = ''
+$environmentIdValue = ''
+$organizationIdValue = ''
+if (-not $releaseNeutral) {
+    if (-not [Guid]::TryParse($EnvironmentId, [ref]$parsedEnvironmentId) -or
+        -not [Guid]::TryParse($OrganizationId, [ref]$parsedOrganizationId)) {
+        throw 'Environment and organization IDs must be GUIDs.'
+    }
 
-$organizationUri = $null
-if (-not [Uri]::TryCreate($OrganizationUrl, [UriKind]::Absolute, [ref]$organizationUri) -or
-    $organizationUri.Scheme -cne 'https' -or
-    $organizationUri.UserInfo -or
-    $organizationUri.AbsolutePath -ne '/' -or
-    $organizationUri.Query -or
-    $organizationUri.Fragment) {
-    throw 'Organization URL must be an HTTPS origin without credentials, path, query, or fragment.'
+    $organizationUri = $null
+    if (-not [Uri]::TryCreate($OrganizationUrl, [UriKind]::Absolute, [ref]$organizationUri) -or
+        $organizationUri.Scheme -cne 'https' -or
+        $organizationUri.UserInfo -or
+        $organizationUri.AbsolutePath -ne '/' -or
+        $organizationUri.Query -or
+        $organizationUri.Fragment) {
+        throw 'Organization URL must be an HTTPS origin without credentials, path, query, or fragment.'
+    }
+    $organizationUrlValue = $organizationUri.GetLeftPart([UriPartial]::Authority).TrimEnd('/')
+    $environmentIdValue = $parsedEnvironmentId.ToString('D').ToLowerInvariant()
+    $organizationIdValue = $parsedOrganizationId.ToString('D').ToLowerInvariant()
 }
 
 $repositoryRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
@@ -72,9 +96,9 @@ if ($configurationFullPath -ieq $htmlFullPath) {
 
 $configuration = [ordered]@{
     mode = $Mode
-    environmentId = $parsedEnvironmentId.ToString('D').ToLowerInvariant()
-    organizationId = $parsedOrganizationId.ToString('D').ToLowerInvariant()
-    organizationUrl = $organizationUri.GetLeftPart([UriPartial]::Authority).TrimEnd('/')
+    environmentId = $environmentIdValue
+    organizationId = $organizationIdValue
+    organizationUrl = $organizationUrlValue
     candidateCoreEnabled = $CandidateCoreEnabled
     syntheticDataOnly = $SyntheticDataOnly
     devDirectWriteFallbackEnabled = [bool]$DevDirectWriteFallbackEnabled

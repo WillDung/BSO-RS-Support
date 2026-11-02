@@ -6,6 +6,7 @@ param(
     [switch]$RefreshExisting,
     [switch]$ReleaseNeutralProfile,
     [switch]$PublishOnly,
+    [switch]$ReconcilePublishOnly,
     [switch]$CreateNewResources,
     [ValidateSet(
         'os_/bso/candidate-console.html',
@@ -130,12 +131,22 @@ $sourceCandidateConsoleNames = @(
         ForEach-Object { "os_/bso/$($_.Name)" } |
         Sort-Object
 )
+$metadataCandidateConsoleNames = [System.Collections.Generic.List[string]]::new()
+$metadataDirectory = Join-Path $repositoryRoot 'solutions\WebResources\os_\bso'
+foreach ($metadataFile in Get-ChildItem -LiteralPath $metadataDirectory -Filter 'candidate-console*.data.xml' -File) {
+    $metadataReader = [System.Xml.XmlReader]::Create($metadataFile.FullName, $solutionXmlSettings)
+    try { $metadataDocument = [xml]::new(); $metadataDocument.Load($metadataReader) }
+    finally { $metadataReader.Dispose() }
+    $metadataCandidateConsoleNames.Add([string]$metadataDocument.WebResource.Name)
+}
+$metadataCandidateConsoleNames = @($metadataCandidateConsoleNames | Sort-Object)
 $declaredCandidateConsoleNames = @($allResources | ForEach-Object Name | Sort-Object)
 $candidateConsoleNameSets = @(
     $canonicalCandidateConsoleNames,
     $inventoryCandidateConsoleNames,
     $solutionCandidateConsoleNames,
     $sourceCandidateConsoleNames,
+    $metadataCandidateConsoleNames,
     $declaredCandidateConsoleNames
 )
 $candidateConsoleInventoryDrift = $canonicalCandidateConsoleNames.Count -ne 5
@@ -193,9 +204,11 @@ if ($EnvironmentName -cne $target.EnvironmentName -or
     -not [IO.Path]::IsPathFullyQualified($EvidencePath) -or
     $relativeEvidencePath -eq '.' -or
     (-not [IO.Path]::IsPathRooted($relativeEvidencePath) -and $relativeEvidencePath -notmatch '^\.\.(\\|$)') -or
-    ((Test-Path -LiteralPath $EvidencePath) -and -not $Continue) -or
+    ((Test-Path -LiteralPath $EvidencePath) -and -not ($Continue -or $ReconcilePublishOnly)) -or
     ($Continue -and (-not (Test-Path -LiteralPath $EvidencePath -PathType Leaf) -or $RefreshExisting)) -or
-    ($RefreshExisting -and -not $Apply -and (Test-Path -LiteralPath $EvidencePath))) {
+    ($RefreshExisting -and -not $Apply -and (Test-Path -LiteralPath $EvidencePath) -and
+        -not $ReconcilePublishOnly) -or
+    ($ReconcilePublishOnly -and -not (Test-Path -LiteralPath $EvidencePath -PathType Leaf))) {
     throw 'Candidate Console target or new evidence path is not exact.'
 }
 if ($RefreshResourceNames.Count -gt 0) {
@@ -217,8 +230,25 @@ if ($PublishOnly) {
         [string]::Join('|', $canonicalCandidateConsoleNames)) {
         throw 'CANDIDATE_CONSOLE_RESOURCE_INVENTORY_DRIFT'
     }
+    if (-not [string]::IsNullOrWhiteSpace($EnvironmentConfigurationPath) -or
+        -not [string]::IsNullOrWhiteSpace($EnvironmentHtmlPath) -or
+        -not [string]::IsNullOrWhiteSpace($BaselineSnapshotPath)) {
+        throw 'Publish-only mode does not accept replacement content or a baseline snapshot path.'
+    }
 }
-if ($ReleaseNeutralProfile -and -not $PublishOnly) {
+if ($ReconcilePublishOnly) {
+    $selectedResourceNames = @($resources | ForEach-Object Name | Sort-Object)
+    if ($Apply -or $PublishOnly -or $Continue -or $CreateNewResources -or
+        $RefreshResourceNames.Count -ne 5 -or
+        [string]::Join('|', $selectedResourceNames) -cne
+            [string]::Join('|', $canonicalCandidateConsoleNames) -or
+        -not [string]::IsNullOrWhiteSpace($EnvironmentConfigurationPath) -or
+        -not [string]::IsNullOrWhiteSpace($EnvironmentHtmlPath) -or
+        -not [string]::IsNullOrWhiteSpace($BaselineSnapshotPath)) {
+        throw 'Read-only publication reconciliation requires the exact five-resource set and an existing journal.'
+    }
+}
+if ($ReleaseNeutralProfile -and -not $PublishOnly -and -not $ReconcilePublishOnly) {
     $releaseNeutralResourceNames = @(
         'os_/bso/candidate-console-environment.js',
         'os_/bso/candidate-console.html'
@@ -273,7 +303,7 @@ $hasEnvironmentResource = $resources.Name -ccontains 'os_/bso/candidate-console-
 $hasHtmlResource = $resources.Name -ccontains 'os_/bso/candidate-console.html'
 $environmentConfiguration = $null
 $configurationHash = $null
-if ($hasEnvironmentResource -or $hasHtmlResource) {
+if (-not ($PublishOnly -or $ReconcilePublishOnly) -and ($hasEnvironmentResource -or $hasHtmlResource)) {
     if ([string]::IsNullOrWhiteSpace($EnvironmentConfigurationPath)) {
         throw 'The selected configuration or HTML refresh requires an externally generated environment configuration.'
     }
@@ -328,10 +358,11 @@ if ($hasEnvironmentResource -or $hasHtmlResource) {
         }
         $environmentResource[0].Path = $EnvironmentConfigurationPath
     }
-} elseif (-not [string]::IsNullOrWhiteSpace($EnvironmentConfigurationPath)) {
+} elseif (-not ($PublishOnly -or $ReconcilePublishOnly) -and
+    -not [string]::IsNullOrWhiteSpace($EnvironmentConfigurationPath)) {
     throw 'An external environment configuration is accepted only for its resource or its matching HTML refresh.'
 }
-if ($hasHtmlResource) {
+if (-not ($PublishOnly -or $ReconcilePublishOnly) -and $hasHtmlResource) {
     if ([string]::IsNullOrWhiteSpace($EnvironmentHtmlPath)) {
         throw 'The HTML refresh requires an externally generated cache-busted HTML file.'
     }
@@ -354,7 +385,8 @@ if ($hasHtmlResource) {
         throw 'Generated HTML differs from the checked-in source except for the verified environment cache token.'
     }
     $htmlResource[0].Path = $EnvironmentHtmlPath
-} elseif (-not [string]::IsNullOrWhiteSpace($EnvironmentHtmlPath)) {
+} elseif (-not ($PublishOnly -or $ReconcilePublishOnly) -and
+    -not [string]::IsNullOrWhiteSpace($EnvironmentHtmlPath)) {
     throw 'An external HTML resource is accepted only when that exact HTML resource is selected.'
 }
 $publishLabel = "srapp + $($resources.Count) exact web resources scoped PublishXml"
@@ -516,6 +548,21 @@ function Get-ExactWebResourceState {
         PublishedMatchesEffective = [Convert]::ToBase64String($effectiveBytes) -ceq
             [Convert]::ToBase64String($publishedBytes)
     }
+}
+
+function Get-SolutionMembershipFingerprint {
+    param([Parameter(Mandatory)][object[]]$Components)
+    $membershipLines = @(
+        $Components |
+            ForEach-Object { "$([int]$_.componenttype)|$([string]$_.objectid)" } |
+            Sort-Object
+    )
+    $membershipText = [string]::Join("`n", $membershipLines)
+    [Convert]::ToHexString(
+        [Security.Cryptography.SHA256]::HashData(
+            [Text.UTF8Encoding]::new($false).GetBytes($membershipText)
+        )
+    ).ToLowerInvariant()
 }
 
 function Assert-PublishedWebResourceReadback {
@@ -815,7 +862,8 @@ try {
             $resourceId = [string]$matches[0].webresourceid
             $effective = Get-EffectiveWebResource -ResourceId $resourceId
             $readback = $effective.Row
-            if ($ReleaseNeutralProfile -and -not $PublishOnly -and $effective.Source -cne 'Published' -and
+            if ($ReleaseNeutralProfile -and -not $PublishOnly -and -not $ReconcilePublishOnly -and
+                $effective.Source -cne 'Published' -and
                 [string]::IsNullOrWhiteSpace($BaselineSnapshotPath)) {
                 throw 'Release-neutral source baseline contains an unpublished resource; stop without refresh.'
             }
@@ -891,6 +939,141 @@ try {
     })
     if ($navMember.Count -ne 1) {
         throw 'Existing srapp Site Map is not an exact member of the project Solution.'
+    }
+
+    if ($ReconcilePublishOnly) {
+        $script:Journal = Get-Content -LiteralPath $EvidencePath -Raw | ConvertFrom-Json
+        $journalResourceNames = @(
+            $script:Journal.Dispatches |
+                Where-Object { $_.Name -in $canonicalCandidateConsoleNames } |
+                ForEach-Object { [string]$_.Name } |
+                Sort-Object
+        )
+        $failures = [System.Collections.Generic.List[string]]::new()
+        if ($script:Journal.Result -cne 'CANDIDATE_CONSOLE_PUBLICATION_OUTCOME_AMBIGUOUS' -or
+            [string]$script:Journal.Environment -cne $target.EnvironmentName -or
+            [string]$script:Journal.AppUniqueName -cne $target.AppUniqueName -or
+            [string]$script:Journal.SolutionUniqueName -cne $target.SolutionUniqueName -or
+            [string]::Join('|', $journalResourceNames) -cne
+                [string]::Join('|', $canonicalCandidateConsoleNames) -or
+            [int]$script:Journal.RequestCounts.POST -ne 1 -or
+            [int]$script:Journal.RequestCounts.PATCH -ne 0 -or
+            [int]$script:Journal.AutomaticRetries -ne 0) {
+            $failures.Add('JOURNAL_SCOPE_OR_COUNT_MISMATCH')
+        }
+
+        $postPublishState = [ordered]@{}
+        foreach ($resource in $resources) {
+            $journalEntry = @($script:Journal.Dispatches | Where-Object Name -CEQ $resource.Name)
+            $remoteEntry = @($existing.value | Where-Object name -CEQ $resource.Name)
+            if ($journalEntry.Count -ne 1 -or $remoteEntry.Count -ne 1 -or
+                [string]$journalEntry[0].WebResourceId -ine [string]$remoteEntry[0].webresourceid) {
+                $failures.Add("RESOURCE_IDENTITY:$($resource.Name)")
+                continue
+            }
+            try {
+                $state = Get-ExactWebResourceState -Resource $resource `
+                    -ResourceId ([string]$journalEntry[0].WebResourceId)
+                $expectedHash = [string]$expectedCandidateConsoleHashes[$resource.Name]
+                $prePublishHash = [string]$script:Journal.PrePublishHashes.PSObject.Properties[
+                    $resource.Name
+                ].Value
+                $postPublishState[$resource.Name] = [ordered]@{
+                    CurrentSha256 = $state.EffectiveSha256
+                    PublishedSha256 = $state.PublishedSha256
+                    PublicationState = $state.Source
+                    PublishedMatchesCurrent = $state.PublishedMatchesEffective
+                    ExpectedSha256 = $expectedHash
+                    PrePublishSha256 = $prePublishHash
+                }
+                if ($state.Source -cne 'Published') {
+                    $failures.Add("PUBLICATION_STATE:$($resource.Name)")
+                }
+                if ($state.EffectiveSha256 -cne $expectedHash -or
+                    $state.PublishedSha256 -cne $expectedHash -or
+                    $prePublishHash -cne $state.EffectiveSha256 -or
+                    -not $state.PublishedMatchesEffective) {
+                    $failures.Add("HASH_MISMATCH:$($resource.Name)")
+                }
+            } catch {
+                $postPublishState[$resource.Name] = [ordered]@{
+                    Reconciliation = 'GET_FAILED'
+                    ErrorType = $_.Exception.GetType().Name
+                }
+                $failures.Add("GET_FAILED:$($resource.Name)")
+            }
+        }
+
+        $runtimeResources = Get-DataverseJson -Path (
+            "$($target.WebResourceEntitySet)?%24select=webresourceid,name&" +
+            "%24filter=startswith(name,'$candidateConsolePrefix')"
+        )
+        $runtimeCandidateConsoleNames = @(
+            $runtimeResources.value |
+                Where-Object { [string]$_.name -like "$candidateConsolePrefix*" } |
+                ForEach-Object { [string]$_.name } |
+                Sort-Object
+        )
+        if ([string]::Join('|', $runtimeCandidateConsoleNames) -cne
+            [string]::Join('|', $canonicalCandidateConsoleNames)) {
+            $failures.Add('RUNTIME_RESOURCE_INVENTORY_DRIFT')
+        }
+
+        $membershipHash = Get-SolutionMembershipFingerprint -Components $memberships.value
+        if ($membershipHash -cne [string]$script:Journal.SolutionMembershipFingerprintBefore) {
+            $failures.Add('SOLUTION_MEMBERSHIP_CHANGED')
+        }
+        $siteMapHash = [Convert]::ToHexString(
+            [Security.Cryptography.SHA256]::HashData(
+                [Text.UTF8Encoding]::new($false).GetBytes([string]$siteMap.sitemapxml)
+            )
+        ).ToLowerInvariant()
+        if ($siteMapHash -cne [string]$script:Journal.SiteMapSha256Before) {
+            $failures.Add('SITEMAP_CHANGED')
+        }
+        if ($script:Counts.POST -ne 0 -or $script:Counts.PATCH -ne 0) {
+            $failures.Add('READ_ONLY_OPERATION_COUNT_MISMATCH')
+        }
+
+        $readOnlyReconciliation = [ordered]@{
+            Mode = 'GET_ONLY'
+            ResourceState = $postPublishState
+            RuntimeResourceCount = $runtimeCandidateConsoleNames.Count
+            RuntimeResourceNames = $runtimeCandidateConsoleNames
+            SolutionMembershipFingerprint = $membershipHash
+            SiteMapSha256 = $siteMapHash
+            RequestCounts = $script:Counts
+            Failures = @($failures | Select-Object -Unique)
+        }
+        $script:Journal | Add-Member -NotePropertyName ReadOnlyReconciliation `
+            -NotePropertyValue $readOnlyReconciliation -Force
+        $script:Journal.RequestCounts.GET = [int]$script:Journal.RequestCounts.GET + $script:Counts.GET
+        $script:Journal.RequestCounts.POST = [int]$script:Journal.RequestCounts.POST + $script:Counts.POST
+        $script:Journal.RequestCounts.PATCH = [int]$script:Journal.RequestCounts.PATCH + $script:Counts.PATCH
+        if ($failures.Count -eq 0) {
+            $script:Journal.Result = 'CANDIDATE_CONSOLE_FULL_PUBLICATION_SET_RECONCILED'
+            $script:Journal.PublishXml = 'GET_RECONCILED_AFTER_AMBIGUOUS_RESPONSE'
+        } else {
+            $script:Journal.Result = 'CANDIDATE_CONSOLE_PUBLICATION_OUTCOME_AMBIGUOUS'
+            $script:Journal.PublishXml = 'RECONCILIATION_FAILED'
+        }
+        Save-Journal
+        [ordered]@{
+            Result = [string]$script:Journal.Result
+            Environment = $target.EnvironmentName
+            SolutionUniqueName = $target.SolutionUniqueName
+            AppUniqueName = $target.AppUniqueName
+            ResourceCount = $canonicalCandidateConsoleNames.Count
+            OriginalPublishXmlCount = [int]$script:Journal.RequestCounts.POST
+            ReconciliationGetCount = $script:Counts.GET
+            ReconciliationPatchCount = $script:Counts.PATCH
+            ReconciliationPostCount = $script:Counts.POST
+            Failures = @($failures | Select-Object -Unique)
+            ResourceState = $postPublishState
+            AutomaticRetries = 0
+            EvidencePath = $EvidencePath
+        } | ConvertTo-Json -Depth 10
+        return
     }
 
     if (-not $Apply -and -not $Continue) {
@@ -1102,6 +1285,8 @@ try {
                 $publishResourceIds | Select-Object -Unique
             )
             $script:Journal.SiteMapSha256Before = $sitemapHashBefore
+            $solutionMembershipHashBefore = Get-SolutionMembershipFingerprint -Components $memberships.value
+            $script:Journal.SolutionMembershipFingerprintBefore = $solutionMembershipHashBefore
             $script:Journal.PublishXmlScope = "srapp + $($script:Journal.ResourceIds.Count) exact canonical Candidate Console web resources"
             $script:Journal.PatchCountBeforePublish = $script:Counts.PATCH
             Save-Journal
@@ -1195,6 +1380,21 @@ try {
                     "appmodules?%24select=appmoduleid,uniquename,name,statecode,componentstate&" +
                     "%24filter=uniquename eq '$($target.AppUniqueName)'"
                 )
+                $membershipsAfter = Get-DataverseJson -Path (
+                    "solutioncomponents?%24select=objectid,componenttype&" +
+                    "%24filter=_solutionid_value eq $($solutionRows.value[0].solutionid)"
+                )
+                $solutionMembershipHashAfter = Get-SolutionMembershipFingerprint -Components $membershipsAfter.value
+                $runtimeResourcesAfter = Get-DataverseJson -Path (
+                    "$($target.WebResourceEntitySet)?%24select=webresourceid,name&" +
+                    "%24filter=startswith(name,'$candidateConsolePrefix')"
+                )
+                $runtimeCandidateConsoleNamesAfter = @(
+                    $runtimeResourcesAfter.value |
+                        Where-Object { [string]$_.name -like "$candidateConsolePrefix*" } |
+                        ForEach-Object { [string]$_.name } |
+                        Sort-Object
+                )
                 if ($siteMapHashAfter -cne $sitemapHashBefore -or
                     [string]$siteMapAfter.sitemapid -ine $target.SiteMapId -or
                     [string]$siteMapAfter.sitemapnameunique -cne $target.SiteMapUniqueName -or
@@ -1203,6 +1403,9 @@ try {
                     [string]$appAfter.value[0].uniquename -cne $target.AppUniqueName -or
                     [string]$appAfter.value[0].name -cne 'BSO-RS-Support' -or
                     [int]$appAfter.value[0].statecode -ne 0 -or
+                    $solutionMembershipHashAfter -cne $solutionMembershipHashBefore -or
+                    [string]::Join('|', $runtimeCandidateConsoleNamesAfter) -cne
+                        [string]::Join('|', $canonicalCandidateConsoleNames) -or
                     $script:Counts.PATCH -ne 0 -or
                     $script:Counts.POST -ne [int]$publishAttempted) {
                     $reconciled = $false
@@ -1220,6 +1423,7 @@ try {
 
             $script:Journal.Result = 'CANDIDATE_CONSOLE_FULL_PUBLICATION_SET_RECONCILED'
             $script:Journal.PostPublishState = $postPublishState
+            $script:Journal.SolutionMembershipFingerprintAfter = $solutionMembershipHashAfter
             $script:Journal.PublishXml = if (-not $publishAttempted) {
                 'NOT_REQUIRED_ALREADY_PUBLISHED'
             } elseif ($null -eq $publishStatus) {

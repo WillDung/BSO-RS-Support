@@ -269,7 +269,8 @@ Assert-Test ($publishCalls.Count -eq 3 -and
     $deployment.Contains('PUBLISHED_GET_RECONCILED') -and
     $deployment.Contains('PUBLISH_ACCEPTED_RECONCILIATION_FAILED')) `
     'Require exact published-resource GET reconciliation after each scoped PublishXml'
-$publishOnlyStart = $deployment.IndexOf('        if ($PublishOnly) {')
+$publishOnlyWork = $deployment.IndexOf('$publishResourceIds =')
+$publishOnlyStart = $deployment.LastIndexOf('        if ($PublishOnly) {', $publishOnlyWork)
 $publishOnlyNextRefresh = $deployment.IndexOf(
     "        foreach (`$resource in `$resources) {`r`n            `$entry = @(`$script:Journal.Dispatches | Where-Object Name -CEQ `$resource.Name)[0]`r`n            `$matches = @(`$existing.value | Where-Object name -CEQ `$resource.Name)",
     $publishOnlyStart
@@ -284,8 +285,12 @@ Assert-Test ($deployment.Contains('[switch]$PublishOnly') -and
     $deployment.Contains("'docs\SOLUTION_COMPONENT_INVENTORY.json'") -and
     $deployment.Contains("'docs\RELEASE_INPUT_MANIFEST.json'") -and
     $deployment.Contains("'solutions\Other\Solution.xml'") -and
+    $deployment.Contains("'solutions\WebResources\os_\bso'") -and
+    $deployment.Contains("'candidate-console*.data.xml'") -and
     $deployment.Contains('$canonicalCandidateConsoleNames.Count -ne 5') -and
     $deployment.Contains('CANDIDATE_CONSOLE_RESOURCE_INVENTORY_DRIFT') -and
+    $deployment.Contains('Publish-only mode does not accept replacement content or a baseline snapshot path.') -and
+    $deployment.Contains('if (-not ($PublishOnly -or $ReconcilePublishOnly) -and ($hasEnvironmentResource -or $hasHtmlResource))') -and
     $deployment.Contains('$runtimeCandidateConsoleNames') -and
     $deployment.Contains('Get-ChildItem -LiteralPath') -and
     $publishOnlyBlock -and
@@ -302,6 +307,9 @@ Assert-Test ($deployment.Contains('[switch]$PublishOnly') -and
     $publishOnlyBlock.Contains('CANDIDATE_CONSOLE_PUBLICATION_OUTCOME_AMBIGUOUS') -and
     $publishOnlyBlock.Contains('CANDIDATE_CONSOLE_FULL_PUBLICATION_SET_RECONCILED') -and
     $publishOnlyBlock.Contains('$script:Journal.PrePublishHashes[$resource.Name] -cne $state.EffectiveSha256') -and
+    $publishOnlyBlock.Contains('SolutionMembershipFingerprintBefore = $solutionMembershipHashBefore') -and
+    $publishOnlyBlock.Contains('$solutionMembershipHashAfter -cne $solutionMembershipHashBefore') -and
+    $publishOnlyBlock.Contains('$runtimeCandidateConsoleNamesAfter') -and
     $publishOnlyBlock.Contains('SolutionMembershipUnchanged = $true') -and
     $publishOnlyBlock.Contains('SiteMapPatchCount = 0')) `
     'Inspect and pin the complete Candidate Console set, publish only matching unpublished resources once, then reconcile every hash'
@@ -318,6 +326,25 @@ Assert-Test ($publishOnlyPostCalls.Count -eq 1 -and
     $publishOnlyBlock.Contains('ResourcePostCount = 0') -and
     $publishOnlyBlock.Contains('$script:Counts.POST -ne [int]$publishAttempted')) `
     'Reserve at most one PublishXml after integrity gates and reconcile ambiguous outcomes without retry'
+$reconcileAnchor = $deployment.IndexOf('$navMember =')
+$reconcileStart = $deployment.IndexOf('    if ($ReconcilePublishOnly) {', $reconcileAnchor)
+$reconcileStop = $deployment.IndexOf('    if (-not $Apply -and -not $Continue) {', $reconcileStart)
+$reconcileBlock = if ($reconcileStart -ge 0 -and $reconcileStop -gt $reconcileStart) {
+    $deployment.Substring($reconcileStart, $reconcileStop - $reconcileStart)
+} else { '' }
+Assert-Test ($deployment.Contains('[switch]$ReconcilePublishOnly') -and
+    $deployment.Contains('Read-only publication reconciliation requires the exact five-resource set and an existing journal.') -and
+    $reconcileBlock -and
+    -not $reconcileBlock.Contains('Invoke-DataverseRequest -Method POST') -and
+    -not $reconcileBlock.Contains('Invoke-DataverseRequest -Method PATCH') -and
+    $reconcileBlock.Contains('GET_ONLY') -and
+    $reconcileBlock.Contains('Add-Member -NotePropertyName ReadOnlyReconciliation') -and
+    $reconcileBlock.Contains('$script:Journal.PrePublishHashes.PSObject.Properties[') -and
+    $reconcileBlock.Contains('PUBLICATION_STATE:$($resource.Name)') -and
+    $reconcileBlock.Contains('HASH_MISMATCH:$($resource.Name)') -and
+    $reconcileBlock.Contains('GET_RECONCILED_AFTER_AMBIGUOUS_RESPONSE') -and
+    $reconcileBlock.Contains('CANDIDATE_CONSOLE_PUBLICATION_OUTCOME_AMBIGUOUS')) `
+    'Provide a read-only reconciliation path that never retries the reserved ambiguous publication'
 $resourceSelection = $deployment.IndexOf('$resources = @($allResources | Where-Object { $RefreshResourceNames -ccontains $_.Name })')
 $publishLabel = $deployment.IndexOf('$publishLabel = "srapp + $($resources.Count) exact web resources scoped PublishXml"')
 Assert-Test ($deployment.Contains('[string[]]$RefreshResourceNames = @()') -and
@@ -339,8 +366,8 @@ Assert-Test ($deployment.Contains('[switch]$CreateNewResources') -and
     'Restrict creation to the two configuration resources and verify the external DEV configuration before dispatch'
 Assert-Test ($deployment.Contains('[switch]$ReleaseNeutralProfile') -and
     $deployment.Contains('Release-neutral refresh is restricted to the existing environment configuration and matching HTML resources.') -and
-    $deployment.Contains('if ($ReleaseNeutralProfile -and -not $PublishOnly)') -and
-    $deployment.Contains("if (`$ReleaseNeutralProfile -and -not `$PublishOnly -and `$effective.Source -cne 'Published' -and") -and
+    $deployment.Contains('if ($ReleaseNeutralProfile -and -not $PublishOnly -and -not $ReconcilePublishOnly)') -and
+    $deployment.Contains("if (`$ReleaseNeutralProfile -and -not `$PublishOnly -and -not `$ReconcilePublishOnly -and") -and
     $deployment.Contains('Release-neutral source baseline contains an unpublished resource; stop without refresh.') -and
     $deployment.Contains('EffectiveSource -cne ''Published'' -or -not $_.PublishedMatchesEffective') -and
     $deployment.Contains('CANDIDATE_CONSOLE_SOURCE_BASELINE_UNRECONCILED') -and

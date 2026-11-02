@@ -260,6 +260,96 @@ Assert-Test (-not $script.Contains('WebApi.deleteRecord') -and
 
 $deploymentPath = Join-Path $root 'scripts\Deploy-BsoRsCandidateConsole.ps1'
 $deployment = Get-Content -LiteralPath $deploymentPath -Raw
+$deploymentTokens = $null
+$deploymentParseErrors = $null
+$deploymentAst = [System.Management.Automation.Language.Parser]::ParseFile(
+    $deploymentPath,
+    [ref]$deploymentTokens,
+    [ref]$deploymentParseErrors
+)
+$layerHelperAst = $deploymentAst.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq 'Test-WebResourceLayerEquivalence'
+}, $true)
+$definitionHelperAst = $deploymentAst.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq 'Test-WebResourceDefinitionEquivalence'
+}, $true)
+$publishXmlHelperAst = $deploymentAst.Find({
+    param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq 'New-CandidateConsolePublishParameterXml'
+}, $true)
+if ($null -eq $layerHelperAst -or $null -eq $definitionHelperAst -or
+    $null -eq $publishXmlHelperAst) {
+    throw 'Candidate Console publication helpers are missing.'
+}
+. ([scriptblock]::Create($layerHelperAst.Extent.Text))
+. ([scriptblock]::Create($definitionHelperAst.Extent.Text))
+. ([scriptblock]::Create($publishXmlHelperAst.Extent.Text))
+$approvedHash = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+$otherHash = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
+$matchingLayers = Test-WebResourceLayerEquivalence `
+    -PublishedSha256 $approvedHash -CurrentSha256 $approvedHash `
+    -EffectiveSha256 $approvedHash -ExpectedSha256 $approvedHash
+$currentPublishedOnly = Test-WebResourceDefinitionEquivalence `
+    -PublishedSha256 $approvedHash -CurrentSha256 $approvedHash -ExpectedSha256 $approvedHash
+$componentStateOneEvidence = [pscustomobject]@{
+    ComponentState = 1
+    Sha256 = $approvedHash
+}
+$componentStateOneLayers = Test-WebResourceLayerEquivalence `
+    -PublishedSha256 $approvedHash -CurrentSha256 $componentStateOneEvidence.Sha256 `
+    -EffectiveSha256 $approvedHash -ExpectedSha256 $approvedHash
+$publishedCurrentMismatch = Test-WebResourceLayerEquivalence `
+    -PublishedSha256 $otherHash -CurrentSha256 $approvedHash `
+    -EffectiveSha256 $approvedHash -ExpectedSha256 $approvedHash
+$effectivePublishedMismatch = Test-WebResourceLayerEquivalence `
+    -PublishedSha256 $approvedHash -CurrentSha256 $approvedHash `
+    -EffectiveSha256 $otherHash -ExpectedSha256 $approvedHash
+$missingEffectiveEvidence = Test-WebResourceLayerEquivalence `
+    -PublishedSha256 $approvedHash -CurrentSha256 $approvedHash `
+    -EffectiveSha256 $null -ExpectedSha256 $approvedHash
+$missingPublishedEvidence = Test-WebResourceLayerEquivalence `
+    -PublishedSha256 $null -CurrentSha256 $approvedHash `
+    -EffectiveSha256 $approvedHash -ExpectedSha256 $approvedHash
+Assert-Test ($matchingLayers.IsReconciled -and
+    -not $currentPublishedOnly.PSObject.Properties['EffectiveEvidencePresent'] -and
+    -not $publishedCurrentMismatch.IsReconciled -and
+    -not $effectivePublishedMismatch.IsReconciled -and
+    -not $missingEffectiveEvidence.IsReconciled -and
+    -not $missingPublishedEvidence.IsReconciled) `
+    'Require published, current, effective, and expected hashes to match; missing evidence fails closed'
+Assert-Test ($currentPublishedOnly.IsReconciled -and
+    $componentStateOneEvidence.ComponentState -eq 1 -and
+    $componentStateOneLayers.IsReconciled -and
+    $deployment.Contains('CurrentComponentState = $current.Row.componentstate') -and
+    -not $layerHelperAst.Extent.Text.Contains('componentstate')) `
+    'Do not treat RetrieveUnpublished existence or componentstate alone as a publication failure'
+$publishWebResourceId = '11111111-1111-1111-1111-111111111111'
+$publishWebResourceIdUnique = '22222222-2222-2222-2222-222222222222'
+$publishSolutionComponentId = '33333333-3333-3333-3333-333333333333'
+$publishAppModuleId = '44444444-4444-4444-4444-444444444444'
+$parameterXml = New-CandidateConsolePublishParameterXml `
+    -WebResourceIds @($publishWebResourceId) -AppModuleId $publishAppModuleId
+$expectedParameterXml = "<importexportxml><webresources><webresource>$publishWebResourceId</webresource></webresources><appmodules><appmodule>$publishAppModuleId</appmodule></appmodules></importexportxml>"
+$wrongIdentityRejected = $false
+try {
+    [void](New-CandidateConsolePublishParameterXml `
+        -WebResourceIds @('not-a-webresource-guid') -AppModuleId $publishAppModuleId)
+} catch {
+    $wrongIdentityRejected = $true
+}
+Assert-Test ($parameterXml -ceq $expectedParameterXml -and
+    -not $parameterXml.Contains($publishWebResourceIdUnique) -and
+    -not $parameterXml.Contains($publishSolutionComponentId) -and
+    $wrongIdentityRejected -and
+    $deployment.Contains('$resourceId = [string]$matches[0].webresourceid') -and
+    -not $deployment.Contains('$resourceId = [string]$matches[0].webresourceidunique') -and
+    $deployment.Contains('$script:Journal.ParameterXml = $parameterXml')) `
+    'Build and journal exact PublishXml from validated webresourceid values only'
 $publishCalls = [regex]::Matches($deployment, "Invoke-DataverseRequest -Method POST -Path 'PublishXml'")
 $publishedReadbacks = [regex]::Matches($deployment, 'Assert-PublishedWebResourceReadback')
 Assert-Test ($publishCalls.Count -eq 3 -and
@@ -295,7 +385,8 @@ Assert-Test ($deployment.Contains('[switch]$PublishOnly') -and
     $deployment.Contains('Get-ChildItem -LiteralPath') -and
     $publishOnlyBlock -and
     -not $publishOnlyBlock.Contains('-Method PATCH') -and
-    $publishOnlyBlock.Contains('$state.Source -ceq ''Unpublished''') -and
+    $publishOnlyBlock.Contains('$definitionEquivalence.IsReconciled') -and
+    $publishOnlyBlock.Contains('EFFECTIVE_CONTENT_UNVERIFIED') -and
     $publishOnlyBlock.Contains('$publishResourceIds.Add($resourceId)') -and
     $publishOnlyBlock.Contains('CANDIDATE_CONSOLE_SOURCE_CONTENT_DRIFT:$($resource.Name)') -and
     $publishOnlyBlock.Contains('Stop-PublishOnlyPreflight') -and
@@ -306,7 +397,7 @@ Assert-Test ($deployment.Contains('[switch]$PublishOnly') -and
     $publishOnlyBlock.Contains('PublishXmlCount = [int]$publishAttempted') -and
     $publishOnlyBlock.Contains('CANDIDATE_CONSOLE_PUBLICATION_OUTCOME_AMBIGUOUS') -and
     $publishOnlyBlock.Contains('CANDIDATE_CONSOLE_FULL_PUBLICATION_SET_RECONCILED') -and
-    $publishOnlyBlock.Contains('$script:Journal.PrePublishHashes[$resource.Name] -cne $state.EffectiveSha256') -and
+    $publishOnlyBlock.Contains('$script:Journal.PrePublishHashes[$resource.Name] -cne $state.CurrentSha256') -and
     $publishOnlyBlock.Contains('SolutionMembershipFingerprintBefore = $solutionMembershipHashBefore') -and
     $publishOnlyBlock.Contains('$solutionMembershipHashAfter -cne $solutionMembershipHashBefore') -and
     $publishOnlyBlock.Contains('$runtimeCandidateConsoleNamesAfter') -and
@@ -317,7 +408,7 @@ $publishOnlyPostCalls = [regex]::Matches(
     $publishOnlyBlock,
     "Invoke-DataverseRequest -Method POST -Path 'PublishXml'"
 )
-$hashGateIndex = $publishOnlyBlock.IndexOf('if ($state.EffectiveSha256 -cne $expectedHash)')
+$hashGateIndex = $publishOnlyBlock.IndexOf('if ($state.CurrentSha256 -cne $expectedHash)')
 $publishDispatchIndex = $publishOnlyBlock.IndexOf("Invoke-DataverseRequest -Method POST -Path 'PublishXml'")
 Assert-Test ($publishOnlyPostCalls.Count -eq 1 -and
     $hashGateIndex -ge 0 -and $publishDispatchIndex -gt $hashGateIndex -and
@@ -340,7 +431,7 @@ Assert-Test ($deployment.Contains('[switch]$ReconcilePublishOnly') -and
     $reconcileBlock.Contains('GET_ONLY') -and
     $reconcileBlock.Contains('Add-Member -NotePropertyName ReadOnlyReconciliation') -and
     $reconcileBlock.Contains('$script:Journal.PrePublishHashes.PSObject.Properties[') -and
-    $reconcileBlock.Contains('PUBLICATION_STATE:$($resource.Name)') -and
+    $reconcileBlock.Contains('EFFECTIVE_EVIDENCE_MISSING:$($resource.Name)') -and
     $reconcileBlock.Contains('HASH_MISMATCH:$($resource.Name)') -and
     $reconcileBlock.Contains('GET_RECONCILED_AFTER_AMBIGUOUS_RESPONSE') -and
     $reconcileBlock.Contains('CANDIDATE_CONSOLE_PUBLICATION_OUTCOME_AMBIGUOUS')) `
@@ -368,8 +459,8 @@ Assert-Test ($deployment.Contains('[switch]$ReleaseNeutralProfile') -and
     $deployment.Contains('Release-neutral refresh is restricted to the existing environment configuration and matching HTML resources.') -and
     $deployment.Contains('if ($ReleaseNeutralProfile -and -not $PublishOnly -and -not $ReconcilePublishOnly)') -and
     $deployment.Contains("if (`$ReleaseNeutralProfile -and -not `$PublishOnly -and -not `$ReconcilePublishOnly -and") -and
-    $deployment.Contains('Release-neutral source baseline contains an unpublished resource; stop without refresh.') -and
-    $deployment.Contains('EffectiveSource -cne ''Published'' -or -not $_.PublishedMatchesEffective') -and
+    $deployment.Contains('Release-neutral source baseline published/current bytes do not match the accepted baseline.') -and
+    $deployment.Contains('-not $_.PublishedMatchesCurrent') -and
     $deployment.Contains('CANDIDATE_CONSOLE_SOURCE_BASELINE_UNRECONCILED') -and
     $deployment.Contains('$environmentConfiguration.mode -cne ''UNCONFIGURED''') -and
     $deployment.Contains('$environmentConfiguration.candidateCoreEnabled -ne $false') -and
@@ -380,8 +471,8 @@ Assert-Test ($deployment.Contains('[switch]$ReleaseNeutralProfile') -and
 Assert-Test ($deployment.Contains('[string]$BaselineSnapshotPath') -and
     $deployment.Contains('Baseline snapshot capture requires a new external path and a read-only release-neutral existing-resource preflight.') -and
     $deployment.Contains('PublishedContentBase64 = [Convert]::ToBase64String($publishedBytes)') -and
-    $deployment.Contains('EffectiveContentBase64 = [Convert]::ToBase64String($remoteBytes)') -and
-    $deployment.Contains('EffectiveSource -cne ''Published'' -or -not $_.PublishedMatchesEffective') -and
+$deployment.Contains('CurrentContentBase64 = [Convert]::ToBase64String($remoteBytes)') -and
+$deployment.Contains('PublishedMatchesCurrent') -and
     $deployment.Contains('CANDIDATE_CONSOLE_SOURCE_BASELINE_UNRECONCILED') -and
     $deployment.Contains('BaselineVersionsMatch = $baselineVersionsMatch')) `
     'Capture exact published and effective resource bytes outside the repository and block on version drift'

@@ -490,27 +490,101 @@ function Get-DataverseJson {
     $response.Content | ConvertFrom-Json
 }
 
-function Get-EffectiveWebResource {
+function Get-CurrentWebResource {
     param([Parameter(Mandatory)][string]$ResourceId)
-    $drafts = Get-DataverseJson -Path (
+    $currentVersions = Get-DataverseJson -Path (
         "$($target.WebResourceEntitySet)/Microsoft.Dynamics.CRM.RetrieveUnpublishedMultiple()?" +
-        "%24select=webresourceid,name,displayname,webresourcetype,content&" +
+        "%24select=webresourceid,webresourceidunique,name,displayname,webresourcetype,content,componentstate,modifiedon&" +
         "%24filter=webresourceid%20eq%20$ResourceId"
     )
-    $draftRows = @($drafts.value | Where-Object {
+    $currentRows = @($currentVersions.value | Where-Object {
         [string]$_.webresourceid -ieq $ResourceId
     })
-    if ($draftRows.Count -gt 1) {
-        throw 'Unpublished Candidate Console web resource is ambiguous.'
+    if ($currentRows.Count -ne 1) {
+        throw 'Current Candidate Console web resource evidence is missing or ambiguous.'
     }
-    if ($draftRows.Count -eq 1) {
-        return [pscustomobject]@{ Source = 'Unpublished'; Row = $draftRows[0] }
-    }
-    $published = Get-DataverseJson -Path (
-        "$($target.WebResourceEntitySet)($ResourceId)?" +
-        "%24select=webresourceid,name,displayname,webresourcetype,content"
+    [pscustomobject]@{ ReadPath = 'RetrieveUnpublishedMultiple'; Row = $currentRows[0] }
+}
+
+function Test-WebResourceLayerEquivalence {
+    param(
+        [AllowNull()][string]$PublishedSha256,
+        [AllowNull()][string]$CurrentSha256,
+        [AllowNull()][string]$EffectiveSha256,
+        [Parameter(Mandatory)][string]$ExpectedSha256
     )
-    [pscustomobject]@{ Source = 'Published'; Row = $published }
+    $hashPattern = '^[0-9a-f]{64}$'
+    $publishedPresent = $PublishedSha256 -match $hashPattern
+    $currentPresent = $CurrentSha256 -match $hashPattern
+    $effectivePresent = $EffectiveSha256 -match $hashPattern
+    [pscustomobject]@{
+        PublishedEvidencePresent = $publishedPresent
+        CurrentEvidencePresent = $currentPresent
+        EffectiveEvidencePresent = $effectivePresent
+        PublishedMatchesCurrent = $publishedPresent -and $currentPresent -and
+            $PublishedSha256 -ieq $CurrentSha256
+        PublishedMatchesExpected = $publishedPresent -and
+            $PublishedSha256 -ieq $ExpectedSha256
+        CurrentMatchesExpected = $currentPresent -and
+            $CurrentSha256 -ieq $ExpectedSha256
+        EffectiveMatchesPublished = $effectivePresent -and $publishedPresent -and
+            $EffectiveSha256 -ieq $PublishedSha256
+        EffectiveMatchesExpected = $effectivePresent -and
+            $EffectiveSha256 -ieq $ExpectedSha256
+        IsReconciled = $publishedPresent -and $currentPresent -and
+            $effectivePresent -and
+            $PublishedSha256 -ieq $CurrentSha256 -and
+            $PublishedSha256 -ieq $ExpectedSha256 -and
+            $CurrentSha256 -ieq $ExpectedSha256 -and
+            $EffectiveSha256 -ieq $ExpectedSha256
+    }
+}
+
+function Test-WebResourceDefinitionEquivalence {
+    param(
+        [AllowNull()][string]$PublishedSha256,
+        [AllowNull()][string]$CurrentSha256,
+        [Parameter(Mandatory)][string]$ExpectedSha256
+    )
+    $hashPattern = '^[0-9a-f]{64}$'
+    $publishedPresent = $PublishedSha256 -match $hashPattern
+    $currentPresent = $CurrentSha256 -match $hashPattern
+    [pscustomobject]@{
+        PublishedEvidencePresent = $publishedPresent
+        CurrentEvidencePresent = $currentPresent
+        IsReconciled = $publishedPresent -and $currentPresent -and
+            $PublishedSha256 -ieq $CurrentSha256 -and
+            $PublishedSha256 -ieq $ExpectedSha256 -and
+            $CurrentSha256 -ieq $ExpectedSha256
+    }
+}
+
+function New-CandidateConsolePublishParameterXml {
+    param(
+        [Parameter(Mandatory)][string[]]$WebResourceIds,
+        [Parameter(Mandatory)][string]$AppModuleId
+    )
+    if ($WebResourceIds.Count -eq 0 -or
+        @($WebResourceIds | Select-Object -Unique).Count -ne $WebResourceIds.Count) {
+        throw 'Candidate Console PublishXml resource identity list is empty or duplicated.'
+    }
+    $appGuid = [Guid]::Empty
+    if (-not [Guid]::TryParse($AppModuleId, [ref]$appGuid)) {
+        throw 'Candidate Console PublishXml AppModule identity is invalid.'
+    }
+    foreach ($resourceId in $WebResourceIds) {
+        $resourceGuid = [Guid]::Empty
+        if (-not [Guid]::TryParse($resourceId, [ref]$resourceGuid)) {
+            throw 'Candidate Console PublishXml WebResource identity is invalid.'
+        }
+    }
+    $webresourceXml = [System.Text.StringBuilder]::new()
+    [void]$webresourceXml.Append('<webresources>')
+    foreach ($resourceId in $WebResourceIds) {
+        [void]$webresourceXml.Append("<webresource>$resourceId</webresource>")
+    }
+    [void]$webresourceXml.Append('</webresources>')
+    "<importexportxml>$($webresourceXml.ToString())<appmodules><appmodule>$AppModuleId</appmodule></appmodules></importexportxml>"
 }
 
 function Get-ExactWebResourceState {
@@ -518,12 +592,15 @@ function Get-ExactWebResourceState {
         [Parameter(Mandatory)][pscustomobject]$Resource,
         [Parameter(Mandatory)][string]$ResourceId
     )
-    $effective = Get-EffectiveWebResource -ResourceId $ResourceId
+    $current = Get-CurrentWebResource -ResourceId $ResourceId
     $published = Get-DataverseJson -Path (
         "$($target.WebResourceEntitySet)($ResourceId)?" +
-        "%24select=webresourceid,name,displayname,webresourcetype,content"
+        "%24select=webresourceid,webresourceidunique,name,displayname,webresourcetype,content,componentstate,modifiedon"
     )
-    foreach ($row in @($effective.Row, $published)) {
+    if ($null -eq $published) {
+        throw 'Published Candidate Console web resource evidence is missing.'
+    }
+    foreach ($row in @($current.Row, $published)) {
         if ([string]$row.webresourceid -ine $ResourceId -or
             [string]$row.name -cne $Resource.Name -or
             [string]$row.displayname -cne $Resource.DisplayName -or
@@ -531,21 +608,40 @@ function Get-ExactWebResourceState {
             throw 'Candidate Console web resource identity changed during publish-only reconciliation.'
         }
     }
+    $currentUniqueId = [Guid]::Empty
+    $publishedUniqueId = [Guid]::Empty
+    if (-not [Guid]::TryParse([string]$current.Row.webresourceidunique, [ref]$currentUniqueId) -or
+        -not [Guid]::TryParse([string]$published.webresourceidunique, [ref]$publishedUniqueId) -or
+        $currentUniqueId -ne $publishedUniqueId) {
+        throw 'Published and current Candidate Console web resource unique identities differ.'
+    }
     try {
-        $effectiveBytes = [Convert]::FromBase64String([string]$effective.Row.content)
+        $currentBytes = [Convert]::FromBase64String([string]$current.Row.content)
         $publishedBytes = [Convert]::FromBase64String([string]$published.content)
     } catch {
         throw 'Candidate Console web resource content is invalid during publish-only reconciliation.'
     }
+    $currentSha256 = [Convert]::ToHexString(
+        [Security.Cryptography.SHA256]::HashData($currentBytes)
+    ).ToLowerInvariant()
+    $publishedSha256 = [Convert]::ToHexString(
+        [Security.Cryptography.SHA256]::HashData($publishedBytes)
+    ).ToLowerInvariant()
     [pscustomobject]@{
-        Source = $effective.Source
-        EffectiveSha256 = [Convert]::ToHexString(
-            [Security.Cryptography.SHA256]::HashData($effectiveBytes)
-        ).ToLowerInvariant()
-        PublishedSha256 = [Convert]::ToHexString(
-            [Security.Cryptography.SHA256]::HashData($publishedBytes)
-        ).ToLowerInvariant()
-        PublishedMatchesEffective = [Convert]::ToBase64String($effectiveBytes) -ceq
+        WebResourceId = $ResourceId
+        WebResourceIdUnique = [string]$published.webresourceidunique
+        CurrentReadPath = $current.ReadPath
+        CurrentSha256 = $currentSha256
+        PublishedSha256 = $publishedSha256
+        EffectiveSha256 = $null
+        EffectiveEvidence = 'NOT_VERIFIED'
+        CurrentComponentState = $current.Row.componentstate
+        PublishedComponentState = $published.componentstate
+        CurrentModifiedOn = $current.Row.modifiedon
+        PublishedModifiedOn = $published.modifiedon
+        CurrentContentBase64 = [Convert]::ToBase64String($currentBytes)
+        PublishedContentBase64 = [Convert]::ToBase64String($publishedBytes)
+        PublishedMatchesCurrent = [Convert]::ToBase64String($currentBytes) -ceq
             [Convert]::ToBase64String($publishedBytes)
     }
 }
@@ -860,12 +956,19 @@ try {
             $matches = @($existing.value | Where-Object name -CEQ $resource.Name)
             if ($matches.Count -ne 1) { throw "Refresh resource identity is missing or ambiguous: $($resource.Name)" }
             $resourceId = [string]$matches[0].webresourceid
-            $effective = Get-EffectiveWebResource -ResourceId $resourceId
+            $effective = Get-CurrentWebResource -ResourceId $resourceId
             $readback = $effective.Row
             if ($ReleaseNeutralProfile -and -not $PublishOnly -and -not $ReconcilePublishOnly -and
-                $effective.Source -cne 'Published' -and
                 [string]::IsNullOrWhiteSpace($BaselineSnapshotPath)) {
-                throw 'Release-neutral source baseline contains an unpublished resource; stop without refresh.'
+                $baselineState = Get-ExactWebResourceState -Resource $resource -ResourceId $resourceId
+                $acceptedBaselineHash = [string]$expectedCandidateConsoleHashes[$resource.Name]
+                $baselineEquivalence = Test-WebResourceDefinitionEquivalence `
+                    -PublishedSha256 $baselineState.PublishedSha256 `
+                    -CurrentSha256 $baselineState.CurrentSha256 `
+                    -ExpectedSha256 $acceptedBaselineHash
+                if (-not $baselineEquivalence.IsReconciled) {
+                    throw 'Release-neutral source baseline published/current bytes do not match the accepted baseline.'
+                }
             }
             $membership = Get-DataverseJson -Path "solutioncomponents?%24select=objectid,componenttype&%24filter=_solutionid_value eq $($solutionRows.value[0].solutionid) and objectid eq $resourceId"
             if ([string]$readback.name -cne $resource.Name -or
@@ -900,28 +1003,32 @@ try {
                 $publishedHash = [Convert]::ToHexString(
                     [Security.Cryptography.SHA256]::HashData($publishedBytes)
                 ).ToLowerInvariant()
-                $publishedMatchesEffective = $publishedHash -ceq $remoteHash
+                $publishedMatchesCurrent = $publishedHash -ceq $remoteHash
                 $script:RefreshBaselineResources.Add([ordered]@{
                     Name = $resource.Name
                     WebResourceId = $resourceId
                     DisplayName = $resource.DisplayName
                     Type = $resource.Type
-                    EffectiveSource = $effective.Source
-                    EffectiveContentBase64 = [Convert]::ToBase64String($remoteBytes)
-                    EffectiveSha256 = $remoteHash
+                    CurrentReadPath = $effective.ReadPath
+                    CurrentContentBase64 = [Convert]::ToBase64String($remoteBytes)
+                    CurrentSha256 = $remoteHash
                     PublishedContentBase64 = [Convert]::ToBase64String($publishedBytes)
                     PublishedSha256 = $publishedHash
-                    PublishedMatchesEffective = $publishedMatchesEffective
+                    PublishedMatchesCurrent = $publishedMatchesCurrent
+                    CurrentComponentState = $effective.Row.componentstate
+                    PublishedComponentState = $published.componentstate
+                    CurrentModifiedOn = $effective.Row.modifiedon
+                    PublishedModifiedOn = $published.modifiedon
                 })
             }
             $script:RefreshContentChecks.Add([ordered]@{
                 Name = $resource.Name
-                Source = $effective.Source
+                CurrentReadPath = $effective.ReadPath
                 ContentMatchesLocal = $remoteHash -ceq $localHash
                 LocalSha256 = $localHash
-                RemoteSha256 = $remoteHash
+                CurrentSha256 = $remoteHash
                 PublishedSha256 = $publishedHash
-                PublishedMatchesEffective = $publishedMatchesEffective
+                PublishedMatchesCurrent = $publishedMatchesCurrent
             })
         }
     } else {
@@ -978,21 +1085,28 @@ try {
                 $prePublishHash = [string]$script:Journal.PrePublishHashes.PSObject.Properties[
                     $resource.Name
                 ].Value
+                $layerEquivalence = Test-WebResourceLayerEquivalence `
+                    -PublishedSha256 $state.PublishedSha256 `
+                    -CurrentSha256 $state.CurrentSha256 `
+                    -EffectiveSha256 $state.EffectiveSha256 `
+                    -ExpectedSha256 $expectedHash
                 $postPublishState[$resource.Name] = [ordered]@{
-                    CurrentSha256 = $state.EffectiveSha256
+                    CurrentReadPath = $state.CurrentReadPath
+                    CurrentSha256 = $state.CurrentSha256
                     PublishedSha256 = $state.PublishedSha256
-                    PublicationState = $state.Source
-                    PublishedMatchesCurrent = $state.PublishedMatchesEffective
+                    EffectiveSha256 = $state.EffectiveSha256
+                    EffectiveEvidence = $state.EffectiveEvidence
+                    CurrentComponentState = $state.CurrentComponentState
+                    PublishedComponentState = $state.PublishedComponentState
+                    PublishedMatchesCurrent = $layerEquivalence.PublishedMatchesCurrent
                     ExpectedSha256 = $expectedHash
                     PrePublishSha256 = $prePublishHash
                 }
-                if ($state.Source -cne 'Published') {
-                    $failures.Add("PUBLICATION_STATE:$($resource.Name)")
-                }
-                if ($state.EffectiveSha256 -cne $expectedHash -or
-                    $state.PublishedSha256 -cne $expectedHash -or
-                    $prePublishHash -cne $state.EffectiveSha256 -or
-                    -not $state.PublishedMatchesEffective) {
+                if (-not $layerEquivalence.IsReconciled -or
+                    $prePublishHash -cne $state.CurrentSha256) {
+                    if (-not $layerEquivalence.EffectiveEvidencePresent) {
+                        $failures.Add("EFFECTIVE_EVIDENCE_MISSING:$($resource.Name)")
+                    }
                     $failures.Add("HASH_MISMATCH:$($resource.Name)")
                 }
             } catch {
@@ -1109,7 +1223,7 @@ try {
                 }
                 $baselineVersionsMatch = @(
                     $snapshot.Resources | Where-Object {
-                        $_.EffectiveSource -cne 'Published' -or -not $_.PublishedMatchesEffective
+                        -not $_.PublishedMatchesCurrent
                     }
                 ).Count -eq 0
                 [IO.File]::WriteAllText(
@@ -1214,33 +1328,37 @@ try {
                 }
                 $state = Get-ExactWebResourceState -Resource $resource -ResourceId $resourceId
                 $expectedHash = [string]$expectedCandidateConsoleHashes[$resource.Name]
-                if ($state.EffectiveSha256 -cne $expectedHash) {
+                if ($state.CurrentSha256 -cne $expectedHash) {
                     Stop-PublishOnlyPreflight "CANDIDATE_CONSOLE_SOURCE_CONTENT_DRIFT:$($resource.Name)"
                 }
-                if ($state.Source -cnotin @('Published', 'Unpublished')) {
-                    Stop-PublishOnlyPreflight 'MANAGED_ARTIFACT_SOURCE_QUALIFICATION_FAILED:PUBLICATION_STATE'
+                if ([string]$state.PublishedSha256 -notmatch '^[0-9a-f]{64}$') {
+                    Stop-PublishOnlyPreflight 'MANAGED_ARTIFACT_SOURCE_QUALIFICATION_FAILED:PUBLISHED_EVIDENCE_MISSING'
                 }
-                if ($state.Source -ceq 'Published') {
-                    if ($state.PublishedSha256 -cne $expectedHash -or
-                        -not $state.PublishedMatchesEffective) {
-                        Stop-PublishOnlyPreflight "CANDIDATE_CONSOLE_SOURCE_CONTENT_DRIFT:$($resource.Name)"
-                    }
-                } else {
+                $definitionEquivalence = Test-WebResourceDefinitionEquivalence `
+                    -PublishedSha256 $state.PublishedSha256 `
+                    -CurrentSha256 $state.CurrentSha256 `
+                    -ExpectedSha256 $expectedHash
+                if (-not ([string]$state.EffectiveSha256 -match '^[0-9a-f]{64}$')) {
+                    Stop-PublishOnlyPreflight 'MANAGED_ARTIFACT_SOURCE_QUALIFICATION_FAILED:EFFECTIVE_CONTENT_UNVERIFIED'
+                }
+                if (-not $definitionEquivalence.IsReconciled) {
                     $publishResourceIds.Add($resourceId)
                 }
-                $entry.State = if ($state.Source -ceq 'Unpublished') {
-                    'PREPUBLISH_GET_RECONCILED_UNPUBLISHED'
+                $entry.State = if ($definitionEquivalence.IsReconciled) {
+                    'PREPUBLISH_DEFINITIONS_RECONCILED'
                 } else {
-                    'PREPUBLISH_GET_RECONCILED_PUBLISHED'
+                    'PREPUBLISH_PUBLISHED_LAYER_REQUIRES_RECONCILIATION'
                 }
                 $entry.WebResourceId = $resourceId
                 $script:Journal.PrePublishHashes[$resource.Name] = $expectedHash
                 $currentStateBeforePublish[$resource.Name] = [ordered]@{
-                    CurrentSha256 = $state.EffectiveSha256
+                    CurrentSha256 = $state.CurrentSha256
                     PublishedSha256 = $state.PublishedSha256
-                    PublicationState = $state.Source
-                    PublishedMatchesCurrent = $state.PublishedMatchesEffective
+                    EffectiveSha256 = $state.EffectiveSha256
+                    EffectiveEvidence = $state.EffectiveEvidence
+                    PublishedMatchesCurrent = $state.PublishedMatchesCurrent
                     ExpectedSha256 = $expectedHash
+                    RequiresPublication = -not $definitionEquivalence.IsReconciled
                 }
                 Save-Journal
             }
@@ -1276,9 +1394,9 @@ try {
                 )
             ).ToLowerInvariant()
             $script:Journal.CurrentStateBeforePublish = $currentStateBeforePublish
-            $script:Journal.UnpublishedResourceNames = @(
+            $script:Journal.ResourcesRequiringPublication = @(
                 $resources |
-                    Where-Object { $currentStateBeforePublish[$_.Name].PublicationState -ceq 'Unpublished' } |
+                    Where-Object { $currentStateBeforePublish[$_.Name].RequiresPublication } |
                     ForEach-Object Name
             )
             $script:Journal.ResourceIds = @(
@@ -1294,8 +1412,6 @@ try {
             $publishStatus = $null
             $publishAttempted = $false
             if ($script:Journal.ResourceIds.Count -gt 0) {
-                $webresourceXml = [System.Text.StringBuilder]::new()
-                [void]$webresourceXml.Append('<webresources>')
                 foreach ($resourceId in $script:Journal.ResourceIds) {
                     if ($resourceId -notin @(
                         $script:Journal.Dispatches |
@@ -1304,10 +1420,10 @@ try {
                     )) {
                         Stop-PublishOnlyPreflight 'MANAGED_ARTIFACT_SOURCE_QUALIFICATION_FAILED:PUBLISH_SCOPE'
                     }
-                    [void]$webresourceXml.Append("<webresource>$resourceId</webresource>")
                 }
-                [void]$webresourceXml.Append('</webresources>')
-                $parameterXml = "<importexportxml>$($webresourceXml.ToString())<appmodules><appmodule>$($target.AppId)</appmodule></appmodules></importexportxml>"
+                $parameterXml = New-CandidateConsolePublishParameterXml `
+                    -WebResourceIds $script:Journal.ResourceIds `
+                    -AppModuleId $target.AppId
                 $expectedParameterXml = "<importexportxml><webresources>$(
                     ($script:Journal.ResourceIds | ForEach-Object { "<webresource>$_</webresource>" }) -join ''
                 )</webresources><appmodules><appmodule>$($target.AppId)</appmodule></appmodules></importexportxml>"
@@ -1318,6 +1434,7 @@ try {
                 $publishEntry = @($script:Journal.Dispatches | Where-Object Name -CEQ $publishLabel)[0]
                 $publishEntry.State = 'DISPATCH_RESERVED'
                 $script:Journal.PublishXml = 'DISPATCH_RESERVED'
+                $script:Journal.ParameterXml = $parameterXml
                 Save-Journal
                 $publishAttempted = $true
                 try {
@@ -1343,11 +1460,13 @@ try {
                     $entry = @($script:Journal.Dispatches | Where-Object Name -CEQ $resource.Name)[0]
                     $state = Get-ExactWebResourceState -Resource $resource -ResourceId ([string]$entry.WebResourceId)
                     $expectedHash = [string]$expectedCandidateConsoleHashes[$resource.Name]
-                    if ($state.Source -cne 'Published' -or
-                        $state.EffectiveSha256 -cne $expectedHash -or
-                        $state.PublishedSha256 -cne $expectedHash -or
-                        -not $state.PublishedMatchesEffective -or
-                        [string]$script:Journal.PrePublishHashes[$resource.Name] -cne $state.EffectiveSha256) {
+                    $layerEquivalence = Test-WebResourceLayerEquivalence `
+                        -PublishedSha256 $state.PublishedSha256 `
+                        -CurrentSha256 $state.CurrentSha256 `
+                        -EffectiveSha256 $state.EffectiveSha256 `
+                        -ExpectedSha256 $expectedHash
+                    if (-not $layerEquivalence.IsReconciled -or
+                        [string]$script:Journal.PrePublishHashes[$resource.Name] -cne $state.CurrentSha256) {
                         $reconciled = $false
                     }
                     $membership = Get-DataverseJson -Path (
@@ -1361,10 +1480,14 @@ try {
                         $reconciled = $false
                     }
                     $postPublishState[$resource.Name] = [ordered]@{
-                        CurrentSha256 = $state.EffectiveSha256
+                        CurrentReadPath = $state.CurrentReadPath
+                        CurrentSha256 = $state.CurrentSha256
                         PublishedSha256 = $state.PublishedSha256
-                        PublicationState = $state.Source
-                        PublishedMatchesCurrent = $state.PublishedMatchesEffective
+                        EffectiveSha256 = $state.EffectiveSha256
+                        EffectiveEvidence = $state.EffectiveEvidence
+                        CurrentComponentState = $state.CurrentComponentState
+                        PublishedComponentState = $state.PublishedComponentState
+                        PublishedMatchesCurrent = $layerEquivalence.PublishedMatchesCurrent
                         ExpectedSha256 = $expectedHash
                     }
                 }
@@ -1441,8 +1564,8 @@ try {
                 AppUniqueName = $target.AppUniqueName
                 ResourceNames = $canonicalCandidateConsoleNames
                 TargetedResourceCount = $resources.Count
-                UnpublishedResourceCountBefore = $script:Journal.UnpublishedResourceNames.Count
-                ResourcesPublished = $script:Journal.UnpublishedResourceNames
+                ResourcesRequiringPublication = $script:Journal.ResourcesRequiringPublication
+                ResourcesPublished = $script:Journal.ResourcesRequiringPublication
                 ResourcePatchCount = $script:Counts.PATCH
                 ResourcePostCount = 0
                 SiteMapPatchCount = 0
@@ -1474,7 +1597,7 @@ try {
             if ([string]::IsNullOrWhiteSpace($etag)) {
                 throw "Refresh resource ETag is unavailable: $($resource.Name)"
             }
-            $readback = (Get-EffectiveWebResource -ResourceId $resourceId).Row
+            $readback = (Get-CurrentWebResource -ResourceId $resourceId).Row
             if ([string]$readback.name -cne $resource.Name -or
                 [string]$readback.displayname -cne $resource.DisplayName -or
                 [int]$readback.webresourcetype -ne $resource.Type) {
@@ -1497,7 +1620,7 @@ try {
                 }
                 $entry.State = 'PATCH_ACKNOWLEDGED'
                 Save-Journal
-                $readback = (Get-EffectiveWebResource -ResourceId $resourceId).Row
+                $readback = (Get-CurrentWebResource -ResourceId $resourceId).Row
                 if ([string]$readback.name -cne $resource.Name -or
                     [string]$readback.displayname -cne $resource.DisplayName -or
                     [int]$readback.webresourcetype -ne $resource.Type -or
@@ -1510,16 +1633,13 @@ try {
             Save-Journal
         }
 
-        $webresourceXml = [System.Text.StringBuilder]::new()
-        [void]$webresourceXml.Append('<webresources>')
-        foreach ($resourceId in $script:Journal.ResourceIds) {
-            [void]$webresourceXml.Append("<webresource>$resourceId</webresource>")
-        }
-        [void]$webresourceXml.Append('</webresources>')
-        $parameterXml = "<importexportxml>$($webresourceXml.ToString())<appmodules><appmodule>$($target.AppId)</appmodule></appmodules></importexportxml>"
+        $parameterXml = New-CandidateConsolePublishParameterXml `
+            -WebResourceIds $script:Journal.ResourceIds `
+            -AppModuleId $target.AppId
         $publishEntry = @($script:Journal.Dispatches | Where-Object Name -CEQ $publishLabel)[0]
         $publishEntry.State = 'DISPATCH_RESERVED'
         $script:Journal.PublishXml = 'DISPATCH_RESERVED'
+        $script:Journal.ParameterXml = $parameterXml
         Save-Journal
         $publish = Invoke-DataverseRequest -Method POST -Path 'PublishXml' `
             -Body ([ordered]@{ ParameterXml = $parameterXml })

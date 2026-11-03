@@ -2,7 +2,7 @@
 
 ## Release-neutral 21-root managed artifact (2026-11-03)
 
-**Current status:** `RELEASEABLE_MANAGED_ARTIFACT_BUILT` and `VN_LMV_IT_RELEASE_SOURCE_RESTORED`. LMV BI DEV managed Test rehearsal is stopped before import: `TEST_SOLUTION_IMPORT_PERMISSION_NOT_VERIFIED`. `REAL_DATA_STILL_PROHIBITED`.
+**Current status:** `RELEASEABLE_MANAGED_ARTIFACT_BUILT` and `VN_LMV_IT_RELEASE_SOURCE_RESTORED`. LMV BI DEV managed Test import now follows `OPERATOR_ASSISTED_TEST_IMPORT` (`TEST_IMPORT_EXECUTION_DELEGATED_TO_AUTHORIZED_OPERATOR`). The pre-import baseline is `OPERATOR_ASSISTED_IMPORT_BASELINE_READY`. The workflow is waiting for the authorized operator's import result. `REAL_DATA_STILL_PROHIBITED`.
 
 **Source preflight (read-only):** PAC and Dataverse `WhoAmI` agreed on the exact VN LMV IT target, `os_sr_bso_rs_support`, and `srapp`. The cleaned Solution still had 47 memberships and 21 roots (20 authored + 1 unsigned package-backed generated assembly) with release-root identity SHA-256 `ffde0fe088d87120aa29caf11de156537f19abf9627695d95306eea040c530e4`. The signed rollback assembly, 50 `ProtectCandidateCore` steps, and `os_sr_devcs` were absent from the Solution, but their records remain in the environment and all 50 steps remain inactive. The source had one `os_sr_cact_pkg`, package-linked unsigned assembly, and package-backed `os_sr_cact.ApplyCandidateAction` handler: `CANONICAL_21_ROOT_RELEASE_MEMBERSHIP_RECONFIRMED`, `PACKAGE_GENERATED_ASSEMBLY_RELEASE_ROOT_VERIFIED`.
 
@@ -24,7 +24,27 @@ It contains no rollback assembly, guard steps, `os_sr_devcs`, target URL/IDs, se
 - the recovery checkpoint is valid until 8 November 2026;
 - a clean baseline with no `os` publisher, project Solution, tables, APIs, package, `srapp`, resources, or BSO role.
 
-The deployment identity's effective privileges are now 61 Basic-depth privileges and no longer include `prvImportCustomization`, which was effective at Global depth on 1 November 2026. Role assignment or self-elevation is outside the authorized scope, so no import, configuration, or rehearsal write occurred. **External dependency:** restore the authorized deployment identity's import privilege, then freshly requalify and resume the approved rehearsal.
+The deployment identity's effective privileges are now 61 Basic-depth privileges and no longer include `prvImportCustomization`, which was effective at Global depth on 1 November 2026. Role assignment or self-elevation is outside the authorized scope, so no import, configuration, or rehearsal write occurred. The 3 November stop was `TEST_SOLUTION_IMPORT_PERMISSION_NOT_VERIFIED`.
+
+**Revised deployment model (2026-11-03):** The owner chose `OPERATOR_ASSISTED_TEST_IMPORT` and will not grant import privilege to the Copilot/deployment identity. No privilege, role, or team change was made or requested. An authorized LMV BI DEV environment owner or release operator imports only the frozen artifact (SHA-256 `33c491f84d8082817e0be888889fd6239a6bdb5bc76c01bdcb5040cdc11f9970`) under these constraints:
+
+- exact target only, no Production;
+- no PublishAllXml;
+- no unrelated Solution and no security-role change;
+- no Candidate data;
+- no package push before reconciliation;
+- no retry after an ambiguous outcome.
+
+The operator handoff is kept outside the repository.
+
+A fresh read-only pre-import baseline returned `OPERATOR_ASSISTED_IMPORT_BASELINE_READY`. It confirmed:
+
+- explicit-target PAC identity and Sandbox type;
+- the recovery checkpoint is present and expires 8 November 2026;
+- zero `os` publishers, `os_sr` Solutions, tables, Custom APIs, PluginPackages, WebResources, `srapp`, BSO role, or signed rollback assembly;
+- positive-control queries returned rows.
+
+Copilot then reconciles the import read-only. If the Copilot identity also lacks Candidate Console WebResource write or BSO role-assignment capability, those exact steps become bounded operator micro-handoffs rather than privilege grants.
 
 ## Live managed-artifact reconciliation (2026-11-02)
 

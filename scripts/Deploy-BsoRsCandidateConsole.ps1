@@ -389,7 +389,7 @@ if (-not ($PublishOnly -or $ReconcilePublishOnly) -and $hasHtmlResource) {
     -not [string]::IsNullOrWhiteSpace($EnvironmentHtmlPath)) {
     throw 'An external HTML resource is accepted only when that exact HTML resource is selected.'
 }
-$publishLabel = "srapp + $($resources.Count) exact web resources scoped PublishXml"
+$publishLabel = "$($resources.Count) exact web resources scoped PublishXml"
 $finalDispatchName = if ($CreateNewResources -or $RefreshExisting) {
     $publishLabel
 } else {
@@ -561,16 +561,11 @@ function Test-WebResourceDefinitionEquivalence {
 
 function New-CandidateConsolePublishParameterXml {
     param(
-        [Parameter(Mandatory)][string[]]$WebResourceIds,
-        [Parameter(Mandatory)][string]$AppModuleId
+        [Parameter(Mandatory)][string[]]$WebResourceIds
     )
     if ($WebResourceIds.Count -eq 0 -or
         @($WebResourceIds | Select-Object -Unique).Count -ne $WebResourceIds.Count) {
         throw 'Candidate Console PublishXml resource identity list is empty or duplicated.'
-    }
-    $appGuid = [Guid]::Empty
-    if (-not [Guid]::TryParse($AppModuleId, [ref]$appGuid)) {
-        throw 'Candidate Console PublishXml AppModule identity is invalid.'
     }
     foreach ($resourceId in $WebResourceIds) {
         $resourceGuid = [Guid]::Empty
@@ -584,7 +579,7 @@ function New-CandidateConsolePublishParameterXml {
         [void]$webresourceXml.Append("<webresource>$resourceId</webresource>")
     }
     [void]$webresourceXml.Append('</webresources>')
-    "<importexportxml>$($webresourceXml.ToString())<appmodules><appmodule>$AppModuleId</appmodule></appmodules></importexportxml>"
+    "<importexportxml>$($webresourceXml.ToString())</importexportxml>"
 }
 
 function Get-ExactWebResourceState {
@@ -986,11 +981,11 @@ try {
             $remoteHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($remoteBytes)).ToLowerInvariant()
             $localHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($localBytes)).ToLowerInvariant()
             $publishedHash = $null
-            $publishedMatchesEffective = $null
+            $publishedMatchesCurrent = $null
             if (-not [string]::IsNullOrWhiteSpace($BaselineSnapshotPath)) {
                 $published = Get-DataverseJson -Path (
                     "$($target.WebResourceEntitySet)($resourceId)?" +
-                    "%24select=webresourceid,name,displayname,webresourcetype,content"
+                    "%24select=webresourceid,name,displayname,webresourcetype,content,componentstate,modifiedon"
                 )
                 if ([string]$published.webresourceid -ine $resourceId -or
                     [string]$published.name -cne $resource.Name -or
@@ -1405,7 +1400,7 @@ try {
             $script:Journal.SiteMapSha256Before = $sitemapHashBefore
             $solutionMembershipHashBefore = Get-SolutionMembershipFingerprint -Components $memberships.value
             $script:Journal.SolutionMembershipFingerprintBefore = $solutionMembershipHashBefore
-            $script:Journal.PublishXmlScope = "srapp + $($script:Journal.ResourceIds.Count) exact canonical Candidate Console web resources"
+            $script:Journal.PublishXmlScope = "$($script:Journal.ResourceIds.Count) exact canonical Candidate Console web resources"
             $script:Journal.PatchCountBeforePublish = $script:Counts.PATCH
             Save-Journal
 
@@ -1422,11 +1417,10 @@ try {
                     }
                 }
                 $parameterXml = New-CandidateConsolePublishParameterXml `
-                    -WebResourceIds $script:Journal.ResourceIds `
-                    -AppModuleId $target.AppId
+                    -WebResourceIds $script:Journal.ResourceIds
                 $expectedParameterXml = "<importexportxml><webresources>$(
                     ($script:Journal.ResourceIds | ForEach-Object { "<webresource>$_</webresource>" }) -join ''
-                )</webresources><appmodules><appmodule>$($target.AppId)</appmodule></appmodules></importexportxml>"
+                )</webresources></importexportxml>"
                 if ($parameterXml -cne $expectedParameterXml -or
                     $script:Counts.PATCH -ne 0 -or $script:Counts.POST -ne 0) {
                     Stop-PublishOnlyPreflight 'MANAGED_ARTIFACT_SOURCE_QUALIFICATION_FAILED:PUBLISH_SCOPE'
@@ -1571,6 +1565,7 @@ try {
                 SiteMapPatchCount = 0
                 PublishXmlCount = [int]$publishAttempted
                 PublishXmlScope = $script:Journal.PublishXmlScope
+                PublishAllXml = 0
                 AutomaticRetries = 0
                 PublishedState = 'GET_RECONCILED'
                 AcceptedHashesUnchanged = $true
@@ -1634,8 +1629,7 @@ try {
         }
 
         $parameterXml = New-CandidateConsolePublishParameterXml `
-            -WebResourceIds $script:Journal.ResourceIds `
-            -AppModuleId $target.AppId
+            -WebResourceIds $script:Journal.ResourceIds
         $publishEntry = @($script:Journal.Dispatches | Where-Object Name -CEQ $publishLabel)[0]
         $publishEntry.State = 'DISPATCH_RESERVED'
         $script:Journal.PublishXml = 'DISPATCH_RESERVED'
@@ -1664,7 +1658,8 @@ try {
             WebResourcePatchCount = $script:Counts.PATCH
             SitemapPatchCount = 0
             PublishXmlCount = 1
-            PublishXmlScope = "srapp + $($resources.Count) exact web resources"
+            PublishXmlScope = "$($resources.Count) exact web resources"
+            PublishAllXml = 0
             PublishedWebResourceReadback = 'GET_RECONCILED'
             AutomaticRetries = 0
             EvidencePath = $EvidencePath

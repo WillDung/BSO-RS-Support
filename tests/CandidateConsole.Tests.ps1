@@ -329,27 +329,33 @@ Assert-Test ($currentPublishedOnly.IsReconciled -and
     -not $layerHelperAst.Extent.Text.Contains('componentstate')) `
     'Do not treat RetrieveUnpublished existence or componentstate alone as a publication failure'
 $publishWebResourceId = '11111111-1111-1111-1111-111111111111'
+$secondPublishWebResourceId = '55555555-5555-5555-5555-555555555555'
 $publishWebResourceIdUnique = '22222222-2222-2222-2222-222222222222'
 $publishSolutionComponentId = '33333333-3333-3333-3333-333333333333'
-$publishAppModuleId = '44444444-4444-4444-4444-444444444444'
 $parameterXml = New-CandidateConsolePublishParameterXml `
-    -WebResourceIds @($publishWebResourceId) -AppModuleId $publishAppModuleId
-$expectedParameterXml = "<importexportxml><webresources><webresource>$publishWebResourceId</webresource></webresources><appmodules><appmodule>$publishAppModuleId</appmodule></appmodules></importexportxml>"
+    -WebResourceIds @($publishWebResourceId, $secondPublishWebResourceId)
+$expectedParameterXml = "<importexportxml><webresources><webresource>$publishWebResourceId</webresource><webresource>$secondPublishWebResourceId</webresource></webresources></importexportxml>"
+$parameterXmlDocument = [xml]$parameterXml
+$publishedResourceNodes = @($parameterXmlDocument.SelectNodes('/importexportxml/webresources/webresource'))
+$nonWebResourceNodes = @($parameterXmlDocument.SelectNodes('//appmodules|//sitemaps|//sitemap'))
 $wrongIdentityRejected = $false
 try {
     [void](New-CandidateConsolePublishParameterXml `
-        -WebResourceIds @('not-a-webresource-guid') -AppModuleId $publishAppModuleId)
+        -WebResourceIds @('not-a-webresource-guid'))
 } catch {
     $wrongIdentityRejected = $true
 }
 Assert-Test ($parameterXml -ceq $expectedParameterXml -and
+    $publishedResourceNodes.Count -eq 2 -and
+    $nonWebResourceNodes.Count -eq 0 -and
     -not $parameterXml.Contains($publishWebResourceIdUnique) -and
     -not $parameterXml.Contains($publishSolutionComponentId) -and
     $wrongIdentityRejected -and
     $deployment.Contains('$resourceId = [string]$matches[0].webresourceid') -and
     -not $deployment.Contains('$resourceId = [string]$matches[0].webresourceidunique') -and
-    $deployment.Contains('$script:Journal.ParameterXml = $parameterXml')) `
-    'Build and journal exact PublishXml from validated webresourceid values only'
+    $deployment.Contains('$script:Journal.ParameterXml = $parameterXml') -and
+    -not $deployment.Contains('-AppModuleId $target.AppId')) `
+    'Build and journal WebResource-only PublishXml with exactly the selected resource IDs'
 $publishCalls = [regex]::Matches($deployment, "Invoke-DataverseRequest -Method POST -Path 'PublishXml'")
 $publishedReadbacks = [regex]::Matches($deployment, 'Assert-PublishedWebResourceReadback')
 Assert-Test ($publishCalls.Count -eq 3 -and
@@ -437,7 +443,7 @@ Assert-Test ($deployment.Contains('[switch]$ReconcilePublishOnly') -and
     $reconcileBlock.Contains('CANDIDATE_CONSOLE_PUBLICATION_OUTCOME_AMBIGUOUS')) `
     'Provide a read-only reconciliation path that never retries the reserved ambiguous publication'
 $resourceSelection = $deployment.IndexOf('$resources = @($allResources | Where-Object { $RefreshResourceNames -ccontains $_.Name })')
-$publishLabel = $deployment.IndexOf('$publishLabel = "srapp + $($resources.Count) exact web resources scoped PublishXml"')
+$publishLabel = $deployment.IndexOf('$publishLabel = "$($resources.Count) exact web resources scoped PublishXml"')
 Assert-Test ($deployment.Contains('[string[]]$RefreshResourceNames = @()') -and
     $deployment.Contains('if ($Continue -or (-not $RefreshExisting -and -not $CreateNewResources))') -and
     $deployment.Contains('$RefreshResourceNames.Count -ne 5') -and
@@ -476,6 +482,13 @@ $deployment.Contains('PublishedMatchesCurrent') -and
     $deployment.Contains('CANDIDATE_CONSOLE_SOURCE_BASELINE_UNRECONCILED') -and
     $deployment.Contains('BaselineVersionsMatch = $baselineVersionsMatch')) `
     'Capture exact published and effective resource bytes outside the repository and block on version drift'
+Assert-Test ($deployment.Contains('"%24select=webresourceid,name,displayname,webresourcetype,content,componentstate,modifiedon"') -and
+    $deployment.Contains('PublishedComponentState = $published.componentstate') -and
+    $deployment.Contains('PublishedModifiedOn = $published.modifiedon')) `
+    'Select every published baseline property that the StrictMode snapshot reads'
+Assert-Test ($deployment.Contains('$publishedMatchesCurrent = $null') -and
+    -not $deployment.Contains('$publishedMatchesEffective')) `
+    'Initialize the published/current comparison for refreshes without a baseline snapshot'
 Assert-Test ($deployment.Contains('CANDIDATE_CONSOLE_CONFIG_RESOURCES_PREFLIGHT_READY') -and
     $deployment.Contains('if (-not $Continue -and -not $CreateNewResources -and -not $RefreshExisting)') -and
     $deployment.Contains('NOT_REQUIRED_EXISTING_NAVIGATION_RECONCILED') -and
@@ -483,9 +496,12 @@ Assert-Test ($deployment.Contains('CANDIDATE_CONSOLE_CONFIG_RESOURCES_PREFLIGHT_
     'Create only the selected configuration resources, preserve the sitemap, and reconcile published bytes'
 Assert-Test ($deployment.Contains('if (-not $Continue -and -not $CreateNewResources -and -not $RefreshExisting)') -and
     $deployment.Contains('if ($CreateNewResources -or $RefreshExisting)') -and
-    $deployment.Contains('PublishXmlIncludesOnlyTargetAppAndSelectedWebResources = $true') -and
-    $deployment.Contains('$publishLabel = "srapp + $($resources.Count) exact web resources scoped PublishXml"')) `
-    'Refresh exact web resources without PATCHing the sitemap and publish only selected resources with srapp'
+    $deployment.Contains('PublishXmlScope = "$($resources.Count) exact web resources"') -and
+    $deployment.Contains('PublishAllXml = 0') -and
+    $deployment.Contains('AutomaticRetries = 0') -and
+    -not $deployment.Contains("-Path 'PublishAllXml'") -and
+    -not $deployment.Contains('-Path "PublishAllXml"')) `
+    'Refresh selected WebResources only, with no app/sitemap publication, global publish, or retry'
 
 $hash = (Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $version = [regex]::Match($html, 'candidate-console\.js\?v=([0-9a-f]+)')

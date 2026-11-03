@@ -4,7 +4,14 @@
 
 ## Managed-artifact source decision (2026-11-02)
 
-**Current outcome (2026-11-03, post-demo):** `POST_DEMO_MANAGED_RELEASE_CANDIDATE_BUILT`. The new Managed `os_sr_bso_rs_support` 1.0.0.0 artifact has SHA-256 `d04e4da864e3fd4b49f1687304b7c0a041761c6f2b5568a2386d728f1983e4d9`.
+**Final outcome (2026-11-03):** `FINAL_PRODUCTION_RELEASE_CANDIDATE_BUILT`. The Managed `os_sr_bso_rs_support` **1.0.0.1** artifact has SHA-256 `cf70174044be21962c30771861aefb8fa7033014add0d0869523f418eaf55bd3`. It is the immutable Production release candidate.
+
+- It was built after a version-only Solution update, using the same release-neutral procedure and verified DEV restoration (retries=0).
+- Its only difference from the post-demo artifact below is the `solution.xml` `<Version>`.
+
+The post-demo `1.0.0.0` artifact below is superseded by the final version and retained.
+
+**Post-demo outcome (2026-11-03):** `POST_DEMO_MANAGED_RELEASE_CANDIDATE_BUILT`. The new Managed `os_sr_bso_rs_support` 1.0.0.0 artifact has SHA-256 `d04e4da864e3fd4b49f1687304b7c0a041761c6f2b5568a2386d728f1983e4d9`.
 
 - It was built with the same release-neutral procedure: WebResource-only `PublishXml` for two resources, a single Managed export, and DEV restoration verified (retries=0).
 - It has the identical 21-root set and an identical Candidate Core package.

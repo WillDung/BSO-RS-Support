@@ -76,7 +76,7 @@ if ($approval.mode -cne 'TEST' -or
     $approval.devDirectWriteFallbackEnabled -ne $false -or
     $approval.diagnosticsMode -cne 'OFF' -or
     $approval.solutionUniqueName -cne 'os_sr_bso_rs_support' -or
-    $approval.solutionVersion -cne '1.0.0.0' -or
+    $approval.solutionVersion -cne '1.0.0.1' -or
     $approval.artifactOrigin -cnotin @('CANONICAL_SOURCE', 'APPROVED_TEST_BUILD') -or
     $approval.artifactReleaseable -ne $true -or
     $approval.managedArtifactSha256 -cne $artifactHash) {

@@ -133,7 +133,7 @@ Assert-Test (@($inventory.requiredCapabilityDisposition | Where-Object {
 
 Assert-Test ($releaseInputs.status -ceq 'FROZEN_OFFLINE_SOURCE_INPUTS_NOT_A_RELEASE_APPROVAL' -and
     $releaseInputs.solution.uniqueName -ceq 'os_sr_bso_rs_support' -and
-    $releaseInputs.solution.version -ceq '1.0.0.0' -and
+    $releaseInputs.solution.version -ceq '1.0.0.1' -and
     $releaseInputs.solution.packageType -ceq 'Managed' -and
     $releaseInputs.canonicalSource.rootComponentCount -eq 20 -and
     $releaseInputs.releaseRootModel.authoredCanonicalRootCount -eq 20 -and
@@ -321,7 +321,7 @@ try {
         devDirectWriteFallbackEnabled = $false
         diagnosticsMode = 'OFF'
         solutionUniqueName = 'os_sr_bso_rs_support'
-        solutionVersion = '1.0.0.0'
+        solutionVersion = '1.0.0.1'
         artifactOrigin = 'APPROVED_TEST_BUILD'
         artifactReleaseable = $true
         managedArtifactSha256 = (Get-FileHash -LiteralPath $managedArtifactPath -Algorithm SHA256).Hash.ToLowerInvariant()

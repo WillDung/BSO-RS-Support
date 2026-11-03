@@ -15,7 +15,7 @@
     "managedOnly": true,
     "sha256PinRequired": true,
     "solutionUniqueName": "os_sr_bso_rs_support",
-    "solutionVersion": "1.0.0.0",
+    "solutionVersion": "1.0.0.1",
     "devOriginReviewArtifactAllowed": false,
     "canonicalReleaseInputManifestRequired": true
   },

@@ -71,7 +71,7 @@ $requiredCommonApproval = $approval.mode -ceq $Mode -and
     $approval.ownerApproved -eq $true -and
     $approval.authorizedDeploymentIdentityApproved -eq $true -and
     $approval.solutionUniqueName -ceq 'os_sr_bso_rs_support' -and
-    $approval.solutionVersion -ceq '1.0.0.0' -and
+    $approval.solutionVersion -ceq '1.0.0.1' -and
     $approval.artifactOrigin -cin @('CANONICAL_SOURCE', 'APPROVED_TEST_BUILD') -and
     $approval.artifactReleaseable -eq $true -and
     $approval.managedArtifactSha256 -ceq $artifactHash -and

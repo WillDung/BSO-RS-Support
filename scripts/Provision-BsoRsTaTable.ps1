@@ -1316,7 +1316,7 @@ function Get-Preflight {
     $solutionFilter = [Uri]::EscapeDataString("uniquename eq 'os_sr_bso_rs_support'")
     $solutions = @(Get-ODataList -Path "solutions?`$select=solutionid,friendlyname,uniquename,version,ismanaged,_publisherid_value&`$filter=$solutionFilter")
     if ($solutions.Count -ne 1 -or $solutions[0].friendlyname -cne 'BSO-RS-Support' -or
-        $solutions[0].version -cne '1.0.0.0' -or $solutions[0].ismanaged -ne $false -or
+        $solutions[0].version -cne '1.0.0.1' -or $solutions[0].ismanaged -ne $false -or
         $solutions[0]._publisherid_value -ne $publishers[0].publisherid) { throw 'Project Solution/Publisher linkage mismatch; stop without writes.' }
 
     $script:PreflightStage = 'PROJECT_INVENTORY'

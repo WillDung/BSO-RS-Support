@@ -1,5 +1,77 @@
 # Current State
 
+## Final Production release candidate 1.0.0.1 (2026-11-03)
+
+**Current status:**
+
+- `FINAL_PRODUCTION_RELEASE_CANDIDATE_BUILT`
+- `FINAL_RELEASE_VERSION_1_0_0_1`
+- `VN_LMV_IT_FINAL_RELEASE_SOURCE_RESTORED`
+- `APPLICATION_FUNCTIONALLY_READY_FOR_PRODUCTION`
+- `REAL_DATA_STILL_PROHIBITED`
+
+`PRODUCTION_GO_LIVE_APPROVED` is **not** claimed.
+
+**Why:** The post-demo artifact was functionally accepted, but it had the same Solution version (`1.0.0.0`) as the superseded demo artifact and the version already installed in LMV BI DEV. The owner decided to finalize the release as `1.0.0.1` with no functional change.
+
+**Source change (version-only):**
+
+- `<Version>` in [Solution.xml](../solutions/Other/Solution.xml) changed to `1.0.0.1`.
+- The Solution-version pins were updated in [RELEASE_INPUT_MANIFEST.json](RELEASE_INPUT_MANIFEST.json), [RELEASE_ARTIFACTS.json](RELEASE_ARTIFACTS.json), [SOLUTION_IMPORT_CONTRACT.json](SOLUTION_IMPORT_CONTRACT.json), the offline Test-rehearsal and import gates, the reference-table provisioning preflight, and [BsoRsProductionReadiness.Tests.ps1](../tests/BsoRsProductionReadiness.Tests.ps1).
+- The derived root-manifest, canonical-source, gate-script, and tool fingerprints were recomputed.
+- The `os_sr_cact` assembly version and the WebResource `IntroducedVersion` values intentionally remain `1.0.0.0`.
+- The Console, sitemap, package, schema, API, role, and Solution membership are unchanged.
+
+**VN LMV IT steps:**
+
+1. A fresh read-only guard matched the final post-demo guard exactly.
+2. The Solution version was updated with one conditional update (`1.0.0.0` → `1.0.0.1`, HTTP 204, readback verified). No publish was needed for this.
+3. The DEV Console baseline (all five resources) was captured and matched the accepted post-demo bytes.
+4. The release-neutral environment configuration and HTML were applied with one `PublishXml` limited to those two WebResource IDs.
+5. One Managed export was made.
+6. The exact DEV bytes were restored with the same scoped publication.
+7. Restoration was verified:
+   - Published, current, effective, and captured baseline hashes match for all five resources.
+   - Sitemap, package, API topology, BSO role, and the 47-component Solution membership are unchanged.
+   - The Solution version remains `1.0.0.1`.
+- No `srapp` or sitemap publication, no `PublishAllXml`, no `pac solution publish`, and retries=0.
+
+**Final artifact:**
+
+- SHA-256 `cf70174044be21962c30771861aefb8fa7033014add0d0869523f418eaf55bd3`.
+- Managed `1.0.0.1`, stored externally as a frozen, read-only artifact.
+- Exactly 21 release roots, identical to the accepted set.
+- Candidate Management is first in the sitemap.
+- Hardened Console HTML and JavaScript, with release-neutral (`UNCONFIGURED`) configuration.
+- The Candidate Core package is byte-identical (`dbf60872…`).
+- **Excluded:** no rollback assembly, ProtectCandidateCore steps, `os_sr_devcs`, target identifiers, personal identities, or secrets.
+
+**Content-delta proof:** Compared with the post-demo artifact, the only difference is the `solution.xml` `<Version>` line. All other 33 archive files are byte-identical, including `customizations.xml`, the package, and all Console resources. There is no `FINAL_RELEASE_CONTENT_DRIFT`, so the accepted post-demo regression remains authoritative and no new lifecycle run was required.
+
+**Artifact lineage (all retained):**
+
+| SHA-256 | Version | Classification |
+|---|---|---|
+| `33c491f8…` | 1.0.0.0 | Demo-era artifact, `SUPERSEDED_BY_POST_DEMO_HARDENING` |
+| `d04e4da8…` | 1.0.0.0 | Post-demo functional artifact, superseded by the final 1.0.0.1 version |
+| `cf701740…` | 1.0.0.1 | Immutable Production release candidate |
+
+**Remaining blockers (external only):**
+
+- Production target approval
+- Production deployment authorization
+- Production BSO access
+- real-data authorization
+- privacy
+- audit
+- DLP
+- backup and recovery ownership
+- support, monitoring, and escalation ownership
+- ATSugg migration decision
+- launch integrations decision
+
+No technical gates remain open.
+
 ## Post-demo UX hardening and release candidate (2026-11-03)
 
 **Current status:**

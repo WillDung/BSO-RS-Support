@@ -3,16 +3,16 @@
   "status": "FROZEN_OFFLINE_SOURCE_INPUTS_NOT_A_RELEASE_APPROVAL",
   "solution": {
     "uniqueName": "os_sr_bso_rs_support",
-    "version": "1.0.0.0",
+    "version": "1.0.0.1",
     "packageType": "Managed",
     "managedArtifactStatus": "MANAGED_RELEASE_ARTIFACT_REQUIRES_APPROVED_TEST_REHEARSAL"
   },
   "canonicalSource": {
     "rootManifest": "../solutions/Other/Solution.xml",
-    "rootManifestSha256": "8b2254ce6c94ae7216b3b2e629298b0211958fb7a7aa8f0383b8fc58ccb31cfd",
+    "rootManifestSha256": "45a784f8343f61f92d4e8b63be59b2540ce3957b7e665adf3a3de32eb2095f2e",
     "sourceFileCount": 171,
     "sourceFingerprintAlgorithm": "SHA256_OF_UTF8_SORTED_GIT_INDEX_LINES_RELATIVE_PATH_PIPE_RAW_FILE_SHA256",
-    "sourceFingerprint": "6947ea91424a8159861838ae5cbde573162f597f32bb1c0f0d0ec70099f721fa",
+    "sourceFingerprint": "fff8b7879c2b756f3a2b1753159135a0dc00a890a20e4445870a0fd23ea984d1",
     "rootComponentFingerprint": "96b5a9e96fb5d5f6ecd619ed42762477c67651e8159168e9b5a8063445e48c3f",
     "rootComponentCount": 20,
     "sourceInventory": "SOLUTION_COMPONENT_INVENTORY.json"
@@ -42,13 +42,20 @@
     },
     "onlyPermittedGeneratedRoot": "The exact package-backed PluginAssembly above; any other 21st root fails release validation.",
     "managedReleaseArtifact": {
-      "result": "POST_DEMO_MANAGED_RELEASE_CANDIDATE_BUILT",
+      "result": "FINAL_PRODUCTION_RELEASE_CANDIDATE_BUILT",
       "exportedOn": "2026-11-03",
       "solutionUniqueName": "os_sr_bso_rs_support",
-      "solutionVersion": "1.0.0.0",
+      "solutionVersion": "1.0.0.1",
       "managed": true,
       "publisherPrefix": "os",
-      "sha256": "d04e4da864e3fd4b49f1687304b7c0a041761c6f2b5568a2386d728f1983e4d9",
+      "sha256": "cf70174044be21962c30771861aefb8fa7033014add0d0869523f418eaf55bd3",
+      "contentDeltaFromPostDemoArtifact": "solution.xml Version 1.0.0.0 -> 1.0.0.1 only; all other 33 archive files byte-identical",
+      "postDemoFunctionalArtifact": {
+        "sha256": "d04e4da864e3fd4b49f1687304b7c0a041761c6f2b5568a2386d728f1983e4d9",
+        "solutionVersion": "1.0.0.0",
+        "disposition": "SUPERSEDED_BY_FINAL_VERSION_1_0_0_1",
+        "note": "Functionally accepted post-demo artifact; retained as evidence, not deleted."
+      },
       "releaseRootCount": 21,
       "authoredRootCount": 20,
       "generatedPackageRootCount": 1,
@@ -109,9 +116,9 @@
     "builder": "../scripts/Build-BsoRsPortableSolution.ps1",
     "builderSha256": "fd5e7dbb3320c3593e6ccf1d7a5d93eb2144e4a5ed1f5b7b6a12adba582e5d95",
     "testRehearsalGate": "../scripts/Test-BsoRsTestRehearsalGate.ps1",
-    "testRehearsalGateSha256": "337f6c377aa5fcc36df82203d18e0d7863b5255bedf75e7506790c70a9ac23d2",
+    "testRehearsalGateSha256": "b5114160c9a3f0431d6d0b2a8eac026f30221bd0f8fccbf771b79850249fd330",
     "solutionImportGate": "../scripts/Test-BsoRsSolutionImportGate.ps1",
-    "solutionImportGateSha256": "8708fc14934ecaf465b8fc3de95e9a667dcc955a91dd42819a00c74fc2d62c38",
+    "solutionImportGateSha256": "c7b9df57cf4d23d1ad5ebca8b9148d31c720969d186ead5d19f2e6c56fdc432c",
     "testTargetAuthorizationValidator": "../scripts/BsoRsTestTargetAuthorization.psm1",
     "testTargetAuthorizationValidatorSha256": "c8071bfe9803ee0c779b7cf470af89e3d47c30b32ec2b6e0405075c67008b7e0",
     "configurationGenerator": "../scripts/New-BsoRsCandidateConsoleEnvironmentConfig.ps1",
@@ -123,7 +130,7 @@
     "canonicalSourceFingerprintTool": "../scripts/BsoRsCanonicalSourceFingerprint.psm1",
     "canonicalSourceFingerprintToolSha256": "3ef2e540fb93198d37a83c7d657f37284db2544400554858b0045b7a15b3a658",
     "toolFingerprintAlgorithm": "SHA256_OF_UTF8_SORTED_LINES_RELATIVE_PATH_PIPE_FILE_SHA256",
-    "toolFingerprint": "fc1bf2a2415d9f33cafb4d23cc4c562a71bc6c1a7350277ecd52e039dc4ca059"
+    "toolFingerprint": "8cdbd3feb23ca212996430e0595d6145b0f69439f2452517af88cf8e0f3584bf"
   },
   "devOriginReviewArtifact": {
     "disposition": "DEV_ORIGIN_REVIEW_ARTIFACT_NOT_RELEASEABLE",

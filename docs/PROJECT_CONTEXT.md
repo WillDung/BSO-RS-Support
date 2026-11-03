@@ -1,5 +1,7 @@
 # Project Context
 
+**Final release candidate (2026-11-03):** `FINAL_PRODUCTION_RELEASE_CANDIDATE_BUILT`, `FINAL_RELEASE_VERSION_1_0_0_1`. Managed `os_sr_bso_rs_support` 1.0.0.1 has SHA-256 `cf70174044be21962c30771861aefb8fa7033014add0d0869523f418eaf55bd3`. It differs from the post-demo artifact only in the `solution.xml` version. Production go-live is not approved; see [CURRENT_STATE.md](CURRENT_STATE.md).
+
 **Post-demo status (2026-11-03):** The VN LMV IT demo succeeded, and post-demo UX hardening A–D is complete. Candidate Management is the default workspace. Labels are neutral. The obsolete ProtectCandidateCore UI text was removed. Record Call is offered only at Need Call Candidate.
 
 Status: `POST_DEMO_REGRESSION_ACCEPTED`, `APPLICATION_FUNCTIONALLY_READY_FOR_PRODUCTION`, `POST_DEMO_MANAGED_RELEASE_CANDIDATE_BUILT` (SHA-256 `d04e4da864e3fd4b49f1687304b7c0a041761c6f2b5568a2386d728f1983e4d9`), `REAL_DATA_STILL_PROHIBITED`. The artifact below is `SUPERSEDED_BY_POST_DEMO_HARDENING` and retained as demo-era evidence. Production go-live is not approved. See [CURRENT_STATE.md](CURRENT_STATE.md).

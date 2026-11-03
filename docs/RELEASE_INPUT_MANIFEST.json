@@ -18,7 +18,7 @@
     "sourceInventory": "SOLUTION_COMPONENT_INVENTORY.json"
   },
   "releaseRootModel": {
-    "status": "ROOT_PARTITION_AND_MEMBERSHIP_CLEANUP_VERIFIED_RELEASE_EXPORT_PENDING",
+    "status": "ROOT_PARTITION_AND_MEMBERSHIP_CLEANUP_VERIFIED_RELEASEABLE_MANAGED_ARTIFACT_BUILT",
     "authoredCanonicalRootCount": 20,
     "generatedPackageRootCount": 1,
     "expectedLiveAndExportReleaseRootCount": 21,
@@ -40,7 +40,25 @@
       "signedRollbackAssembly": 1,
       "inactiveProtectCandidateCoreSteps": 50
     },
-    "onlyPermittedGeneratedRoot": "The exact package-backed PluginAssembly above; any other 21st root fails release validation."
+    "onlyPermittedGeneratedRoot": "The exact package-backed PluginAssembly above; any other 21st root fails release validation.",
+    "managedReleaseArtifact": {
+      "result": "RELEASEABLE_MANAGED_ARTIFACT_BUILT",
+      "exportedOn": "2026-11-03",
+      "solutionUniqueName": "os_sr_bso_rs_support",
+      "solutionVersion": "1.0.0.0",
+      "managed": true,
+      "publisherPrefix": "os",
+      "sha256": "33c491f84d8082817e0be888889fd6239a6bdb5bc76c01bdcb5040cdc11f9970",
+      "releaseRootCount": 21,
+      "authoredRootCount": 20,
+      "generatedPackageRootCount": 1,
+      "releaseRootIdentitySetSha256": "ffde0fe088d87120aa29caf11de156537f19abf9627695d95306eea040c530e4",
+      "candidateConsoleEnvironmentConfigurationSha256": "f0cb52b99cd842b278b6a799917c34102b0ece42b48763c73b1d59cbe110d5eb",
+      "candidateConsoleHtmlSha256": "8ece63c84388fee2e5bbae50106454f8a8b64081e4f568284c6a64fe8b5229a5",
+      "storage": "External frozen artifact; not committed to the repository.",
+      "rejectedPrior72RootArtifactSha256": "fbc9d9604a125e9ac1a6bca99927fc2d8d7e2db31e78733e43cfd33b324b1ac8",
+      "rejectedPrior72RootArtifactDisposition": "MANAGED_ARTIFACT_RELEASE_INVENTORY_MISMATCH_PERMANENTLY_REJECTED"
+    }
   },
   "candidateCore": {
     "packageFileName": "os_sr_cact_pkg.nupkg",

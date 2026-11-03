@@ -150,7 +150,7 @@
     "explanation": "The 72 count is the pre-cleanup unmanaged export's RootComponent inventory: 20 authored canonical roots, one package-generated unsigned PluginAssembly root, and 51 excluded roots (one signed rollback assembly plus 50 inactive guard steps). The canonical Solution.xml remains at 20 authored roots; the expected live and managed-export release composition is 21 roots. The package-generated assembly is expected only because its packageid links to the retained os_sr_cact_pkg PluginPackage. Custom API, entity, and web-resource metadata files are included source details rather than separate counted roots."
   },
   "liveMembershipReconciliation": {
-    "status": "LIVE_ROOT_PARTITION_AND_MEMBERSHIP_CLEANUP_VERIFIED_RELEASE_EXPORT_PENDING",
+    "status": "LIVE_ROOT_PARTITION_AND_MEMBERSHIP_CLEANUP_VERIFIED_RELEASEABLE_MANAGED_ARTIFACT_BUILT",
     "rootPartition": {
       "preCleanupLiveRoots": 72,
       "authoredCanonicalRoots": 20,
@@ -219,7 +219,41 @@
       "guardStepRecordsRetainedInactive": 50,
       "rollbackAssemblyRecordRetained": true,
       "packageBackedAssemblyRetained": true,
-      "devcsApiAndChildRecordsRetainedOutsideSolution": true
+      "devcsApiAndChildRecordsRetainedOutsideSolution": true,
+      "reconfirmedBeforeExport": "2026-11-03"
+    },
+    "managedReleaseArtifactVerification": {
+      "result": "RELEASEABLE_MANAGED_ARTIFACT_BUILT",
+      "exportedOn": "2026-11-03",
+      "artifactSha256": "33c491f84d8082817e0be888889fd6239a6bdb5bc76c01bdcb5040cdc11f9970",
+      "managed": true,
+      "solutionVersion": "1.0.0.0",
+      "releaseRootCount": 21,
+      "authoredRootCount": 20,
+      "generatedPackageRootCount": 1,
+      "releaseRootIdentitySetSha256": "ffde0fe088d87120aa29caf11de156537f19abf9627695d95306eea040c530e4",
+      "excludedFromArtifact": {
+        "signedRollbackAssembly": true,
+        "protectCandidateCoreSteps": 50,
+        "osSrDevcsApiRequestParametersAndResponseProperties": true
+      },
+      "contains": {
+        "tables": 10,
+        "choices": 2,
+        "bsoRole": 1,
+        "candidateConsoleWebResources": 5,
+        "srappAppModuleAndSiteMap": true,
+        "osSrCactCustomApiRequestParameters": 18,
+        "osSrCactCustomApiResponseProperties": 5,
+        "osSrCactPkgPluginPackage": true,
+        "alternateKeys": 5
+      },
+      "candidateConsoleContent": "RELEASE_NEUTRAL_UNCONFIGURED",
+      "targetBindingsPresent": false,
+      "secretsOrPersonalIdentitiesPresent": false,
+      "webResourceDescriptionNote": "The five WebResource descriptions retain the creation-time label text from the deployment tool; it carries no URL, environment ID, organization ID, or runtime binding.",
+      "sourceRestoration": "VN_LMV_IT_RELEASE_SOURCE_RESTORED",
+      "prior72RootArtifact": "PERMANENTLY_REJECTED"
     },
     "supersededInvariant": "The earlier 72 = 20 retained + 52 excluded partition incorrectly counted the unsigned package-generated PluginAssembly as excluded. Verified partition: 72 = 20 authored canonical roots + 1 generated package-backed root + 51 excluded roots. os_sr_devcs is a separate non-root membership group.",
     "generatedReleaseRoot": {
@@ -284,9 +318,10 @@
       "packageMembershipRemoval": false,
       "activeCandidateCoreApiRemoval": false,
       "componentDeletion": false,
-      "openVerification": [
-        "Apply the approved release-neutral environment configuration and matching HTML, publish only those exact WebResource IDs, export one Managed artifact, and restore the exact captured DEV bytes.",
-        "Reconcile the resulting artifact against exactly 21 release roots and verify that the package-backed assembly, package, active Candidate Core API, srapp, schema, role, and environment-resident excluded records remain unchanged."
+      "openVerification": [],
+      "completedVerification": [
+        "2026-11-03: Applied the release-neutral environment configuration and matching HTML, published only those exact WebResource IDs, exported one Managed artifact, and restored the exact captured DEV bytes.",
+        "2026-11-03: Reconciled the artifact against exactly 21 release roots; package-backed assembly, package, active Candidate Core API, srapp, schema, role, and environment-resident excluded records remained unchanged."
       ]
     }
   },

@@ -1,8 +1,34 @@
 # Current State
 
+## Release-neutral 21-root managed artifact (2026-11-03)
+
+**Current status:** `RELEASEABLE_MANAGED_ARTIFACT_BUILT` and `VN_LMV_IT_RELEASE_SOURCE_RESTORED`. LMV BI DEV managed Test rehearsal is stopped before import: `TEST_SOLUTION_IMPORT_PERMISSION_NOT_VERIFIED`. `REAL_DATA_STILL_PROHIBITED`.
+
+**Source preflight (read-only):** PAC and Dataverse `WhoAmI` agreed on the exact VN LMV IT target, `os_sr_bso_rs_support`, and `srapp`. The cleaned Solution still had 47 memberships and 21 roots (20 authored + 1 unsigned package-backed generated assembly) with release-root identity SHA-256 `ffde0fe088d87120aa29caf11de156537f19abf9627695d95306eea040c530e4`. The signed rollback assembly, 50 `ProtectCandidateCore` steps, and `os_sr_devcs` were absent from the Solution, but their records remain in the environment and all 50 steps remain inactive. The source had one `os_sr_cact_pkg`, package-linked unsigned assembly, and package-backed `os_sr_cact.ApplyCandidateAction` handler: `CANONICAL_21_ROOT_RELEASE_MEMBERSHIP_RECONFIRMED`, `PACKAGE_GENERATED_ASSEMBLY_RELEASE_ROOT_VERIFIED`.
+
+**Candidate Console cycle:** All five resources satisfied published == current (`RetrieveUnpublishedMultiple`) == effective-served (`getWebResourceUrl`, HTTP 200) == accepted DEV pin: `CANDIDATE_CONSOLE_DEV_BASELINE_RECONFIRMED`. The generated release-neutral configuration/HTML pair (`UNCONFIGURED`, no bindings, Candidate Core and fallback disabled, diagnostics Off) was validated offline. It was then applied with resource PATCH=2 and one `PublishXml` whose journaled `ParameterXml` contained only the two changed WebResource IDs: no `srapp`, sitemap, or `PublishAllXml`; retries=0. All four layers matched the release-neutral pins. After one Managed export, the exact captured DEV bytes were restored by the same scoped path. All five resources matched the captured baseline on every layer. `srapp`, sitemap, package, assemblies, APIs, guard steps, and Solution-membership fingerprints were unchanged.
+
+**Artifact acceptance:** The new Managed `1.0.0.0` artifact (publisher prefix `os`, SHA-256 `33c491f84d8082817e0be888889fd6239a6bdb5bc76c01bdcb5040cdc11f9970`) has exactly the 21 release roots, matching the live identity set. It contains:
+
+- the expected tables, forms, views, 5 alternate keys, relationships, Choices, and BSO role;
+- `srapp` and its sitemap;
+- `os_sr_cact` (18 request parameters and 5 response properties);
+- `os_sr_cact_pkg` at its pinned package and DLL hashes;
+- release-neutral Console content.
+
+It contains no rollback assembly, guard steps, `os_sr_devcs`, target URL/IDs, secrets, or personal identities. Two platform app dependencies (default app icon and `AppChannel` setting) are standard Power Apps platform dependencies. The artifact is frozen outside the repository. The earlier 72-root artifact remains permanently rejected.
+
+**LMV BI DEV requalification:** Read-only checks showed:
+
+- the exact Sandbox target and `WhoAmI` agreement;
+- the recovery checkpoint is valid until 8 November 2026;
+- a clean baseline with no `os` publisher, project Solution, tables, APIs, package, `srapp`, resources, or BSO role.
+
+The deployment identity's effective privileges are now 61 Basic-depth privileges and no longer include `prvImportCustomization`, which was effective at Global depth on 1 November 2026. Role assignment or self-elevation is outside the authorized scope, so no import, configuration, or rehearsal write occurred. **External dependency:** restore the authorized deployment identity's import privilege, then freshly requalify and resume the approved rehearsal.
+
 ## Live managed-artifact reconciliation (2026-11-02)
 
-**Current status:** `CANDIDATE_CONSOLE_PUBLISHED_CURRENT_EFFECTIVE_EQUIVALENCE_VERIFIED`, `MANAGED_ARTIFACT_SOURCE_QUALIFIED`, and `VN_LMV_IT_RELEASE_SOURCE_RESTORED` were reached for the Candidate Console resource path. The earlier Managed export remains rejected as `MANAGED_ARTIFACT_RELEASE_INVENTORY_MISMATCH`; `RELEASEABLE_MANAGED_ARTIFACT_BUILT` is not claimed and LMV BI DEV was not resumed. The owner-directed solution-membership cleanup has now been verified; the next release-neutral update, exact WebResource-only publish, managed export, and mandatory restore remain pending.
+**Status at that checkpoint:** `CANDIDATE_CONSOLE_PUBLISHED_CURRENT_EFFECTIVE_EQUIVALENCE_VERIFIED`, `MANAGED_ARTIFACT_SOURCE_QUALIFIED`, and `VN_LMV_IT_RELEASE_SOURCE_RESTORED` were reached for the Candidate Console resource path. The earlier Managed export remains rejected as `MANAGED_ARTIFACT_RELEASE_INVENTORY_MISMATCH`; `RELEASEABLE_MANAGED_ARTIFACT_BUILT` is not claimed and LMV BI DEV was not resumed. The owner-directed solution-membership cleanup has now been verified; the next release-neutral update, exact WebResource-only publish, managed export, and mandatory restore remain pending.
 
 **Verified root and membership state:** Before cleanup, the exact 72-root identity set matched the inventory (SHA-256 `b33267f353d8025a92d0c3b2dcd2d7c35f98f104d0ef50e3a8909d9b8e2fcde0`): 20 authored roots + one generated package-backed root + 51 excluded roots, with no duplicate, missing, or misclassified roots. After cleanup, 21 live root identities exactly match the expected release set (SHA-256 `ffde0fe088d87120aa29caf11de156537f19abf9627695d95306eea040c530e4`). The 51 excluded root memberships and all 15 `os_sr_devcs` memberships were removed; all underlying components remain. The live Solution now has 47 component memberships: 21 roots and 26 non-roots (retained `os_sr_cact` API group 24, package membership 1, `srapp` child 1). All 50 guard-step records remain inactive; rollback assembly, package-backed assembly, `os_sr_devcs` API/children, and both package handlers remain in the environment. See [SOLUTION_COMPONENT_INVENTORY.json](SOLUTION_COMPONENT_INVENTORY.json).
 

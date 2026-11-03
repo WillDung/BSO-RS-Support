@@ -137,6 +137,56 @@
     },
     "explanation": "The 72 count is the retained unmanaged export's RootComponent inventory. The 20 count is the canonical Solution.xml root set after excluding 50 inactive guard steps and both PluginAssembly roots. The accepted unsigned package is retained separately with its PluginPackage metadata and is not an additional RootComponent in the 20-root manifest. Custom API, entity, and web-resource metadata files are included source details rather than separate counted roots."
   },
+  "liveMembershipReconciliation": {
+    "status": "READ_ONLY_EVIDENCE_PROPOSED_REMOVAL_PLAN_PENDING_AUTHORIZATION",
+    "rootPartition": {
+      "exportRoots": 72,
+      "retainedRoots": 20,
+      "excludedRoots": 52,
+      "excludedRootComposition": {
+        "signedRollbackAssembly": 1,
+        "packageBackedAssembly": 1,
+        "inactiveProtectCandidateCoreSteps": 50
+      },
+      "duplicateRoots": 0,
+      "missingRoots": 0,
+      "misclassifiedRoots": 0
+    },
+    "rejectedInvariant": "72 = 20 retained + os_sr_devcs + 1 rollback assembly + 50 steps is false: os_sr_devcs is not a RootComponent, and the package-backed PluginAssembly root is the second excluded type-91 root.",
+    "nonRootSolutionMemberships": {
+      "explanation": "Custom API and PluginPackage memberships are parent-less solution components exported as customapis/ and pluginpackages/ folders, not as Solution.xml RootComponent entries.",
+      "retained": [
+        {
+          "component": "os_sr_cact",
+          "customApi": 1,
+          "requestParameters": 18,
+          "responseProperties": 5
+        },
+        {
+          "component": "os_sr_cact_pkg",
+          "pluginPackage": 1
+        }
+      ],
+      "excluded": [
+        {
+          "component": "os_sr_devcs",
+          "customApi": 1,
+          "requestParameters": 12,
+          "responseProperties": 2,
+          "disposition": "TEMPORARY_DEV_CUSTOM_API_MEMBERSHIP_EXCLUDED_FROM_RELEASE"
+        }
+      ]
+    },
+    "proposedMembershipRemovalSet": {
+      "rootRemovals": 52,
+      "nonRootCustomApiGroup": "os_sr_devcs (1 Custom API, 12 request parameters, 2 response properties)",
+      "componentDeletion": false,
+      "openVerification": [
+        "Whether removing the os_sr_devcs Custom API membership also removes its 14 child memberships, or whether each child requires explicit removal.",
+        "Removing the package-backed PluginAssembly root must leave the os_sr_cact_pkg PluginPackage membership and os_sr_cact handler binding intact."
+      ]
+    }
+  },
   "requiredCapabilityDisposition": [
     {
       "capability": "srapp AppModule",

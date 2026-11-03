@@ -17,6 +17,31 @@
     "rootComponentCount": 20,
     "sourceInventory": "SOLUTION_COMPONENT_INVENTORY.json"
   },
+  "releaseRootModel": {
+    "status": "ROOT_PARTITION_AND_MEMBERSHIP_CLEANUP_VERIFIED_RELEASE_EXPORT_PENDING",
+    "authoredCanonicalRootCount": 20,
+    "generatedPackageRootCount": 1,
+    "expectedLiveAndExportReleaseRootCount": 21,
+    "excludedPreCleanupRootCount": 51,
+    "postCleanupLiveRootCount": 21,
+    "postCleanupExcludedRootCount": 0,
+    "postCleanupSolutionComponentRows": 47,
+    "removedExcludedRootMembershipCount": 51,
+    "removedTemporaryDevMembershipCount": 15,
+    "generatedPackageAssemblyRoot": {
+      "componentType": 91,
+      "objectId": "d71c6048-4fd0-f111-a05a-002248a1ba20",
+      "schemaName": "os_sr_cact, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+      "classification": "GENERATED_FROM_CANONICAL_SOURCE",
+      "packageUniqueName": "os_sr_cact_pkg",
+      "packageId": "43765041-4fd0-f111-a05a-002248a1ba20"
+    },
+    "excludedRootComposition": {
+      "signedRollbackAssembly": 1,
+      "inactiveProtectCandidateCoreSteps": 50
+    },
+    "onlyPermittedGeneratedRoot": "The exact package-backed PluginAssembly above; any other 21st root fails release validation."
+  },
   "candidateCore": {
     "packageFileName": "os_sr_cact_pkg.nupkg",
     "packageUniqueName": "os_sr_cact_pkg",
@@ -66,13 +91,13 @@
     "configurationGenerator": "../scripts/New-BsoRsCandidateConsoleEnvironmentConfig.ps1",
     "configurationGeneratorSha256": "b11e66b4d7c6f19b7ff8a8c5d691cba5a3e82dff1371f4bff8709628f0555791",
     "inventoryGenerator": "../scripts/New-BsoRsSolutionComponentInventory.ps1",
-    "inventoryGeneratorSha256": "a144af8d8a99147c01c638749835750ba71d86e60ec2a66687777cb4cab55c5a",
+    "inventoryGeneratorSha256": "20d450461aadbe464ff82dde0128cef1b22ceb54723ddd3c69fb604865f2178a",
     "packageUpdater": "../scripts/Update-BsoRsCandidatePluginPackage.ps1",
     "packageUpdaterSha256": "1a97d71e9ebfe41f02838bbb380630025c577c4ab2f66f7f45360974717e8f38",
     "canonicalSourceFingerprintTool": "../scripts/BsoRsCanonicalSourceFingerprint.psm1",
     "canonicalSourceFingerprintToolSha256": "3ef2e540fb93198d37a83c7d657f37284db2544400554858b0045b7a15b3a658",
     "toolFingerprintAlgorithm": "SHA256_OF_UTF8_SORTED_LINES_RELATIVE_PATH_PIPE_FILE_SHA256",
-    "toolFingerprint": "5dc534a316ae54beef758cef0e7c7e6d5a0519195c26e913085663e097283f0c"
+    "toolFingerprint": "fc1bf2a2415d9f33cafb4d23cc4c562a71bc6c1a7350277ecd52e039dc4ca059"
   },
   "devOriginReviewArtifact": {
     "disposition": "DEV_ORIGIN_REVIEW_ARTIFACT_NOT_RELEASEABLE",

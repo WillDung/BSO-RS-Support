@@ -10,14 +10,28 @@ $inventoryPath = Join-Path $docs 'SOLUTION_COMPONENT_INVENTORY.json'
 $artifactPath = Join-Path $docs 'RELEASE_ARTIFACTS.json'
 $rollbackPath = Join-Path $docs 'ROLLBACK_MANIFEST.json'
 $updaterPath = Join-Path $docs 'RELEASE_UPDATER_CONTRACT.json'
+$solutionManifestPath = Join-Path $solutions 'Other\Solution.xml'
 $buildPath = Join-Path $root 'scripts\Build-BsoRsPortableSolution.ps1'
 $gatePath = Join-Path $root 'scripts\Test-BsoRsTestRehearsalGate.ps1'
+$solutionManifest = [xml][IO.File]::ReadAllText($solutionManifestPath)
+$roots = @($solutionManifest.SelectNodes('//*[local-name()="RootComponent"]'))
 $passed = 0
 
 function Assert-Test {
     param([bool]$Condition, [string]$Name)
     if (-not $Condition) { throw "FAIL: $Name" }
     $script:passed++
+}
+
+function Get-RootKey {
+    param([string]$Type, [string]$Id, [string]$SchemaName)
+    if (-not [string]::IsNullOrWhiteSpace($Id)) {
+        return '{0}|id:{1}' -f $Type, $Id.Trim('{}').ToLowerInvariant()
+    }
+    if (-not [string]::IsNullOrWhiteSpace($SchemaName)) {
+        return '{0}|name:{1}' -f $Type, $SchemaName.ToLowerInvariant()
+    }
+    throw 'A Solution root must have an identity or schema name.'
 }
 
 $profiles = Get-Content -LiteralPath $profilesPath -Raw | ConvertFrom-Json
@@ -37,6 +51,35 @@ foreach ($profileName in @('DEV', 'TEST', 'PROD')) {
 $inventory = Get-Content -LiteralPath $inventoryPath -Raw | ConvertFrom-Json
 Assert-Test ($inventory.rootComponentCount -eq 72 -and $inventory.components.Count -eq 72) `
     'Inventory maps all 72 export root components'
+$authoredRootKeys = [string[]]@($roots | ForEach-Object {
+    Get-RootKey -Type $_.GetAttribute('type') -Id $_.GetAttribute('id') `
+        -SchemaName $_.GetAttribute('schemaName')
+})
+$generatedAssembly = @($inventory.components | Where-Object {
+    $_.type -eq 91 -and $_.disposition -ceq 'GENERATED_FROM_CANONICAL_SOURCE'
+})
+Assert-Test ($generatedAssembly.Count -eq 1 -and
+    $generatedAssembly[0].id -ceq 'd71c6048-4fd0-f111-a05a-002248a1ba20' -and
+    $generatedAssembly[0].name -match 'PublicKeyToken=null') `
+    'Identify the exact unsigned package-generated PluginAssembly root'
+function Test-ExpectedReleaseRootSet {
+    param([string[]]$RootKeys, [string[]]$AuthoredKeys, [string]$GeneratedRootKey)
+    $expectedKeys = [string[]]@($AuthoredKeys + $GeneratedRootKey)
+    if ($RootKeys.Count -ne 21 -or @($RootKeys | Select-Object -Unique).Count -ne 21) {
+        return $false
+    }
+    return @(Compare-Object -ReferenceObject $expectedKeys -DifferenceObject $RootKeys).Count -eq 0
+}
+$expectedGeneratedRootKey = Get-RootKey -Type ([string]$generatedAssembly[0].type) `
+    -Id ([string]$generatedAssembly[0].id) -SchemaName ([string]$generatedAssembly[0].schemaName)
+Assert-Test (Test-ExpectedReleaseRootSet `
+    -RootKeys ([string[]]@($authoredRootKeys + $expectedGeneratedRootKey)) `
+    -AuthoredKeys $authoredRootKeys -GeneratedRootKey $expectedGeneratedRootKey) `
+    'Accept exactly 20 authored roots plus the one expected package-generated root'
+Assert-Test (-not (Test-ExpectedReleaseRootSet `
+    -RootKeys ([string[]]@($authoredRootKeys + '91|id:11111111-1111-1111-1111-111111111111')) `
+    -AuthoredKeys $authoredRootKeys -GeneratedRootKey $expectedGeneratedRootKey)) `
+    'Reject a different 21st root even when the artifact root count is 21'
 $expectedCounts = @{
     '1' = 10
     '9' = 2
@@ -51,11 +94,23 @@ foreach ($componentType in $expectedCounts.Keys) {
     $count = @($inventory.components | Where-Object { $_.type -eq [int]$componentType }).Count
     Assert-Test ($count -eq $expectedCounts[$componentType]) "Inventory maps component type $componentType"
 }
-Assert-Test ($inventory.releaseDisposition.retainedReleaseRoots -eq 20 -and
+Assert-Test ($inventory.releaseDisposition.authoredCanonicalRoots -eq 20 -and
+    $inventory.releaseDisposition.generatedPackageAssemblyRoots -eq 1 -and
+    $inventory.releaseDisposition.expectedLiveAndExportReleaseRoots -eq 21 -and
     $inventory.releaseDisposition.excludedInactiveProtectCandidateCoreSteps -eq 50 -and
     $inventory.releaseDisposition.excludedSignedRollbackAssembly -eq 1 -and
-    $inventory.releaseDisposition.packageBackedAssemblyManagedSeparately -eq 1) `
-    'Inventory dispositions exclude inactive guards and the rollback assembly'
+    $inventory.releaseDisposition.excludedRoots -eq 51 -and
+    @($inventory.components | Where-Object {
+        $_.disposition -eq 'RETAINED_SOURCE'
+    }).Count -eq 20 -and
+    @($inventory.components | Where-Object {
+        $_.disposition -eq 'GENERATED_FROM_CANONICAL_SOURCE'
+    }).Count -eq 1 -and
+    @($inventory.components | Where-Object {
+        $_.disposition -in @('ROLLBACK_ONLY_SIGNED_ASSEMBLY_NOT_RETAINED',
+            'INACTIVE_PROTECTCANDIDATECORE_GUARD_EXCLUDED_FROM_RELEASE')
+    }).Count -eq 51) `
+    'Inventory separates 20 authored, one generated, and 51 excluded roots'
 Assert-Test ($inventory.additionalSourceAreas.customApiFilesInExport -eq 39 -and
     $inventory.additionalSourceAreas.retainedCandidateCoreApiFiles -eq 24 -and
     $inventory.additionalSourceAreas.excludedTemporaryDevApiFiles -eq 15 -and
@@ -115,9 +170,6 @@ Assert-Test ($gateResult.Result -ceq 'TEST_REHEARSAL_RUNNER_READY_TARGET_REQUIRE
 Assert-Test ($gateSource -notmatch '\bpac\b|Invoke-WebRequest|Invoke-RestMethod|solution import') `
     'Test rehearsal gate has no network or import execution path'
 
-$solutionManifestPath = Join-Path $solutions 'Other\Solution.xml'
-[xml]$solutionManifest = [IO.File]::ReadAllText($solutionManifestPath)
-$roots = @($solutionManifest.SelectNodes('//*[local-name()="RootComponent"]'))
 Assert-Test ($roots.Count -eq 20 -and
     @($roots | Where-Object { $_.GetAttribute('type') -in @('91', '92') }).Count -eq 0) `
     'Canonical release manifest excludes assembly registrations and all guard steps'

@@ -24,10 +24,13 @@ function Assert-Test {
     $script:passed++
 }
 
-Assert-Test ($inventory.rootComponentCount -eq 72 -and $inventory.countSemantics.exportRoots -eq 72 -and
-    $inventory.countSemantics.canonicalSolutionRoots -eq 20 -and
-    $inventory.countSemantics.excludedRoots -eq 52 -and $roots.Count -eq 20) `
-    'Reconcile the 72 export roots to the 20 canonical roots and 52 explicit exclusions'
+Assert-Test ($inventory.rootComponentCount -eq 72 -and
+    $inventory.countSemantics.preCleanupExportRoots -eq 72 -and
+    $inventory.countSemantics.authoredCanonicalRoots -eq 20 -and
+    $inventory.countSemantics.generatedReleaseRoots -eq 1 -and
+    $inventory.countSemantics.expectedLiveAndExportReleaseRoots -eq 21 -and
+    $inventory.countSemantics.excludedRoots -eq 51 -and $roots.Count -eq 20) `
+    'Reconcile the pre-cleanup 72 roots to 20 authored, one generated, and 51 excluded roots'
 $canonicalCounts = @{}
 foreach ($group in $roots | Group-Object { $_.GetAttribute('type') }) {
     $canonicalCounts[$group.Name] = $group.Count
@@ -36,11 +39,41 @@ Assert-Test ($canonicalCounts['1'] -eq 10 -and $canonicalCounts['9'] -eq 2 -and
     $canonicalCounts['20'] -eq 1 -and $canonicalCounts['61'] -eq 5 -and
     $canonicalCounts['62'] -eq 1 -and $canonicalCounts['80'] -eq 1) `
     'Verify the canonical root count by component class'
-Assert-Test (@($inventory.countSemantics.excludedRootsByType | Where-Object {
-    $_.type -eq 91 -and $_.count -eq 2
+Assert-Test (@($inventory.countSemantics.generatedRootsByType | Where-Object {
+    $_.type -eq 91 -and $_.count -eq 1
+}).Count -eq 1 -and @($inventory.countSemantics.excludedRootsByType | Where-Object {
+    $_.type -eq 91 -and $_.count -eq 1
 }).Count -eq 1 -and @($inventory.countSemantics.excludedRootsByType | Where-Object {
     $_.type -eq 92 -and $_.count -eq 50
-}).Count -eq 1) 'Explain both excluded assembly roots and all inactive guard steps'
+}).Count -eq 1) 'Separate the generated assembly root from the excluded rollback assembly and guard steps'
+Assert-Test ($inventory.liveMembershipReconciliation.rootPartition.preCleanupLiveRoots -eq 72 -and
+    $inventory.liveMembershipReconciliation.rootPartition.authoredCanonicalRoots -eq 20 -and
+    $inventory.liveMembershipReconciliation.rootPartition.generatedReleaseRoots -eq 1 -and
+    $inventory.liveMembershipReconciliation.rootPartition.expectedReleaseRoots -eq 21 -and
+    $inventory.liveMembershipReconciliation.rootPartition.excludedRoots -eq 51 -and
+    $inventory.liveMembershipReconciliation.rootPartition.duplicateRoots -eq 0 -and
+    $inventory.liveMembershipReconciliation.rootPartition.missingRoots -eq 0 -and
+    $inventory.liveMembershipReconciliation.rootPartition.misclassifiedRoots -eq 0 -and
+    $inventory.liveMembershipReconciliation.rootPartition.postCleanupLiveRoots -eq 21 -and
+    $inventory.liveMembershipReconciliation.rootPartition.postCleanupExcludedRootsRemaining -eq 0 -and
+    $inventory.liveMembershipReconciliation.postCleanupComponentHierarchy.solutionComponentRows -eq 47 -and
+    $inventory.liveMembershipReconciliation.postCleanupComponentHierarchy.rootRows -eq 21 -and
+    $inventory.liveMembershipReconciliation.postCleanupComponentHierarchy.nonRootRows -eq 26 -and
+    $inventory.liveMembershipReconciliation.postCleanupComponentHierarchy.releaseRootIdentityMatch -eq $true -and
+    $inventory.liveMembershipReconciliation.postCleanupComponentHierarchy.releaseRootIdentitySetSha256 -ceq
+        'ffde0fe088d87120aa29caf11de156537f19abf9627695d95306eea040c530e4' -and
+    $inventory.liveMembershipReconciliation.generatedReleaseRoot.packageIdLinkVerified -eq $true -and
+    $inventory.liveMembershipReconciliation.generatedReleaseRoot.packageUniqueName -ceq 'os_sr_cact_pkg' -and
+    $inventory.liveMembershipReconciliation.proposedMembershipRemovalSet.rootRemovals -eq 51 -and
+    $inventory.liveMembershipReconciliation.proposedMembershipRemovalSet.packageGeneratedAssemblyRemoval -eq $false) `
+    'Track the verified generated root and keep it outside the exact 51-root removal set'
+Assert-Test ($inventory.liveMembershipReconciliation.nonRootSolutionMemberships.excluded.customApi -eq 1 -and
+    $inventory.liveMembershipReconciliation.nonRootSolutionMemberships.excluded.requestParameters -eq 12 -and
+    $inventory.liveMembershipReconciliation.nonRootSolutionMemberships.excluded.responseProperties -eq 2 -and
+    $inventory.liveMembershipReconciliation.nonRootSolutionMemberships.excluded.membershipCount -eq 15 -and
+    $inventory.liveMembershipReconciliation.nonRootSolutionMemberships.excluded.removedFromSolutionMembership -eq $true -and
+    $inventory.liveMembershipReconciliation.nonRootSolutionMemberships.excluded.componentRecordsRetained -eq $true) `
+    'Keep the removed temporary DEV Custom API group distinct from its retained component records'
 
 $requiredEntities = @(
     'os_sr_cand', 'os_sr_call', 'os_sr_csh', 'os_sr_intv', 'os_sr_oprc',
@@ -103,6 +136,19 @@ Assert-Test ($releaseInputs.status -ceq 'FROZEN_OFFLINE_SOURCE_INPUTS_NOT_A_RELE
     $releaseInputs.solution.version -ceq '1.0.0.0' -and
     $releaseInputs.solution.packageType -ceq 'Managed' -and
     $releaseInputs.canonicalSource.rootComponentCount -eq 20 -and
+    $releaseInputs.releaseRootModel.authoredCanonicalRootCount -eq 20 -and
+    $releaseInputs.releaseRootModel.generatedPackageRootCount -eq 1 -and
+    $releaseInputs.releaseRootModel.expectedLiveAndExportReleaseRootCount -eq 21 -and
+    $releaseInputs.releaseRootModel.excludedPreCleanupRootCount -eq 51 -and
+    $releaseInputs.releaseRootModel.postCleanupLiveRootCount -eq 21 -and
+    $releaseInputs.releaseRootModel.postCleanupExcludedRootCount -eq 0 -and
+    $releaseInputs.releaseRootModel.postCleanupSolutionComponentRows -eq 47 -and
+    $releaseInputs.releaseRootModel.removedExcludedRootMembershipCount -eq 51 -and
+    $releaseInputs.releaseRootModel.removedTemporaryDevMembershipCount -eq 15 -and
+    $releaseInputs.releaseRootModel.generatedPackageAssemblyRoot.componentType -eq 91 -and
+    $releaseInputs.releaseRootModel.generatedPackageAssemblyRoot.objectId -ceq
+        'd71c6048-4fd0-f111-a05a-002248a1ba20' -and
+    $releaseInputs.releaseRootModel.generatedPackageAssemblyRoot.packageUniqueName -ceq 'os_sr_cact_pkg' -and
     $releaseInputs.candidateCore.packageUniqueName -ceq 'os_sr_cact_pkg' -and
     $releaseInputs.candidateCore.customApiHandlerTypeName -ceq 'os_sr_cact.ApplyCandidateAction' -and
     $releaseInputs.candidateCore.protectCandidateCoreDisposition -ceq 'ALL_50_STEPS_INACTIVE_AND_EXCLUDED') `
@@ -389,7 +435,7 @@ Assert-Test ($rollback.rollbackPlan.offlinePlanStatus -ceq 'ROLLBACK_PLAN_OFFLIN
 
 Write-Output "BSO-RS production-readiness offline checks passed: $passed"
 [pscustomobject]@{
-    SourceInventory = 'SOLUTION_COMPONENT_COUNT_SEMANTICS_RECONCILED'
+    SourceInventory = 'SOLUTION_COMPONENT_COUNT_SEMANTICS_RECONCILED_AND_MEMBERSHIP_CLEANUP_VERIFIED'
     PortableConfiguration = 'PORTABLE_ENVIRONMENT_CONFIGURATION_OFFLINE_VERIFIED'
     ManagedArtifact = 'MANAGED_RELEASE_ARTIFACT_REQUIRES_APPROVED_TEST_REHEARSAL'
     PackageUpdater = 'PACKAGE_RELEASE_UPDATER_OFFLINE_READY_IMPLEMENTED'

@@ -81,8 +81,8 @@ $components = foreach ($root in $roots) {
                 $disposition = 'ROLLBACK_ONLY_SIGNED_ASSEMBLY_NOT_RETAINED'
                 $sourceMapping = 'Rollback manifest only; binary excluded from canonical source.'
             } else {
-                $disposition = 'PACKAGE_BACKED_ASSEMBLY_RELEASED_AS_PACKAGE_ARTIFACT'
-                $sourceMapping = 'pluginpackages/os_sr_cact_pkg/pluginpackage.xml; package/os_sr_cact_pkg.nupkg'
+                $disposition = 'GENERATED_FROM_CANONICAL_SOURCE'
+                $sourceMapping = 'Generated from pluginpackages/os_sr_cact_pkg/pluginpackage.xml and package/os_sr_cact_pkg.nupkg; confirm live packageid linkage before release.'
             }
         }
         '92' {
@@ -146,16 +146,20 @@ $inventory = [ordered]@{
         noTopLevelFolderFor = @('CloudFlows', 'ConnectionReferences', 'EnvironmentVariableDefinitions')
     }
     releaseDisposition = [ordered]@{
-        retainedReleaseRoots = 20
+        authoredCanonicalRoots = 20
+        generatedPackageAssemblyRoots = 1
+        expectedLiveAndExportReleaseRoots = 21
         excludedInactiveProtectCandidateCoreSteps = 50
         excludedSignedRollbackAssembly = 1
-        packageBackedAssemblyManagedSeparately = 1
+        excludedRoots = 51
         temporaryDevCustomApiExcluded = 'os_sr_devcs'
     }
     countSemantics = [ordered]@{
-        exportRoots = $components.Count
-        canonicalSolutionRoots = 20
-        excludedRoots = 52
+        preCleanupExportRoots = $components.Count
+        authoredCanonicalRoots = 20
+        generatedReleaseRoots = 1
+        expectedLiveAndExportReleaseRoots = 21
+        excludedRoots = 51
         canonicalRootsByType = @(
             [ordered]@{ type = 1; typeName = 'Entity'; count = 10 }
             [ordered]@{ type = 9; typeName = 'OptionSet'; count = 2 }
@@ -164,12 +168,20 @@ $inventory = [ordered]@{
             [ordered]@{ type = 62; typeName = 'AppModuleSiteMap'; count = 1 }
             [ordered]@{ type = 80; typeName = 'AppModule'; count = 1 }
         )
+        generatedRootsByType = @(
+            [ordered]@{
+                type = 91
+                typeName = 'PluginAssembly'
+                count = 1
+                disposition = 'unsigned assembly generated from the retained os_sr_cact_pkg PluginPackage'
+            }
+        )
         excludedRootsByType = @(
             [ordered]@{
                 type = 91
                 typeName = 'PluginAssembly'
-                count = 2
-                disposition = 'one signed rollback-only root excluded; active package-backed assembly is delivered through the retained package artifact'
+                count = 1
+                disposition = 'signed rollback-only assembly root excluded; component remains environment-resident'
             }
             [ordered]@{
                 type = 92
@@ -184,7 +196,7 @@ $inventory = [ordered]@{
             webResourceMetadataFiles = $webResourceMetadataFiles.Count
             candidateCorePackageArtifacts = 1
         }
-        explanation = 'The 72 count is the retained unmanaged export RootComponent inventory. The 20 count is the canonical Solution.xml root set after excluding 50 inactive guard steps and both PluginAssembly roots. The accepted unsigned package is retained separately with its PluginPackage metadata and is not an additional RootComponent in the 20-root manifest. Custom API, entity, and web-resource metadata files are included source details rather than separate counted roots.'
+        explanation = 'The 72 count is the pre-cleanup unmanaged export RootComponent inventory: 20 authored canonical roots, one package-generated unsigned PluginAssembly root, and 51 excluded roots (one signed rollback assembly plus 50 inactive guard steps). The canonical Solution.xml remains at 20 authored roots; the expected live and managed-export release composition is 21 roots. Custom API, entity, and web-resource metadata files are included source details rather than separate counted roots.'
     }
     requiredCapabilityDisposition = @(
         [ordered]@{

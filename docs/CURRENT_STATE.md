@@ -2,7 +2,7 @@
 
 ## LMV BI DEV managed Test import and configuration (2026-11-03)
 
-**Current status:** `TEST_OPERATOR_IMPORT_RECONCILED`, `TEST_MANAGED_DEPLOYMENT_TOPOLOGY_VERIFIED`, `TEST_CONFIGURATION_RUNTIME_VERIFIED`, `TEST_CANDIDATE_CORE_PACKAGE_RECONCILED`, and `TEST_DEPLOYMENT_OPERATOR_PRIVILEGED_IDENTITY`. The rehearsal stopped at `TEST_BSO_ROLE_ASSIGNMENT_READY`. No Candidate lifecycle, idempotency, direct-write negative, or recovery rehearsal step has run. `TEST_REHEARSAL_ACCEPTED` is not claimed. `REAL_DATA_STILL_PROHIBITED`.
+**Current status:** `TEST_OPERATOR_IMPORT_RECONCILED`, `TEST_MANAGED_DEPLOYMENT_TOPOLOGY_VERIFIED`, `TEST_CONFIGURATION_RUNTIME_VERIFIED`, `TEST_CANDIDATE_CORE_PACKAGE_RECONCILED`, `TEST_DEPLOYMENT_OPERATOR_PRIVILEGED_IDENTITY`, and `TEST_BSO_ROLE_ASSIGNMENT_VERIFIED`. The rehearsal stopped at `TEST_BSO_BROWSER_IDENTITY_REQUIRED`: the shared browser session still resolved `WhoAmI` to the deployment identity after manual sign-in was requested. No Candidate lifecycle, idempotency, direct-write negative, or recovery rehearsal step has run. `TEST_REHEARSAL_ACCEPTED` is not claimed. `REAL_DATA_STILL_PROHIBITED`.
 
 **Managed import:** The deployment identity's effective `prvImportCustomization` was restored externally through team-derived System Administrator membership. The identity has no direct roles, and this work did not change its access. At the owner's direct request, the frozen artifact (SHA-256 `33c491f84d8082817e0be888889fd6239a6bdb5bc76c01bdcb5040cdc11f9970`) was verified and imported once into the exact LMV BI DEV Sandbox:
 
@@ -48,7 +48,25 @@ The import job reached 100% and the async operation Succeeded. Readback shows `o
 - The deployment identity is excluded from BSO least-privilege acceptance.
 - Of 59 enabled interactive Read-Write users, 58 hold System Administrator or other roles. Most hold System Administrator through team membership.
 - One licensed, non-integration user has no direct or team-derived roles; its only team is the default business-unit team. That user does not hold `BSO-RS Support - BSO`.
-- The exact next write is one assignment of that role to that user, with no other role, team, or security change. It was not performed.
+- At that point, the exact next write was one assignment of that role to that user, with no other role, team, or security change.
+
+**BSO role assignment (owner-approved):**
+
+- **Pre-dispatch guard:** passed immediately before the write. It confirmed:
+  - the exact Sandbox target;
+  - the user is enabled and licensed and is not an application user;
+  - no direct roles, and only the default business-unit team, which has no roles;
+  - exactly one managed `BSO-RS Support - BSO` role, a member of the Solution, in a matching business unit and not yet assigned.
+- **Write:** one `systemuserroles_association` assignment, which returned HTTP 204, with retries=0. No other role, team, role-definition, or deployment-identity change was made.
+- **Readback:** the user is still enabled, the only direct role is `BSO-RS Support - BSO`, and the team set is unchanged with no team roles: `TEST_BSO_ROLE_ASSIGNMENT_VERIFIED`.
+- **Effective-privilege preflight:**
+  - 60 effective privileges.
+  - Candidate, Call Log, Status History, and Interview Schedule: only Basic Read, Append, and AppendTo. There is no Create or Write privilege.
+  - TA, Position, Candidate Source, and Location: Global Read.
+  - App access: `prvReadAppModule` is present, and `srapp` is associated with the BSO role.
+  - `os_sr_cact` is private and requires `prvReados_sr_cand`, which is present.
+  - No customization, import, role, user, plugin, or WebResource-write privilege.
+- **Browser identity:** not verified. Candidate Core acceptance must not run under the deployment identity, so runtime testing waits for a browser session whose `WhoAmI` is the clean BSO user.
 
 **Recovery:** The Test recovery checkpoint remains present and expires 8 November 2026. It must be rechecked before the first synthetic Candidate write.
 

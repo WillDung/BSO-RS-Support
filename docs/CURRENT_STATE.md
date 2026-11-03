@@ -1,8 +1,74 @@
 # Current State
 
+## LMV BI DEV managed Test import and configuration (2026-11-03)
+
+**Current status:** `TEST_OPERATOR_IMPORT_RECONCILED`, `TEST_MANAGED_DEPLOYMENT_TOPOLOGY_VERIFIED`, `TEST_CONFIGURATION_RUNTIME_VERIFIED`, `TEST_CANDIDATE_CORE_PACKAGE_RECONCILED`, and `TEST_DEPLOYMENT_OPERATOR_PRIVILEGED_IDENTITY`. The rehearsal stopped at `TEST_BSO_ROLE_ASSIGNMENT_READY`. No Candidate lifecycle, idempotency, direct-write negative, or recovery rehearsal step has run. `TEST_REHEARSAL_ACCEPTED` is not claimed. `REAL_DATA_STILL_PROHIBITED`.
+
+**Managed import:** The deployment identity's effective `prvImportCustomization` was restored externally through team-derived System Administrator membership. The identity has no direct roles, and this work did not change its access. At the owner's direct request, the frozen artifact (SHA-256 `33c491f84d8082817e0be888889fd6239a6bdb5bc76c01bdcb5040cdc11f9970`) was verified and imported once into the exact LMV BI DEV Sandbox:
+
+- explicit-target PAC import;
+- no `PublishAllXml`;
+- retries=0.
+
+The import job reached 100% and the async operation Succeeded. Readback shows `os_sr_bso_rs_support` `1.0.0.0`, Managed.
+
+**Post-import reconciliation (read-only):**
+
+- **Solution membership:** 21 roots (10 Entity, 2 Choice, 1 Role, 5 WebResource, 1 sitemap, 1 AppModule, and 1 package-generated unsigned assembly) and 47 total memberships.
+- **Candidate Core:**
+  - exactly one `os_sr_cact_pkg` v1.0.0;
+  - one unsigned `os_sr_cact` assembly linked to that package;
+  - active `os_sr_cact` with 18 request parameters and 5 response properties;
+  - `os_sr_cact.ApplyCandidateAction` as the handler.
+- **Steps:** the only project step is the platform-generated Custom API implementation step. The package-contained `ProtectCandidateCore` type exists, but it has no step registrations.
+- **Absent:** the signed rollback assembly and `os_sr_devcs`.
+- **Schema and security metadata:**
+  - nine `os_sr_*` tables, each with a main form and seven views;
+  - five expected alternate keys;
+  - 76 project relationships;
+  - `srapp`, its sitemap, and `BSO-RS Support - BSO`.
+
+**TEST configuration:**
+
+- **Input:** the frozen target-bound TEST pair was revalidated before the write. The configuration specifies:
+  - TEST mode, with Candidate Core enabled;
+  - synthetic data only, with the DEV fallback disabled and diagnostics Off;
+  - the exact LMV BI DEV binding.
+
+  The HTML differs from release-neutral only in the configuration cache token, and the policy and JavaScript pins match.
+- **Write:** after browser `WhoAmI` and target checks, two WebResource PATCHes and one `PublishXml` were sent. The `PublishXml` was scoped to exactly those two WebResource IDs: no `srapp`, no sitemap, `PublishAllXml`=0, retries=0.
+- **Readback:**
+  - The configuration and HTML resources show published == current == effective == expected TEST hashes, all HTTP 200.
+  - JavaScript, CSS, and policy are unchanged.
+  - The effective runtime object resolves to the required TEST settings.
+
+**Package and identity:**
+
+- The live package came only from the frozen artifact, whose package SHA-256 matches the pin. Package writes=0.
+- The deployment identity is excluded from BSO least-privilege acceptance.
+- Of 59 enabled interactive Read-Write users, 58 hold System Administrator or other roles. Most hold System Administrator through team membership.
+- One licensed, non-integration user has no direct or team-derived roles; its only team is the default business-unit team. That user does not hold `BSO-RS Support - BSO`.
+- The exact next write is one assignment of that role to that user, with no other role, team, or security change. It was not performed.
+
+**Recovery:** The Test recovery checkpoint remains present and expires 8 November 2026. It must be rechecked before the first synthetic Candidate write.
+
+## VN LMV IT publication-state ambiguity (2026-11-03)
+
+During a PAC help check, `pac solution publish` was accidentally invoked against VN LMV IT and displayed `Publishing All Customizations...`. The client was terminated after about 30 seconds, and server-side completion is unknown: `VN_LMV_IT_PUBLISHALL_COMPLETION_UNKNOWN`.
+
+Read-only reconciliation found:
+
+- all five Candidate Console resources still satisfy published == current == effective == captured DEV baseline, with HTTP 200;
+- `srapp` and its sitemap remain Published;
+- the sitemap modification time matches the prior snapshot.
+
+Together these give `VN_LMV_IT_KNOWN_CANDIDATE_CONSOLE_BASELINE_INTACT`. There is no proof either way about unrelated unpublished customizations. No corrective, compensating, or undo write was attempted. The frozen artifact predates the incident and remains accepted.
+
+Classification: `VN_LMV_IT_PUBLICATION_STATE_AMBIGUITY_RECORDED`. VN LMV IT is quarantined from writes for this Test continuation. The owner should review this before any future VN LMV IT source-authoring operation. It does not block the LMV BI DEV rehearsal.
+
 ## Release-neutral 21-root managed artifact (2026-11-03)
 
-**Current status:** `RELEASEABLE_MANAGED_ARTIFACT_BUILT` and `VN_LMV_IT_RELEASE_SOURCE_RESTORED`. LMV BI DEV managed Test import now follows `OPERATOR_ASSISTED_TEST_IMPORT` (`TEST_IMPORT_EXECUTION_DELEGATED_TO_AUTHORIZED_OPERATOR`). The pre-import baseline is `OPERATOR_ASSISTED_IMPORT_BASELINE_READY`. The workflow is waiting for the authorized operator's import result. `REAL_DATA_STILL_PROHIBITED`.
+**Status at that checkpoint:** `RELEASEABLE_MANAGED_ARTIFACT_BUILT` and `VN_LMV_IT_RELEASE_SOURCE_RESTORED`. LMV BI DEV managed Test import then followed `OPERATOR_ASSISTED_TEST_IMPORT` (`TEST_IMPORT_EXECUTION_DELEGATED_TO_AUTHORIZED_OPERATOR`), with pre-import baseline `OPERATOR_ASSISTED_IMPORT_BASELINE_READY`; see the newer section above for the import result. `REAL_DATA_STILL_PROHIBITED`.
 
 **Source preflight (read-only):** PAC and Dataverse `WhoAmI` agreed on the exact VN LMV IT target, `os_sr_bso_rs_support`, and `srapp`. The cleaned Solution still had 47 memberships and 21 roots (20 authored + 1 unsigned package-backed generated assembly) with release-root identity SHA-256 `ffde0fe088d87120aa29caf11de156537f19abf9627695d95306eea040c530e4`. The signed rollback assembly, 50 `ProtectCandidateCore` steps, and `os_sr_devcs` were absent from the Solution, but their records remain in the environment and all 50 steps remain inactive. The source had one `os_sr_cact_pkg`, package-linked unsigned assembly, and package-backed `os_sr_cact.ApplyCandidateAction` handler: `CANONICAL_21_ROOT_RELEASE_MEMBERSHIP_RECONFIRMED`, `PACKAGE_GENERATED_ASSEMBLY_RELEASE_ROOT_VERIFIED`.
 

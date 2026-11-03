@@ -1,5 +1,140 @@
 # Current State
 
+## Post-demo UX hardening and release candidate (2026-11-03)
+
+**Current status:**
+
+- `POST_DEMO_REGRESSION_ACCEPTED`
+- `APPLICATION_FUNCTIONALLY_READY_FOR_PRODUCTION`
+- `POST_DEMO_MANAGED_RELEASE_CANDIDATE_BUILT`
+- `REAL_DATA_STILL_PROHIBITED`
+
+`PRODUCTION_GO_LIVE_APPROVED` is **not** claimed. The external Production and business gates below remain open.
+
+The end-of-week VN LMV IT product demo completed successfully using synthetic data only. The owner then approved one bounded hardening pass. That pass covered exactly UX items A–D. Candidate Core runtime, persistence, idempotency, concurrency, and BSO least-privilege security were not reopened.
+
+**UX items A–D (implemented, VN LMV IT verified):**
+
+| Item | Finding | Change |
+|---|---|---|
+| A | `srapp` opened on TA Directory because Candidate Management was the fifth sitemap entry. | Candidate Management is now the first entry in the canonical [AppModuleSiteMap.xml](../solutions/AppModuleSiteMaps/srapp/AppModuleSiteMap.xml) and is the default workspace. TA Directory, Positions, Candidate Sources, and Locations are unchanged and remain accessible. |
+| B | Environment labels combined mode with data-authorization wording, so a Production configuration could imply that real data was approved. | The environment badge shows only the configured mode (`DEV`, `TEST`, or `PROD`). The data badge shows `SYNTHETIC DATA ONLY` or the neutral `PRODUCTION CONFIGURATION`. Real-data authorization remains a governance gate outside runtime configuration. |
+| C | The obsolete diagnostic `PROTECTCANDIDATECORE INACTIVE — NOT PRODUCTION` was user-facing. | The badge was removed from the Candidate Console. ProtectCandidateCore remains inactive and superseded; its registrations were not changed. |
+| D | Record Call was offered on rows that were already past Need Call Candidate. | The Console offers Record Call (row button, call panel, and submit) only at `Need Call Candidate`, matching the server transition rule. Server validation and `Operation.cs` are unchanged; UI gating is a convenience only. |
+
+**Regression tests added:**
+
+- [CandidateConsole.Tests.ps1](../tests/CandidateConsole.Tests.ps1) covers labels, removal of the obsolete text, gating wiring, and sitemap order.
+- [CandidateConsolePolicy.test.cjs](../tests/CandidateConsolePolicy.test.cjs) evaluates the real Console gating for these statuses:
+  - Need Call Candidate: available
+  - Candidate Answered: unavailable
+  - Waiting Manual Scheduling: unavailable
+  - Round 1 Scheduled: unavailable
+  - Offer Extended: unavailable
+  - Candidate Failed: unavailable
+
+**VN LMV IT application:**
+
+- A fresh read-only guard passed before any write. It covered:
+  - target and organization
+  - `srapp` and `os_sr_bso_rs_support`
+  - Candidate Core topology
+  - inactive guard steps
+  - BSO role, user, and team
+- **Candidate Console:**
+  - Two resources were refreshed: HTML and JavaScript.
+  - One `PublishXml` was limited to those two WebResource IDs.
+  - Published, current, effective, and expected hashes matched for all five resources.
+- **Sitemap:**
+  - One conditional update of the `srapp` sitemap.
+  - One `PublishXml` limited to that sitemap and the `srapp` app module.
+  - Readback reconciled.
+- No `PublishAllXml`, no `pac solution publish`, and retries=0.
+
+**Synthetic regression (clean BSO identity):**
+
+- Flow: CAND-00001065 was created, then moved through Answered, Waiting Manual Scheduling, and Round 1 Scheduled.
+- Action times were 4.9 s, 1.6 s, 3.6 s, and 2.5 s.
+- After a full reload:
+  - The app landed on Candidate Management.
+  - Status, Call History, three Status History rows, and the Round 1 schedule persisted.
+  - Record Call was present only at Need Call Candidate and absent afterwards.
+- A read-only security guard re-check was unchanged:
+  - same BSO role privileges
+  - no protected direct Create/Write/Delete
+  - Candidate Core execute privilege retained
+  - no extra roles
+  - reference pages readable
+
+**Release artifact:**
+
+- The new release-neutral Managed `1.0.0.0` artifact has SHA-256 `d04e4da864e3fd4b49f1687304b7c0a041761c6f2b5568a2386d728f1983e4d9`.
+- It was exported once and is stored externally as a frozen artifact.
+- **Contents:**
+  - Exactly 21 release roots (20 authored + 1 package-backed assembly). The root set is identical to the accepted model.
+  - Candidate Management is the first sitemap entry.
+  - It contains the hardened Candidate Console.
+  - The Candidate Core package is byte-identical.
+- **Excluded:** no rollback assembly, ProtectCandidateCore steps, `os_sr_devcs`, target identifiers, or personal identities.
+- **DEV restoration:** VN LMV IT was restored to its exact DEV Console bytes and verified, with WebResource-only publication.
+- **Superseded artifact:** The demo-era artifact `33c491f8…` is `SUPERSEDED_BY_POST_DEMO_HARDENING`. It is retained, unaltered, as valid evidence of the successful demo-era release. Hashes are recorded in [RELEASE_INPUT_MANIFEST.json](RELEASE_INPUT_MANIFEST.json).
+
+**Performance:**
+
+- The ~39 s first action observed before the demo did not recur: `COLD_START_NOT_REPRODUCED`.
+- Observed first-action latency is consistent with platform warm-up, not a Candidate Core defect. No infrastructure or architecture change was made.
+
+**Synthetic data disposition (plan only; nothing deleted):**
+
+- The `[SYNTHETIC-E2E]` / `[SYNTHETIC-DEMO]` Candidates in VN LMV IT and their dependent records remain in place, including CAND-00001065:
+  - Call Logs
+  - Status History
+  - Interview Schedules
+  - Operation Receipts
+- The `[DEV]` reference records remain because the DEV Console lists only `[DEV]`-prefixed references.
+- **Proposed cleanup order**, which requires separate authorization:
+  1. Operation Receipts
+  2. Interview Schedules
+  3. Call Logs
+  4. Status History
+  5. Candidates
+  6. `[DEV]` reference records, only if VN LMV IT is retired as a demo environment.
+
+  Each step needs a pre-count and a post-count, and must use a synthetic-marker filter only.
+
+**External Production gates:**
+
+- These gates are open, have no recorded approval, and are tracked in [READINESS_BLOCKER_LEDGER.md](READINESS_BLOCKER_LEDGER.md):
+  - Production environment and target approval
+  - Production BSO user and access readiness
+  - real candidate-data authorization
+  - privacy approval
+  - audit requirements
+  - DLP requirements
+  - backup and recovery ownership
+  - support, monitoring, and escalation ownership
+  - the ATSugg migration decision (none, reference-only, or full)
+  - the integrations required at launch (Outlook, Teams, SharePoint, or other)
+
+**Minimum Production launch scope (proposal):**
+
+- **In scope:**
+  - Candidate Management
+  - Candidate Core workflow
+  - call tracking
+  - manual scheduling
+  - Pass/Fail
+  - Reschedule/Cancel
+  - history and audit-visible application records
+  - the reference administration BSOs need
+- **Out of scope unless explicitly approved:**
+  - migration automation
+  - optional integrations
+  - additional analytics
+  - nonessential UX enhancements
+
+**Historical evidence:** `VN_LMV_IT_PUBLICATION_STATE_AMBIGUITY_RECORDED` still applies. The entries below are retained unchanged.
+
 ## VN LMV IT demo readiness (2026-11-03)
 
 **Current status:**

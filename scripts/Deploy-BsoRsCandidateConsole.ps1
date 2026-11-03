@@ -45,7 +45,7 @@ $target = [ordered]@{
 }
 $acceptedPublicationHashes = @{
     'os_/bso/candidate-console-environment.js' = '58e03dc262b790b7431f34ca5554422fc86f0d62f6e8b6160805a6b2d906335c'
-    'os_/bso/candidate-console.html' = '1fe0782fd56432eca75959e412bc15e109b51818eeae4251846bcb8bbe61dbd9'
+    'os_/bso/candidate-console.html' = 'f28b26fa4b7c72ce7cd3fa08d9f25d831334633f0e411fe715d5aa4c7393ef79'
 }
 $allResources = @(
     [pscustomobject]@{

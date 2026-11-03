@@ -4,7 +4,15 @@
 
 ## Managed-artifact source decision (2026-11-02)
 
-**Current outcome (2026-11-03):** `RELEASEABLE_MANAGED_ARTIFACT_BUILT`. The new Managed `os_sr_bso_rs_support` 1.0.0.0 artifact (SHA-256 `33c491f84d8082817e0be888889fd6239a6bdb5bc76c01bdcb5040cdc11f9970`) has exactly 21 release roots and release-neutral Candidate Console content. The temporary change used PATCH=2 and one `PublishXml` limited to the two changed WebResource IDs, with retries=0. VN LMV IT was then restored to its exact DEV bytes and verified (`VN_LMV_IT_RELEASE_SOURCE_RESTORED`). The LMV BI DEV import is blocked until the deployment identity's import privilege is restored. The 72-root artifact below remains permanently rejected.
+**Current outcome (2026-11-03, post-demo):** `POST_DEMO_MANAGED_RELEASE_CANDIDATE_BUILT`. The new Managed `os_sr_bso_rs_support` 1.0.0.0 artifact has SHA-256 `d04e4da864e3fd4b49f1687304b7c0a041761c6f2b5568a2386d728f1983e4d9`.
+
+- It was built with the same release-neutral procedure: WebResource-only `PublishXml` for two resources, a single Managed export, and DEV restoration verified (retries=0).
+- It has the identical 21-root set and an identical Candidate Core package.
+- It carries the hardened Candidate Console, and Candidate Management is first in the sitemap.
+
+The artifact described next is `SUPERSEDED_BY_POST_DEMO_HARDENING` and retained as historical evidence.
+
+**Demo-era outcome (2026-11-03):** `RELEASEABLE_MANAGED_ARTIFACT_BUILT`. The new Managed `os_sr_bso_rs_support` 1.0.0.0 artifact (SHA-256 `33c491f84d8082817e0be888889fd6239a6bdb5bc76c01bdcb5040cdc11f9970`) has exactly 21 release roots and release-neutral Candidate Console content. The temporary change used PATCH=2 and one `PublishXml` limited to the two changed WebResource IDs, with retries=0. VN LMV IT was then restored to its exact DEV bytes and verified (`VN_LMV_IT_RELEASE_SOURCE_RESTORED`). The LMV BI DEV import is blocked until the deployment identity's import privilege is restored. The 72-root artifact below remains permanently rejected.
 
 **Previous outcome (2026-11-02):** The five Candidate Console resources passed published/current/effective hash equivalence and source qualification. The temporary release-neutral config/HTML update was restored to captured DEV bytes after one Managed export. That ZIP is not releasable: it contains the pre-cleanup 72-root inventory and the `os_sr_devcs` non-root membership. The owner-directed membership-only cleanup is now verified: the live Solution has exactly 21 expected roots and 47 memberships, and no duplicate, missing, or misclassified root. The 51 excluded-root and 15 `os_sr_devcs` memberships were removed; underlying component records remain. Both prior temporary `PublishXml` requests included `srapp`, exceeding the approved WebResource-only scope; its pre-call publication state was not captured. A new release-neutral update, exact changed-WebResource-only publish, managed export, and mandatory restoration remain pending. Do not claim `RELEASEABLE_MANAGED_ARTIFACT_BUILT` or resume LMV BI DEV.
 

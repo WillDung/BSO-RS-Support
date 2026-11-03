@@ -22,6 +22,10 @@
     offerExtended: 100010004,
     candidateFailed: 100010005
   };
+  // Mirrors the Candidate Core RecordCall transition; the server remains authoritative.
+  function canRecordCall(status) {
+    return status === STATUS.needCall;
+  }
   const INTERVIEW_RESULT_LABELS = {
     100000000: "Pending",
     100000001: "Pass",
@@ -201,11 +205,11 @@
       ? "DEV DIRECT-WRITE FALLBACK"
       : "CANDIDATE CORE PATH";
     $("environment-mode-badge").textContent = supportedEnvironment
-      ? `${environmentPolicy.mode} — ${environmentPolicy.syntheticDataOnly ? "SYNTHETIC DATA ONLY" : "REAL-DATA MODE"}`
+      ? environmentPolicy.mode
       : "ENVIRONMENT CONFIGURATION REQUIRED";
     $("real-data-badge").textContent = supportedEnvironment && !environmentPolicy.syntheticDataOnly
-      ? "NON-SYNTHETIC MODE CONFIGURED — REAL DATA NOT APPROVED"
-      : "REAL DATA PROHIBITED";
+      ? "PRODUCTION CONFIGURATION"
+      : "SYNTHETIC DATA ONLY";
     document.querySelectorAll("[data-workflow-label]").forEach((label) => {
       label.textContent = !supportedEnvironment
         ? "Unavailable until environment configuration is valid"
@@ -284,7 +288,8 @@
       value || environmentPolicy.directWriteFallbackAvailable !== true;
     document.querySelectorAll("button[data-action]").forEach((button) => {
       button.disabled = value ||
-        (button.id === "submit-call" && !selectedCandidate) ||
+        (button.id === "submit-call" &&
+          (!selectedCandidate || !canRecordCall(selectedCandidate[TABLES.candidate.status]))) ||
         (button.id === "waiting-status-button" && button.hidden) ||
         (button.id === "schedule-round1-button" &&
           (button.hidden || !selectedCandidate ||
@@ -540,7 +545,7 @@
       call.className = "button button-primary button-small";
       call.dataset.action = "";
       call.textContent = "Record Call";
-      call.hidden = [STATUS.offerExtended, STATUS.candidateFailed].includes(candidate[TABLES.candidate.status]);
+      call.hidden = !canRecordCall(candidate[TABLES.candidate.status]);
       call.disabled = busy;
       call.addEventListener("click", (event) => {
         event.stopPropagation();
@@ -800,11 +805,11 @@
       $("cancel-round1-button").hidden = true;
       $("detail-heading").textContent = candidate[TABLES.candidate.name] || "Candidate";
       $("detail-panel").hidden = false;
-      const terminal = [STATUS.offerExtended, STATUS.candidateFailed].includes(candidate[TABLES.candidate.status]);
-      $("call-entry-panel").hidden = terminal;
+      const callAllowed = canRecordCall(candidate[TABLES.candidate.status]);
+      $("call-entry-panel").hidden = !callAllowed;
       $("call-candidate-label").textContent =
         `${candidate[TABLES.candidate.number] || ""} ${candidate[TABLES.candidate.name] || ""}`.trim();
-      $("submit-call").disabled = busy;
+      $("submit-call").disabled = busy || !callAllowed;
       const canMoveToWaiting = candidate[TABLES.candidate.status] === STATUS.answered;
       const canSchedule = candidate[TABLES.candidate.status] === STATUS.waitingManualScheduling &&
         isCandidateAllowedByDataMode(candidate);
@@ -1798,8 +1803,8 @@
       showNotice("This action is unavailable for the selected candidate under the configured data mode.", true);
       return;
     }
-    if ([STATUS.offerExtended, STATUS.candidateFailed].includes(candidate[TABLES.candidate.status])) {
-      showNotice("No further workflow actions are available for this Candidate.", true);
+    if (!canRecordCall(candidate[TABLES.candidate.status])) {
+      showNotice("Record Call is available only when the Candidate status is Need Call Candidate.", true);
       return;
     }
     if (await openCandidate(candidate[TABLES.candidate.id])) {
@@ -1955,6 +1960,10 @@
     }
     if (!isCandidateCoreEnabled() || !isCandidateAllowedByDataMode(selectedCandidate)) {
       showNotice("Candidate Core is unavailable for this candidate under the configured data mode.", true);
+      return;
+    }
+    if (!canRecordCall(selectedCandidate[c.status])) {
+      showNotice("Record Call is available only when the Candidate status is Need Call Candidate.", true);
       return;
     }
     const outcome = Number($("call-outcome").value);

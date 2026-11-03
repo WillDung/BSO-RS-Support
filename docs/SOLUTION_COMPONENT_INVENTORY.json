@@ -223,9 +223,11 @@
       "reconfirmedBeforeExport": "2026-11-03"
     },
     "managedReleaseArtifactVerification": {
-      "result": "RELEASEABLE_MANAGED_ARTIFACT_BUILT",
+      "result": "POST_DEMO_MANAGED_RELEASE_CANDIDATE_BUILT",
       "exportedOn": "2026-11-03",
-      "artifactSha256": "33c491f84d8082817e0be888889fd6239a6bdb5bc76c01bdcb5040cdc11f9970",
+      "artifactSha256": "d04e4da864e3fd4b49f1687304b7c0a041761c6f2b5568a2386d728f1983e4d9",
+      "supersededArtifactSha256": "33c491f84d8082817e0be888889fd6239a6bdb5bc76c01bdcb5040cdc11f9970",
+      "supersededArtifactDisposition": "SUPERSEDED_BY_POST_DEMO_HARDENING",
       "managed": true,
       "solutionVersion": "1.0.0.0",
       "releaseRootCount": 21,

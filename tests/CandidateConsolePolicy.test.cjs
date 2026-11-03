@@ -155,3 +155,28 @@ test("invalid or unconfigured policies fail closed", () => {
     "CONFIGURATION_INVALID"
   );
 });
+
+test("Record Call availability mirrors the Candidate Core RecordCall transition", () => {
+  const consoleSource = fs.readFileSync(path.join(webRoot, "candidate-console.js"), "utf8");
+  const statusBlock = consoleSource.match(/const STATUS = \{[\s\S]*?\n  \};/);
+  const gateBlock = consoleSource.match(/function canRecordCall\(status\) \{[\s\S]*?\n  \}/);
+  assert.ok(statusBlock && gateBlock);
+  const context = vm.createContext({});
+  vm.runInContext(
+    `${statusBlock[0]}\n${gateBlock[0]}\nthis.STATUS = STATUS;\nthis.canRecordCall = canRecordCall;`,
+    context
+  );
+  const { STATUS, canRecordCall } = context;
+  assert.equal(canRecordCall(STATUS.needCall), true);
+  for (const status of [
+    STATUS.answered,
+    STATUS.waitingManualScheduling,
+    STATUS.round1Scheduled,
+    STATUS.offerExtended,
+    STATUS.candidateFailed
+  ]) {
+    assert.equal(canRecordCall(status), false, `status ${status}`);
+  }
+  assert.equal(canRecordCall(undefined), false);
+  assert.equal(canRecordCall(String(STATUS.needCall)), false);
+});

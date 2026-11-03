@@ -27,8 +27,13 @@ Assert-Test ($html.Contains('id="workflow-path-badge"') -and
     $html.Contains('id="environment-mode-badge"') -and
     $html.Contains('id="real-data-badge"') -and
     $html.Contains('CANDIDATE CORE PATH') -and
-    $html.Contains('PROTECTCANDIDATECORE INACTIVE — NOT PRODUCTION') -and
-    $html.Contains('REAL DATA PROHIBITED')) 'Default to the Candidate Core path and retain DEV safety warnings'
+    -not $html.Contains('PROTECTCANDIDATECORE') -and
+    -not $script.Contains('PROTECTCANDIDATECORE')) 'Default to the Candidate Core path without the obsolete ProtectCandidateCore diagnostic'
+Assert-Test (-not $html.Contains('REAL-DATA MODE') -and -not $script.Contains('REAL-DATA MODE') -and
+    -not $script.Contains('REAL DATA NOT APPROVED') -and
+    $script.Contains('? environmentPolicy.mode') -and
+    $script.Contains('"PRODUCTION CONFIGURATION"') -and
+    $script.Contains('"SYNTHETIC DATA ONLY"')) 'Label the environment mode neutrally without implying real-data authorization'
 Assert-Test ($html.Contains('id="dev-fallback-toggle"') -and
     $html.Contains('Enable DEV direct-write fallback for this browser session') -and
     -not $html.Contains('id="dev-fallback-toggle" type="checkbox" checked')) 'Keep direct writes behind an explicit unchecked session switch'
@@ -104,6 +109,14 @@ Assert-Test ($script.Contains('row.classList.add("selected")') -and
 Assert-Test ($html.Contains('id="call-entry-panel"') -and
     $html.Contains('id="call-form"') -and
     $html.Contains('id="call-outcome"')) 'Use the visible Record Call panel'
+Assert-Test ($script -match 'function canRecordCall\(status\) \{\r?\n\s+return status === STATUS\.needCall;\r?\n\s+\}' -and
+    $script.Contains('call.hidden = !canRecordCall(candidate[TABLES.candidate.status]);') -and
+    $script.Contains('$("call-entry-panel").hidden = !callAllowed;') -and
+    $script.Contains('$("submit-call").disabled = busy || !callAllowed;') -and
+    $script.Contains('(!selectedCandidate || !canRecordCall(selectedCandidate[TABLES.candidate.status]))') -and
+    ([regex]::Matches($script, 'if \(!canRecordCall\(').Count -eq 2) -and
+    -not $script.Contains('const terminal = [STATUS.offerExtended, STATUS.candidateFailed]')) `
+    'Gate every Record Call surface on the Need Call Candidate state only'
 Assert-Test ($html.Contains('Changed On / Created On') -and
     $script.Contains('history[h.changedAt] || history.createdon')) 'Show Status History time with Created On fallback'
 Assert-Test ($html.Contains('data-action disabled') -and
@@ -377,7 +390,7 @@ $publishOnlyBlock = if ($publishOnlyStart -ge 0 -and $publishOnlyNextRefresh -gt
 Assert-Test ($deployment.Contains('[switch]$PublishOnly') -and
     $deployment.Contains('($PublishOnly -and (-not $Apply -or -not $RefreshExisting -or -not $ReleaseNeutralProfile') -and
     $deployment.Contains("'os_/bso/candidate-console-environment.js' = '58e03dc262b790b7431f34ca5554422fc86f0d62f6e8b6160805a6b2d906335c'") -and
-    $deployment.Contains("'os_/bso/candidate-console.html' = '1fe0782fd56432eca75959e412bc15e109b51818eeae4251846bcb8bbe61dbd9'") -and
+    $deployment.Contains("'os_/bso/candidate-console.html' = 'f28b26fa4b7c72ce7cd3fa08d9f25d831334633f0e411fe715d5aa4c7393ef79'") -and
     $deployment.Contains("'docs\SOLUTION_COMPONENT_INVENTORY.json'") -and
     $deployment.Contains("'docs\RELEASE_INPUT_MANIFEST.json'") -and
     $deployment.Contains("'solutions\Other\Solution.xml'") -and
@@ -516,5 +529,15 @@ foreach ($resource in $resourceVersions) {
     Assert-Test ($resourceVersion.Success -and $resourceHash.StartsWith($resourceVersion.Groups[1].Value)) `
         "Keep $($resource.Name) cache version tied to its content"
 }
+
+$siteMapPath = Join-Path $root 'solutions\AppModuleSiteMaps\srapp\AppModuleSiteMap.xml'
+$siteMapXml = [xml](Get-Content -LiteralPath $siteMapPath -Raw)
+$siteMapSubAreas = @($siteMapXml.AppModuleSiteMap.SiteMap.Area.Group.SubArea)
+$siteMapTitles = @($siteMapSubAreas | ForEach-Object { $_.Titles.Title.Title })
+Assert-Test ($siteMapSubAreas.Count -eq 5 -and
+    $siteMapSubAreas[0].Id -ceq 'subarea_bso_candidate_management' -and
+    $siteMapSubAreas[0].Url -ceq '$webresource:os_/bso/candidate-console.html' -and
+    [string]::Join('|', $siteMapTitles) -ceq 'Candidate Management|TA Directory|Positions|Candidate Sources|Locations') `
+    'Open srapp on Candidate Management first while preserving every reference page'
 
 Write-Output "Candidate Console static checks passed: $passed"

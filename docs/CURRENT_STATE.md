@@ -1,8 +1,101 @@
 # Current State
 
-## LMV BI DEV managed Test import and configuration (2026-11-03)
+## VN LMV IT final synthetic smoke and technical acceptance (2026-11-03)
 
-**Current status:** `TEST_OPERATOR_IMPORT_RECONCILED`, `TEST_MANAGED_DEPLOYMENT_TOPOLOGY_VERIFIED`, `TEST_CONFIGURATION_RUNTIME_VERIFIED`, `TEST_CANDIDATE_CORE_PACKAGE_RECONCILED`, `TEST_DEPLOYMENT_OPERATOR_PRIVILEGED_IDENTITY`, and `TEST_BSO_ROLE_ASSIGNMENT_VERIFIED`. The rehearsal stopped at `TEST_BSO_BROWSER_IDENTITY_REQUIRED`: the shared browser session still resolved `WhoAmI` to the deployment identity after manual sign-in was requested. No Candidate lifecycle, idempotency, direct-write negative, or recovery rehearsal step has run. `TEST_REHEARSAL_ACCEPTED` is not claimed. `REAL_DATA_STILL_PROHIBITED`.
+**Current status:**
+
+- `VN_LMV_IT_FINAL_SYNTHETIC_SMOKE_ACCEPTED`
+- `CANDIDATE_CORE_RUNTIME_RECONFIRMED`
+- `CANDIDATE_CORE_IDEMPOTENCY_RECONFIRMED`
+- `CANDIDATE_CORE_CONCURRENCY_RECONFIRMED`
+- `BSO_LEAST_PRIVILEGE_SECURITY_RECONFIRMED`
+- `CANDIDATE_CONSOLE_RUNTIME_RECONFIRMED`
+- `TECHNICAL_GO_LIVE_ACCEPTANCE_GRANTED`
+- `APPLICATION_TECHNICALLY_READY_FOR_GO_LIVE`
+- `REAL_DATA_STILL_PROHIBITED_PENDING_BUSINESS_GATES`
+
+**Business decision:** The owner removed the LMV BI DEV rehearsal from the critical path. Its last recorded state is below and was not continued. The bounded VN LMV IT final synthetic smoke became the technical acceptance gate. The earlier VN LMV IT Phase 5A/5B evidence remains historical supporting evidence; see [Phase 5B Security Acceptance Report](PHASE_5B_SECURITY_ACCEPTANCE_REPORT.md).
+
+**Publication ambiguity:** `VN_LMV_IT_PUBLICATION_STATE_AMBIGUITY_RECORDED` still applies.
+
+- Whether the accidental `pac solution publish` completed remains unknown.
+- No attempt was made to undo or resolve it.
+- Immediately before the smoke, the five Candidate Console resources still matched the accepted DEV baseline (all HTTP 200).
+- No proof exists about unrelated unpublished customizations.
+
+**Scope and boundaries:**
+
+- Only Candidate Core business operations were authorized.
+- No Solution, package, Custom API, schema, role-definition, role-assignment, team, Candidate Console, audit, DLP, or environment-configuration change was made.
+- No `PublishXml`, `PublishAllXml`, or `pac solution publish` was run.
+- Retries=0.
+
+**Target and identity gates:**
+
+- Read-only checks confirmed the exact VN LMV IT organization, environment, and URL; `srapp`; `os_sr_bso_rs_support`; active `os_sr_cact`; and `os_sr_cact_pkg`.
+- The BSO identity previously accepted in Phase 5B was used:
+  - enabled;
+  - only direct role `BSO-RS Support - BSO` (60 privileges, with no Create/Write/Delete on any `os_sr_*` table);
+  - only the default business-unit team, with no team roles;
+  - no System Administrator or System Customizer;
+  - Candidate Core execution and reference-table reads present.
+
+  Result: `FINAL_SMOKE_BSO_IDENTITY_VERIFIED`.
+- Browser `WhoAmI` matched that identity on the exact `srapp`. The Console loaded the Candidate Core path in DEV synthetic-only mode, and the fallback was unavailable. Result: `FINAL_SMOKE_BROWSER_IDENTITY_VERIFIED`.
+- The deployment identity was not used for any Candidate operation.
+
+**Lifecycle smoke:** Under the same BSO browser identity, through the Console UI, these four operations each returned `Applied`:
+
+1. CreateCandidate;
+2. RecordCall = Answered;
+3. ProceedToScheduling;
+4. MarkRound1Scheduled.
+
+The data used existing `[DEV]` synthetic reference records and one `[SYNTHETIC-E2E]` Candidate with a `.invalid` email address. Server readback confirmed:
+
+- a server-generated Candidate Number;
+- owner = the initiating BSO;
+- final status Round 1 Scheduled;
+- exactly 1 Call Log, 3 Status History rows, 1 active Interview Schedule with the expected TA and Location, and 4 Operation Receipts matching the 4 CorrelationIds and transitions.
+
+After a full browser reload, the same state, history, schedule, and Candidate Number were shown. Result: `FINAL_SMOKE_LIFECYCLE_PERSISTENCE_ACCEPTED`.
+
+**Idempotency and concurrency:**
+
+- Replaying RecordCall with the same CorrelationId and payload returned `DuplicateReplay`, with the original Call Log and history IDs.
+- The same CorrelationId with a conflicting payload was rejected with `CORRELATION_CONFLICT`.
+- A stale `ExpectedStatus` request was rejected with `STALE_EXPECTED_STATUS`.
+- Readback afterwards: counts were still 1/3/1, Receipts still 4, no Receipt for the stale request, Candidate unchanged.
+
+Results: `FINAL_SMOKE_IDEMPOTENCY_ACCEPTED` and `FINAL_SMOKE_CONCURRENCY_ACCEPTED`.
+
+**Direct-write negatives:** Each was attempted once under the same identity, and each was denied with HTTP 403 by Dataverse privilege enforcement:
+
+- Candidate Create (`prvCreateos_sr_cand`);
+- Candidate Update (`prvWriteos_sr_cand`);
+- Call Log Create (`prvCreateos_sr_call`);
+- Status History Create (`prvCreateos_sr_csh`);
+- Interview Schedule Create (`prvCreateos_sr_intv`).
+
+No rows were created. A final reconciliation found the role, team, and privilege state unchanged. Result: `FINAL_SMOKE_BSO_SECURITY_ACCEPTED`.
+
+**Retention:** No rollback was needed or performed. The synthetic Candidate and its records are kept as Test evidence. Identifiers are held in session evidence and omitted here.
+
+**Remaining gates (external/business/Production only):**
+
+- explicit Production target approval;
+- real-data authorization;
+- privacy, audit, and DLP approval where required;
+- Production BSO user and access confirmation;
+- backup and recovery ownership;
+- support and escalation ownership;
+- the ATSugg data-migration decision, if migration is required.
+
+No further technical rehearsal phase is required by this decision.
+
+## LMV BI DEV managed Test import and configuration (2026-11-03; removed from the critical path)
+
+**Status at removal from the critical path:** `TEST_OPERATOR_IMPORT_RECONCILED`, `TEST_MANAGED_DEPLOYMENT_TOPOLOGY_VERIFIED`, `TEST_CONFIGURATION_RUNTIME_VERIFIED`, `TEST_CANDIDATE_CORE_PACKAGE_RECONCILED`, `TEST_DEPLOYMENT_OPERATOR_PRIVILEGED_IDENTITY`, and `TEST_BSO_ROLE_ASSIGNMENT_VERIFIED`. The rehearsal stopped at `TEST_BSO_BROWSER_IDENTITY_REQUIRED`: the shared browser session still resolved `WhoAmI` to the deployment identity after manual sign-in was requested. No Candidate lifecycle, idempotency, direct-write negative, or recovery rehearsal step has run. `TEST_REHEARSAL_ACCEPTED` is not claimed. `REAL_DATA_STILL_PROHIBITED`.
 
 **Managed import:** The deployment identity's effective `prvImportCustomization` was restored externally through team-derived System Administrator membership. The identity has no direct roles, and this work did not change its access. At the owner's direct request, the frozen artifact (SHA-256 `33c491f84d8082817e0be888889fd6239a6bdb5bc76c01bdcb5040cdc11f9970`) was verified and imported once into the exact LMV BI DEV Sandbox:
 

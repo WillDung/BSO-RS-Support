@@ -1,5 +1,73 @@
 # Current State
 
+## VN LMV IT demo readiness (2026-11-03)
+
+**Current status:**
+
+- `DEMO_FEATURE_SCOPE_FROZEN`
+- `DEMO_SYNTHETIC_DATA_READY`
+- `DEMO_BSO_IDENTITY_READY`
+- `DEMO_END_TO_END_DRY_RUN_ACCEPTED`
+- `BSO_RS_SUPPORT_DEMO_READY`
+- `REAL_DATA_STILL_PROHIBITED`
+
+The technical acceptance below is unchanged. This entry only prepares VN LMV IT for the end-of-week product demo.
+
+**Scope freeze:**
+
+- No feature, schema, Custom API, package, Solution membership, role-definition, role-assignment, team, or Candidate Console change was made.
+- No `PublishXml`, `PublishAllXml`, or `pac solution publish` was run.
+- `VN_LMV_IT_PUBLICATION_STATE_AMBIGUITY_RECORDED` still applies.
+
+**Read-only baseline (before the demo data was created):**
+
+- Exact VN LMV IT target, `srapp`, `os_sr_bso_rs_support`, and `os_sr_cact` confirmed.
+- The five Candidate Console resources were still published/current, returned HTTP 200, and matched the accepted DEV baseline hashes.
+
+**Demo identity:**
+
+- The demo used the same clean BSO user accepted in the final smoke, signed in manually in the browser.
+- Browser WhoAmI matched that user before and after a full reload.
+- A read-only recheck afterwards confirmed:
+  - the account is enabled;
+  - its only direct role is `BSO-RS Support - BSO`;
+  - its only team is the default business-unit team, with no team roles;
+  - it has no administrator or customizer access.
+- The Console showed the Candidate Core path, and the fallback toggle was unavailable.
+- Do not use the deployment or admin identity for the demo, because that identity inherits System Administrator through a team.
+
+**Synthetic demo data:**
+
+- **Reference data:** reuses the existing `[DEV]` TA, Position, Candidate Source, and Location records. New `[SYNTHETIC-DEMO]` reference records were not created, because Console lookups only list `[DEV]`-prefixed records.
+- **Candidates:** named `[SYNTHETIC-E2E] [SYNTHETIC-DEMO] <scenario>` with `.invalid` emails. All were created through the Console UI under the BSO identity.
+
+| Scenario | Candidate | Demo state |
+| --- | --- | --- |
+| A Fresh Need Call | CAND-00001058 | Need Call Candidate |
+| B Ready To Schedule | CAND-00001059 | Waiting Manual Scheduling |
+| C Round 1 Scheduled (primary dry run) | CAND-00001057 | Round 1 Scheduled; schedule ACTIVE |
+| D Pass | CAND-00001060 | Offer Extended; Round 1 result Pass |
+| E Fail | CAND-00001061 | Candidate Failed; Round 1 result Fail |
+| F Reschedule | CAND-00001062 | Need Call Candidate; schedule Superseded plus a Proposed replacement |
+| G Cancel | CAND-00001063 | Need Call Candidate; schedule Cancelled |
+
+The final-smoke Candidate CAND-00001056 and CAND-00001054 (both Round 1 Scheduled) are extra in-app fallbacks. CAND-00001054 has no Position or Candidate Source.
+
+**Dry run results:**
+
+- **Primary path on C:** open Candidate Management → create → search/select → inspect details → Record Call = Answered → Proceed to Scheduling → Mark Round 1 Scheduled → full reload. The Candidate Number, Round 1 Scheduled status, one call, three status-history rows, and the ACTIVE schedule all persisted.
+- **Secondary features:** Pass, Fail, Reschedule, and Cancel each produced the expected status, status history, and schedule state.
+- **Final reload:** the Candidate list loaded every demo and fallback record with the expected status. Detail panels showed call, status, and schedule history.
+
+**Demo friction (cosmetic; no backend change made):**
+
+- The app opens on TA Directory. Click **Candidate Management** in the sitemap first.
+- The first Record Call of the session took about 39 seconds (cold start). Later actions took 3–7 seconds. Do one warm-up action before presenting.
+- The DEV / `PROTECTCANDIDATECORE INACTIVE — NOT PRODUCTION` badges are visible to the audience.
+- The row-level **Record Call** button also shows for Round 1 Scheduled Candidates.
+
+**Real data:** still prohibited, pending the business, privacy, and Production gates listed below.
+
 ## VN LMV IT final synthetic smoke and technical acceptance (2026-11-03)
 
 **Current status:**

@@ -4,7 +4,7 @@ Internal BSO Recruitment Support and Candidate Operations. The target is a Power
 
 ## Phase and implementation status
 
-**Current phase: Production Readiness / ALM remediation.** Candidate Core and Candidate Console are implemented in source; Phase 5B BSO security acceptance and Candidate Console DEV verification are recorded as passed in DEV only. The canonical Solution source has an offline unmanaged pack/unpack round-trip. Production readiness remains `PRODUCTION_READINESS_BLOCKED_TECHNICAL_AND_EXTERNAL`: the existing-package release updater is not implemented, the managed artifact requires an approved Test rehearsal, and organizational Test/Production gates remain open. See [Current State](docs/CURRENT_STATE.md) and the [Readiness Blocker Ledger](docs/READINESS_BLOCKER_LEDGER.md).
+**Current phase: P0 Business Completeness (DEV; owner acceptance incomplete).** Slice 1 and the 21-input/five-output Candidate Core contract are deployed in VN LMV IT. One bounded owner-development profile diagnostic succeeded on an existing synthetic Candidate, but an earlier HTTP 400 remains unexplained; workflow regression and TA/Location acceptance are still pending. Clean-BSO runtime acceptance is deferred. The frozen release remains the pre-P0 baseline, so production readiness is false and real candidate data remains prohibited. See [Current State](docs/CURRENT_STATE.md) and the [Readiness Blocker Ledger](docs/READINESS_BLOCKER_LEDGER.md).
 
 ## Target architecture and technology
 

@@ -964,6 +964,60 @@ internal static class Program
             maskedPhoneTarget.GetAttributeValue<string>("os_sr_cand_phn") == "+15550101004" &&
             maskedPhoneUpdate.Updates == 1 && maskedPhoneUpdate.Receipt != null,
             "SDK ProfileFieldMask applies a phone-only edit despite defaulted text and lookup parameters");
+        var saturatedInputNames = new HashSet<string>(new[]
+        {
+            "ActionType", "CandidateId", "ExpectedStatus", "CorrelationId",
+            "CandidateName", "CandidateEmail", "CandidatePhone", "CandidateCvUrl",
+            "PositionId", "CandidateSourceId", "AssignedTaId", "ProfileFieldMask",
+            "Reason", "CallOutcome", "ContactedAt", "Notes", "InterviewerId",
+            "LocationId", "StartAt", "EndAt", "ResultNotes"
+        }, StringComparer.Ordinal);
+        var saturatedUnmaskedTextVariants = new[]
+        {
+            (Name: (object?)null, Email: (object?)"", Phone: "+15550101005",
+                CvUrl: "https://careers.example.invalid/cv/saturated-null-name"),
+            (Name: (object?)"", Email: (object?)null, Phone: "+15550101006",
+                CvUrl: "https://careers.example.invalid/cv/saturated-null-email")
+        };
+        foreach (var variant in saturatedUnmaskedTextVariants)
+        {
+            var saturatedUpdate = CreateProfileUpdateHost();
+            saturatedUpdate.Input["CandidateName"] = variant.Name;
+            saturatedUpdate.Input["CandidateEmail"] = variant.Email;
+            saturatedUpdate.Input["CandidatePhone"] = variant.Phone;
+            saturatedUpdate.Input["CandidateCvUrl"] = variant.CvUrl;
+            saturatedUpdate.Input["PositionId"] = Guid.Empty;
+            saturatedUpdate.Input["CandidateSourceId"] = Guid.Empty;
+            saturatedUpdate.Input["AssignedTaId"] = Guid.Empty;
+            saturatedUpdate.Input["ProfileFieldMask"] = "CandidatePhone,CandidateCvUrl";
+            saturatedUpdate.Input["Reason"] = null;
+            saturatedUpdate.Input["CallOutcome"] = new OptionSetValue(0);
+            saturatedUpdate.Input["ContactedAt"] = DateTime.MinValue;
+            saturatedUpdate.Input["Notes"] = null;
+            saturatedUpdate.Input["InterviewerId"] = Guid.Empty;
+            saturatedUpdate.Input["LocationId"] = Guid.Empty;
+            saturatedUpdate.Input["StartAt"] = DateTime.MinValue;
+            saturatedUpdate.Input["EndAt"] = DateTime.MinValue;
+            saturatedUpdate.Input["ResultNotes"] = null;
+            Check(saturatedUpdate.Input.Count == 21 &&
+                saturatedInputNames.SetEquals(saturatedUpdate.Input.Keys),
+                "SDK saturated profile diagnostic uses the exact 21-input API shape");
+            new ApplyCandidateAction().Execute(saturatedUpdate);
+            var saturatedTarget = saturatedUpdate.CandidateRequests.Single().Target;
+            Check(saturatedTarget.Attributes.Count == 2 &&
+                !saturatedTarget.Contains("os_sr_cand_nm") &&
+                !saturatedTarget.Contains("os_sr_cand_eml") &&
+                !saturatedTarget.Contains("os_sr_cand_pos") &&
+                !saturatedTarget.Contains("os_sr_cand_csrc") &&
+                !saturatedTarget.Contains("os_sr_cand_ta") &&
+                saturatedTarget.GetAttributeValue<string>("os_sr_cand_phn") == variant.Phone &&
+                saturatedTarget.GetAttributeValue<string>("os_sr_cand_cvurl") == variant.CvUrl &&
+                saturatedUpdate.Updates == 1 && saturatedUpdate.Receipt != null,
+                "SDK saturated masked edit ignores unmasked null/empty text and defaulted lookup values");
+            Check(saturatedUpdate.Status == ActionRequest.NeedCall &&
+                saturatedUpdate.Calls == 0 && saturatedUpdate.Histories == 0,
+                "SDK saturated profile-only edit preserves workflow status and history");
+        }
         var legacySdkReplay = CreateProfileUpdateHost();
         var legacySdkRequest = new ActionRequest(Actor, legacySdkReplay.Input.ToDictionary(
             pair => pair.Key, pair => (object?)pair.Value, StringComparer.Ordinal), DateTime.UtcNow);

@@ -169,8 +169,8 @@ foreach ($resourceName in $acceptedPublicationHashes.Keys) {
     $expectedCandidateConsoleHashes[$resourceName] = [string]$acceptedPublicationHashes[$resourceName]
 }
 $developmentSourceAheadHashes = @{
-    'os_/bso/candidate-console.html' = '25b4af85040e1e5a93d50d967b27b4e4fdeadada363098833e566453a6cb3440'
-    'os_/bso/candidate-console.js' = '99d018241eaae5c466d44c400836eda1efaaedb85ec7ddc1820dff99a43f4431'
+    'os_/bso/candidate-console.html' = 'b922522c7c818ae28b30814bd6adafadb260759f437b5f3a149e117d92d95fba'
+    'os_/bso/candidate-console.js' = 'cb26a8d5a859e9a72b27e25ee8220a4ad5704d4473dd37af0ee7b69ec0d55e53'
 }
 $developmentSourceAheadUnchangedNames = @(
     'os_/bso/candidate-console-environment.js',

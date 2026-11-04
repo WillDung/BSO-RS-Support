@@ -540,8 +540,8 @@ Assert-Test ($deployment.Contains('if (-not $Continue -and -not $CreateNewResour
     -not $deployment.Contains('-Path "PublishAllXml"')) `
     'Refresh selected WebResources only, with no app/sitemap publication, global publish, or retry'
 Assert-Test ($deployment.Contains('[switch]$DevelopmentSourceAhead') -and
-    $deployment.Contains("'os_/bso/candidate-console.html' = '25b4af85040e1e5a93d50d967b27b4e4fdeadada363098833e566453a6cb3440'") -and
-    $deployment.Contains("'os_/bso/candidate-console.js' = '99d018241eaae5c466d44c400836eda1efaaedb85ec7ddc1820dff99a43f4431'") -and
+    $deployment.Contains("'os_/bso/candidate-console.html' = 'b922522c7c818ae28b30814bd6adafadb260759f437b5f3a149e117d92d95fba'") -and
+    $deployment.Contains("'os_/bso/candidate-console.js' = 'cb26a8d5a859e9a72b27e25ee8220a4ad5704d4473dd37af0ee7b69ec0d55e53'") -and
     $deployment.Contains('Development source-ahead refresh requires the exact HTML/JavaScript pair and their matching external DEV configuration.') -and
     $deployment.Contains('[string]::IsNullOrWhiteSpace($EnvironmentConfigurationPath)') -and
     $deployment.Contains('[string]::IsNullOrWhiteSpace($EnvironmentHtmlPath)') -and

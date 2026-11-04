@@ -50,6 +50,56 @@ Assert-Test ($plan.Result -ceq 'PACKAGE_UPDATE_PLAN_READY_NOT_DISPATCHED' -and
     -not $plan.JournalWritten -and -not (Test-Path -LiteralPath $planJournal)) `
     'Plan validates the real pinned package without network or journal writes'
 
+$devPlan = & $updaterPath -Mode Plan -TargetProfile DEV `
+    -DevelopmentSourceAheadOfFrozenRelease `
+    -ExpectedEnvironmentDisplayName 'VN LMV IT' `
+    -OrganizationUrl 'https://test.invalid' `
+    -ExpectedEnvironmentId '11111111-1111-4111-8111-111111111111' `
+    -ExpectedOrganizationId '22222222-2222-4222-8222-222222222222' `
+    -ArtifactPath $packagePath `
+    -ExpectedPackageSha256 $manifest.candidateCore.packageSha256 `
+    -ExpectedAssemblySha256 $manifest.candidateCore.embeddedAssemblySha256 `
+    -ExpectedPackageUniqueName $manifest.candidateCore.packageUniqueName `
+    -ExpectedHandlerTypeName $manifest.candidateCore.customApiHandlerTypeName `
+    -JournalPath $planJournal
+Assert-Test ($devPlan.Result -ceq 'PACKAGE_UPDATE_PLAN_READY_NOT_DISPATCHED' -and
+    $devPlan.NetworkOperations -eq 0 -and $devPlan.DispatchCount -eq 0 -and
+    -not $devPlan.JournalWritten) `
+    'Explicit DEV source-ahead planning remains offline and cannot dispatch'
+
+$devMissingOptIn = & $updaterPath -Mode Plan -TargetProfile DEV `
+    -ExpectedEnvironmentDisplayName 'VN LMV IT' `
+    -OrganizationUrl 'https://test.invalid' `
+    -ExpectedEnvironmentId '11111111-1111-4111-8111-111111111111' `
+    -ExpectedOrganizationId '22222222-2222-4222-8222-222222222222' `
+    -ArtifactPath $packagePath `
+    -ExpectedPackageSha256 $manifest.candidateCore.packageSha256 `
+    -ExpectedAssemblySha256 $manifest.candidateCore.embeddedAssemblySha256 `
+    -ExpectedPackageUniqueName $manifest.candidateCore.packageUniqueName `
+    -ExpectedHandlerTypeName $manifest.candidateCore.customApiHandlerTypeName `
+    -JournalPath $planJournal
+Assert-Test ($devMissingOptIn.FailureCode -ceq 'PACKAGE_DEVELOPMENT_SOURCE_AUTHORIZATION_REQUIRED' -and
+    $devMissingOptIn.NetworkOperations -eq 0) `
+    'DEV source-ahead deployment is blocked without explicit recovery-only opt-in'
+
+$expectedBsoPrivileges = Get-RolePrivilegeMapFromXml `
+    -Path (Join-Path $root 'solutions\Roles\BSO-RS Support - BSO.xml') `
+    -ExpectedRoleName 'BSO-RS Support - BSO'
+$expectedReferencePrivileges = Get-RolePrivilegeMapFromXml `
+    -Path (Join-Path $root 'solutions\Roles\BSO-RS Support - Reference Admin.xml') `
+    -ExpectedRoleName 'BSO-RS Support - Reference Admin'
+Assert-Test ($expectedBsoPrivileges.Count -eq 60 -and
+    $expectedReferencePrivileges.Count -eq 20 -and
+    -not ($expectedBsoPrivileges.ContainsKey('prvCreateos_sr_cand')) -and
+    -not ($expectedBsoPrivileges.ContainsKey('prvWriteos_sr_cand'))) `
+    'Local security baselines retain denied BSO direct-write privileges and bounded Reference Admin scope'
+$alteredBsoPrivileges = [Collections.Generic.Dictionary[string, string]]::new([StringComparer]::Ordinal)
+foreach ($key in $expectedBsoPrivileges.Keys) { $alteredBsoPrivileges.Add($key, $expectedBsoPrivileges[$key]) }
+$alteredBsoPrivileges['prvReados_sr_cand'] = 'Local'
+Assert-Test ((Test-RolePrivilegeMapEqual -Expected $expectedBsoPrivileges -Actual $expectedBsoPrivileges) -and
+    -not (Test-RolePrivilegeMapEqual -Expected $expectedBsoPrivileges -Actual $alteredBsoPrivileges)) `
+    'Role definition reconciliation detects privilege-depth drift'
+
 $badHash = & $updaterPath -Mode Plan -TargetProfile TEST `
     -OrganizationUrl 'https://test.invalid' `
     -ExpectedEnvironmentId '11111111-1111-4111-8111-111111111111' `
@@ -89,6 +139,31 @@ try {
 } catch { $ambiguousPackageResult = $_.Exception.Message }
 Assert-Test ($ambiguousPackageResult -ceq 'PACKAGE_IDENTITY_AMBIGUOUS') `
     'Package lookup rejects duplicate existing records'
+
+$legacyTopology = [pscustomobject]@{
+    OneExistingPackage = $true
+    PackageAssemblyLinked = $true
+    ExpectedHandlerPackageBacked = $true
+    CustomApiMetadataUnchanged = $true
+    LegacyAssemblyUntouched = $true
+    AllProtectCandidateCoreStepsInactive = $true
+    ProtectCandidateCoreStepCount = 49
+    NoActiveLegacyHandlers = $true
+    NoActiveCandidateCoreProfilerWrappers = $true
+    PluginTraceLogOff = $true
+    NoNewPluginPackage = $true
+}
+$legacyPreflightResult = $null
+try { Assert-PreflightTopology -Snapshot $legacyTopology; $legacyPreflightResult = 'PASS' }
+catch { $legacyPreflightResult = $_.Exception.Message }
+Assert-Test ($legacyPreflightResult -ceq 'PASS') `
+    'Legacy guard topology is gated by inactivity, not a fixed 62-step count'
+$legacyTopology.NoActiveLegacyHandlers = $false
+$activeLegacyPreflight = $null
+try { Assert-PreflightTopology -Snapshot $legacyTopology; $activeLegacyPreflight = 'PASS' }
+catch { $activeLegacyPreflight = $_.Exception.Message }
+Assert-Test ($activeLegacyPreflight -ceq 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED') `
+    'Unexpected active signed rollback handler blocks the preflight'
 
 Assert-Test ((Get-PacPushClassification -ProcessStarted $false -ExitCode -1 `
     -StandardOutput '' -StandardError '') -ceq 'NOT_DISPATCHED') `
@@ -140,7 +215,8 @@ $after = [pscustomobject]@{
     CustomApiMetadataUnchanged = $true
     LegacyAssemblyUntouched = $true
     AllProtectCandidateCoreStepsInactive = $true
-    NoActiveProfilerWrappers = $true
+    NoActiveLegacyHandlers = $true
+    NoActiveCandidateCoreProfilerWrappers = $true
     PluginTraceLogOff = $true
     NoNewPluginPackage = $true
     ModifiedOnAdvanced = $false
@@ -156,6 +232,98 @@ Assert-Test (-not (Test-SnapshotEquivalent -Before $beforeJournal -After $after)
 $after.LegacyAssemblyId = $before.LegacyAssemblyId
 
 New-Item -ItemType Directory -Path $temporaryRoot -Force | Out-Null
+$apiParameterId = '33333333-3333-4333-8333-333333333333'
+$apiPlanPath = Join-Path $temporaryRoot 'approved-profile-mask-api-plan.json'
+$maskContract = @((Get-Content -LiteralPath (Join-Path $root 'docs\PHASE_3C_API_CONTRACT.json') -Raw |
+    ConvertFrom-Json).inputs | Where-Object name -CEQ 'ProfileFieldMask')
+$apiPlan = [ordered]@{
+    EnvironmentName = 'VN LMV IT'
+    OrganizationUrl = 'https://test.invalid'
+    ExpectedEnvironmentId = '11111111-1111-4111-8111-111111111111'
+    ExpectedOrganizationId = '22222222-2222-4222-8222-222222222222'
+    SolutionUniqueName = $manifest.solution.uniqueName
+    ApiUniqueName = 'os_sr_cact'
+    ApiId = '44444444-4444-4444-8444-444444444444'
+    ExpectedMissingNames = @('ProfileFieldMask')
+    AutomaticRetries = 0
+    MaximumPostDispatches = 1
+    Writes = @([ordered]@{
+        Id = $apiParameterId
+        Name = 'ProfileFieldMask'
+        Type = [int]$maskContract[0].type
+        IsOptional = [bool]$maskContract[0].optional
+        Body = [ordered]@{
+            customapirequestparameterid = $apiParameterId
+            uniquename = 'ProfileFieldMask'
+            type = [int]$maskContract[0].type
+            isoptional = [bool]$maskContract[0].optional
+        }
+    })
+}
+$apiPlan | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $apiPlanPath
+$ExpectedDevelopmentApiPlanPath = $apiPlanPath
+$ExpectedDevelopmentApiPlanSha256 = (Get-FileHash -LiteralPath $apiPlanPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$apiPlanReadback = Get-ApprovedDevelopmentApiParameterPlan -Baseline ([pscustomobject]@{
+    Api = [pscustomobject]@{ customapiid = $apiPlan.ApiId }
+})
+Assert-Test ($apiPlanReadback.Writes.Count -eq 1 -and
+    $apiPlanReadback.Writes[0].Name -ceq 'ProfileFieldMask') `
+    'DEV package gate accepts only a hash-pinned single ProfileFieldMask API plan'
+$baselineMembershipLines = @(
+    '60|aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa|0',
+    '1|bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb|0'
+)
+$addedMaskMembership = '61|33333333-3333-4333-8333-333333333333|0'
+Assert-Test (Test-ApprovedDevelopmentMembershipDelta -BaselineLines $baselineMembershipLines `
+    -CurrentLines @($baselineMembershipLines + $addedMaskMembership) `
+    -ApiParameterId $apiParameterId -ApiParameterPresent $true) `
+    'DEV package gate permits the exact plan-pinned API parameter membership delta'
+Assert-Test (-not (Test-ApprovedDevelopmentMembershipDelta -BaselineLines $baselineMembershipLines `
+    -CurrentLines @($baselineMembershipLines + '61|55555555-5555-4555-8555-555555555555|0') `
+    -ApiParameterId $apiParameterId -ApiParameterPresent $true) -and
+    -not (Test-ApprovedDevelopmentMembershipDelta -BaselineLines $baselineMembershipLines `
+        -CurrentLines @($baselineMembershipLines | Select-Object -First 1) `
+        -ApiParameterId $apiParameterId -ApiParameterPresent $false)) `
+    'DEV package gate rejects unrelated membership additions and missing baseline members'
+$ExpectedDevelopmentApiPlanSha256 = ('0' * 64)
+$invalidApiPlanFailure = $null
+try {
+    Get-ApprovedDevelopmentApiParameterPlan -Baseline ([pscustomobject]@{
+        Api = [pscustomobject]@{ customapiid = $apiPlan.ApiId }
+    }) | Out-Null
+} catch { $invalidApiPlanFailure = $_.Exception.Message }
+Assert-Test ($invalidApiPlanFailure -ceq 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED') `
+    'DEV package gate rejects a changed API plan fingerprint'
+Assert-Test ((Test-HasFileStoreSourceLabel -Labels @('File Store', 'File Store')) -and
+    -not (Test-HasFileStoreSourceLabel -Labels @('Database'))) `
+    'Package assembly source check accepts duplicate localized File Store labels only'
+$profilerTypeId = '55555555-5555-4555-8555-555555555555'
+$unrelatedProfilerStep = [pscustomobject]@{
+    name = "CustomApi 'msdyn_ContentGenerationSemanticProfiler' implementation"
+    _eventhandler_value = $profilerTypeId
+}
+$candidateProfilerStep = [pscustomobject]@{
+    name = "CustomApi 'os_sr_cact' implementation"
+    _eventhandler_value = $profilerTypeId
+}
+Assert-Test (-not (Test-IsCandidateCoreProfilerStep -Step $unrelatedProfilerStep `
+        -ProfilerTypeIds @($profilerTypeId)) -and
+    (Test-IsCandidateCoreProfilerStep -Step $candidateProfilerStep `
+        -ProfilerTypeIds @($profilerTypeId))) `
+    'Profiler safety gate is scoped to Candidate Core rather than unrelated platform plugins'
+$originalUriGet = (Get-Item Function:\Invoke-DataverseUriGet).ScriptBlock
+try {
+    Set-Item Function:\Invoke-DataverseUriGet -Value {
+        [pscustomobject]@{ value = @([pscustomobject]@{ id = 'synthetic-row' }) }
+    }
+    $script:ApiRoot = 'https://org.invalid/api/data/v9.2/'
+    $rowsWithoutNextLink = @(Get-DataverseRows -Path 'syntheticrows')
+    Assert-Test ($rowsWithoutNextLink.Count -eq 1 -and $rowsWithoutNextLink[0].id -ceq 'synthetic-row') `
+        'Read-only paging accepts a single-page response without an optional nextLink'
+} finally {
+    Set-Item Function:\Invoke-DataverseUriGet -Value $originalUriGet
+}
+
 $successJournalPath = Join-Path $temporaryRoot 'success.json'
 $successJournal = New-PackageUpdaterJournal -Profile TEST -UniqueName 'os_sr_cact_pkg' `
     -ArtifactSha256 $packageHash -EnvironmentId '11111111-1111-4111-8111-111111111111' `
@@ -229,15 +397,51 @@ try {
 Assert-Test ($reusedJournalFailure -ceq 'PACKAGE_DISPATCH_JOURNAL_ALREADY_EXISTS') `
     'Existing one-shot journal prevents dispatch reuse'
 
+$utcModifiedOn = [DateTimeOffset]::new(2026, 11, 4, 5, 44, 7, [TimeSpan]::Zero)
+$offsetModifiedOn = [DateTimeOffset]::new(2026, 11, 4, 12, 44, 7, [TimeSpan]::FromHours(7))
+$laterModifiedOn = $utcModifiedOn.AddSeconds(1)
+Assert-Test (Test-PackageModifiedOnMatchesBaseline `
+    -CurrentModifiedOn $utcModifiedOn -BaselineModifiedOn $offsetModifiedOn) `
+    'Package timestamp baseline compares equivalent instants across offsets'
+Assert-Test (-not (Test-PackageModifiedOnMatchesBaseline `
+    -CurrentModifiedOn $laterModifiedOn -BaselineModifiedOn $utcModifiedOn)) `
+    'Package timestamp baseline still detects a genuinely advanced timestamp'
+
  $updaterSource = Get-Content -LiteralPath $updaterPath -Raw
 Assert-Test ($updaterSource.Contains('$start.ArgumentList.Add($argument)') -and
     -not $updaterSource.Contains('Invoke-Expression') -and
     -not $updaterSource.Contains('PublishAllXml') -and
+    $updaterSource.Contains('$ExecutablePath help') -and
+    -not $updaterSource.Contains('$ExecutablePath --version') -and
     $updaterSource.Contains("dispatchState -cnotin @('OUTCOME_AMBIGUOUS', 'DISPATCH_RESERVED')") -and
     $updaterSource.Contains("PSObject.Properties['ModifiedOn']") -and
+    $updaterSource.Contains('ModifiedOn = $PackageRow.modifiedon') -and
+    -not $updaterSource.Contains('ModifiedOn = [string]$PackageRow.modifiedon') -and
+    -not $updaterSource.Contains('[string]$Before.ModifiedOn') -and
     $updaterSource.Contains("Manifest.releaseTooling.pacCliVersion") -and
     $updaterSource.Contains("CommandType -ne 'Application'")) `
     'Updater uses structured PAC arguments, pinned CLI version, and restart-safe read-only journal reconciliation'
+$preflightStart = $updaterSource.IndexOf("if (`$Mode -ceq 'Preflight') {")
+$preflightEnd = $updaterSource.IndexOf("if (`$Mode -ceq 'Reconcile') {", $preflightStart)
+$preflightBlock = if ($preflightStart -ge 0 -and $preflightEnd -gt $preflightStart) {
+    $updaterSource.Substring($preflightStart, $preflightEnd - $preflightStart)
+} else { '' }
+Assert-Test ($updaterSource.Contains("RequestedMode -eq 'Preflight' -and `$TargetProfile -cne 'DEV'") -and
+    $updaterSource.Contains('ExpectedDevelopmentBaselinePath') -and
+    $updaterSource.Contains('ExpectedDevelopmentApiPlanPath') -and
+    $updaterSource.Contains('ExpectedDevelopmentApiPlanSha256') -and
+    $updaterSource.Contains('SolutionMembershipMatchesApprovedPlan') -and
+    $updaterSource.Contains('Test-ApprovedDevelopmentMembershipDelta') -and
+    $updaterSource.Contains('PACKAGE_MODIFIED_SINCE_BASELINE') -and
+    $updaterSource.Contains('NoActiveCandidateCoreProfilerWrappers') -and
+    $updaterSource.Contains('BsoProtectedDirectCreateWriteAbsent') -and
+    $updaterSource.Contains('ReferenceAdminRoleUnassigned') -and
+    $updaterSource.Contains('$guardSteps.Count -eq 62') -eq $false -and
+    $preflightBlock -and
+    -not $preflightBlock.Contains('Write-NewJournal') -and
+    -not $preflightBlock.Contains('Invoke-PacPluginPush') -and
+    -not $preflightBlock.Contains('Invoke-OneShotDispatchStateMachine')) `
+    'DEV preflight compares exact recorded topology and roles without a 62-step gate or dispatch path'
 
 "BsoRsCandidatePackageUpdater.Tests.ps1: $passed assertions passed."
 } finally {

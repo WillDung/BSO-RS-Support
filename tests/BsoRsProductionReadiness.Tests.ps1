@@ -124,7 +124,7 @@ foreach ($fileName in @(
     Assert-Test (Test-Path -LiteralPath (Join-Path $webRoot $fileName) -PathType Leaf) `
         "Candidate Console source exists: $fileName"
 }
-Assert-Test ((Get-ChildItem -LiteralPath (Join-Path $solutions 'customapis\os_sr_cact') -Recurse -File).Count -eq 26 -and
+Assert-Test ((Get-ChildItem -LiteralPath (Join-Path $solutions 'customapis\os_sr_cact') -Recurse -File).Count -eq 27 -and
     (Test-Path -LiteralPath (Join-Path $solutions 'pluginpackages\os_sr_cact_pkg\pluginpackage.xml') -PathType Leaf) -and
     (Test-Path -LiteralPath (Join-Path $solutions 'pluginpackages\os_sr_cact_pkg\package\os_sr_cact_pkg.nupkg') -PathType Leaf)) `
     'Candidate Core API metadata and package-backed handler artifact are retained'

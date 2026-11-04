@@ -438,15 +438,18 @@ namespace os_sr_cact
                     throw new OperationError("UNEXPECTED_INPUT:SDK_ADAPTER:OTHER");
             }
 
+            if (action != "UpdateCandidate" &&
+                parameters.TryGetValue("ProfileFieldMask", out var profileMask) &&
+                profileMask != null &&
+                (!(profileMask is string emptyMask) || emptyMask.Length != 0))
+                throw new OperationError("PROFILE_FIELD_MASK_NOT_APPLICABLE");
+
             if (action != null)
             {
                 foreach (var name in ActionRequest.ApplicableInputNames(action))
                 {
                     if (name == "ActionType" || name == "CorrelationId") continue;
                     if (!parameters.TryGetValue(name, out var value)) continue;
-                    // Dataverse supplies Guid.Empty for omitted optional GUIDs; explicit null still means clear.
-                    if (action == "UpdateCandidate" && ActionRequest.IsOptionalProfileLookup(name) &&
-                        value is Guid id && id == Guid.Empty) continue;
                     input[name] = value;
                 }
             }

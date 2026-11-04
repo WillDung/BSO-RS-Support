@@ -75,7 +75,7 @@ Assert-Test ($referenceRole.Role.IsAutoAssigned -eq '0' -and $referencePrivilege
 $apiContract = Get-Content -Raw -LiteralPath (Join-Path $docs 'PHASE_3C_API_CONTRACT.json') | ConvertFrom-Json
 $requestMetadata = @(Get-ChildItem -LiteralPath (Join-Path $solutions 'customapis\os_sr_cact\customapirequestparameters') -Recurse -Filter '*.xml' |
     ForEach-Object { ([xml](Get-Content -Raw -LiteralPath $_.FullName)).customapirequestparameter })
-Assert-Test ($requestMetadata.Count -eq 20 -and @($requestMetadata.uniquename | Select-Object -Unique).Count -eq 20 -and
+Assert-Test ($requestMetadata.Count -eq 21 -and @($requestMetadata.uniquename | Select-Object -Unique).Count -eq 21 -and
     @($apiContract.inputs | Where-Object {
         $contractParameter = $_
         $match = @($requestMetadata | Where-Object { $_.uniquename -ceq $contractParameter.name })

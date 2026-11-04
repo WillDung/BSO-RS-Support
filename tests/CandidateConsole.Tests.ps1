@@ -117,6 +117,11 @@ Assert-Test ($html.Contains('id="candidate-cv-url"') -and
     $script.Contains('addDetailLink(details, "Candidate CV URL"') -and
     $script.Contains('getLookupName("os_sr_ta", candidate[TABLES.candidate.assignedTa])')) `
     'Create, view, and update Candidate CV URL and Assigned TA only through Candidate Core'
+Assert-Test ($script.Contains('"ProfileFieldMask"') -and
+    $script.Contains('const PROFILE_FIELD_ORDER = [') -and
+    $script.Contains('canonicalProfileFieldMask(changedProfileFields)') -and
+    $script.Contains('changedProfileFields.add(inputName);')) `
+    'Declare and send the explicit changed-profile field mask through Candidate Core'
 Assert-Test ($script.Contains('row.classList.add("selected")') -and
     $style.Contains('tr.candidate-row.selected')) 'Highlight the selected Candidate row'
 Assert-Test ($html.Contains('id="call-entry-panel"') -and
@@ -534,6 +539,29 @@ Assert-Test ($deployment.Contains('if (-not $Continue -and -not $CreateNewResour
     -not $deployment.Contains("-Path 'PublishAllXml'") -and
     -not $deployment.Contains('-Path "PublishAllXml"')) `
     'Refresh selected WebResources only, with no app/sitemap publication, global publish, or retry'
+Assert-Test ($deployment.Contains('[switch]$DevelopmentSourceAhead') -and
+    $deployment.Contains("'os_/bso/candidate-console.html' = '25b4af85040e1e5a93d50d967b27b4e4fdeadada363098833e566453a6cb3440'") -and
+    $deployment.Contains("'os_/bso/candidate-console.js' = '99d018241eaae5c466d44c400836eda1efaaedb85ec7ddc1820dff99a43f4431'") -and
+    $deployment.Contains('Development source-ahead refresh requires the exact HTML/JavaScript pair and their matching external DEV configuration.') -and
+    $deployment.Contains('[string]::IsNullOrWhiteSpace($EnvironmentConfigurationPath)') -and
+    $deployment.Contains('[string]::IsNullOrWhiteSpace($EnvironmentHtmlPath)') -and
+    $deployment.Contains('CANDIDATE_CONSOLE_DEV_SOURCE_AHEAD_PREFLIGHT_READY') -and
+    $deployment.Contains('CANDIDATE_CONSOLE_DEV_SOURCE_AHEAD_REFRESHED') -and
+    $deployment.Contains('PublishXmlScope = "$($resources.Count) exact web resources"') -and
+    $deployment.Contains('SiteMapPatchCount = 0') -and
+    $deployment.Contains('AutomaticRetries = 0') -and
+    -not $deployment.Contains("Invoke-DataverseRequest -Method POST -Path 'PublishAllXml'") -and
+    -not $deployment.Contains('PublishXmlCount = 0')) `
+    'DEV source-ahead path pins only the approved HTML and JavaScript and uses scoped publication'
+Assert-Test ($deployment.Contains('$developmentSourceAheadUnchangedNames = @(') -and
+    $deployment.Contains("'os_/bso/candidate-console-environment.js'") -and
+    $deployment.Contains("'os_/bso/candidate-console-policy.js'") -and
+    $deployment.Contains('Get-ExactWebResourceState') -and
+    $deployment.Contains('SelectedForRefresh = $false') -and
+    $deployment.Contains('[string]$configurationHash') -and
+    $deployment.Contains('unchangedMembershipCount -ne 1') -and
+    $deployment.Contains('CANDIDATE_CONSOLE_SOURCE_BASELINE_UNRECONCILED')) `
+    'DEV source-ahead preflight proves unselected policy bytes match live, published source without refreshing them'
 
 $hash = (Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $version = [regex]::Match($html, 'candidate-console\.js\?v=([0-9a-f]+)')

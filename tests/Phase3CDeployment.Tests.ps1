@@ -15,7 +15,10 @@ Assert-Test ($e.Count -eq 0) 'Deployment runner parses'
 Assert-Test ($contract.uniqueName -ceq 'os_sr_cact' -and -not $contract.isFunction -and $contract.bindingType -eq 0) 'Approved unbound Action'
 Assert-Test ($contract.isPrivate -and $contract.allowedCustomProcessingStepType -eq 0) 'Private discovery with no extension steps'
 Assert-Test ($contract.executePrivilegeName -ceq 'prvReados_sr_cand') 'Least-privilege existing Candidate Read execution privilege'
-Assert-Test ($contract.inputs.Count -eq 20 -and $contract.outputs.Count -eq 5) 'Local source contract preserves five outputs and declares typed profile, scheduling, and result inputs'
+Assert-Test ($contract.inputs.Count -eq 21 -and $contract.outputs.Count -eq 5 -and
+    @($contract.inputs | Where-Object {
+        $_.name -ceq 'ProfileFieldMask' -and $_.type -eq 10 -and $_.optional
+    }).Count -eq 1) 'Local source contract preserves five outputs and adds one optional string profile mask'
 Assert-Test ($contract.localSourceStatus -match 'local source' -and
     $contract.schedulingEvidenceContract.source -match 'os_sr_intv' -and
     $contract.schedulingEvidenceContract.MarkRound1Scheduled -match 'active TA and Location' -and

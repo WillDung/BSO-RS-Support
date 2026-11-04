@@ -25,11 +25,8 @@ $script:WriteIndex = 0
 $script:Plan = $null
 $script:Journal = $null
 $maximumReads = 100
-$maximumWrites = 7
-$allowedMissingNames = @(
-    'InterviewerId', 'LocationId', 'StartAt', 'EndAt', 'ResultNotes',
-    'CandidateCvUrl', 'AssignedTaId'
-)
+$maximumWrites = 1
+$allowedMissingNames = @('ProfileFieldMask')
 
 if ($EnvironmentName -cne 'VN LMV IT' -or
     $script:OrganizationUrl -cne 'https://org14938ec2.crm4.dynamics.com' -or

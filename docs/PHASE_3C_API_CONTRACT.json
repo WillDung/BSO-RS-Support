@@ -21,8 +21,23 @@
   "executePrivilegeName": "prvReados_sr_cand",
   "executionIdentity": "CallingUser for authorization and business reads; UserId must equal InitiatingUserId; fixed business writes use CreateOrganizationService(null) only inside ApplyCandidateAction.",
   "executionPrivilegeStatus": "Accepted Phase 5A/5B baseline: os_sr_cact uses prvReados_sr_cand; BSO direct protected-table Create/Write is denied by role definition. Fresh deployment safety reconciliation must verify metadata without requiring an unassigned BSO role or clean-BSO identity.",
-  "profileReplacement": "Present fields replace; omitted fields preserve; explicit null clears only optional phone/lookup fields. Required name/email cannot be null/blank.",
-  "optionalProfileLookupTransport": "The submitted P0 corrective package contains an SDK adapter that treats Guid.Empty as omission for UpdateCandidate PositionId/CandidateSourceId/AssignedTaId transport defaults. PAC acknowledged the update, but deployed bytes are not exposed. Offline tests model explicit null as a clear and retain strict domain empty-GUID and required-GUID validation. The first owner edit after deployment returned REQUIRED_TEXT; omitted-GUID preservation and explicit-null clearing are not runtime accepted. No parameter, output, or fingerprint-version change.",
+  "profileReplacement": "UpdateCandidate requires ProfileFieldMask. Only masked profile values are validated, fingerprinted, and updated; unmasked values, including SDK defaults, are ignored. Masked null clears optional profile values. Required name/email cannot be null or blank.",
+  "profileFieldMaskContract": {
+    "parameter": "ProfileFieldMask",
+    "type": 10,
+    "metadataOptional": true,
+    "requiredFor": "UpdateCandidate",
+    "canonicalOrder": ["CandidateName", "CandidateEmail", "CandidatePhone", "PositionId", "CandidateSourceId", "CandidateCvUrl", "AssignedTaId"],
+    "syntax": "Case-sensitive comma-separated field names with no whitespace, duplicates, empty tokens, or unknown names.",
+    "invalidMask": "INVALID_PROFILE_FIELD_MASK",
+    "missingMask": "PROFILE_FIELD_MASK_REQUIRED",
+    "nonUpdateMask": "Nonempty masks are rejected as PROFILE_FIELD_MASK_NOT_APPLICABLE; null or empty defaults are ignored.",
+    "maskedMissingOptionalValue": "PROFILE_FIELD_VALUE_REQUIRED",
+    "maskedGuidEmpty": "INVALID_GUID_PARAMETER:<parameter>",
+    "maskedMalformedLookup": "INVALID_GUID_PARAMETER:<parameter>",
+    "legacyReceiptCompatibility": "Version 1 maskless UpdateCandidate receipts replay only when the new request's legacy-equivalent normalized fingerprint matches. Receipts are not rewritten; changed fields or values conflict."
+  },
+  "optionalProfileLookupTransport": "UpdateCandidate no longer infers lookup omission from Guid.Empty. Unmasked lookup defaults are ignored by ProfileFieldMask; a masked Guid.Empty is invalid, an unmasked value is ignored, and masked explicit null clears. The last deployed optional-GUID correction was acknowledged but deployed bytes are not exposed. Its owner edit returned REQUIRED_TEXT; runtime mask behavior remains unverified. Fingerprint version remains 1 with tested legacy-receipt compatibility.",
   "supportedActionTypes": ["CreateCandidate", "UpdateCandidate", "RecordCall", "ProceedToScheduling", "MarkRound1Scheduled", "RecordPass", "RecordFail", "RequestReschedule", "CancelRound1"],
   "schedulingEvidenceContract": {
     "source": "Existing os_sr_intv Round 1 records are the authoritative durable scheduling evidence; do not require a separate external calendar system for these Candidate Core operations.",
@@ -33,7 +48,7 @@
     "CancelRound1": "Requires exactly one active Round 1 schedule with no terminal result and a reason. Cancel and read back the existing schedule before Candidate, Status History, and Receipt writes.",
     "calendarBoundary": "These manual scheduling records do not represent a calendar event booking. Separate email/calendar integrations continue to follow their approved identity, availability, and fail-closed rules."
   },
-  "localSourceStatus": "P0 Slice 1 local source and live API metadata have 20 inputs/five outputs. Console/forms/views and the separate unassigned Reference Admin role were deployed. Owner creation passed; an initial UpdateCandidate failed with INVALID_GUID_PARAMETER:PositionId. One separately authorized optional-GUID corrective package update was acknowledged, but the next owner edit returned REQUIRED_TEXT and the synthetic profile remained unchanged. Full P0 runtime acceptance remains blocked; frozen release evidence is unchanged. See CURRENT_STATE.md.",
+  "localSourceStatus": "Current local source contract has 21 inputs/five outputs, including optional ProfileFieldMask; offline validation passed. The last live readback remains 20 inputs/five outputs and does not include this mask. The Console and package mask changes are local and not deployed. The prior owner edit returned REQUIRED_TEXT with the synthetic profile unchanged. Any deployment requires fresh exact-target confirmation and preflight. Full P0 runtime acceptance remains blocked; frozen release evidence is unchanged. See CURRENT_STATE.md.",
   "actionMutationMatrix": {
     "CreateCandidate": ["CANDIDATE_CREATE", "RECEIPT_CREATE"],
     "UpdateCandidate": ["CANDIDATE_UPDATE", "RECEIPT_CREATE"],
@@ -60,6 +75,7 @@
     { "name": "PositionId", "type": 12, "optional": true },
     { "name": "CandidateSourceId", "type": 12, "optional": true },
     { "name": "AssignedTaId", "type": 12, "optional": true },
+    { "name": "ProfileFieldMask", "type": 10, "optional": true },
     { "name": "Reason", "type": 10, "optional": true },
     { "name": "CallOutcome", "type": 7, "optional": true },
     { "name": "ContactedAt", "type": 1, "optional": true },

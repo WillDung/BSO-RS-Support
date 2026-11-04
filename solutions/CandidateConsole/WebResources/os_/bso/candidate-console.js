@@ -140,10 +140,19 @@
   const CORE_API_PARAMETER_NAMES = new Set([
     "ActionType", "CandidateId", "ExpectedStatus", "CorrelationId", "CandidateName",
     "CandidateEmail", "CandidatePhone", "CandidateCvUrl", "PositionId", "CandidateSourceId",
-    "AssignedTaId", "Reason",
+    "AssignedTaId", "ProfileFieldMask", "Reason",
     "CallOutcome", "ContactedAt", "Notes", "InterviewerId", "LocationId", "StartAt",
     "EndAt", "ResultNotes"
   ]);
+  const PROFILE_FIELD_ORDER = [
+    "CandidateName", "CandidateEmail", "CandidatePhone", "PositionId",
+    "CandidateSourceId", "CandidateCvUrl", "AssignedTaId"
+  ];
+
+  function canonicalProfileFieldMask(changedFields) {
+    const changed = new Set(changedFields);
+    return PROFILE_FIELD_ORDER.filter((field) => changed.has(field)).join(",");
+  }
 
   const $ = (id) => document.getElementById(id);
   const globalContext = () => {
@@ -2127,6 +2136,7 @@
       ExpectedStatus: Number(selectedCandidate[c.status])
     };
     const baseline = {};
+    const changedProfileFields = new Set();
     const addTextChange = (inputName, attribute, value, optional) => {
       const current = optional
         ? (selectedCandidate[attribute] || null)
@@ -2135,6 +2145,7 @@
       if (current !== next) {
         inputs[inputName] = next;
         baseline[attribute] = current;
+        changedProfileFields.add(inputName);
       }
     };
     const addLookupChange = (inputName, attribute, selectId) => {
@@ -2146,6 +2157,7 @@
       if (!sameOptionalGuid(current, next)) {
         inputs[inputName] = next;
         baseline[attribute] = current;
+        changedProfileFields.add(inputName);
       }
     };
     addTextChange("CandidateName", c.name, candidateName, false);
@@ -2155,6 +2167,7 @@
     addLookupChange("PositionId", c.position, "edit-candidate-position");
     addLookupChange("CandidateSourceId", c.source, "edit-candidate-source");
     addLookupChange("AssignedTaId", c.assignedTa, "edit-candidate-assigned-ta");
+    inputs.ProfileFieldMask = canonicalProfileFieldMask(changedProfileFields);
     if (Object.keys(baseline).length === 0) {
       showNotice("No profile changes to save.");
       return;

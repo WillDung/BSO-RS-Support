@@ -33,7 +33,11 @@ static class Program
             input["ExpectedStatus"] = ActionRequest.Scheduled;
         if (action == "RequestReschedule" || action == "CancelRound1") input["Reason"] = "Synthetic reason";
         if (action == "CreateCandidate") { input["CandidateName"] = "Synthetic Candidate"; input["CandidateEmail"] = "synthetic@example.invalid"; }
-        if (action == "UpdateCandidate") input["CandidateName"] = "Synthetic Replacement";
+        if (action == "UpdateCandidate")
+        {
+            input["ProfileFieldMask"] = "CandidateName";
+            input["CandidateName"] = "Synthetic Replacement";
+        }
         return input;
     }
     static ActionRequest Request(Dictionary<string, object?> input) => new(Actor, input, Now);
@@ -328,6 +332,7 @@ static class Program
             Reject(() => Request(inputWithLookup), "INVALID_GUID_PARAMETER:" + parameter);
         }
         var updateWithNullLookup = Input("UpdateCandidate");
+        updateWithNullLookup["ProfileFieldMask"] = "CandidateName,PositionId";
         updateWithNullLookup["PositionId"] = null;
         Check(Request(updateWithNullLookup).Values.ContainsKey("PositionId") &&
             Request(updateWithNullLookup).Values["PositionId"] == null,
@@ -337,10 +342,50 @@ static class Program
         updateWithNullLookup["PositionId"] = "not-a-guid";
         Reject(() => Request(updateWithNullLookup), "INVALID_GUID_PARAMETER:PositionId");
         updateWithNullLookup = Input("UpdateCandidate");
+        updateWithNullLookup["ProfileFieldMask"] = "CandidateName,AssignedTaId";
         updateWithNullLookup["AssignedTaId"] = null;
         Check(Request(updateWithNullLookup).Values.ContainsKey("AssignedTaId") &&
             Request(updateWithNullLookup).Values["AssignedTaId"] == null,
             "UpdateCandidate explicit null AssignedTaId remains a clear operation");
+        var missingProfileMask = Input("UpdateCandidate");
+        missingProfileMask.Remove("ProfileFieldMask");
+        Reject(() => Request(missingProfileMask), "PROFILE_FIELD_MASK_REQUIRED");
+        foreach (var invalidMask in new object?[]
+        {
+            "", " ", "CandidateName,", "CandidateName, CandidatePhone",
+            "CandidateName,CandidateName", "Name", new object()
+        })
+        {
+            var invalidMaskInput = Input("UpdateCandidate");
+            invalidMaskInput["ProfileFieldMask"] = invalidMask;
+            Reject(() => Request(invalidMaskInput), "INVALID_PROFILE_FIELD_MASK");
+        }
+        var canonicalMaskInput = Input("UpdateCandidate");
+        canonicalMaskInput["ProfileFieldMask"] = "AssignedTaId,CandidatePhone,CandidateName";
+        canonicalMaskInput["CandidatePhone"] = "+15550101001";
+        canonicalMaskInput["AssignedTaId"] = Guid.NewGuid();
+        var canonicalMaskRequest = Request(canonicalMaskInput);
+        Check(string.Equals((string?)canonicalMaskRequest.Values["ProfileFieldMask"],
+            "CandidateName,CandidatePhone,AssignedTaId", StringComparison.Ordinal) &&
+            Request(new Dictionary<string, object?>(canonicalMaskInput)
+            {
+                ["ProfileFieldMask"] = "CandidateName,CandidatePhone,AssignedTaId"
+            }).Fingerprint == canonicalMaskRequest.Fingerprint,
+            "UpdateCandidate mask whitelist is canonicalized before fingerprinting");
+        var unmaskedDefaults = Input("UpdateCandidate");
+        unmaskedDefaults["CandidateEmail"] = new object();
+        unmaskedDefaults["CandidatePhone"] = Guid.Empty;
+        var ignoredUnmaskedDefaults = Request(unmaskedDefaults);
+        Check(!ignoredUnmaskedDefaults.Values.ContainsKey("CandidateEmail") &&
+            !ignoredUnmaskedDefaults.Values.ContainsKey("CandidatePhone"),
+            "UpdateCandidate ignores malformed and empty values outside the field mask");
+        var missingMaskedValue = Input("UpdateCandidate");
+        missingMaskedValue["ProfileFieldMask"] = "CandidatePhone";
+        missingMaskedValue.Remove("CandidateName");
+        Reject(() => Request(missingMaskedValue), "PROFILE_FIELD_VALUE_REQUIRED");
+        var inapplicableMask = Input("CreateCandidate");
+        inapplicableMask["ProfileFieldMask"] = "CandidatePhone";
+        Reject(() => Request(inapplicableMask), "PROFILE_FIELD_MASK_NOT_APPLICABLE");
         foreach (string invalidCvUrl in new[]
         {
             "http://careers.example.invalid/cv",
@@ -427,19 +472,52 @@ static class Program
         var actorInput = Input();
         Check(Request(actorInput).Fingerprint != new ActionRequest(Guid.Parse("00000000-0000-0000-0000-000000000003"), actorInput, Now).Fingerprint, "Actor included in fingerprint");
         var ordered = Input("UpdateCandidate");
+        ordered["ProfileFieldMask"] = "CandidateName,CandidatePhone";
+        ordered["CandidatePhone"] = "+15550101000";
         var reversed = ordered.Reverse().ToDictionary(x => x.Key, x => x.Value);
         Check(Request(ordered).Fingerprint == Request(reversed).Fingerprint, "Canonical input order");
         reversed["CandidatePhone"] = null;
         Check(Request(ordered).Fingerprint != Request(reversed).Fingerprint, "Omitted and explicit null differ");
         var vectorId = Guid.Parse("00000000-0000-0000-0000-000000000004");
         var vector = Input("UpdateCandidate", vectorId);
-        Check(Request(vector).Fingerprint == "4e5eb0d4c3e770c2fd219dd2f3ddad71ca261af3a87220d1148cd9af8a46d0b5", "Update fingerprint golden vector");
+        Check(Request(vector).Fingerprint == "8fd2f364aa2547776970aae88501e24893f5cbd20cace81005d73381a4988ccc",
+            "Update fingerprint golden vector: " + Request(vector).Fingerprint);
         vector["CandidateName"] = "  Synthetic Replacement  ";
-        Check(Request(vector).Fingerprint == "4e5eb0d4c3e770c2fd219dd2f3ddad71ca261af3a87220d1148cd9af8a46d0b5", "Trimmed equivalent request golden vector");
+        Check(Request(vector).Fingerprint == "8fd2f364aa2547776970aae88501e24893f5cbd20cace81005d73381a4988ccc",
+            "Trimmed equivalent request golden vector: " + Request(vector).Fingerprint);
+        vector["ProfileFieldMask"] = "CandidateName,CandidatePhone";
         vector["CandidatePhone"] = null;
-        Check(Request(vector).Fingerprint == "c35231ed0a55b5c76c91f24e0db6c90fd086a4d94997f0279ceea8f11391ca81", "Explicit null fingerprint golden vector");
+        Check(Request(vector).Fingerprint == "1f7e4c1efdc6dca185bb479c5002f59e9407f5786ae2dc779e2b10c819ab1887",
+            "Explicit null fingerprint golden vector: " + Request(vector).Fingerprint);
         vector["CandidatePhone"] = "";
-        Check(Request(vector).Fingerprint != "c35231ed0a55b5c76c91f24e0db6c90fd086a4d94997f0279ceea8f11391ca81", "Empty string differs from explicit null");
+        Check(Request(vector).Fingerprint != "1f7e4c1efdc6dca185bb479c5002f59e9407f5786ae2dc779e2b10c819ab1887",
+            "Empty string differs from explicit null");
+        var legacyReceiptInput = Input("UpdateCandidate", Guid.NewGuid());
+        var legacyReceiptRequest = Request(legacyReceiptInput);
+        var legacyReceipt = new Receipt
+        {
+            Action = "UpdateCandidate",
+            Fingerprint = legacyReceiptRequest.LegacyFingerprint,
+            Version = "1",
+            Result = new ActionResult
+            {
+                CandidateId = Candidate,
+                Previous = ActionRequest.NeedCall,
+                Current = ActionRequest.NeedCall
+            }
+        };
+        var legacyReceiptStore = new MemoryStore();
+        legacyReceiptStore.Receipts[legacyReceiptInput["CorrelationId"] is Guid legacyCorrelation
+            ? legacyCorrelation : throw new Exception("Expected correlation")] = legacyReceipt;
+        var legacyReplay = legacyReceiptStore.Atomic(legacyReceiptRequest);
+        Check(legacyReplay.Replay && legacyReceiptStore.Updates == 0 &&
+            legacyReceipt.Fingerprint == legacyReceiptRequest.LegacyFingerprint &&
+            legacyReceiptStore.Events.SequenceEqual(new[] { "RECEIPT_READ", "CANDIDATE_READ" }),
+            "Maskless UpdateCandidate receipt replays through legacy fingerprint without rewriting receipt");
+        var changedLegacyRequestInput = Input("UpdateCandidate", legacyReceiptRequest.Correlation);
+        changedLegacyRequestInput["ProfileFieldMask"] = "CandidateName,CandidatePhone";
+        changedLegacyRequestInput["CandidatePhone"] = null;
+        Reject(() => legacyReceiptStore.Atomic(Request(changedLegacyRequestInput)), "CORRELATION_CONFLICT");
         var callVector = Input("RecordCall", vectorId);
         Check(Request(callVector).Fingerprint == "6da0c75875c5e6fc97e34e59df7b0a64631b5874f8f75d4c922173d5b67ca4e2", "Call UTC and Choice fingerprint golden vector");
         var originalCulture = System.Globalization.CultureInfo.CurrentCulture;

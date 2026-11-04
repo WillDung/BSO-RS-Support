@@ -871,6 +871,8 @@ internal static class Program
         Check(auditPending.OrganizationReads == 0, "SDK does not query organization audit state");
         var validUpdate = new Host(100010000);
         validUpdate.Input["ActionType"] = "UpdateCandidate";
+        validUpdate.Input["ProfileFieldMask"] =
+            "CandidateName,CandidatePhone,PositionId,CandidateSourceId,CandidateCvUrl,AssignedTaId";
         validUpdate.Input["CandidateName"] = "Synthetic Replacement";
         var updatedPositionId = Guid.NewGuid();
         var updatedTaId = Guid.NewGuid();
@@ -925,24 +927,66 @@ internal static class Program
             defaultedProfileUpdate.Updates == 1,
             "SDK transport-default profile replay performs no second Candidate update");
         var consoleProfileUpdate = CreateProfileUpdateHost();
+        consoleProfileUpdate.Input["ProfileFieldMask"] = "CandidateEmail,CandidatePhone,CandidateCvUrl";
         consoleProfileUpdate.Input["CandidateEmail"] = "edited@example.invalid";
         consoleProfileUpdate.Input["CandidatePhone"] = "+15550101002";
         consoleProfileUpdate.Input["CandidateCvUrl"] = "https://careers.example.invalid/cv/updated";
         foreach (var lookup in profileLookups) consoleProfileUpdate.Input[lookup.Parameter] = Guid.Empty;
         new ApplyCandidateAction().Execute(consoleProfileUpdate);
         var consoleProfileTarget = consoleProfileUpdate.CandidateRequests.Single().Target;
-        Check(consoleProfileTarget.Attributes.Count == 4 &&
-            consoleProfileTarget.GetAttributeValue<string>("os_sr_cand_nm") == "Synthetic Replacement" &&
+        Check(consoleProfileTarget.Attributes.Count == 3 &&
+            !consoleProfileTarget.Contains("os_sr_cand_nm") &&
             consoleProfileTarget.GetAttributeValue<string>("os_sr_cand_eml") == "edited@example.invalid" &&
             consoleProfileTarget.GetAttributeValue<string>("os_sr_cand_phn") == "+15550101002" &&
             consoleProfileTarget.GetAttributeValue<string>("os_sr_cand_cvurl") ==
                 "https://careers.example.invalid/cv/updated" &&
             consoleProfileUpdate.Calls == 0 && consoleProfileUpdate.Histories == 0,
             "SDK matches the rejected Console edit payload shape without mutating its unchanged lookups");
+        var unmaskedDefaultProfileUpdate = CreateProfileUpdateHost();
+        unmaskedDefaultProfileUpdate.Input.Remove("ProfileFieldMask");
+        unmaskedDefaultProfileUpdate.Input["CandidateName"] = null;
+        unmaskedDefaultProfileUpdate.Input["CandidateEmail"] = "";
+        unmaskedDefaultProfileUpdate.Input["CandidatePhone"] = "+15550101003";
+        foreach (var lookup in profileLookups)
+            unmaskedDefaultProfileUpdate.Input[lookup.Parameter] = Guid.Empty;
+        Reject(() => new ApplyCandidateAction().Execute(unmaskedDefaultProfileUpdate), "PROFILE_FIELD_MASK_REQUIRED");
+        Check(unmaskedDefaultProfileUpdate.Updates == 0 && unmaskedDefaultProfileUpdate.Receipt == null,
+            "SDK rejects an UpdateCandidate request without a field mask before mutation");
+        var maskedPhoneUpdate = CreateProfileUpdateHost();
+        maskedPhoneUpdate.Input["ProfileFieldMask"] = "CandidatePhone";
+        maskedPhoneUpdate.Input["CandidateName"] = null;
+        maskedPhoneUpdate.Input["CandidateEmail"] = "";
+        maskedPhoneUpdate.Input["CandidatePhone"] = "+15550101004";
+        foreach (var lookup in profileLookups) maskedPhoneUpdate.Input[lookup.Parameter] = Guid.Empty;
+        new ApplyCandidateAction().Execute(maskedPhoneUpdate);
+        var maskedPhoneTarget = maskedPhoneUpdate.CandidateRequests.Single().Target;
+        Check(maskedPhoneTarget.Attributes.Count == 1 &&
+            maskedPhoneTarget.GetAttributeValue<string>("os_sr_cand_phn") == "+15550101004" &&
+            maskedPhoneUpdate.Updates == 1 && maskedPhoneUpdate.Receipt != null,
+            "SDK ProfileFieldMask applies a phone-only edit despite defaulted text and lookup parameters");
+        var legacySdkReplay = CreateProfileUpdateHost();
+        var legacySdkRequest = new ActionRequest(Actor, legacySdkReplay.Input.ToDictionary(
+            pair => pair.Key, pair => (object?)pair.Value, StringComparer.Ordinal), DateTime.UtcNow);
+        var legacySdkReceipt = new Entity("os_sr_oprc", Guid.NewGuid())
+        {
+            ["os_sr_oprc_corid"] = ((Guid)legacySdkReplay.Input["CorrelationId"]).ToString("D"),
+            ["os_sr_oprc_cact"] = "UpdateCandidate",
+            ["os_sr_oprc_hash"] = legacySdkRequest.LegacyFingerprint,
+            ["os_sr_oprc_ver"] = "1",
+            ["os_sr_oprc_cand"] = new EntityReference("os_sr_cand", Candidate),
+            ["os_sr_oprc_newstat"] = ActionRequest.NeedCall
+        };
+        legacySdkReplay.Receipt = legacySdkReceipt;
+        new ApplyCandidateAction().Execute(legacySdkReplay);
+        Check((string)legacySdkReplay.Output["ResultCode"] == "DuplicateReplay" &&
+            legacySdkReplay.Updates == 0 && legacySdkReplay.Receipt == legacySdkReceipt &&
+            legacySdkReceipt.GetAttributeValue<string>("os_sr_oprc_hash") == legacySdkRequest.LegacyFingerprint,
+            "SDK replays a matching historical maskless receipt without updating Candidate or rewriting receipt");
         foreach (var lookup in profileLookups)
         {
             var clearProfile = CreateProfileUpdateHost();
             clearProfile.Input["CorrelationId"] = minimalProfileUpdate.Input["CorrelationId"];
+            clearProfile.Input["ProfileFieldMask"] = "CandidateName," + lookup.Parameter;
             foreach (var other in profileLookups) clearProfile.Input[other.Parameter] = Guid.Empty;
             clearProfile.Input[lookup.Parameter] = null;
             new ApplyCandidateAction().Execute(clearProfile);
@@ -956,6 +1000,7 @@ internal static class Program
                 minimalProfileUpdate.Receipt!.GetAttributeValue<string>("os_sr_oprc_hash"),
                 "SDK explicit " + lookup.Parameter + " clear differs from omission in the receipt fingerprint");
             var malformedProfile = CreateProfileUpdateHost();
+            malformedProfile.Input["ProfileFieldMask"] = "CandidateName," + lookup.Parameter;
             malformedProfile.Input[lookup.Parameter] = Guid.NewGuid().ToString("D");
             Reject(() => new ApplyCandidateAction().Execute(malformedProfile),
                 "INVALID_GUID_PARAMETER:" + lookup.Parameter);
@@ -965,10 +1010,11 @@ internal static class Program
         }
         var emptyDefaultedUpdate = CreateProfileUpdateHost();
         emptyDefaultedUpdate.Input.Remove("CandidateName");
+        emptyDefaultedUpdate.Input.Remove("ProfileFieldMask");
         foreach (var lookup in profileLookups) emptyDefaultedUpdate.Input[lookup.Parameter] = Guid.Empty;
-        Reject(() => new ApplyCandidateAction().Execute(emptyDefaultedUpdate), "EMPTY_UPDATE");
+        Reject(() => new ApplyCandidateAction().Execute(emptyDefaultedUpdate), "PROFILE_FIELD_MASK_REQUIRED");
         Check(emptyDefaultedUpdate.Updates == 0 && emptyDefaultedUpdate.Receipt == null,
-            "SDK GUID defaults alone cannot manufacture a profile mutation");
+            "SDK GUID defaults cannot manufacture a profile mutation without a mask");
         foreach (string requiredGuid in new[] { "CandidateId", "CorrelationId" })
         {
             var invalidProfile = CreateProfileUpdateHost();
@@ -980,6 +1026,7 @@ internal static class Program
         }
         var staleUpdate = new Host(100010000) { Status = ActionRequest.Answered };
         staleUpdate.Input["ActionType"] = "UpdateCandidate";
+        staleUpdate.Input["ProfileFieldMask"] = "CandidateName";
         staleUpdate.Input["CandidateName"] = "Synthetic Replacement";
         staleUpdate.Input.Remove("CallOutcome");
         staleUpdate.Input.Remove("ContactedAt");
@@ -1002,6 +1049,12 @@ internal static class Program
         unknownAction.Input["ActionType"] = "UnsupportedOperation";
         unknownAction.Input["Actor"] = Guid.NewGuid();
         Reject(() => new ApplyCandidateAction().Execute(unknownAction), "INVALID_ACTION");
+        var inapplicableProfileMask = new Host(100010000, createCandidate: true);
+        inapplicableProfileMask.Input["ProfileFieldMask"] = "CandidatePhone";
+        Reject(() => new ApplyCandidateAction().Execute(inapplicableProfileMask),
+            "CANDIDATE_CORE_OPERATION_REJECTED:CREATE_CANDIDATE:INPUT_VALIDATION:PROFILE_FIELD_MASK_NOT_APPLICABLE");
+        Check(inapplicableProfileMask.CreatedCandidates == 0 && inapplicableProfileMask.Receipt == null,
+            "SDK rejects profile masks on CreateCandidate before storage");
         foreach (var directWrite in new[]
         {
             (Message: "Create", Table: "os_sr_cand", Category: "CANDIDATE_CREATE"),
@@ -1198,6 +1251,7 @@ internal static class Program
     {
         var host = new Host(ActionRequest.NeedCall);
         host.Input["ActionType"] = "UpdateCandidate";
+        host.Input["ProfileFieldMask"] = "CandidateName";
         host.Input["CandidateName"] = "Synthetic Replacement";
         host.Input.Remove("CallOutcome");
         host.Input.Remove("ContactedAt");

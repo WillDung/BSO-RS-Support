@@ -5,6 +5,7 @@ param(
     [switch]$Continue,
     [switch]$RefreshExisting,
     [switch]$ReleaseNeutralProfile,
+    [switch]$DevelopmentSourceAhead,
     [switch]$PublishOnly,
     [switch]$ReconcilePublishOnly,
     [switch]$CreateNewResources,
@@ -167,11 +168,47 @@ foreach ($fileName in $releaseManifest.candidateConsole.PSObject.Properties.Name
 foreach ($resourceName in $acceptedPublicationHashes.Keys) {
     $expectedCandidateConsoleHashes[$resourceName] = [string]$acceptedPublicationHashes[$resourceName]
 }
+$developmentSourceAheadHashes = @{
+    'os_/bso/candidate-console.html' = '25b4af85040e1e5a93d50d967b27b4e4fdeadada363098833e566453a6cb3440'
+    'os_/bso/candidate-console.js' = '99d018241eaae5c466d44c400836eda1efaaedb85ec7ddc1820dff99a43f4431'
+}
+$developmentSourceAheadUnchangedNames = @(
+    'os_/bso/candidate-console-environment.js',
+    'os_/bso/candidate-console-policy.js'
+)
+if ($DevelopmentSourceAhead) {
+    $selectedDevelopmentNames = @($RefreshResourceNames | Sort-Object -CaseSensitive)
+    $allowedDevelopmentNames = @($developmentSourceAheadHashes.Keys | Sort-Object -CaseSensitive)
+    if (-not $RefreshExisting -or $Continue -or $CreateNewResources -or
+        $ReleaseNeutralProfile -or $PublishOnly -or $ReconcilePublishOnly -or
+        $RefreshResourceNames.Count -ne 2 -or
+        [string]::Join('|', $selectedDevelopmentNames) -cne
+            [string]::Join('|', $allowedDevelopmentNames) -or
+        [string]::IsNullOrWhiteSpace($EnvironmentConfigurationPath) -or
+        [string]::IsNullOrWhiteSpace($EnvironmentHtmlPath) -or
+        -not [string]::IsNullOrWhiteSpace($BaselineSnapshotPath)) {
+        throw 'Development source-ahead refresh requires the exact HTML/JavaScript pair and their matching external DEV configuration.'
+    }
+    foreach ($resourceName in $allowedDevelopmentNames) {
+        $resource = @($allResources | Where-Object Name -CEQ $resourceName)
+        if ($resource.Count -ne 1) { throw 'CANDIDATE_CONSOLE_RESOURCE_INVENTORY_DRIFT' }
+        $sourceHash = [Convert]::ToHexString(
+            [Security.Cryptography.SHA256]::HashData([IO.File]::ReadAllBytes($resource[0].Path))
+        ).ToLowerInvariant()
+        if ($sourceHash -cne $developmentSourceAheadHashes[$resourceName]) {
+            throw 'CANDIDATE_CONSOLE_SOURCE_CONTENT_DRIFT'
+        }
+        $expectedCandidateConsoleHashes[$resourceName] = $sourceHash
+    }
+}
 foreach ($resourceName in $canonicalCandidateConsoleNames) {
     if ($expectedCandidateConsoleHashes[$resourceName] -notmatch '^[0-9a-f]{64}$') {
         throw 'CANDIDATE_CONSOLE_RESOURCE_INVENTORY_DRIFT'
     }
-    if ($resourceName -notin $acceptedPublicationHashes.Keys) {
+    $unchangedSourceAheadResource = $DevelopmentSourceAhead -and
+        $resourceName -cin $developmentSourceAheadUnchangedNames
+    if ($resourceName -notin $acceptedPublicationHashes.Keys -and
+        -not $unchangedSourceAheadResource) {
         $sourceResource = @($allResources | Where-Object Name -CEQ $resourceName)
         if ($sourceResource.Count -ne 1) {
             throw 'CANDIDATE_CONSOLE_RESOURCE_INVENTORY_DRIFT'
@@ -942,6 +979,62 @@ try {
         "name eq '$($_.Name)'"
     }))
     $existing = Get-DataverseJson -Path "$($target.WebResourceEntitySet)?%24select=webresourceid,name&%24filter=$([Uri]::EscapeDataString($nameFilter))"
+    if ($DevelopmentSourceAhead) {
+        foreach ($unchangedName in $developmentSourceAheadUnchangedNames) {
+            $unchangedResource = @($allResources | Where-Object Name -CEQ $unchangedName)
+            if ($unchangedResource.Count -ne 1 -or $unchangedName -in $resources.Name) {
+                throw 'CANDIDATE_CONSOLE_RESOURCE_INVENTORY_DRIFT'
+            }
+            $unchangedRows = Get-DataverseJson -Path (
+                "$($target.WebResourceEntitySet)?%24select=webresourceid,name&" +
+                "%24filter=$([Uri]::EscapeDataString("name eq '$unchangedName'"))"
+            )
+            $unchangedMatches = @($unchangedRows.value | Where-Object name -CEQ $unchangedName)
+            if ($unchangedMatches.Count -ne 1) {
+                throw 'CANDIDATE_CONSOLE_RESOURCE_INVENTORY_DRIFT'
+            }
+            $unchangedId = [string]$unchangedMatches[0].webresourceid
+            $unchangedState = Get-ExactWebResourceState `
+                -Resource $unchangedResource[0] -ResourceId $unchangedId
+            $unchangedExpectedHash = if ($unchangedName -ceq 'os_/bso/candidate-console-environment.js') {
+                [string]$configurationHash
+            } else {
+                [Convert]::ToHexString(
+                    [Security.Cryptography.SHA256]::HashData(
+                        [IO.File]::ReadAllBytes($unchangedResource[0].Path)
+                    )
+                ).ToLowerInvariant()
+            }
+            $unchangedMembership = Get-DataverseJson -Path (
+                "solutioncomponents?%24select=objectid,componenttype&" +
+                "%24filter=_solutionid_value eq $($solutionRows.value[0].solutionid) and objectid eq $unchangedId"
+            )
+            $unchangedMembershipCount = @($unchangedMembership.value | Where-Object {
+                [int]$_.componenttype -eq $target.WebResourceObjectTypeCode -and
+                [string]$_.objectid -ieq $unchangedId
+            }).Count
+            $unchangedEquivalence = Test-WebResourceDefinitionEquivalence `
+                -PublishedSha256 $unchangedState.PublishedSha256 `
+                -CurrentSha256 $unchangedState.CurrentSha256 `
+                -ExpectedSha256 $unchangedExpectedHash
+            if (-not $unchangedEquivalence.IsReconciled -or
+                [int]$unchangedState.CurrentComponentState -ne 0 -or
+                [int]$unchangedState.PublishedComponentState -ne 0 -or
+                $unchangedMembershipCount -ne 1) {
+                throw 'CANDIDATE_CONSOLE_SOURCE_BASELINE_UNRECONCILED'
+            }
+            $script:RefreshContentChecks.Add([ordered]@{
+                Name = $unchangedName
+                SelectedForRefresh = $false
+                ContentMatchesExpected = $true
+                ExpectedSha256 = $unchangedExpectedHash
+                CurrentSha256 = $unchangedState.CurrentSha256
+                PublishedSha256 = $unchangedState.PublishedSha256
+                PublishedMatchesCurrent = $unchangedState.PublishedMatchesCurrent
+                SolutionMembershipCount = $unchangedMembershipCount
+            })
+        }
+    }
     if ($RefreshExisting) {
         if (@($existing.value).Count -ne $resources.Count -or
             @($existing.value | Where-Object { $_.name -notin @($resources | ForEach-Object Name) }).Count -ne 0) {
@@ -1228,7 +1321,9 @@ try {
                 )
             }
             [ordered]@{
-                Result = if (-not $baselineVersionsMatch) {
+                Result = if ($DevelopmentSourceAhead) {
+                    'CANDIDATE_CONSOLE_DEV_SOURCE_AHEAD_PREFLIGHT_READY'
+                } elseif (-not $baselineVersionsMatch) {
                     'CANDIDATE_CONSOLE_SOURCE_BASELINE_UNRECONCILED'
                 } else {
                     'CANDIDATE_CONSOLE_REFRESH_PREFLIGHT_READY'
@@ -1242,6 +1337,7 @@ try {
                 ContentChecks = @($script:RefreshContentChecks)
                 BaselineSnapshotCaptured = -not [string]::IsNullOrWhiteSpace($BaselineSnapshotPath)
                 BaselineVersionsMatch = $baselineVersionsMatch
+                DevelopmentSourceAhead = [bool]$DevelopmentSourceAhead
                 Writes = 0
                 AutomaticRetries = 0
             } | ConvertTo-Json -Depth 8
@@ -1274,6 +1370,7 @@ try {
             Environment = $target.EnvironmentName
             AppUniqueName = $target.AppUniqueName
             SolutionUniqueName = $target.SolutionUniqueName
+            DevelopmentSourceAhead = [bool]$DevelopmentSourceAhead
             Dispatches = [System.Collections.Generic.List[object]]::new()
             ResourceIds = @()
             SiteMapPatch = 'NOT_DISPATCHED'
@@ -1650,10 +1747,15 @@ try {
         $script:Journal.Result = 'CANDIDATE_CONSOLE_REFRESHED'
         Save-Journal
         [ordered]@{
-            Result = 'CANDIDATE_CONSOLE_REFRESHED'
+            Result = if ($DevelopmentSourceAhead) {
+                'CANDIDATE_CONSOLE_DEV_SOURCE_AHEAD_REFRESHED'
+            } else {
+                'CANDIDATE_CONSOLE_REFRESHED'
+            }
             Environment = $target.EnvironmentName
             AppUniqueName = $target.AppUniqueName
             SolutionUniqueName = $target.SolutionUniqueName
+            DevelopmentSourceAhead = [bool]$DevelopmentSourceAhead
             Resources = @($resources | ForEach-Object Name)
             WebResourcePatchCount = $script:Counts.PATCH
             SitemapPatchCount = 0

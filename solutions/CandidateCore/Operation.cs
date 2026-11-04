@@ -37,17 +37,24 @@ namespace os_sr_cact
         public int? ExpectedStatus { get; }
         public IReadOnlyDictionary<string, object?> Values { get; }
         public string Fingerprint { get; }
+        public string LegacyFingerprint { get; }
 
         private static readonly string[] DeclaredInputNames =
         {
             "ActionType", "CorrelationId", "CandidateId", "ExpectedStatus", "CandidateName",
             "CandidateEmail", "CandidatePhone", "CandidateCvUrl", "PositionId", "CandidateSourceId",
-            "AssignedTaId", "CallOutcome", "ContactedAt", "Notes", "Reason", "InterviewerId",
-            "LocationId", "StartAt", "EndAt", "ResultNotes"
+            "AssignedTaId", "ProfileFieldMask", "CallOutcome", "ContactedAt", "Notes", "Reason",
+            "InterviewerId", "LocationId", "StartAt", "EndAt", "ResultNotes"
         };
 
         private static readonly HashSet<string> DeclaredInputNameSet =
             new HashSet<string>(DeclaredInputNames, StringComparer.Ordinal);
+
+        private static readonly string[] UpdateCandidateProfileFields =
+        {
+            "CandidateName", "CandidateEmail", "CandidatePhone", "PositionId",
+            "CandidateSourceId", "CandidateCvUrl", "AssignedTaId"
+        };
 
         public static bool IsSupportedAction(string action) =>
             new[] { "CreateCandidate", "UpdateCandidate", "RecordCall", "ProceedToScheduling",
@@ -62,7 +69,8 @@ namespace os_sr_cact
                     "CandidateCvUrl", "PositionId", "CandidateSourceId", "AssignedTaId" });
             if (action == "UpdateCandidate")
                 return common.Concat(new[] { "CandidateId", "ExpectedStatus", "CandidateName", "CandidateEmail",
-                    "CandidatePhone", "CandidateCvUrl", "PositionId", "CandidateSourceId", "AssignedTaId" });
+                    "CandidatePhone", "CandidateCvUrl", "PositionId", "CandidateSourceId", "AssignedTaId",
+                    "ProfileFieldMask" });
             if (action == "RecordCall")
                 return common.Concat(new[] { "CandidateId", "ExpectedStatus", "CallOutcome", "ContactedAt", "Notes" });
             if (action == "MarkRound1Scheduled" || action == "RequestReschedule")
@@ -115,13 +123,31 @@ namespace os_sr_cact
                 if (hasExpectedStatus && (!ExpectedStatus.HasValue || ExpectedStatus < NeedCall || ExpectedStatus > Failed))
                     throw new OperationError("INVALID_EXPECTED_STATUS");
             }
+            var maskedProfileFields = new HashSet<string>(StringComparer.Ordinal);
+            var normalizedProfileMask = Action == "UpdateCandidate"
+                ? NormalizeProfileFieldMask(input, maskedProfileFields)
+                : "";
             var values = new SortedDictionary<string, object?>(StringComparer.Ordinal);
-            var profile = new[] { "CandidateName", "CandidateEmail", "CandidatePhone", "CandidateCvUrl",
-                "PositionId", "CandidateSourceId", "AssignedTaId" };
+            var profile = UpdateCandidateProfileFields;
             var allowed = new HashSet<string>(ApplicableInputNames(Action), StringComparer.Ordinal);
             foreach (var pair in input)
             {
                 if (Action == "CreateCandidate" && (pair.Key == "ExpectedStatus" || pair.Key == "CandidateId"))
+                    continue;
+                if (pair.Key == "ProfileFieldMask")
+                {
+                    if (Action != "UpdateCandidate")
+                    {
+                        if (pair.Value != null &&
+                            (!(pair.Value is string emptyMask) || emptyMask.Length != 0))
+                            throw new OperationError("PROFILE_FIELD_MASK_NOT_APPLICABLE");
+                        continue;
+                    }
+                    values.Add(pair.Key, normalizedProfileMask);
+                    continue;
+                }
+                if (Action == "UpdateCandidate" && profile.Contains(pair.Key) &&
+                    !maskedProfileFields.Contains(pair.Key))
                     continue;
                 if (!allowed.Contains(pair.Key))
                     throw new OperationError("UNEXPECTED_INPUT:ACTION_REQUEST:" +
@@ -158,7 +184,16 @@ namespace os_sr_cact
             }
             if (Action == "CreateCandidate" && (!values.ContainsKey("CandidateName") || !values.ContainsKey("CandidateEmail")))
                 throw new OperationError("CONTACT_REQUIRED");
-            if (Action == "UpdateCandidate" && !profile.Any(values.ContainsKey)) throw new OperationError("EMPTY_UPDATE");
+            if (Action == "UpdateCandidate")
+            {
+                foreach (var field in maskedProfileFields)
+                {
+                    if (!input.ContainsKey(field))
+                        throw new OperationError(field == "CandidateName" || field == "CandidateEmail"
+                            ? "REQUIRED_TEXT" : "PROFILE_FIELD_VALUE_REQUIRED");
+                }
+                if (!profile.Any(values.ContainsKey)) throw new OperationError("EMPTY_UPDATE");
+            }
             if (Action == "RecordCall")
             {
                 int outcome = Required<int>(values, "CallOutcome");
@@ -183,13 +218,38 @@ namespace os_sr_cact
                     throw new OperationError("INVALID_SCHEDULE_TIME");
             }
             Values = values;
-            // Length prefixes distinguish omitted, null, empty, delimiters and different typed values.
+            Fingerprint = FingerprintFor(actor, values);
+            LegacyFingerprint = Action == "UpdateCandidate"
+                ? FingerprintFor(actor, values.Where(pair => pair.Key != "ProfileFieldMask"))
+                : Fingerprint;
+        }
+
+        private static string NormalizeProfileFieldMask(
+            IDictionary<string, object?> input, HashSet<string> maskedFields)
+        {
+            if (!input.TryGetValue("ProfileFieldMask", out var rawMask) || rawMask == null)
+                throw new OperationError("PROFILE_FIELD_MASK_REQUIRED");
+            if (!(rawMask is string mask) || mask.Length == 0)
+                throw new OperationError("INVALID_PROFILE_FIELD_MASK");
+            foreach (var field in mask.Split(','))
+            {
+                if (field.Length == 0 || !string.Equals(field, field.Trim(), StringComparison.Ordinal) ||
+                    !UpdateCandidateProfileFields.Contains(field) || !maskedFields.Add(field))
+                    throw new OperationError("INVALID_PROFILE_FIELD_MASK");
+            }
+            return string.Join(",", UpdateCandidateProfileFields.Where(maskedFields.Contains));
+        }
+
+        private static string FingerprintFor(
+            Guid actor, IEnumerable<KeyValuePair<string, object?>> values)
+        {
             var canonical = new StringBuilder("os_sr_cact:1");
             Append(canonical, "Actor", actor.ToString("D"));
             foreach (var pair in values)
                 Append(canonical, pair.Key, CanonicalValue(pair.Value));
             using (var hash = SHA256.Create())
-                Fingerprint = BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(canonical.ToString()))).Replace("-", "").ToLowerInvariant();
+                return BitConverter.ToString(hash.ComputeHash(Encoding.UTF8.GetBytes(canonical.ToString())))
+                    .Replace("-", "").ToLowerInvariant();
         }
 
         private static string CanonicalValue(object? value)
@@ -362,8 +422,10 @@ namespace os_sr_cact
             var receipt = store.FindReceipt(request.Correlation);
             if (receipt != null)
             {
-                if (receipt.Action != request.Action || receipt.Fingerprint != request.Fingerprint ||
-                    receipt.Version != "1")
+                var fingerprintMatches = receipt.Fingerprint == request.Fingerprint ||
+                    (request.Action == "UpdateCandidate" &&
+                        receipt.Fingerprint == request.LegacyFingerprint);
+                if (receipt.Action != request.Action || !fingerprintMatches || receipt.Version != "1")
                     throw new OperationError("CORRELATION_CONFLICT");
                 if (request.CandidateId.HasValue && request.CandidateId != receipt.Result.CandidateId)
                     throw new OperationError("CORRELATION_CONFLICT");

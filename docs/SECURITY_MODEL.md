@@ -1,10 +1,12 @@
 # Security Model
 
-## Reference Admin scope (approved, not deployed)
+## Reference Admin scope (deployed, unassigned; 2026-11-04)
 
-The owner approved one additional Reference Admin role root with organization-level Read/Create/Write on TA and Location only. Delete, Candidate, Call Log, Status History, Interview Schedule, Operation Receipt, and Candidate Core privileges are excluded. The role is to remain unassigned until a separate access decision is made.
+The owner-approved P0 scope (2026-11-04) is one separate Reference Admin role with organization-level Create/Read/Write/Append/Append To on TA, Position, Candidate Source, and Location only. Delete, Candidate, Call Log, Status History, Interview Schedule, Operation Receipt, Candidate Core execution, and security/admin privileges are excluded. The role remains unassigned; this does not broaden the BSO role.
 
-No role definition or `srapp` role association was authored because the environment-generated role identifier has not been read under the required clean BSO identity. No role, team membership, BSO privilege, or app association was changed. The accepted BSO/Candidate Core security boundary remains unchanged; live role creation and least-privilege acceptance are pending authenticated environment access.
+Live creation/readback confirmed exactly the approved 20 Global privileges and zero user/team assignments. Dataverse initially added four SharePoint defaults; these were detected and removed from this new role only, with immediate readback and no retry. The actual unmanaged export is captured in [Reference Admin role source](../solutions/Roles/BSO-RS%20Support%20-%20Reference%20Admin.xml), with its own canonical Solution root. No app-role association or BSO role change was made.
+
+Fresh P0 reconciliation matched all 60 canonical BSO privileges and confirmed no protected Core direct Create/Write. All 50 existing ProtectCandidateCore registrations remained disabled; missing legacy Interview Schedule registrations are not a defect. The owner authorizes `OWNER_DEV_FUNCTIONAL_IDENTITY` for this development pass; a clean BSO identity is not a deployment prerequisite. Clean-BSO runtime acceptance remains deferred, not reconfirmed by owner testing. Owner profile-edit acceptance is blocked as recorded in [Current State](CURRENT_STATE.md); no successful P0 lifecycle/security runtime acceptance is claimed.
 
 ## Phase 5B Candidate Core service boundary (29 October 2026)
 
@@ -48,7 +50,11 @@ The Phase 5A user-directed scheduling contract treats the durable `os_sr_intv` R
 
 VN LMV IT readback now confirms `os_sr_cact` uses `prvReados_sr_cand`. The API remains included in `os_sr_bso_rs_support`. Current live readback also shows the unassigned `BSO-RS Support - BSO` role with zero user/team assignments and no protected custom-table Create/Write grants in the verified scope. This session did not establish the precise change provenance for those live values; treat them as observed state and keep role assignment out of Phase 5A.
 
-The approved Phase 5A target supersedes `ProtectCandidateCore` as the production direct-write security boundary; Dataverse role privileges will deny direct protected-table writes. Guard source is retained and its 50 registrations remain documented inactive. They were not re-read, modified, or reactivated in this work. SYSTEM writes are scoped to the explicit API mutation matrix; standard Dataverse privilege denial, not guard-specific `0x80040265`, is the intended future direct-write result.
+The approved Phase 5A/5B architecture is `CURRENT_DATAVERSE_ROLE_SECURITY_MODEL`: Dataverse role privileges deny BSO direct protected-table Create/Write; the API validates caller-visible references and performs bounded trusted SYSTEM writes while preserving initiating actor/owner semantics. `ProtectCandidateCore` is superseded and does not participate in current authorization.
+
+**Read-only reconciliation and owner decision (2026-11-04):** all 50 installed `os_sr_cact.ProtectCandidateCore` registrations are disabled, synchronous PreValidation, and run as caller. The two installed legacy/package types have 50 and zero registrations respectively. The older contract's 62-name coverage, including 12 absent `os_sr_intv` registrations, is `HISTORICAL_PROTECTCANDIDATECORE_REGISTRATION_MODEL`, not a current deployment requirement or defect. Do not enable existing steps, create missing steps, activate the signed rollback assembly, or expand the guard model. Historical source and evidence remain retained.
+
+[Cutover-BsoRsCandidateCoreGuards.ps1](../scripts/Cutover-BsoRsCandidateCoreGuards.ps1) now defaults to read-only role-model reconciliation and reports `LEGACY_PROTECTCANDIDATECORE_CUTOVER_NOT_APPLICABLE`. It rejects active legacy registrations without changing them and does not require an exact registration count. Retained active-guard recovery requires explicit `-SecurityModel LegacyActiveGuardRecovery` plus separate recovery authorization; it is not part of P0 deployment. This guard readback does not itself reconfirm BSO role privileges or clean-BSO runtime acceptance.
 
 The user designated VN LMV IT as the Phase 5A implementation/deployment/runtime/browser acceptance environment. This task does not authorize targeting Production as a separate environment or claiming Production acceptance. The role remains unassigned and must stay unassigned through Phase 5A closure. Real candidate data remains prohibited.
 

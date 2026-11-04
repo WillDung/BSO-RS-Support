@@ -2,6 +2,7 @@
 [CmdletBinding()]
 param(
     [ValidateSet('Preflight', 'Apply', 'Continue', 'Reconcile', 'Rollback')][string]$Mode = 'Preflight',
+    [ValidateSet('DataverseRoles', 'LegacyActiveGuardRecovery')][string]$SecurityModel = 'DataverseRoles',
     [Parameter(Mandatory)][string]$EnvironmentName,
     [Parameter(Mandatory)][string]$OrganizationUrl,
     [Parameter(Mandatory)][string]$ExpectedEnvironmentId,
@@ -89,7 +90,8 @@ function Invoke-GuardRequest {
         [object]$Body
     )
     if ($Method -ceq 'PATCH' -and
-        ($Mode -notin @('Apply', 'Continue', 'Rollback') -or
+        ($SecurityModel -cne 'LegacyActiveGuardRecovery' -or
+            $Mode -notin @('Apply', 'Continue', 'Rollback') -or
             $Path -notmatch '^sdkmessageprocessingsteps\([0-9a-fA-F-]{36}\)$' -or
             $null -eq $script:Journal -or $script:WriteIndex -ge $script:ActiveWrites.Count)) {
         throw 'Only a journaled SDK message processing step EventHandler PATCH is permitted.'
@@ -178,6 +180,47 @@ function Get-GuardRows {
 function Get-GuardHash {
     param([byte[]]$Bytes)
     Get-Sha256 -Bytes $Bytes
+}
+
+function Get-RoleModelLegacyGuardInventory {
+    $types = @(Get-GuardRows -Path "plugintypes?`$select=plugintypeid,typename&`$filter=typename eq 'os_sr_cact.ProtectCandidateCore'")
+    if ($types.Count -eq 0) { throw 'Installed legacy ProtectCandidateCore type could not be reconciled.' }
+    $steps = @(
+        foreach ($type in $types) {
+            $typeId = [guid]$type.plugintypeid
+            Get-GuardRows -Path "sdkmessageprocessingsteps?`$select=sdkmessageprocessingstepid,name,statecode,stage,mode,_impersonatinguserid_value&`$filter=_eventhandler_value eq $typeId"
+        }
+    )
+    $named = @(Get-GuardRows -Path "sdkmessageprocessingsteps?`$select=sdkmessageprocessingstepid,name&`$filter=startswith(name,'os_sr_cact.guard.')")
+    $ids = @($steps | ForEach-Object { ([guid]$_.sdkmessageprocessingstepid).ToString('D') } | Sort-Object -Unique)
+    if ($ids.Count -ne $steps.Count -or
+        @($named | Where-Object { ([guid]$_.sdkmessageprocessingstepid).ToString('D') -notin $ids }).Count -ne 0) {
+        throw 'Legacy guard names reference an unexpected handler or duplicate registration.'
+    }
+    if (@($steps | Where-Object {
+                $null -eq $_.statecode -or [int]$_.statecode -ne 1
+            }).Count -ne 0) {
+        throw 'Unexpected active ProtectCandidateCore registration; current role-based model requires all legacy steps disabled.'
+    }
+    if (@($steps | Where-Object {
+                $null -eq $_.stage -or [int]$_.stage -ne 10 -or
+                $null -eq $_.mode -or [int]$_.mode -ne 0 -or
+                $null -ne $_._impersonatinguserid_value
+            }).Count -ne 0) {
+        throw 'Disabled legacy guard registration configuration differs from synchronous PreValidation caller execution.'
+    }
+    [ordered]@{
+        Result = 'LEGACY_PROTECTCANDIDATECORE_CUTOVER_NOT_APPLICABLE'
+        SecurityModel = 'CURRENT_DATAVERSE_ROLE_SECURITY_MODEL'
+        LegacyModel = 'HISTORICAL_PROTECTCANDIDATECORE_REGISTRATION_MODEL'
+        Classification = 'PROTECTCANDIDATECORE_LEGACY_TOPOLOGY_RECONCILED'
+        LegacySteps = $steps.Count
+        DisabledLegacySteps = $steps.Count
+        ActiveLegacySteps = 0
+        LegacyRegistrationCountRequired = $false
+        MissingInterviewScheduleRegistrationsRequired = $false
+        DirectWriteSecurityBoundary = 'Dataverse role privileges; bounded trusted Candidate Core API writes'
+    }
 }
 
 function ConvertTo-GuardPropertyValue {
@@ -704,6 +747,9 @@ function Invoke-GuardStepWrite {
 }
 
 try {
+    if ($SecurityModel -ceq 'DataverseRoles' -and $Mode -notin @('Preflight', 'Reconcile')) {
+        throw 'Current Dataverse role security model is read-only; legacy recovery requires explicit -SecurityModel LegacyActiveGuardRecovery and separate recovery authorization.'
+    }
     if ($EnvironmentName -cne 'VN LMV IT' -or ([Uri]$OrganizationUrl).Scheme -cne 'https') {
         throw 'R4L target must use the owner-confirmed VN LMV IT environment and an HTTPS organization URL.'
     }
@@ -714,6 +760,15 @@ try {
     if ([string]$who.UserId -ine $script:ExpectedUserId -or
         [string]$who.OrganizationId -ine $ExpectedOrganizationId) {
         throw 'Dataverse WhoAmI does not match the PAC expected-user and organization guards.'
+    }
+
+    if ($SecurityModel -ceq 'DataverseRoles') {
+        $inventory = Get-RoleModelLegacyGuardInventory
+        $inventory.GET = $script:RequestCounts.GET
+        $inventory.PATCH = $script:RequestCounts.PATCH
+        $inventory.AutomaticRetries = 0
+        $inventory | ConvertTo-Json -Depth 10
+        return
     }
 
     if ($Mode -ceq 'Preflight') {

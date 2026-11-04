@@ -898,11 +898,92 @@ internal static class Program
             profileUpdateTarget.GetAttributeValue<EntityReference>("os_sr_cand_ta")?.Id == updatedTaId &&
             validUpdate.Calls == 0 && validUpdate.Histories == 0,
             "SDK UpdateCandidate persists profile changes and explicit clears without workflow side effects");
+        var minimalProfileUpdate = CreateProfileUpdateHost();
+        var defaultedProfileUpdate = CreateProfileUpdateHost();
+        defaultedProfileUpdate.Input["CorrelationId"] = minimalProfileUpdate.Input["CorrelationId"];
+        var profileLookups = new[]
+        {
+            (Parameter: "PositionId", Attribute: "os_sr_cand_pos"),
+            (Parameter: "CandidateSourceId", Attribute: "os_sr_cand_csrc"),
+            (Parameter: "AssignedTaId", Attribute: "os_sr_cand_ta")
+        };
+        foreach (var lookup in profileLookups)
+            defaultedProfileUpdate.Input[lookup.Parameter] = Guid.Empty;
+        new ApplyCandidateAction().Execute(minimalProfileUpdate);
+        new ApplyCandidateAction().Execute(defaultedProfileUpdate);
+        var defaultedTarget = defaultedProfileUpdate.CandidateRequests.Single().Target;
+        Check(defaultedTarget.Attributes.Count == 1 &&
+            defaultedTarget.GetAttributeValue<string>("os_sr_cand_nm") == "Synthetic Replacement" &&
+            defaultedProfileUpdate.Updates == 1 && defaultedProfileUpdate.Calls == 0 &&
+            defaultedProfileUpdate.Histories == 0 && defaultedProfileUpdate.Status == ActionRequest.NeedCall,
+            "SDK optional GUID transport defaults preserve all unchanged lookups and workflow state");
+        Check(defaultedProfileUpdate.Receipt!.GetAttributeValue<string>("os_sr_oprc_hash") ==
+            minimalProfileUpdate.Receipt!.GetAttributeValue<string>("os_sr_oprc_hash"),
+            "SDK defaulted and omitted UpdateCandidate lookups have identical fingerprints");
+        new ApplyCandidateAction().Execute(defaultedProfileUpdate);
+        Check((string)defaultedProfileUpdate.Output["ResultCode"] == "DuplicateReplay" &&
+            defaultedProfileUpdate.Updates == 1,
+            "SDK transport-default profile replay performs no second Candidate update");
+        var consoleProfileUpdate = CreateProfileUpdateHost();
+        consoleProfileUpdate.Input["CandidateEmail"] = "edited@example.invalid";
+        consoleProfileUpdate.Input["CandidatePhone"] = "+15550101002";
+        consoleProfileUpdate.Input["CandidateCvUrl"] = "https://careers.example.invalid/cv/updated";
+        foreach (var lookup in profileLookups) consoleProfileUpdate.Input[lookup.Parameter] = Guid.Empty;
+        new ApplyCandidateAction().Execute(consoleProfileUpdate);
+        var consoleProfileTarget = consoleProfileUpdate.CandidateRequests.Single().Target;
+        Check(consoleProfileTarget.Attributes.Count == 4 &&
+            consoleProfileTarget.GetAttributeValue<string>("os_sr_cand_nm") == "Synthetic Replacement" &&
+            consoleProfileTarget.GetAttributeValue<string>("os_sr_cand_eml") == "edited@example.invalid" &&
+            consoleProfileTarget.GetAttributeValue<string>("os_sr_cand_phn") == "+15550101002" &&
+            consoleProfileTarget.GetAttributeValue<string>("os_sr_cand_cvurl") ==
+                "https://careers.example.invalid/cv/updated" &&
+            consoleProfileUpdate.Calls == 0 && consoleProfileUpdate.Histories == 0,
+            "SDK matches the rejected Console edit payload shape without mutating its unchanged lookups");
+        foreach (var lookup in profileLookups)
+        {
+            var clearProfile = CreateProfileUpdateHost();
+            clearProfile.Input["CorrelationId"] = minimalProfileUpdate.Input["CorrelationId"];
+            foreach (var other in profileLookups) clearProfile.Input[other.Parameter] = Guid.Empty;
+            clearProfile.Input[lookup.Parameter] = null;
+            new ApplyCandidateAction().Execute(clearProfile);
+            var clearTarget = clearProfile.CandidateRequests.Single().Target;
+            Check(clearTarget.Attributes.Count == 2 && clearTarget.Contains(lookup.Attribute) &&
+                clearTarget[lookup.Attribute] == null &&
+                profileLookups.Where(other => other.Parameter != lookup.Parameter)
+                    .All(other => !clearTarget.Contains(other.Attribute)),
+                "SDK explicit null clears only " + lookup.Parameter + " alongside other lookup defaults");
+            Check(clearProfile.Receipt!.GetAttributeValue<string>("os_sr_oprc_hash") !=
+                minimalProfileUpdate.Receipt!.GetAttributeValue<string>("os_sr_oprc_hash"),
+                "SDK explicit " + lookup.Parameter + " clear differs from omission in the receipt fingerprint");
+            var malformedProfile = CreateProfileUpdateHost();
+            malformedProfile.Input[lookup.Parameter] = Guid.NewGuid().ToString("D");
+            Reject(() => new ApplyCandidateAction().Execute(malformedProfile),
+                "INVALID_GUID_PARAMETER:" + lookup.Parameter);
+            Check(malformedProfile.Updates == 0 && malformedProfile.Receipt == null &&
+                !malformedProfile.ServiceFactorySelections.Contains(null),
+                "SDK malformed " + lookup.Parameter + " is rejected before SYSTEM storage");
+        }
+        var emptyDefaultedUpdate = CreateProfileUpdateHost();
+        emptyDefaultedUpdate.Input.Remove("CandidateName");
+        foreach (var lookup in profileLookups) emptyDefaultedUpdate.Input[lookup.Parameter] = Guid.Empty;
+        Reject(() => new ApplyCandidateAction().Execute(emptyDefaultedUpdate), "EMPTY_UPDATE");
+        Check(emptyDefaultedUpdate.Updates == 0 && emptyDefaultedUpdate.Receipt == null,
+            "SDK GUID defaults alone cannot manufacture a profile mutation");
+        foreach (string requiredGuid in new[] { "CandidateId", "CorrelationId" })
+        {
+            var invalidProfile = CreateProfileUpdateHost();
+            invalidProfile.Input[requiredGuid] = Guid.Empty;
+            Reject(() => new ApplyCandidateAction().Execute(invalidProfile),
+                requiredGuid == "CandidateId" ? "INVALID_CANDIDATE" : "INVALID_CORRELATION");
+            Check(invalidProfile.Updates == 0 && invalidProfile.Receipt == null,
+                "SDK required " + requiredGuid + " is never normalized as an optional lookup");
+        }
         var staleUpdate = new Host(100010000) { Status = ActionRequest.Answered };
         staleUpdate.Input["ActionType"] = "UpdateCandidate";
         staleUpdate.Input["CandidateName"] = "Synthetic Replacement";
         staleUpdate.Input.Remove("CallOutcome");
         staleUpdate.Input.Remove("ContactedAt");
+        foreach (var lookup in profileLookups) staleUpdate.Input[lookup.Parameter] = Guid.Empty;
         Reject(() => new ApplyCandidateAction().Execute(staleUpdate), "STALE_EXPECTED_STATUS");
         Check(staleUpdate.Updates == 0 && staleUpdate.Receipt == null &&
             !staleUpdate.ServiceOperations.Any(operation => operation.StartsWith("Create:", StringComparison.Ordinal) ||
@@ -1110,6 +1191,16 @@ internal static class Program
     {
         var host = new Host(100010000, true);
         host.Input["ExpectedStatus"] = new OptionSetValue(ActionRequest.NeedCall);
+        return host;
+    }
+
+    private static Host CreateProfileUpdateHost()
+    {
+        var host = new Host(ActionRequest.NeedCall);
+        host.Input["ActionType"] = "UpdateCandidate";
+        host.Input["CandidateName"] = "Synthetic Replacement";
+        host.Input.Remove("CallOutcome");
+        host.Input.Remove("ContactedAt");
         return host;
     }
 

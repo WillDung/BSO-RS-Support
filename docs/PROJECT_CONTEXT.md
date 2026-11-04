@@ -1,5 +1,7 @@
 # Project Context
 
+**P0 development status (2026-11-04):** Slice 1 package, 20-input/five-output API, Console/forms/views, and an unassigned four-table Reference Admin role are deployed in VN LMV IT. Owner synthetic creation with CV URL and Assigned TA passed, but Edit Candidate returned `INVALID_GUID_PARAMETER:PositionId`; profile/lifecycle/reference-administration acceptance is incomplete and further live writes are paused. The SDK correction is now validated offline only and is not deployed. The BSO role definition is unchanged, and all 50 legacy guards remain disabled. The immutable `cf701740…` release remains the pre-P0 stable baseline; no managed artifact was rebuilt. `BUSINESS_MVP_READY_FOR_PRODUCTION_FALSE`, `CLEAN_BSO_ACCEPTANCE_DEFERRED`, `REAL_DATA_STILL_PROHIBITED`. See [Current State](CURRENT_STATE.md) for the cache caveat and bounded evidence.
+
 **Final release candidate (2026-11-03):** `FINAL_PRODUCTION_RELEASE_CANDIDATE_BUILT`, `FINAL_RELEASE_VERSION_1_0_0_1`. Managed `os_sr_bso_rs_support` 1.0.0.1 has SHA-256 `cf70174044be21962c30771861aefb8fa7033014add0d0869523f418eaf55bd3`. It differs from the post-demo artifact only in the `solution.xml` version. Production go-live is not approved; see [CURRENT_STATE.md](CURRENT_STATE.md).
 
 **Post-demo status (2026-11-03):** The VN LMV IT demo succeeded, and post-demo UX hardening A–D is complete. Candidate Management is the default workspace. Labels are neutral. The obsolete ProtectCandidateCore UI text was removed. Record Call is offered only at Need Call Candidate.

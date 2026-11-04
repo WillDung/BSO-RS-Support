@@ -55,6 +55,35 @@ $authoredRootKeys = [string[]]@($roots | ForEach-Object {
     Get-RootKey -Type $_.GetAttribute('type') -Id $_.GetAttribute('id') `
         -SchemaName $_.GetAttribute('schemaName')
 })
+[xml]$referenceRole = Get-Content -Raw -LiteralPath (Join-Path $solutions 'Roles\BSO-RS Support - Reference Admin.xml')
+$referenceRoleKey = Get-RootKey -Type '20' -Id $referenceRole.Role.id
+$frozenAuthoredRootKeys = [string[]]@($authoredRootKeys | Where-Object { $_ -cne $referenceRoleKey })
+Assert-Test ($authoredRootKeys.Count -eq 21 -and
+    @($authoredRootKeys | Where-Object { $_ -ceq $referenceRoleKey }).Count -eq 1 -and
+    $frozenAuthoredRootKeys.Count -eq 20) `
+    'P0 adds only the exported Reference Admin role root; frozen release remains twenty authored roots'
+$referencePrivileges = @($referenceRole.Role.RolePrivileges.RolePrivilege)
+$expectedReferencePrivileges = @(
+    foreach ($table in 'os_sr_ta', 'os_sr_pos', 'os_sr_csrc', 'os_sr_loc') {
+        foreach ($operation in 'Create', 'Read', 'Write', 'Append', 'AppendTo') { "prv$operation$table" }
+    }
+)
+Assert-Test ($referenceRole.Role.IsAutoAssigned -eq '0' -and $referencePrivileges.Count -eq 20 -and
+    @($referencePrivileges | Where-Object { $_.name -notin $expectedReferencePrivileges -or $_.level -cne 'Global' }).Count -eq 0 -and
+    @($expectedReferencePrivileges | Where-Object { $_ -notin $referencePrivileges.name }).Count -eq 0) `
+    'Reference Admin has exactly twenty global four-table privileges and no Core, Delete, SharePoint, or admin grants'
+$apiContract = Get-Content -Raw -LiteralPath (Join-Path $docs 'PHASE_3C_API_CONTRACT.json') | ConvertFrom-Json
+$requestMetadata = @(Get-ChildItem -LiteralPath (Join-Path $solutions 'customapis\os_sr_cact\customapirequestparameters') -Recurse -Filter '*.xml' |
+    ForEach-Object { ([xml](Get-Content -Raw -LiteralPath $_.FullName)).customapirequestparameter })
+Assert-Test ($requestMetadata.Count -eq 20 -and @($requestMetadata.uniquename | Select-Object -Unique).Count -eq 20 -and
+    @($apiContract.inputs | Where-Object {
+        $contractParameter = $_
+        $match = @($requestMetadata | Where-Object { $_.uniquename -ceq $contractParameter.name })
+        $match.Count -ne 1 -or [int]$match[0].type -ne $contractParameter.type -or
+            [bool][int]$match[0].isoptional -ne $contractParameter.optional
+    }).Count -eq 0 -and
+    (Get-ChildItem -LiteralPath (Join-Path $solutions 'customapis\os_sr_cact\customapiresponseproperties') -Recurse -Filter '*.xml').Count -eq 5) `
+    'Actual exported API source matches all twenty declared inputs and retains five responses without duplicates'
 $generatedAssembly = @($inventory.components | Where-Object {
     $_.type -eq 91 -and $_.disposition -ceq 'GENERATED_FROM_CANONICAL_SOURCE'
 })
@@ -73,12 +102,12 @@ function Test-ExpectedReleaseRootSet {
 $expectedGeneratedRootKey = Get-RootKey -Type ([string]$generatedAssembly[0].type) `
     -Id ([string]$generatedAssembly[0].id) -SchemaName ([string]$generatedAssembly[0].schemaName)
 Assert-Test (Test-ExpectedReleaseRootSet `
-    -RootKeys ([string[]]@($authoredRootKeys + $expectedGeneratedRootKey)) `
-    -AuthoredKeys $authoredRootKeys -GeneratedRootKey $expectedGeneratedRootKey) `
+    -RootKeys ([string[]]@($frozenAuthoredRootKeys + $expectedGeneratedRootKey)) `
+    -AuthoredKeys $frozenAuthoredRootKeys -GeneratedRootKey $expectedGeneratedRootKey) `
     'Accept exactly 20 authored roots plus the one expected package-generated root'
 Assert-Test (-not (Test-ExpectedReleaseRootSet `
-    -RootKeys ([string[]]@($authoredRootKeys + '91|id:11111111-1111-1111-1111-111111111111')) `
-    -AuthoredKeys $authoredRootKeys -GeneratedRootKey $expectedGeneratedRootKey)) `
+    -RootKeys ([string[]]@($frozenAuthoredRootKeys + '91|id:11111111-1111-1111-1111-111111111111')) `
+    -AuthoredKeys $frozenAuthoredRootKeys -GeneratedRootKey $expectedGeneratedRootKey)) `
     'Reject a different 21st root even when the artifact root count is 21'
 $expectedCounts = @{
     '1' = 10
@@ -170,7 +199,7 @@ Assert-Test ($gateResult.Result -ceq 'TEST_REHEARSAL_RUNNER_READY_TARGET_REQUIRE
 Assert-Test ($gateSource -notmatch '\bpac\b|Invoke-WebRequest|Invoke-RestMethod|solution import') `
     'Test rehearsal gate has no network or import execution path'
 
-Assert-Test ($roots.Count -eq 20 -and
+Assert-Test ($roots.Count -eq 21 -and
     @($roots | Where-Object { $_.GetAttribute('type') -in @('91', '92') }).Count -eq 0) `
     'Canonical release manifest excludes assembly registrations and all guard steps'
 Assert-Test (-not (Test-Path -LiteralPath (Join-Path $solutions 'SdkMessageProcessingSteps')) -and
@@ -191,11 +220,17 @@ Assert-Test ($releaseText -notmatch '(?i)\bVN LMV IT\b|https://[a-z0-9-]+\.crm\d
 
 $temporaryZip = Join-Path ([IO.Path]::GetTempPath()) "bso-rs-release-test-$([Guid]::NewGuid().ToString('N')).zip"
 try {
-    $buildOutput = @(& $buildPath -OutputPath $temporaryZip)
-    Assert-Test ($LASTEXITCODE -eq 0 -and $buildOutput.Result -ceq 'UNMANAGED_SOURCE_ROUNDTRIP_PASS' -and
-        $buildOutput.RootComponents -eq 20 -and
-        $buildOutput.ManagedRelease -ceq 'MANAGED_RELEASE_ARTIFACT_REQUIRES_APPROVED_TEST_REHEARSAL') `
-        'PAC pack/unpack round-trip passes with the pinned package'
+    $buildRejected = $false
+    try {
+        & $buildPath -OutputPath $temporaryZip | Out-Null
+    } catch {
+        if ($_.Exception.Message -cne 'Release manifest must contain exactly the 20 approved roots and no assembly or guard registrations.') {
+            throw
+        }
+        $buildRejected = $true
+    }
+    Assert-Test ($buildRejected -and -not (Test-Path -LiteralPath $temporaryZip)) `
+        'Frozen release builder rejects source-ahead P0 roots before packing; no release artifact is rebuilt'
 } finally {
     if (Test-Path -LiteralPath $temporaryZip) {
         Remove-Item -LiteralPath $temporaryZip -Force

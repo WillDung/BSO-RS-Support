@@ -443,7 +443,11 @@ namespace os_sr_cact
                 foreach (var name in ActionRequest.ApplicableInputNames(action))
                 {
                     if (name == "ActionType" || name == "CorrelationId") continue;
-                    if (parameters.TryGetValue(name, out var value)) input[name] = value;
+                    if (!parameters.TryGetValue(name, out var value)) continue;
+                    // Dataverse supplies Guid.Empty for omitted optional GUIDs; explicit null still means clear.
+                    if (action == "UpdateCandidate" && ActionRequest.IsOptionalProfileLookup(name) &&
+                        value is Guid id && id == Guid.Empty) continue;
+                    input[name] = value;
                 }
             }
 

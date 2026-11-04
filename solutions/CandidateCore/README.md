@@ -2,6 +2,14 @@
 
 Source for Candidate Core plug-in code used by the legacy signed `os_sr_cact` assembly and the unsigned package-backed `os_sr_cact` assembly, version `1.0.0.0`. This is authored .NET plug-in source, **not an exported/unpacked Solution**. The supported target is .NET Framework 4.6.2 with `Microsoft.CrmSdk.CoreAssemblies` pinned to 9.0.2.60; the SDK assembly is supplied by the Dataverse sandbox. No runtime dependency is merged/uploaded with the package assembly.
 
+## P0 profile-edit correction (offline only; 2026-11-04)
+
+The owner synthetic Console edit was rejected with `INVALID_GUID_PARAMETER:PositionId` although that unchanged lookup was absent from the request. An SDK regression reproduced the same rejection by supplying the optional-GUID transport defaults.
+
+The SDK adapter now maps `Guid.Empty` to omission for UpdateCandidate's three optional profile lookups only: Position, Candidate Source, and Assigned TA. Explicit null remains a clear; valid references still require caller-context validation. Required CandidateId/CorrelationId and malformed lookup values remain rejected. Domain-level empty-GUID validation, workflow/status/concurrency rules, actor-bound fingerprints, receipts, and the 20-input/five-output API are unchanged. Defaulted and omitted lookup fingerprints match, and replay performs no second update.
+
+This correction is source-only. The previously deployed P0 package is not corrected, and no additional package update, publication, tenant validation, or managed release rebuild is authorized. See [Current State](../../docs/CURRENT_STATE.md).
+
 ## Phase 5B package deployment and BSO acceptance (29 October 2026)
 
 The corrected Receipt ownership boundary was deployed once to the existing unsigned `os_sr_cact_pkg` v1.0.0 in VN LMV IT. PAC reported success with zero retries. Immediate readback retained the same package identity, package-backed File Store assembly and `os_sr_cact.ApplyCandidateAction` handler, and unchanged Custom API metadata. The package record's `ModifiedOn` did not advance in readback, and Dataverse did not expose package bytes; this caveat was recorded without retrying. All 50 `ProtectCandidateCore` steps remained inactive, PluginTraceLog remained Off, no active Profiler wrapper was found, and the signed Database rollback assembly was untouched. Local `.nupkg` SHA-256: `dbf6087203508c8a0016fede8bea2c77a3734a9e294b407197faa08235203b91`; embedded and built DLL SHA-256: `05e983e86290bb70ba82b73177c21dc3a1d87fd14f0d4aeea39af062ed0a721a`.

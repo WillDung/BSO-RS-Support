@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Role id="{ebce003f-0bd8-f111-a05b-002248a1ba20}" name="BSO-RS Support - Reference Admin" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <IsCustomizable>1</IsCustomizable>
+  <IsAutoAssigned>0</IsAutoAssigned>
+  <RolePrivileges>
+    <RolePrivilege name="prvAppendos_sr_csrc" level="Global" />
+    <RolePrivilege name="prvAppendos_sr_loc" level="Global" />
+    <RolePrivilege name="prvAppendos_sr_pos" level="Global" />
+    <RolePrivilege name="prvAppendos_sr_ta" level="Global" />
+    <RolePrivilege name="prvAppendToos_sr_csrc" level="Global" />
+    <RolePrivilege name="prvAppendToos_sr_loc" level="Global" />
+    <RolePrivilege name="prvAppendToos_sr_pos" level="Global" />
+    <RolePrivilege name="prvAppendToos_sr_ta" level="Global" />
+    <RolePrivilege name="prvCreateos_sr_csrc" level="Global" />
+    <RolePrivilege name="prvCreateos_sr_loc" level="Global" />
+    <RolePrivilege name="prvCreateos_sr_pos" level="Global" />
+    <RolePrivilege name="prvCreateos_sr_ta" level="Global" />
+    <RolePrivilege name="prvReados_sr_csrc" level="Global" />
+    <RolePrivilege name="prvReados_sr_loc" level="Global" />
+    <RolePrivilege name="prvReados_sr_pos" level="Global" />
+    <RolePrivilege name="prvReados_sr_ta" level="Global" />
+    <RolePrivilege name="prvWriteos_sr_csrc" level="Global" />
+    <RolePrivilege name="prvWriteos_sr_loc" level="Global" />
+    <RolePrivilege name="prvWriteos_sr_pos" level="Global" />
+    <RolePrivilege name="prvWriteos_sr_ta" level="Global" />
+  </RolePrivileges>
+</Role>

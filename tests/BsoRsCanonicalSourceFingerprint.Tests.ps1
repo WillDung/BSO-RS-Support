@@ -62,7 +62,9 @@ try {
 Assert-Test $duplicateRejected 'Duplicate paths after separator normalization are rejected'
 
 $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) "bso-rs-fingerprint-$([Guid]::NewGuid().ToString('N'))"
+$repositoryIndexFile = $env:GIT_INDEX_FILE
 try {
+    if ($repositoryIndexFile) { Remove-Item Env:GIT_INDEX_FILE }
     $null = New-Item -ItemType Directory -Path $temporaryRoot
     $null = New-Item -ItemType Directory -Path (Join-Path $temporaryRoot 'solutions\Other') -Force
     $null = New-Item -ItemType Directory -Path (Join-Path $temporaryRoot 'solutions\CandidateCore') -Force
@@ -122,6 +124,7 @@ try {
     Assert-Test ($withBomAndCrLf.Fingerprint -cne $baseline.Fingerprint) `
         'A changed source fingerprint detects a stale previously frozen pin'
 } finally {
+    if ($repositoryIndexFile) { $env:GIT_INDEX_FILE = $repositoryIndexFile }
     if (Test-Path -LiteralPath $temporaryRoot) {
         Remove-Item -LiteralPath $temporaryRoot -Recurse -Force
     }

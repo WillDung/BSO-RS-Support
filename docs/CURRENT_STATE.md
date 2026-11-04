@@ -1,6 +1,47 @@
 # Current State
 
-## P0 Slice 1 offline source work
+## P0 Slice 1 deployment; owner acceptance blocked (2026-11-04)
+
+**Status:** `P0_SLICE_1_DEPLOYED_OWNER_ACCEPTANCE_BLOCKED`. This is not `P0_SLICE_1_LIVE_FUNCTIONALLY_ACCEPTED`.
+
+- Fresh VN LMV IT reconciliation verified the existing active `srapp`, unmanaged Solution version `1.0.0.1`, existing unsigned package-backed Candidate Core handler, and unchanged BSO role definition. All 60 canonical BSO privileges matched; protected Core direct Create/Write remained absent.
+- The existing `os_sr_cact_pkg` received exactly one P0 package update. Package/API/handler identities stayed unchanged; no deployed-byte hash is claimed. No guard cutover followed.
+- Exactly `CandidateCvUrl` and `AssignedTaId` were created as optional API inputs. Readback verified the complete 20-input/five-output contract without duplicate parameters or a second API.
+- Nine bounded UI updates changed three Console resources (HTML, JavaScript, policy), four existing TA/Location main and quick-view forms, and two existing Active views. CSS and DEV environment bytes stayed unchanged. One scoped `PublishXml` named only those three WebResources and the TA/Location entities. There was no app/sitemap publication; sitemap composition remained unchanged with Candidate Management first.
+- The separate Reference Admin role was defined with exactly 20 Global privileges across TA, Position, Candidate Source, and Location, and no assignments. Four platform-added SharePoint defaults were detected and removed with one bounded operation each; no BSO role privilege changed. See [Security Model](SECURITY_MODEL.md).
+- One unmanaged source export captured the actual new role and two API inputs into canonical source. P0 now has **21 authored roots plus one package-generated assembly root**; the frozen release remains its historical 20-plus-one model. Frozen release manifests, package pins, inventory evidence, and managed artifact were not rewritten or rebuilt.
+
+**Owner functional evidence:** `OWNER_DEV_FUNCTIONAL_IDENTITY` created one synthetic Candidate through Candidate Core with Name, Email, Phone, Position, Candidate Source, Assigned TA, and HTTPS CV URL. The subsequent profile edit returned HTTP 400, `0x80040265`, `INVALID_GUID_PARAMETER:PositionId`, although the request omitted the unchanged Position lookup. Read-only reconciliation found exactly one Candidate with the original profile and Need Call Candidate status; no edit persistence is claimed. The optional-GUID fault was subsequently reproduced and corrected in offline source as recorded below; the deployed package remains unchanged. There was no automatic retry or second package update.
+
+The create/edit sequence was exercised through a fresh cache-busted Console iframe: the normal app retained historical version-stamped HTML even after reload. Published/current definitions matched the deployment payload, but normal-app cache refresh acceptance is unresolved; no app publication was used as a workaround.
+
+Further live writes are paused. Edit persistence, the subsequent Call/Scheduling lifecycle, reload/history/schedule evidence, and owner TA/Location create/edit acceptance remain pending. Metadata deployment is not proof of those runtime behaviors. Clean-BSO acceptance remains intentionally deferred, not reconfirmed.
+
+**Owner-selected offline correction:** `P0_PROFILE_EDIT_CORRECTION_OFFLINE_VALIDATED_NOT_DEPLOYED`. The SDK test first reproduced the exact `INVALID_GUID_PARAMETER:PositionId` failure with optional lookup GUID defaults. [CandidateActionInputAdapter](../solutions/CandidateCore/DataversePlugin.cs) now maps `Guid.Empty` to omission only for UpdateCandidate's Position, Candidate Source, and Assigned TA. Explicit null still clears; required identifiers, malformed values, caller-visible reference checks, strict domain validation, workflow/concurrency rules, and fingerprints remain unchanged. No Console or API metadata change was needed.
+
+Corrective offline validation passed 394 SDK assertions and 186 domain assertions, including the rejected Console payload shape, unchanged lookup preservation, all three explicit-null clears, malformed/required GUID rejection, stale status, empty-update rejection, normalized fingerprint equivalence, and replay without a second write. The required PowerShell suites and development-only readiness checks passed again; strict readiness still failed at the expected immutable source fingerprint. Source/contract deployment checks passed separately after updating the truthful local-source status. No tenant read, live write, publication, corrective package deployment, or managed release rebuild occurred during this offline-only continuation. Separate deployment authorization is still required.
+
+**Final bounded reconciliation and offline checks:** Fresh GET-only evidence reconfirmed the 20-input/five-output contract, all 50 disabled legacy guards, the unchanged 60-privilege BSO definition, and the exact unassigned Reference Admin definition. Solution membership increased only from 47 to 50: the new role and two API inputs. All nine published UI payloads matched the approved plan. The five Console published/current hashes and cache-busted effective-resource hashes matched the expected target payload; this does not close the normal-app cache caveat above.
+
+Deployment-stage offline suites (before the later corrective source change) passed: Phase5ASecurityBoundary 27, Phase5BSecurity 12, Phase3DR4LGuardCutover 14, Phase5ACandidateCoreApiInputs 9, Phase5ACandidateCoreRuntime 19, CandidateConsole 75, CandidateConsoleConfiguration 21, ReleaseSource 33, CanonicalSourceFingerprint 14, Candidate Core SDK 365, and Candidate Core domain 186. Development-only ProductionReadiness passed 58 checks with the explicit frozen canonical/Console fingerprint exclusion; strict default readiness still stopped at the frozen canonical fingerprint. The unchanged frozen builder rejected the new P0 root set before packing, as expected; no P0 round-trip or release artifact is claimed. Validation used an isolated Git index for the three new source files, leaving actual staging unchanged. Parsing passed for 52 PowerShell files, 101 tracked JSON files, and 161 canonical XML files; `git diff --check` passed. Actual exported role/API XML matched source, and the six exported form/view payloads contained the approved fields without importing unrelated export envelopes.
+
+Confirmed: `PROTECTCANDIDATECORE_LEGACY_TOPOLOGY_RECONCILED`, `CURRENT_DATAVERSE_ROLE_SECURITY_MODEL_CONFIRMED`, `REFERENCE_ADMIN_ROLE_DEFINED_UNASSIGNED`, `BSO_SECURITY_DEFINITION_UNCHANGED`.
+
+Retained: `CLEAN_BSO_ACCEPTANCE_DEFERRED`, `P0_SOURCE_AHEAD_OF_FROZEN_RELEASE_ARTIFACT`, `BUSINESS_MVP_READY_FOR_PRODUCTION_FALSE`, `REAL_DATA_STILL_PROHIBITED`. The frozen `cf701740…` artifact remains `PRE_P0_STABLE_BASELINE`. Historical VN LMV IT Publish All ambiguity remains evidence, not resolved by this scoped publication. No Production deployment, managed artifact rebuild, synthetic-data cleanup, commit, or push occurred.
+
+## P0 Slice 1 security-tool reconciliation (2026-11-04)
+
+The owner confirms `CURRENT_DATAVERSE_ROLE_SECURITY_MODEL` as authoritative and the active ProtectCandidateCore coverage in the older API contract as `HISTORICAL_PROTECTCANDIDATECORE_REGISTRATION_MODEL`. Fresh read-only reconciliation found 50 disabled synchronous PreValidation caller-context legacy steps, no active ProtectCandidateCore step, and no registrations for the 12 historical Interview Schedule hooks. This matches the accepted inactive/superseded guard model; do not enable or recreate guards.
+
+The cutover tool now defaults to read-only role-model reconciliation, with legacy mutation modes behind explicit recovery-only opt-in. Offline validation and the fresh deployment safety preflight passed before the bounded P0 writes above. Live BSO role-definition reconciliation confirmed the unchanged definition; no fresh clean-BSO acceptance is claimed.
+
+The owner authorizes `OWNER_DEV_FUNCTIONAL_IDENTITY` for bounded P0 package/API/UI/forms/views and unassigned Reference Admin deployment and synthetic functional validation. Clean BSO acceptance is deferred. The approved Reference Admin scope is now organization-level Create/Read/Write/Append/Append To on TA, Position, Candidate Source, and Location, with no Delete/Core/security/admin privileges. Earlier TA/Location-only and clean-BSO-prerequisite statements below describe superseded approval scope, not current gates.
+
+The immutable 1.0.0.1 artifact is `PRE_P0_STABLE_BASELINE`; it remains retained and is not rebuilt. `P0_SOURCE_AHEAD_OF_FROZEN_RELEASE_ARTIFACT`, `BUSINESS_MVP_READY_FOR_PRODUCTION_FALSE`, `REAL_DATA_STILL_PROHIBITED`. Live P0 acceptance is not yet claimed.
+
+## Historical P0 Slice 1 offline-only checkpoint
+
+The following checkpoint predates and is superseded by the deployment record above. Its pending-role, 18-input, no-write, clean-BSO-prerequisite, and earlier two-table role-scope statements are historical, not current deployment gates.
 
 **Status:** `P0_SLICE_1_OFFLINE_SOURCE_IMPLEMENTED; ROLE_METADATA_AND_LIVE_ACCEPTANCE_PENDING`. This describes local source only; it is not a deployment or runtime acceptance.
 

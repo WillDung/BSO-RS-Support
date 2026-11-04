@@ -1,0 +1,9 @@
+<customapirequestparameter uniquename="AssignedTaId">
+  <displayname default="AssignedTaId">
+    <label description="AssignedTaId" languagecode="1033" />
+  </displayname>
+  <iscustomizable>1</iscustomizable>
+  <isoptional>1</isoptional>
+  <name>os_sr_cact.AssignedTaId</name>
+  <type>12</type>
+</customapirequestparameter>

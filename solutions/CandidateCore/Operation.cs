@@ -80,6 +80,9 @@ namespace os_sr_cact
 
         public static bool IsDeclaredInputName(string name) => DeclaredInputNameSet.Contains(name);
 
+        internal static bool IsOptionalProfileLookup(string name) =>
+            name == "PositionId" || name == "CandidateSourceId" || name == "AssignedTaId";
+
         public ActionRequest(Guid actor, IDictionary<string, object?> input, DateTime utcNow)
         {
             Actor = actor;
@@ -115,7 +118,6 @@ namespace os_sr_cact
             var values = new SortedDictionary<string, object?>(StringComparer.Ordinal);
             var profile = new[] { "CandidateName", "CandidateEmail", "CandidatePhone", "CandidateCvUrl",
                 "PositionId", "CandidateSourceId", "AssignedTaId" };
-            var optionalGuidProfile = new[] { "PositionId", "CandidateSourceId", "AssignedTaId" };
             var allowed = new HashSet<string>(ApplicableInputNames(Action), StringComparer.Ordinal);
             foreach (var pair in input)
             {
@@ -128,7 +130,7 @@ namespace os_sr_cact
                 if (profile.Contains(pair.Key) || pair.Key == "Notes" || pair.Key == "Reason" ||
                     pair.Key == "ResultNotes")
                 {
-                    if (optionalGuidProfile.Contains(pair.Key))
+                    if (IsOptionalProfileLookup(pair.Key))
                     {
                         if (!NormalizeOptionalGuid(Action, pair.Key, value, out value)) continue;
                     }

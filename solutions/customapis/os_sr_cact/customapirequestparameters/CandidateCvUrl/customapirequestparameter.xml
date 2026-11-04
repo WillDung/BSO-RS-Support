@@ -1,0 +1,9 @@
+<customapirequestparameter uniquename="CandidateCvUrl">
+  <displayname default="CandidateCvUrl">
+    <label description="CandidateCvUrl" languagecode="1033" />
+  </displayname>
+  <iscustomizable>1</iscustomizable>
+  <isoptional>1</isoptional>
+  <name>os_sr_cact.CandidateCvUrl</name>
+  <type>10</type>
+</customapirequestparameter>

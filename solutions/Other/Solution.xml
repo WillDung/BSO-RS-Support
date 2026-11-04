@@ -93,6 +93,7 @@
       <RootComponent type="1" schemaName="os_sr_ta" behavior="0" />
       <RootComponent type="1" schemaName="systemuser" behavior="1" />
       <RootComponent type="20" id="{63d7bb93-0bd2-f111-a05a-000d3a64b349}" behavior="0" />
+      <RootComponent type="20" id="{ebce003f-0bd8-f111-a05b-002248a1ba20}" behavior="0" />
       <RootComponent type="61" schemaName="os_/bso/candidate-console-environment.js" behavior="0" />
       <RootComponent type="61" schemaName="os_/bso/candidate-console-policy.js" behavior="0" />
       <RootComponent type="61" schemaName="os_/bso/candidate-console.css" behavior="0" />

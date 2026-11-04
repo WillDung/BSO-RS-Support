@@ -1,4 +1,7 @@
 #requires -Version 7.4
+[CmdletBinding()]
+param([switch]$SkipFrozenCanonicalFingerprint)
+
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -29,14 +32,14 @@ Assert-Test ($inventory.rootComponentCount -eq 72 -and
     $inventory.countSemantics.authoredCanonicalRoots -eq 20 -and
     $inventory.countSemantics.generatedReleaseRoots -eq 1 -and
     $inventory.countSemantics.expectedLiveAndExportReleaseRoots -eq 21 -and
-    $inventory.countSemantics.excludedRoots -eq 51 -and $roots.Count -eq 20) `
-    'Reconcile the pre-cleanup 72 roots to 20 authored, one generated, and 51 excluded roots'
+    $inventory.countSemantics.excludedRoots -eq 51 -and $roots.Count -eq 21) `
+    'Keep frozen 20-root source evidence distinct from the 21 authored P0 roots including Reference Admin'
 $canonicalCounts = @{}
 foreach ($group in $roots | Group-Object { $_.GetAttribute('type') }) {
     $canonicalCounts[$group.Name] = $group.Count
 }
 Assert-Test ($canonicalCounts['1'] -eq 10 -and $canonicalCounts['9'] -eq 2 -and
-    $canonicalCounts['20'] -eq 1 -and $canonicalCounts['61'] -eq 5 -and
+    $canonicalCounts['20'] -eq 2 -and $canonicalCounts['61'] -eq 5 -and
     $canonicalCounts['62'] -eq 1 -and $canonicalCounts['80'] -eq 1) `
     'Verify the canonical root count by component class'
 Assert-Test (@($inventory.countSemantics.generatedRootsByType | Where-Object {
@@ -121,7 +124,7 @@ foreach ($fileName in @(
     Assert-Test (Test-Path -LiteralPath (Join-Path $webRoot $fileName) -PathType Leaf) `
         "Candidate Console source exists: $fileName"
 }
-Assert-Test ((Get-ChildItem -LiteralPath (Join-Path $solutions 'customapis\os_sr_cact') -Recurse -File).Count -eq 24 -and
+Assert-Test ((Get-ChildItem -LiteralPath (Join-Path $solutions 'customapis\os_sr_cact') -Recurse -File).Count -eq 26 -and
     (Test-Path -LiteralPath (Join-Path $solutions 'pluginpackages\os_sr_cact_pkg\pluginpackage.xml') -PathType Leaf) -and
     (Test-Path -LiteralPath (Join-Path $solutions 'pluginpackages\os_sr_cact_pkg\package\os_sr_cact_pkg.nupkg') -PathType Leaf)) `
     'Candidate Core API metadata and package-backed handler artifact are retained'
@@ -195,13 +198,17 @@ $releaseToolLines = foreach ($relativeTool in $releaseToolPaths) {
     $fullToolPath = Join-Path $docs ($relativeTool.Replace('/', '\'))
     "$relativeTool|$(Get-FileSha256 -Path $fullToolPath)"
 }
-Assert-Test ($sourceInventory.FileCount -eq $releaseInputs.canonicalSource.sourceFileCount -and
+if ($SkipFrozenCanonicalFingerprint) {
+    Write-Warning 'P0_SOURCE_AHEAD_OF_FROZEN_RELEASE_ARTIFACT: frozen canonical fingerprint assertion explicitly skipped for development validation only; this is not release acceptance.'
+} else {
+    Assert-Test ($sourceInventory.FileCount -eq $releaseInputs.canonicalSource.sourceFileCount -and
     $sourceInventory.Algorithm -ceq $releaseInputs.canonicalSource.sourceFingerprintAlgorithm -and
     $sourceInventory.Fingerprint -ceq $releaseInputs.canonicalSource.sourceFingerprint -and
     (Get-Fingerprint -Lines $rootFingerprintLines) -ceq $releaseInputs.canonicalSource.rootComponentFingerprint -and
     (Get-FileSha256 -Path (Join-Path $solutions 'Other\Solution.xml')) -ceq
         $releaseInputs.canonicalSource.rootManifestSha256) `
     'Verify the frozen canonical source and root-component fingerprints'
+}
 Assert-Test ((Get-FileSha256 -Path (Join-Path $solutions 'release-profiles.json')) -ceq
     $releaseInputs.environmentPolicy.portableProfileSourceSha256 -and
     (Get-FileSha256 -Path (Join-Path $solutions 'pluginpackages\os_sr_cact_pkg\package\os_sr_cact_pkg.nupkg')) -ceq
@@ -216,8 +223,12 @@ Assert-Test ((Get-FileSha256 -Path (Join-Path $solutions 'release-profiles.json'
     'Verify pinned environment-policy, package, and release-tooling inputs'
 foreach ($resource in $releaseInputs.candidateConsole.PSObject.Properties) {
     $resourcePath = Join-Path $webRoot $resource.Name
-    Assert-Test ((Get-FileSha256 -Path $resourcePath) -ceq $resource.Value) `
-        "Verify frozen Candidate Console resource hash: $($resource.Name)"
+    if ($SkipFrozenCanonicalFingerprint) {
+        Write-Warning "Frozen canonical Console fingerprint explicitly skipped for P0 development: $($resource.Name)"
+    } else {
+        Assert-Test ((Get-FileSha256 -Path $resourcePath) -ceq $resource.Value) `
+            "Verify frozen Candidate Console resource hash: $($resource.Name)"
+    }
 }
 
 Assert-Test ($updaterContract.status -ceq 'OFFLINE_DISPATCHER_IMPLEMENTED_NOT_EXECUTED' -and
@@ -437,10 +448,11 @@ Write-Output "BSO-RS production-readiness offline checks passed: $passed"
 [pscustomobject]@{
     SourceInventory = 'SOLUTION_COMPONENT_COUNT_SEMANTICS_RECONCILED_AND_MEMBERSHIP_CLEANUP_VERIFIED'
     PortableConfiguration = 'PORTABLE_ENVIRONMENT_CONFIGURATION_OFFLINE_VERIFIED'
-    ManagedArtifact = 'MANAGED_RELEASE_ARTIFACT_REQUIRES_APPROVED_TEST_REHEARSAL'
+    ManagedArtifact = if ($SkipFrozenCanonicalFingerprint) { 'PRE_P0_STABLE_BASELINE' } else { 'MANAGED_RELEASE_ARTIFACT_REQUIRES_APPROVED_TEST_REHEARSAL' }
     PackageUpdater = 'PACKAGE_RELEASE_UPDATER_OFFLINE_READY_IMPLEMENTED'
     PackageUpdaterDispatcher = 'IMPLEMENTED_NOT_EXECUTED'
-    RemainingBlockers = 'EXTERNAL_GATES_ONLY'
+    RemainingBlockers = if ($SkipFrozenCanonicalFingerprint) { 'P0_LIVE_ACCEPTANCE_AND_SEPARATE_RELEASE_QUALIFICATION_REQUIRED' } else { 'EXTERNAL_GATES_ONLY' }
+    ValidationScope = if ($SkipFrozenCanonicalFingerprint) { 'DEVELOPMENT_ONLY_NOT_PRODUCTION_READINESS' } else { 'FROZEN_RELEASE' }
     SolutionImportGate = 'SOLUTION_IMPORT_GATE_OFFLINE_READY'
     TestRehearsal = 'TEST_RELEASE_READINESS_EVIDENCE_REQUIRED'
     RollbackPlan = 'ROLLBACK_PLAN_OFFLINE_READY'

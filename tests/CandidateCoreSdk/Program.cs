@@ -903,6 +903,12 @@ internal static class Program
         var minimalProfileUpdate = CreateProfileUpdateHost();
         var defaultedProfileUpdate = CreateProfileUpdateHost();
         defaultedProfileUpdate.Input["CorrelationId"] = minimalProfileUpdate.Input["CorrelationId"];
+        minimalProfileUpdate.Input.Remove("CandidatePhone");
+        minimalProfileUpdate.Input.Remove("CandidateCvUrl");
+        foreach (var lookupName in new[] { "PositionId", "CandidateSourceId", "AssignedTaId" })
+            minimalProfileUpdate.Input.Remove(lookupName);
+        defaultedProfileUpdate.Input["CandidatePhone"] = null;
+        defaultedProfileUpdate.Input["CandidateCvUrl"] = null;
         var profileLookups = new[]
         {
             (Parameter: "PositionId", Attribute: "os_sr_cand_pos"),
@@ -918,10 +924,24 @@ internal static class Program
             defaultedTarget.GetAttributeValue<string>("os_sr_cand_nm") == "Synthetic Replacement" &&
             defaultedProfileUpdate.Updates == 1 && defaultedProfileUpdate.Calls == 0 &&
             defaultedProfileUpdate.Histories == 0 && defaultedProfileUpdate.Status == ActionRequest.NeedCall,
-            "SDK optional GUID transport defaults preserve all unchanged lookups and workflow state");
+            "SDK unmasked null text and GUID defaults preserve unchanged optional fields and workflow state");
         Check(defaultedProfileUpdate.Receipt!.GetAttributeValue<string>("os_sr_oprc_hash") ==
             minimalProfileUpdate.Receipt!.GetAttributeValue<string>("os_sr_oprc_hash"),
             "SDK defaulted and omitted UpdateCandidate lookups have identical fingerprints");
+        var nullDefaultedProfileUpdate = CreateProfileUpdateHost();
+        nullDefaultedProfileUpdate.Input["CorrelationId"] = minimalProfileUpdate.Input["CorrelationId"];
+        nullDefaultedProfileUpdate.Input["CandidatePhone"] = null;
+        nullDefaultedProfileUpdate.Input["CandidateCvUrl"] = null;
+        foreach (var lookup in profileLookups) nullDefaultedProfileUpdate.Input[lookup.Parameter] = null;
+        new ApplyCandidateAction().Execute(nullDefaultedProfileUpdate);
+        var nullDefaultedTarget = nullDefaultedProfileUpdate.CandidateRequests.Single().Target;
+        Check(nullDefaultedTarget.Attributes.Count == 1 &&
+            !nullDefaultedTarget.Contains("os_sr_cand_phn") &&
+            !nullDefaultedTarget.Contains("os_sr_cand_cvurl") &&
+            profileLookups.All(lookup => !nullDefaultedTarget.Contains(lookup.Attribute)) &&
+            nullDefaultedProfileUpdate.Receipt!.GetAttributeValue<string>("os_sr_oprc_hash") ==
+                minimalProfileUpdate.Receipt!.GetAttributeValue<string>("os_sr_oprc_hash"),
+            "SDK unmasked null optional defaults preserve all optional profile fields");
         new ApplyCandidateAction().Execute(defaultedProfileUpdate);
         Check((string)defaultedProfileUpdate.Output["ResultCode"] == "DuplicateReplay" &&
             defaultedProfileUpdate.Updates == 1,
@@ -1036,23 +1056,77 @@ internal static class Program
             legacySdkReplay.Updates == 0 && legacySdkReplay.Receipt == legacySdkReceipt &&
             legacySdkReceipt.GetAttributeValue<string>("os_sr_oprc_hash") == legacySdkRequest.LegacyFingerprint,
             "SDK replays a matching historical maskless receipt without updating Candidate or rewriting receipt");
-        foreach (var lookup in profileLookups)
+        var legacyPhoneCvReplay = CreateProfileUpdateHost();
+        legacyPhoneCvReplay.Input["ProfileFieldMask"] = "CandidatePhone,CandidateCvUrl";
+        legacyPhoneCvReplay.Input.Remove("CandidateName");
+        legacyPhoneCvReplay.Input["CandidatePhone"] = "+15550101011";
+        legacyPhoneCvReplay.Input["CandidateCvUrl"] =
+            "https://careers.example.invalid/cv/legacy";
+        var legacyPhoneCvRequest = new ActionRequest(Actor, legacyPhoneCvReplay.Input.ToDictionary(
+            pair => pair.Key, pair => (object?)pair.Value, StringComparer.Ordinal), DateTime.UtcNow);
+        var legacyPhoneCvReceipt = new Entity("os_sr_oprc", Guid.NewGuid())
+        {
+            ["os_sr_oprc_corid"] =
+                ((Guid)legacyPhoneCvReplay.Input["CorrelationId"]).ToString("D"),
+            ["os_sr_oprc_cact"] = "UpdateCandidate",
+            ["os_sr_oprc_hash"] = legacyPhoneCvRequest.LegacyFingerprint,
+            ["os_sr_oprc_ver"] = "1",
+            ["os_sr_oprc_cand"] = new EntityReference("os_sr_cand", Candidate),
+            ["os_sr_oprc_newstat"] = ActionRequest.NeedCall
+        };
+        legacyPhoneCvReplay.Receipt = legacyPhoneCvReceipt;
+        new ApplyCandidateAction().Execute(legacyPhoneCvReplay);
+        Check((string)legacyPhoneCvReplay.Output["ResultCode"] == "DuplicateReplay" &&
+            legacyPhoneCvReplay.Updates == 0 && legacyPhoneCvReplay.Receipt == legacyPhoneCvReceipt &&
+            legacyPhoneCvReceipt.GetAttributeValue<string>("os_sr_oprc_hash") ==
+                legacyPhoneCvRequest.LegacyFingerprint,
+            "SDK replays a historical Phone/CV maskless receipt without Candidate update or receipt rewrite");
+        var optionalProfileFields = new[]
+        {
+            (Parameter: "CandidatePhone", Attribute: "os_sr_cand_phn"),
+            (Parameter: "CandidateCvUrl", Attribute: "os_sr_cand_cvurl"),
+            (Parameter: "PositionId", Attribute: "os_sr_cand_pos"),
+            (Parameter: "CandidateSourceId", Attribute: "os_sr_cand_csrc"),
+            (Parameter: "AssignedTaId", Attribute: "os_sr_cand_ta")
+        };
+        foreach (var field in optionalProfileFields)
         {
             var clearProfile = CreateProfileUpdateHost();
             clearProfile.Input["CorrelationId"] = minimalProfileUpdate.Input["CorrelationId"];
-            clearProfile.Input["ProfileFieldMask"] = "CandidateName," + lookup.Parameter;
+            clearProfile.Input["ProfileFieldMask"] = field.Parameter;
+            clearProfile.Input.Remove("CandidateName");
+            clearProfile.Input.Remove("CandidateEmail");
             foreach (var other in profileLookups) clearProfile.Input[other.Parameter] = Guid.Empty;
-            clearProfile.Input[lookup.Parameter] = null;
+            clearProfile.Input.Remove(field.Parameter);
             new ApplyCandidateAction().Execute(clearProfile);
             var clearTarget = clearProfile.CandidateRequests.Single().Target;
-            Check(clearTarget.Attributes.Count == 2 && clearTarget.Contains(lookup.Attribute) &&
-                clearTarget[lookup.Attribute] == null &&
-                profileLookups.Where(other => other.Parameter != lookup.Parameter)
-                    .All(other => !clearTarget.Contains(other.Attribute)),
-                "SDK explicit null clears only " + lookup.Parameter + " alongside other lookup defaults");
-            Check(clearProfile.Receipt!.GetAttributeValue<string>("os_sr_oprc_hash") !=
-                minimalProfileUpdate.Receipt!.GetAttributeValue<string>("os_sr_oprc_hash"),
-                "SDK explicit " + lookup.Parameter + " clear differs from omission in the receipt fingerprint");
+            Check(clearTarget.Attributes.Count == 1 && clearTarget.Contains(field.Attribute) &&
+                clearTarget[field.Attribute] == null &&
+                optionalProfileFields.Where(other => other.Parameter != field.Parameter)
+                    .All(other => !clearTarget.Contains(other.Attribute)) &&
+                clearProfile.Calls == 0 && clearProfile.Histories == 0,
+                "SDK masked omission clears only " + field.Parameter + " without workflow side effects");
+            var explicitNullInput = clearProfile.Input.ToDictionary(
+                pair => pair.Key, pair => (object?)pair.Value, StringComparer.Ordinal);
+            explicitNullInput[field.Parameter] = null;
+            var explicitNullRequest = new ActionRequest(Actor, explicitNullInput, DateTime.UtcNow);
+            Check(clearProfile.Receipt!.GetAttributeValue<string>("os_sr_oprc_hash") ==
+                explicitNullRequest.Fingerprint,
+                "SDK omitted and explicit-null " + field.Parameter + " clears have identical fingerprints");
+            if (field.Parameter == "PositionId" || field.Parameter == "CandidateSourceId" ||
+                field.Parameter == "AssignedTaId")
+            {
+                var emptyGuidProfile = CreateProfileUpdateHost();
+                emptyGuidProfile.Input["ProfileFieldMask"] = "CandidateName," + field.Parameter;
+                emptyGuidProfile.Input[field.Parameter] = Guid.Empty;
+                Reject(() => new ApplyCandidateAction().Execute(emptyGuidProfile),
+                    "INVALID_GUID_PARAMETER:" + field.Parameter);
+                Check(emptyGuidProfile.Updates == 0 && emptyGuidProfile.Receipt == null,
+                    "SDK masked Guid.Empty is rejected before clearing " + field.Parameter);
+            }
+        }
+        foreach (var lookup in profileLookups)
+        {
             var malformedProfile = CreateProfileUpdateHost();
             malformedProfile.Input["ProfileFieldMask"] = "CandidateName," + lookup.Parameter;
             malformedProfile.Input[lookup.Parameter] = Guid.NewGuid().ToString("D");

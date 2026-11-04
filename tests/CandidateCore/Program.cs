@@ -377,12 +377,59 @@ static class Program
         unmaskedDefaults["CandidatePhone"] = Guid.Empty;
         var ignoredUnmaskedDefaults = Request(unmaskedDefaults);
         Check(!ignoredUnmaskedDefaults.Values.ContainsKey("CandidateEmail") &&
-            !ignoredUnmaskedDefaults.Values.ContainsKey("CandidatePhone"),
+            !ignoredUnmaskedDefaults.Values.ContainsKey("CandidatePhone") &&
+            !ignoredUnmaskedDefaults.ProfilePatch["CandidatePhone"].IsSelected &&
+            ignoredUnmaskedDefaults.ProfilePatch["CandidatePhone"].IsSupplied,
             "UpdateCandidate ignores malformed and empty values outside the field mask");
-        var missingMaskedValue = Input("UpdateCandidate");
-        missingMaskedValue["ProfileFieldMask"] = "CandidatePhone";
-        missingMaskedValue.Remove("CandidateName");
-        Reject(() => Request(missingMaskedValue), "PROFILE_FIELD_VALUE_REQUIRED");
+        var missingOptionalValue = Input("UpdateCandidate");
+        missingOptionalValue["ProfileFieldMask"] = "CandidatePhone";
+        missingOptionalValue.Remove("CandidateName");
+        missingOptionalValue.Remove("CandidateEmail");
+        missingOptionalValue.Remove("CandidatePhone");
+        var omittedOptionalRequest = Request(missingOptionalValue);
+        Check(omittedOptionalRequest.ProfilePatch["CandidatePhone"].IsSelected &&
+            !omittedOptionalRequest.ProfilePatch["CandidatePhone"].IsSupplied &&
+            omittedOptionalRequest.ProfilePatch["CandidatePhone"].Value == null &&
+            omittedOptionalRequest.Values.ContainsKey("CandidatePhone") &&
+            omittedOptionalRequest.Values["CandidatePhone"] == null &&
+            !omittedOptionalRequest.Values.ContainsKey("CandidateName") &&
+            !omittedOptionalRequest.Values.ContainsKey("CandidateEmail"),
+            "Masked omitted optional field is an explicit clear while unmasked required fields are preserved");
+        var explicitNullOptional = new Dictionary<string, object?>(missingOptionalValue)
+        {
+            ["CandidatePhone"] = null
+        };
+        var explicitNullRequest = Request(explicitNullOptional);
+        Check(explicitNullRequest.ProfilePatch["CandidatePhone"].IsSelected &&
+            explicitNullRequest.ProfilePatch["CandidatePhone"].IsSupplied &&
+            explicitNullRequest.ProfilePatch["CandidatePhone"].Value == null &&
+            explicitNullRequest.Fingerprint == omittedOptionalRequest.Fingerprint,
+            "Masked omission and explicit null have the same clear intent and fingerprint");
+        var emptyOptional = new Dictionary<string, object?>(missingOptionalValue)
+        {
+            ["CandidatePhone"] = "   "
+        };
+        Check(Request(emptyOptional).Fingerprint == omittedOptionalRequest.Fingerprint,
+            "Masked blank optional text normalizes to the same clear fingerprint");
+        var omittedCvUrl = Input("UpdateCandidate");
+        omittedCvUrl["ProfileFieldMask"] = "CandidateCvUrl";
+        omittedCvUrl.Remove("CandidateName");
+        omittedCvUrl.Remove("CandidateEmail");
+        omittedCvUrl.Remove("CandidateCvUrl");
+        var blankCvUrl = new Dictionary<string, object?>(omittedCvUrl)
+        {
+            ["CandidateCvUrl"] = " "
+        };
+        Check(Request(blankCvUrl).Fingerprint == Request(omittedCvUrl).Fingerprint,
+            "Masked blank CV URL normalizes to the omitted-field clear fingerprint");
+        var missingMaskedName = Input("UpdateCandidate");
+        missingMaskedName["ProfileFieldMask"] = "CandidateName";
+        missingMaskedName.Remove("CandidateName");
+        Reject(() => Request(missingMaskedName), "REQUIRED_TEXT");
+        var blankMaskedEmail = Input("UpdateCandidate");
+        blankMaskedEmail["ProfileFieldMask"] = "CandidateEmail";
+        blankMaskedEmail["CandidateEmail"] = "  ";
+        Reject(() => Request(blankMaskedEmail), "REQUIRED_TEXT");
         var inapplicableMask = Input("CreateCandidate");
         inapplicableMask["ProfileFieldMask"] = "CandidatePhone";
         Reject(() => Request(inapplicableMask), "PROFILE_FIELD_MASK_NOT_APPLICABLE");
@@ -477,7 +524,16 @@ static class Program
         var reversed = ordered.Reverse().ToDictionary(x => x.Key, x => x.Value);
         Check(Request(ordered).Fingerprint == Request(reversed).Fingerprint, "Canonical input order");
         reversed["CandidatePhone"] = null;
-        Check(Request(ordered).Fingerprint != Request(reversed).Fingerprint, "Omitted and explicit null differ");
+        Check(Request(ordered).Fingerprint != Request(reversed).Fingerprint,
+            "Setting an optional field differs from clearing it");
+        var omittedPhone = new Dictionary<string, object?>(ordered);
+        omittedPhone.Remove("CandidatePhone");
+        Check(Request(omittedPhone).Fingerprint == Request(reversed).Fingerprint,
+            "Masked omission and explicit null clear fingerprints match");
+        var preservedPhone = Input("UpdateCandidate");
+        preservedPhone["CandidatePhone"] = "+15550101000";
+        Check(Request(preservedPhone).Fingerprint != Request(omittedPhone).Fingerprint,
+            "Unmasked preservation differs from masked omission clear");
         var vectorId = Guid.Parse("00000000-0000-0000-0000-000000000004");
         var vector = Input("UpdateCandidate", vectorId);
         Check(Request(vector).Fingerprint == "8fd2f364aa2547776970aae88501e24893f5cbd20cace81005d73381a4988ccc",
@@ -490,8 +546,8 @@ static class Program
         Check(Request(vector).Fingerprint == "1f7e4c1efdc6dca185bb479c5002f59e9407f5786ae2dc779e2b10c819ab1887",
             "Explicit null fingerprint golden vector: " + Request(vector).Fingerprint);
         vector["CandidatePhone"] = "";
-        Check(Request(vector).Fingerprint != "1f7e4c1efdc6dca185bb479c5002f59e9407f5786ae2dc779e2b10c819ab1887",
-            "Empty string differs from explicit null");
+        Check(Request(vector).Fingerprint == "1f7e4c1efdc6dca185bb479c5002f59e9407f5786ae2dc779e2b10c819ab1887",
+            "Empty string normalizes to the explicit-null clear fingerprint");
         var legacyReceiptInput = Input("UpdateCandidate", Guid.NewGuid());
         var legacyReceiptRequest = Request(legacyReceiptInput);
         var legacyReceipt = new Receipt
@@ -518,6 +574,51 @@ static class Program
         changedLegacyRequestInput["ProfileFieldMask"] = "CandidateName,CandidatePhone";
         changedLegacyRequestInput["CandidatePhone"] = null;
         Reject(() => legacyReceiptStore.Atomic(Request(changedLegacyRequestInput)), "CORRELATION_CONFLICT");
+        var phoneCvReceiptInput = Input("UpdateCandidate", Guid.NewGuid());
+        phoneCvReceiptInput["ProfileFieldMask"] = "CandidatePhone,CandidateCvUrl";
+        phoneCvReceiptInput.Remove("CandidateName");
+        phoneCvReceiptInput["CandidatePhone"] = "+15550101011";
+        phoneCvReceiptInput["CandidateCvUrl"] = "https://careers.example.invalid/cv/legacy";
+        var phoneCvReceiptRequest = Request(phoneCvReceiptInput);
+        var phoneCvReceipt = new Receipt
+        {
+            Action = "UpdateCandidate",
+            Fingerprint = phoneCvReceiptRequest.LegacyFingerprint,
+            Version = "1",
+            Result = new ActionResult
+            {
+                CandidateId = Candidate,
+                Previous = ActionRequest.NeedCall,
+                Current = ActionRequest.NeedCall
+            }
+        };
+        var phoneCvReceiptStore = new MemoryStore();
+        phoneCvReceiptStore.Receipts[phoneCvReceiptRequest.Correlation] = phoneCvReceipt;
+        var phoneCvReplay = phoneCvReceiptStore.Atomic(phoneCvReceiptRequest);
+        Check(phoneCvReplay.Replay && phoneCvReceiptStore.Updates == 0 &&
+            phoneCvReceipt.Fingerprint == phoneCvReceiptRequest.LegacyFingerprint,
+            "Historical Phone/CV maskless receipt replays without rewriting or updating Candidate");
+        var preserveReceiptInput = Input("UpdateCandidate", Guid.NewGuid());
+        var preserveReceiptRequest = Request(preserveReceiptInput);
+        var clearSameCorrelationInput = new Dictionary<string, object?>(preserveReceiptInput)
+        {
+            ["ProfileFieldMask"] = "CandidateName,AssignedTaId"
+        };
+        clearSameCorrelationInput.Remove("AssignedTaId");
+        var preserveReceiptStore = new MemoryStore();
+        preserveReceiptStore.Receipts[preserveReceiptRequest.Correlation] = new Receipt
+        {
+            Action = "UpdateCandidate",
+            Fingerprint = preserveReceiptRequest.LegacyFingerprint,
+            Version = "1",
+            Result = new ActionResult
+            {
+                CandidateId = Candidate,
+                Previous = ActionRequest.NeedCall,
+                Current = ActionRequest.NeedCall
+            }
+        };
+        Reject(() => preserveReceiptStore.Atomic(Request(clearSameCorrelationInput)), "CORRELATION_CONFLICT");
         var callVector = Input("RecordCall", vectorId);
         Check(Request(callVector).Fingerprint == "6da0c75875c5e6fc97e34e59df7b0a64631b5874f8f75d4c922173d5b67ca4e2", "Call UTC and Choice fingerprint golden vector");
         var originalCulture = System.Globalization.CultureInfo.CurrentCulture;

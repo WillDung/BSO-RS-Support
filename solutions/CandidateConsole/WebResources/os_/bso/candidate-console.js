@@ -2143,7 +2143,7 @@
         : (selectedCandidate[attribute] || "");
       const next = optional ? (value || null) : value;
       if (current !== next) {
-        inputs[inputName] = next;
+        if (next !== null) inputs[inputName] = next;
         baseline[attribute] = current;
         changedProfileFields.add(inputName);
       }
@@ -2155,7 +2155,7 @@
         ? normalizeGuid(selectedCandidate[attribute])
         : null;
       if (!sameOptionalGuid(current, next)) {
-        inputs[inputName] = next;
+        if (next !== null) inputs[inputName] = next;
         baseline[attribute] = current;
         changedProfileFields.add(inputName);
       }

@@ -14,6 +14,20 @@ namespace os_sr_cact
         public OperationError(string code, Exception innerException) : base(code, innerException) { }
     }
 
+    public sealed class ProfileFieldPatch
+    {
+        public bool IsSelected { get; }
+        public bool IsSupplied { get; }
+        public object? Value { get; }
+
+        internal ProfileFieldPatch(bool isSelected, bool isSupplied, object? value)
+        {
+            IsSelected = isSelected;
+            IsSupplied = isSupplied;
+            Value = value;
+        }
+    }
+
     public sealed class ActionRequest
     {
         public const int NeedCall = 100010000;
@@ -36,6 +50,7 @@ namespace os_sr_cact
         public string Action { get; }
         public int? ExpectedStatus { get; }
         public IReadOnlyDictionary<string, object?> Values { get; }
+        public IReadOnlyDictionary<string, ProfileFieldPatch> ProfilePatch { get; }
         public string Fingerprint { get; }
         public string LegacyFingerprint { get; }
 
@@ -128,6 +143,7 @@ namespace os_sr_cact
                 ? NormalizeProfileFieldMask(input, maskedProfileFields)
                 : "";
             var values = new SortedDictionary<string, object?>(StringComparer.Ordinal);
+            var profilePatch = new Dictionary<string, ProfileFieldPatch>(StringComparer.Ordinal);
             var profile = UpdateCandidateProfileFields;
             var allowed = new HashSet<string>(ApplicableInputNames(Action), StringComparer.Ordinal);
             foreach (var pair in input)
@@ -164,6 +180,10 @@ namespace os_sr_cact
                     {
                         if (value != null && !(value is string)) throw new OperationError("INVALID_TEXT");
                         value = (value as string)?.Trim();
+                        if (Action == "UpdateCandidate" && maskedProfileFields.Contains(pair.Key) &&
+                            (pair.Key == "CandidatePhone" || pair.Key == "CandidateCvUrl") &&
+                            value is string optionalText && string.IsNullOrWhiteSpace(optionalText))
+                            value = null;
                         int length = pair.Key == "Notes" ? (Action == "RecordCall" ? 4000 : 1000) :
                             pair.Key == "Reason" || pair.Key == "ResultNotes" ? 1000 :
                             pair.Key == "CandidateName" ? 200 : pair.Key == "CandidateEmail" ? 254 :
@@ -186,11 +206,24 @@ namespace os_sr_cact
                 throw new OperationError("CONTACT_REQUIRED");
             if (Action == "UpdateCandidate")
             {
-                foreach (var field in maskedProfileFields)
+                foreach (var field in UpdateCandidateProfileFields)
                 {
-                    if (!input.ContainsKey(field))
-                        throw new OperationError(field == "CandidateName" || field == "CandidateEmail"
-                            ? "REQUIRED_TEXT" : "PROFILE_FIELD_VALUE_REQUIRED");
+                    var selected = maskedProfileFields.Contains(field);
+                    var supplied = input.TryGetValue(field, out _);
+                    object? normalizedValue = null;
+                    if (selected)
+                    {
+                        if (!supplied)
+                        {
+                            if (field == "CandidateName" || field == "CandidateEmail")
+                                throw new OperationError("REQUIRED_TEXT");
+                            values.Add(field, null);
+                        }
+                        if (!values.TryGetValue(field, out normalizedValue))
+                            throw new OperationError("PROFILE_FIELD_VALUE_REQUIRED");
+                    }
+                    profilePatch.Add(field,
+                        new ProfileFieldPatch(selected, supplied, normalizedValue));
                 }
                 if (!profile.Any(values.ContainsKey)) throw new OperationError("EMPTY_UPDATE");
             }
@@ -217,6 +250,7 @@ namespace os_sr_cact
                     start <= utcNow || end <= start || start.Date != end.Date)
                     throw new OperationError("INVALID_SCHEDULE_TIME");
             }
+            ProfilePatch = new ReadOnlyDictionary<string, ProfileFieldPatch>(profilePatch);
             Values = values;
             Fingerprint = FingerprintFor(actor, values);
             LegacyFingerprint = Action == "UpdateCandidate"

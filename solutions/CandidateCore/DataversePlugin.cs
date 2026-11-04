@@ -614,7 +614,14 @@ namespace os_sr_cact
             };
             foreach (var pair in map)
             {
-                if (!request.Values.TryGetValue(pair.Key, out var value)) continue;
+                object? value;
+                if (request.Action == "UpdateCandidate")
+                {
+                    if (!request.ProfilePatch.TryGetValue(pair.Key, out var patch) ||
+                        !patch.IsSelected) continue;
+                    value = patch.Value;
+                }
+                else if (!request.Values.TryGetValue(pair.Key, out value)) continue;
                 if (value is Guid id) row[pair.Value] = new EntityReference(lookupTables[pair.Key], id);
                 else row[pair.Value] = value;
             }

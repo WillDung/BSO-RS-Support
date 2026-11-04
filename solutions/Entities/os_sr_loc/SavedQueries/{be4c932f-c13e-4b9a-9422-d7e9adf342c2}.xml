@@ -10,7 +10,9 @@
     <layoutxml>
       <grid name="resultset" jump="os_sr_loc_nm" select="1" icon="1" preview="1">
         <row name="result" id="os_sr_locid">
-          <cell name="os_sr_loc_nm" width="300" />
+          <cell name="os_sr_loc_nm" width="250" />
+          <cell name="os_sr_loc_rmeml" width="250" />
+          <cell name="os_sr_loc_det" width="300" />
           <cell name="createdon" width="125" />
         </row>
       </grid>
@@ -21,6 +23,8 @@
         <entity name="os_sr_loc">
           <attribute name="os_sr_locid" />
           <attribute name="os_sr_loc_nm" />
+          <attribute name="os_sr_loc_rmeml" />
+          <attribute name="os_sr_loc_det" />
           <attribute name="createdon" />
           <order attribute="os_sr_loc_nm" descending="false" />
           <filter type="and">

@@ -138,6 +138,7 @@ namespace os_sr_cact
             {
                 (Input: "PositionId", Table: "os_sr_pos"),
                 (Input: "CandidateSourceId", Table: "os_sr_csrc"),
+                (Input: "AssignedTaId", Table: "os_sr_ta"),
                 (Input: "InterviewerId", Table: "os_sr_ta"),
                 (Input: "LocationId", Table: "os_sr_loc")
             })
@@ -594,13 +595,20 @@ namespace os_sr_cact
             var map = new Dictionary<string, string>(StringComparer.Ordinal)
             {
                 ["CandidateName"] = "os_sr_cand_nm", ["CandidateEmail"] = "os_sr_cand_eml",
-                ["CandidatePhone"] = "os_sr_cand_phn", ["PositionId"] = "os_sr_cand_pos",
-                ["CandidateSourceId"] = "os_sr_cand_csrc"
+                ["CandidatePhone"] = "os_sr_cand_phn", ["CandidateCvUrl"] = "os_sr_cand_cvurl",
+                ["PositionId"] = "os_sr_cand_pos", ["CandidateSourceId"] = "os_sr_cand_csrc",
+                ["AssignedTaId"] = "os_sr_cand_ta"
+            };
+            var lookupTables = new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["PositionId"] = "os_sr_pos",
+                ["CandidateSourceId"] = "os_sr_csrc",
+                ["AssignedTaId"] = "os_sr_ta"
             };
             foreach (var pair in map)
             {
                 if (!request.Values.TryGetValue(pair.Key, out var value)) continue;
-                if (value is Guid id) row[pair.Value] = new EntityReference(pair.Key == "PositionId" ? "os_sr_pos" : "os_sr_csrc", id);
+                if (value is Guid id) row[pair.Value] = new EntityReference(lookupTables[pair.Key], id);
                 else row[pair.Value] = value;
             }
         }

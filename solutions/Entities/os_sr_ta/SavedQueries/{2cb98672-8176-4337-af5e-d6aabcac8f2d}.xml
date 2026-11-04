@@ -11,6 +11,7 @@
       <grid name="resultset" jump="os_sr_ta_nm" select="1" icon="1" preview="1">
         <row name="result" id="os_sr_taid">
           <cell name="os_sr_ta_nm" width="300" />
+          <cell name="os_sr_ta_eml" width="250" />
           <cell name="createdon" width="125" />
         </row>
       </grid>
@@ -21,6 +22,7 @@
         <entity name="os_sr_ta">
           <attribute name="os_sr_taid" />
           <attribute name="os_sr_ta_nm" />
+          <attribute name="os_sr_ta_eml" />
           <attribute name="createdon" />
           <order attribute="os_sr_ta_nm" descending="false" />
           <filter type="and">

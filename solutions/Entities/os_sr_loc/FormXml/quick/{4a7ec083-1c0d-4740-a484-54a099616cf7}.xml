@@ -27,6 +27,22 @@
                         <control id="os_sr_loc_nm" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="os_sr_loc_nm" />
                       </cell>
                     </row>
+                    <row>
+                      <cell id="{871f292a-b6e9-4eb8-aef4-df7e1e5a5d93}">
+                        <labels>
+                          <label description="Room/Resource Email" languagecode="1033" />
+                        </labels>
+                        <control id="os_sr_loc_rmeml" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="os_sr_loc_rmeml" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{0f8cf92a-dce7-4b27-8054-99b3fef0eafc}">
+                        <labels>
+                          <label description="Location Details" languagecode="1033" />
+                        </labels>
+                        <control id="os_sr_loc_det" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="os_sr_loc_det" />
+                      </cell>
+                    </row>
                   </rows>
                 </section>
               </sections>

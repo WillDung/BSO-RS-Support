@@ -98,6 +98,27 @@ test("PROD fallback stays unavailable even when requested in configuration", () 
   assert.equal(result.directWriteFallbackAvailable, false);
 });
 
+test("reference selection follows syntheticDataOnly rather than environment mode", () => {
+  const policy = createPolicy();
+  const dev = policy.resolve(configuration(), runtime());
+  const test = policy.resolve(
+    configuration({ mode: "TEST", devDirectWriteFallbackEnabled: false }),
+    runtime()
+  );
+  const prod = policy.resolve(
+    configuration({ mode: "PROD", syntheticDataOnly: false }),
+    runtime()
+  );
+
+  assert.equal(policy.allowsReference("[DEV] Software Engineer", dev.syntheticDataOnly), true);
+  assert.equal(policy.allowsReference("Software Engineer", test.syntheticDataOnly), false);
+  assert.equal(policy.allowsReference("Production Software Engineer", prod.syntheticDataOnly), true);
+  assert.equal(policy.allowsReference("[DEV] Software Engineer", prod.syntheticDataOnly), false);
+  assert.equal(policy.allowsReference("", false), false);
+  assert.equal(policy.allowsReference(null, false), false);
+  assert.equal(policy.allowsReference("Software Engineer", undefined), false);
+});
+
 test("unapproved real-data mode is rejected outside PROD", () => {
   const result = createPolicy().resolve(
     configuration({ syntheticDataOnly: false }),

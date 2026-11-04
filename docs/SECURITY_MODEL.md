@@ -1,5 +1,11 @@
 # Security Model
 
+## Reference Admin scope (approved, not deployed)
+
+The owner approved one additional Reference Admin role root with organization-level Read/Create/Write on TA and Location only. Delete, Candidate, Call Log, Status History, Interview Schedule, Operation Receipt, and Candidate Core privileges are excluded. The role is to remain unassigned until a separate access decision is made.
+
+No role definition or `srapp` role association was authored because the environment-generated role identifier has not been read under the required clean BSO identity. No role, team membership, BSO privilege, or app association was changed. The accepted BSO/Candidate Core security boundary remains unchanged; live role creation and least-privilege acceptance are pending authenticated environment access.
+
 ## Phase 5B Candidate Core service boundary (29 October 2026)
 
 **Current status:** `PHASE_5B_BSO_SECURITY_ACCEPTED_IN_DEV`. The bounded Candidate Core store uses SYSTEM for protected storage; access-controlled Candidate and Interview Schedule reads verify the initiating user's effective `ReadAccess` before returning records. Reference lookups remain caller-context. The initiating user remains the Custom API authorization context and business actor/owner; the fixed `CandidateOperation.MutationMatrix` remains the only write allowlist. Receipt read/create is SYSTEM-only, append-only, and does not require BSO Receipt privileges.

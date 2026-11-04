@@ -28,10 +28,10 @@ Assert-Test ($source -match "executeprivilegename -cne 'prvReados_sr_cand'" -and
     $source -match 'isprivate -ne \$true' -and
     $source -match "bindingtype -ne 0") `
     'Existing Custom API privilege and unbound private contract are guarded'
-Assert-Test ($source -match "'InterviewerId', 'LocationId', 'StartAt', 'EndAt', 'ResultNotes'" -and
+Assert-Test ($source -match "'CandidateCvUrl', 'AssignedTaId'" -and
     $source -match 'MaximumPostDispatches = \$writes\.Count' -and
     $source -match 'MaximumRetries|AutomaticRetries = 0') `
-    'The only permitted request-parameter additions are the five approved inputs'
+    'The only permitted request-parameter additions are the seven approved inputs'
 Assert-Test ($source -match "ValidateSet\('GET', 'POST'\)" -and
     $source -match "customapirequestparameters" -and
     $source -match "MSCRM.SolutionUniqueName" -and
@@ -49,6 +49,8 @@ Assert-Test ($source -notmatch 'pluginpackages|pluginassemblies|sdkmessageproces
 $contractPath = Join-Path $root 'docs\PHASE_3C_API_CONTRACT.json'
 $contract = Get-Content -LiteralPath $contractPath -Raw | ConvertFrom-Json
 $expected = @(
+    'AssignedTaId|12|True'
+    'CandidateCvUrl|10|True'
     'EndAt|1|True'
     'InterviewerId|12|True'
     'LocationId|12|True'
@@ -56,11 +58,14 @@ $expected = @(
     'StartAt|1|True'
 )
 $actual = @($contract.inputs | Where-Object {
-    $_.name -in @('InterviewerId', 'LocationId', 'StartAt', 'EndAt', 'ResultNotes')
+    $_.name -in @(
+        'InterviewerId', 'LocationId', 'StartAt', 'EndAt', 'ResultNotes',
+        'CandidateCvUrl', 'AssignedTaId'
+    )
 } | ForEach-Object {
     '{0}|{1}|{2}' -f $_.name, [int]$_.type, [bool]$_.optional
 } | Sort-Object -CaseSensitive)
 Assert-Test ([string]::Join(';', $actual) -ceq [string]::Join(';', $expected)) `
-    'The approved contract defines the exact five missing inputs and types'
+    'The approved contract defines the exact seven missing inputs and types'
 
 Write-Output "PASS: $script:Passed offline Phase 5A API-input repair assertions; no authentication/network."

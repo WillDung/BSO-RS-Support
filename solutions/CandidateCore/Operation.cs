@@ -41,8 +41,9 @@ namespace os_sr_cact
         private static readonly string[] DeclaredInputNames =
         {
             "ActionType", "CorrelationId", "CandidateId", "ExpectedStatus", "CandidateName",
-            "CandidateEmail", "CandidatePhone", "PositionId", "CandidateSourceId", "CallOutcome",
-            "ContactedAt", "Notes", "Reason", "InterviewerId", "LocationId", "StartAt", "EndAt", "ResultNotes"
+            "CandidateEmail", "CandidatePhone", "CandidateCvUrl", "PositionId", "CandidateSourceId",
+            "AssignedTaId", "CallOutcome", "ContactedAt", "Notes", "Reason", "InterviewerId",
+            "LocationId", "StartAt", "EndAt", "ResultNotes"
         };
 
         private static readonly HashSet<string> DeclaredInputNameSet =
@@ -57,10 +58,11 @@ namespace os_sr_cact
         {
             var common = new[] { "ActionType", "CorrelationId" };
             if (action == "CreateCandidate")
-                return common.Concat(new[] { "CandidateName", "CandidateEmail", "CandidatePhone", "PositionId", "CandidateSourceId" });
+                return common.Concat(new[] { "CandidateName", "CandidateEmail", "CandidatePhone",
+                    "CandidateCvUrl", "PositionId", "CandidateSourceId", "AssignedTaId" });
             if (action == "UpdateCandidate")
                 return common.Concat(new[] { "CandidateId", "ExpectedStatus", "CandidateName", "CandidateEmail",
-                    "CandidatePhone", "PositionId", "CandidateSourceId" });
+                    "CandidatePhone", "CandidateCvUrl", "PositionId", "CandidateSourceId", "AssignedTaId" });
             if (action == "RecordCall")
                 return common.Concat(new[] { "CandidateId", "ExpectedStatus", "CallOutcome", "ContactedAt", "Notes" });
             if (action == "MarkRound1Scheduled" || action == "RequestReschedule")
@@ -111,8 +113,9 @@ namespace os_sr_cact
                     throw new OperationError("INVALID_EXPECTED_STATUS");
             }
             var values = new SortedDictionary<string, object?>(StringComparer.Ordinal);
-            var profile = new[] { "CandidateName", "CandidateEmail", "CandidatePhone", "PositionId", "CandidateSourceId" };
-            var optionalGuidProfile = new[] { "PositionId", "CandidateSourceId" };
+            var profile = new[] { "CandidateName", "CandidateEmail", "CandidatePhone", "CandidateCvUrl",
+                "PositionId", "CandidateSourceId", "AssignedTaId" };
+            var optionalGuidProfile = new[] { "PositionId", "CandidateSourceId", "AssignedTaId" };
             var allowed = new HashSet<string>(ApplicableInputNames(Action), StringComparer.Ordinal);
             foreach (var pair in input)
             {
@@ -135,8 +138,11 @@ namespace os_sr_cact
                         value = (value as string)?.Trim();
                         int length = pair.Key == "Notes" ? (Action == "RecordCall" ? 4000 : 1000) :
                             pair.Key == "Reason" || pair.Key == "ResultNotes" ? 1000 :
-                            pair.Key == "CandidateName" ? 200 : pair.Key == "CandidateEmail" ? 254 : 50;
+                            pair.Key == "CandidateName" ? 200 : pair.Key == "CandidateEmail" ? 254 :
+                            pair.Key == "CandidateCvUrl" ? 2000 : 50;
                         if (value is string text && text.Length > length) throw new OperationError("TEXT_TOO_LONG");
+                        if (pair.Key == "CandidateCvUrl" && value is string cvUrl)
+                            ValidateCandidateCvUrl(cvUrl);
                         if (pair.Key == "CandidateName" || pair.Key == "CandidateEmail" || pair.Key == "Reason")
                         {
                             if (string.IsNullOrWhiteSpace(value as string)) throw new OperationError("REQUIRED_TEXT");
@@ -224,6 +230,15 @@ namespace os_sr_cact
                 return false;
             }
             throw new OperationError("INVALID_GUID_PARAMETER:" + name);
+        }
+
+        private static void ValidateCandidateCvUrl(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return;
+            if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) ||
+                !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+                !string.IsNullOrEmpty(uri.UserInfo))
+                throw new OperationError("INVALID_CV_URL");
         }
     }
 

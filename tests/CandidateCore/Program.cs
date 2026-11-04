@@ -308,7 +308,7 @@ static class Program
         Reject(() => Request(createWithNullCandidateId), "INVALID_CANDIDATEID");
         var createLookupCorrelation = Guid.NewGuid();
         var createWithoutLookups = Request(Input("CreateCandidate", createLookupCorrelation));
-        foreach (string parameter in new[] { "PositionId", "CandidateSourceId" })
+        foreach (string parameter in new[] { "PositionId", "CandidateSourceId", "AssignedTaId" })
         {
             foreach (object? emptyValue in new object?[] { null, Guid.Empty })
             {
@@ -336,6 +336,25 @@ static class Program
         Reject(() => Request(updateWithNullLookup), "INVALID_GUID_PARAMETER:PositionId");
         updateWithNullLookup["PositionId"] = "not-a-guid";
         Reject(() => Request(updateWithNullLookup), "INVALID_GUID_PARAMETER:PositionId");
+        updateWithNullLookup = Input("UpdateCandidate");
+        updateWithNullLookup["AssignedTaId"] = null;
+        Check(Request(updateWithNullLookup).Values.ContainsKey("AssignedTaId") &&
+            Request(updateWithNullLookup).Values["AssignedTaId"] == null,
+            "UpdateCandidate explicit null AssignedTaId remains a clear operation");
+        foreach (string invalidCvUrl in new[]
+        {
+            "http://careers.example.invalid/cv",
+            "https://user:password@careers.example.invalid/cv",
+            "/candidate/cv"
+        })
+        {
+            var invalidCvInput = Input("CreateCandidate");
+            invalidCvInput["CandidateCvUrl"] = invalidCvUrl;
+            Reject(() => Request(invalidCvInput), "INVALID_CV_URL");
+        }
+        var overlongCvInput = Input("CreateCandidate");
+        overlongCvInput["CandidateCvUrl"] = "https://careers.example.invalid/" + new string('a', 2000);
+        Reject(() => Request(overlongCvInput), "TEXT_TOO_LONG");
         var missingCreateName = Input("CreateCandidate");
         missingCreateName.Remove("CandidateName");
         Reject(() => Request(missingCreateName), "CONTACT_REQUIRED");

@@ -1,5 +1,21 @@
 # Current State
 
+## P0 Slice 1 offline source work
+
+**Status:** `P0_SLICE_1_OFFLINE_SOURCE_IMPLEMENTED; ROLE_METADATA_AND_LIVE_ACCEPTANCE_PENDING`. This describes local source only; it is not a deployment or runtime acceptance.
+
+The current worktree adds optional `CandidateCvUrl` and `AssignedTaId` inputs to the Candidate Core source contract, maps them to the existing Candidate columns, and adds Candidate Console create/detail/edit support. Reference choices are filtered and revalidated according to the configured `syntheticDataOnly` policy. Existing TA and Location main/quick forms and Active views now expose their already-provisioned email/details fields. No schema change is included.
+
+The latest previously verified live API metadata still had 18 request parameters and did not include `CandidateCvUrl` or `AssignedTaId` (see the historical read-only diagnosis in this file). The local contract and repair runner are not evidence that the live API has been updated. A clean BSO browser identity is unavailable, so live API parameter repair, package update, publication, role assignment, and runtime acceptance are paused. No environment writes, candidate/reference record writes, publication, or release-artifact rebuild occurred.
+
+The owner-approved Reference Admin scope is one new role root with organization-level Read/Create/Write on TA and Location only; no Delete or Candidate/Core privileges, and the role remains unassigned. Its environment-generated role identifier and app association have not been obtained or authored. The existing BSO security boundary is unchanged.
+
+CV URL validation in source requires an absolute HTTPS URL without embedded credentials and respects the existing 2,000-character field limit. A host allowlist and detailed CV access policy remain open decisions; this source change does not authorize real candidate data. `REAL_DATA_STILL_PROHIBITED`.
+
+The frozen 1.0.0.1 artifact below remains immutable historical evidence and does not contain these later P0 source changes. The earlier `APPLICATION_FUNCTIONALLY_READY_FOR_PRODUCTION` classification applies to that accepted release baseline, not to the P0 changes pending live acceptance.
+
+The offline `BsoRsProductionReadiness.Tests.ps1` currently fails its frozen canonical-source/root-component fingerprint assertion because this work intentionally changes tracked solution source without rebuilding the release candidate. Do not update the frozen release pins or claim readiness for these changes; a new release qualification requires its own authorization after live acceptance.
+
 ## Final Production release candidate 1.0.0.1 (2026-11-03)
 
 **Current status:**

@@ -63,13 +63,14 @@
       name: "os_sr_cand_nm",
       email: "os_sr_cand_eml",
       phone: "os_sr_cand_phn",
+      cvUrl: "os_sr_cand_cvurl",
       status: "os_sr_cand_stat",
       position: "_os_sr_cand_pos_value",
       positionNavigation: "os_sr_cand_pos",
-      positionEntitySet: "os_sr_poses",
       source: "_os_sr_cand_csrc_value",
       sourceNavigation: "os_sr_cand_csrc",
-      sourceEntitySet: "os_sr_csrcs"
+      assignedTa: "_os_sr_cand_ta_value",
+      assignedTaNavigation: "os_sr_cand_ta"
     },
     call: {
       logicalName: "os_sr_call",
@@ -138,7 +139,8 @@
   ]);
   const CORE_API_PARAMETER_NAMES = new Set([
     "ActionType", "CandidateId", "ExpectedStatus", "CorrelationId", "CandidateName",
-    "CandidateEmail", "CandidatePhone", "PositionId", "CandidateSourceId", "Reason",
+    "CandidateEmail", "CandidatePhone", "CandidateCvUrl", "PositionId", "CandidateSourceId",
+    "AssignedTaId", "Reason",
     "CallOutcome", "ContactedAt", "Notes", "InterviewerId", "LocationId", "StartAt",
     "EndAt", "ResultNotes"
   ]);
@@ -239,6 +241,12 @@
   function isCandidateAllowedByDataMode(candidate) {
     return isCandidateCoreEnabled() &&
       (!environmentPolicy.syntheticDataOnly || isSyntheticCandidateMarkers(candidate));
+  }
+
+  function isReferenceAllowedByDataMode(label) {
+    const policy = window.BsoRsCandidateConsolePolicy;
+    return Boolean(policy && typeof policy.allowsReference === "function" &&
+      policy.allowsReference(label, environmentPolicy.syntheticDataOnly));
   }
 
   function isSyntheticInput(name, email) {
@@ -409,7 +417,8 @@
   async function resolveCreatedCandidate(correlationId, expectedName, expectedEmail) {
     const c = TABLES.candidate;
     const rows = await retrieveAll(c.logicalName, `?$select=${[
-      c.id, c.number, c.name, c.email, c.phone, c.status, c.position, c.source,
+      c.id, c.number, c.name, c.email, c.phone, c.cvUrl, c.status, c.position, c.source,
+      c.assignedTa,
       c.correlation, "createdon", "_ownerid_value"
     ].join(",")}&$filter=${encodeURIComponent(`${c.correlation} eq '${correlationId}'`)}&$top=2`);
     const matches = rows.filter((candidate) =>
@@ -462,6 +471,22 @@
     return value.replace(/[{}]/g, "");
   }
 
+  function sameOptionalGuid(actual, expected) {
+    if (!actual && !expected) return true;
+    return Boolean(actual && expected &&
+      normalizeGuid(actual).toLowerCase() === normalizeGuid(expected).toLowerCase());
+  }
+
+  function isValidCandidateCvUrl(value) {
+    if (!value) return true;
+    try {
+      const url = new URL(value);
+      return url.protocol === "https:" && !url.username && !url.password;
+    } catch {
+      return false;
+    }
+  }
+
   async function retrieveAll(tableLogicalName, query) {
     const api = xrm().WebApi;
     let response = await api.retrieveMultipleRecords(tableLogicalName, query);
@@ -498,7 +523,7 @@
     if (!visibleRows.length) {
       const row = document.createElement("tr");
       const cell = appendCell(row, rows.length ? "No candidates match the current search and status filter." : "No synthetic candidates found. Create one to get started.");
-      cell.colSpan = 10;
+      cell.colSpan = 11;
       cell.className = "empty";
       body.appendChild(row);
       return;
@@ -525,6 +550,7 @@
       appendCell(row, candidate[TABLES.candidate.phone]);
       appendCell(row, formatted(candidate, TABLES.candidate.position));
       appendCell(row, formatted(candidate, TABLES.candidate.source));
+      appendCell(row, formatted(candidate, TABLES.candidate.assignedTa));
       appendCell(row, choiceLabel(candidate, TABLES.candidate.status, STATUS_LABELS));
       appendCell(row, formatted(candidate, "_ownerid_value"));
       appendCell(row, formatDate(candidate.createdon));
@@ -560,7 +586,8 @@
   async function refreshCandidates() {
     const c = TABLES.candidate;
     const select = `?$select=${[
-      c.id, c.number, c.name, c.email, c.phone, c.status, c.position, c.source,
+      c.id, c.number, c.name, c.email, c.phone, c.cvUrl, c.status, c.position, c.source,
+      c.assignedTa,
       "createdon", "_ownerid_value"
     ].join(",")}`;
     const syntheticFilter = environmentPolicy.syntheticDataOnly
@@ -584,6 +611,33 @@
     container.appendChild(wrapper);
   }
 
+  function addDetailLink(container, label, value) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "detail-item";
+    const term = document.createElement("dt");
+    term.textContent = label;
+    const detail = document.createElement("dd");
+    if (typeof value === "string" && value) {
+      try {
+        const url = new URL(value);
+        if (url.protocol === "https:" && !url.username && !url.password) {
+          const link = document.createElement("a");
+          link.href = url.href;
+          link.textContent = url.href;
+          link.target = "_blank";
+          link.rel = "noopener noreferrer";
+          detail.appendChild(link);
+        } else {
+          detail.textContent = value;
+        }
+      } catch {
+        detail.textContent = value;
+      }
+    }
+    wrapper.append(term, detail);
+    container.appendChild(wrapper);
+  }
+
   async function getLookupName(tableLogicalName, id) {
     if (!id) return "";
     const entityMetadata = await xrm().Utility.getEntityMetadata(tableLogicalName);
@@ -601,7 +655,8 @@
     details.replaceChildren();
     const lookups = await Promise.all([
       getLookupName("os_sr_pos", candidate[TABLES.candidate.position]),
-      getLookupName("os_sr_csrc", candidate[TABLES.candidate.source])
+      getLookupName("os_sr_csrc", candidate[TABLES.candidate.source]),
+      getLookupName("os_sr_ta", candidate[TABLES.candidate.assignedTa])
     ]);
     addDetailItem(details, "Candidate Number", candidate[TABLES.candidate.number]);
     addDetailItem(details, "Candidate Name", candidate[TABLES.candidate.name]);
@@ -610,6 +665,8 @@
     addDetailItem(details, "Status", choiceLabel(candidate, TABLES.candidate.status, STATUS_LABELS));
     addDetailItem(details, "Position", lookups[0]);
     addDetailItem(details, "Candidate Source", lookups[1]);
+    addDetailItem(details, "Assigned TA", lookups[2]);
+    addDetailLink(details, "Candidate CV URL", candidate[TABLES.candidate.cvUrl]);
     addDetailItem(details, "Owner", formatted(candidate, "_ownerid_value"));
     addDetailItem(details, "Created On", formatDate(candidate.createdon));
   }
@@ -797,6 +854,8 @@
       proposedSchedule = null;
       scheduleRows = [];
       $("scheduling-panel").hidden = true;
+      $("edit-candidate-panel").hidden = true;
+      $("edit-candidate-button").hidden = !isCandidateAllowedByDataMode(candidate);
       $("interview-result-panel").hidden = true;
       $("cancellation-panel").hidden = true;
       $("schedule-round1-button").hidden = true;
@@ -856,19 +915,24 @@
     select.appendChild(option);
   }
 
-  async function loadLookupOptions(tableName, selectId, emptyLabel) {
-    const select = $(selectId);
+  async function loadLookupOptions(tableName, selectIds, emptyLabels) {
+    const ids = Array.isArray(selectIds) ? selectIds : [selectIds];
+    const labels = Array.isArray(emptyLabels) ? emptyLabels : ids.map(() => emptyLabels);
+    if (ids.length !== labels.length) throw new Error("REFERENCE_SELECTOR_CONFIGURATION_INVALID");
     const metadata = await xrm().Utility.getEntityMetadata(tableName);
     const primaryName = metadata.PrimaryNameAttribute;
     const rows = await retrieveAll(tableName,
       `?$select=${metadata.PrimaryIdAttribute},${primaryName},statecode&$filter=statecode eq 0&$orderby=${primaryName} asc`);
-    select.replaceChildren();
-    addOption(select, "", emptyLabel);
+    const selects = ids.map((id) => $(id));
+    selects.forEach((select, index) => {
+      select.replaceChildren();
+      addOption(select, "", labels[index]);
+    });
     for (const row of rows) {
       const id = row[metadata.PrimaryIdAttribute];
       const label = row[primaryName];
-      if (!id || typeof label !== "string" || !label.startsWith("[DEV]")) continue;
-      addOption(select, id, label);
+      if (!id || !isReferenceAllowedByDataMode(label)) continue;
+      selects.forEach((select) => addOption(select, id, label));
     }
   }
 
@@ -933,11 +997,11 @@
     return dateTime;
   }
 
-  async function getActiveSyntheticReference(tableName, value) {
+  async function getActiveReference(tableName, value) {
     const id = normalizeGuid(value);
     const metadata = await xrm().Utility.getEntityMetadata(tableName);
     if (!metadata.PrimaryIdAttribute || !metadata.PrimaryNameAttribute || !metadata.EntitySetName) {
-      throw new Error("DEV_DIRECT_WRITE_REFERENCE_METADATA_INVALID");
+      throw new Error("CANDIDATE_REFERENCE_METADATA_INVALID");
     }
     const reference = await xrm().WebApi.retrieveRecord(
       tableName,
@@ -946,10 +1010,15 @@
     );
     if (reference.statecode !== 0 ||
         typeof reference[metadata.PrimaryNameAttribute] !== "string" ||
-        !reference[metadata.PrimaryNameAttribute].startsWith("[DEV]")) {
-      throw new Error("DEV_DIRECT_WRITE_REFERENCE_NOT_SYNTHETIC_ACTIVE");
+        !isReferenceAllowedByDataMode(reference[metadata.PrimaryNameAttribute])) {
+      throw new Error("CANDIDATE_REFERENCE_NOT_AVAILABLE");
     }
     return { id, entitySetName: metadata.EntitySetName };
+  }
+
+  async function getSelectedActiveReference(tableName, selectId) {
+    const value = $(selectId).value;
+    return value ? getActiveReference(tableName, value) : null;
   }
 
   async function findRound1Schedules(candidateId) {
@@ -1217,8 +1286,8 @@
 
     setBusy(true);
     try {
-      const ta = await getActiveSyntheticReference("os_sr_ta", $("scheduling-ta").value);
-      const location = await getActiveSyntheticReference("os_sr_loc", $("scheduling-location").value);
+      const ta = await getActiveReference("os_sr_ta", $("scheduling-ta").value);
+      const location = await getActiveReference("os_sr_loc", $("scheduling-location").value);
       inputs.InterviewerId = ta.id;
       inputs.LocationId = location.id;
       inputs.StartAt = start.toISOString();
@@ -1317,8 +1386,8 @@
         showNotice("Round 1 schedule state changed or is ambiguous. No schedule was written; reconcile the Candidate state.", true);
         return;
       }
-      const ta = await getActiveSyntheticReference("os_sr_ta", $("scheduling-ta").value);
-      const location = await getActiveSyntheticReference("os_sr_loc", $("scheduling-location").value);
+      const ta = await getActiveReference("os_sr_ta", $("scheduling-ta").value);
+      const location = await getActiveReference("os_sr_loc", $("scheduling-location").value);
       const userId = currentUserId();
       const changedAt = new Date().toISOString();
       const payload = {
@@ -1487,8 +1556,8 @@
         return;
       }
 
-      const ta = await getActiveSyntheticReference("os_sr_ta", $("scheduling-ta").value);
-      const location = await getActiveSyntheticReference("os_sr_loc", $("scheduling-location").value);
+      const ta = await getActiveReference("os_sr_ta", $("scheduling-ta").value);
+      const location = await getActiveReference("os_sr_loc", $("scheduling-location").value);
       const userId = currentUserId();
       const changedAt = new Date().toISOString();
       category = "RESCHEDULE_OLD_SCHEDULE_UPDATE_FAILED";
@@ -1820,8 +1889,13 @@
     const candidateName = $("candidate-name").value.trim();
     const candidateEmail = $("candidate-email").value.trim();
     const candidatePhone = $("candidate-phone").value.trim();
+    const candidateCvUrl = $("candidate-cv-url").value.trim();
     if (!candidateName || !candidateEmail) {
       showNotice("Candidate Name and Email are required.", true);
+      return;
+    }
+    if (!isValidCandidateCvUrl(candidateCvUrl)) {
+      showNotice("Candidate CV URL must be an HTTPS URL without embedded credentials.", true);
       return;
     }
     if (environmentPolicy.syntheticDataOnly && !isSyntheticInput(candidateName, candidateEmail)) {
@@ -1835,20 +1909,34 @@
 
     setBusy(true);
     let candidateId = null;
+    let coreInvoked = false;
     try {
       const c = TABLES.candidate;
       const correlationId = newCorrelationId();
+      const [position, source, assignedTa] = await Promise.all([
+        getSelectedActiveReference("os_sr_pos", "candidate-position"),
+        getSelectedActiveReference("os_sr_csrc", "candidate-source"),
+        getSelectedActiveReference("os_sr_ta", "candidate-assigned-ta")
+      ]);
       const inputs = {
         CandidateName: candidateName,
         CandidateEmail: candidateEmail
       };
       if (candidatePhone) inputs.CandidatePhone = candidatePhone;
-      const positionId = $("candidate-position").value;
-      if (positionId) inputs.PositionId = normalizeGuid(positionId);
-      const sourceId = $("candidate-source").value;
-      if (sourceId) inputs.CandidateSourceId = normalizeGuid(sourceId);
+      if (candidateCvUrl) inputs.CandidateCvUrl = candidateCvUrl;
+      if (position) inputs.PositionId = position.id;
+      if (source) inputs.CandidateSourceId = source.id;
+      if (assignedTa) inputs.AssignedTaId = assignedTa.id;
+      coreInvoked = true;
       await invokeCandidateCore("CreateCandidate", inputs, correlationId);
       const candidate = await resolveCreatedCandidate(correlationId, candidateName, candidateEmail);
+      if ((candidate[c.phone] || "") !== candidatePhone ||
+          (candidate[c.cvUrl] || "") !== candidateCvUrl ||
+          !sameOptionalGuid(candidate[c.position], position && position.id) ||
+          !sameOptionalGuid(candidate[c.source], source && source.id) ||
+          !sameOptionalGuid(candidate[c.assignedTa], assignedTa && assignedTa.id)) {
+        throw new Error("CANDIDATE_CORE_CREATE_PROFILE_READBACK_INVALID");
+      }
       candidateId = normalizeGuid(candidate[c.id]);
       $("candidate-form").reset();
       $("candidate-search").value = "";
@@ -1856,7 +1944,12 @@
       await refreshCoreCandidate(candidateId);
       showNotice("Candidate created successfully through Candidate Core.");
     } catch (error) {
-      await reportCandidateCoreFailure("CreateCandidate", candidateId, error);
+      if (coreInvoked) {
+        await reportCandidateCoreFailure("CreateCandidate", candidateId, error);
+      } else {
+        logSafeFailure("CANDIDATE_CORE_REFERENCE_REVALIDATION_FAILED", error);
+        showNotice("A selected reference is no longer active or available under the configured data policy. Refresh and try again.", true);
+      }
     } finally {
       setBusy(false);
     }
@@ -1870,6 +1963,7 @@
     const candidateName = $("candidate-name").value.trim();
     const candidateEmail = $("candidate-email").value.trim();
     const candidatePhone = $("candidate-phone").value.trim();
+    const candidateCvUrl = $("candidate-cv-url").value.trim();
     if (!candidateName || !candidateEmail) {
       showNotice("Candidate Name and Email are required.", true);
       return;
@@ -1877,6 +1971,10 @@
     if (!candidateName.startsWith("[SYNTHETIC-E2E]") ||
         !/^[^@\s]+@[^@\s]+\.invalid$/i.test(candidateEmail)) {
       showNotice("This DEV console accepts only [SYNTHETIC-E2E] names and reserved .invalid email addresses.", true);
+      return;
+    }
+    if (!isValidCandidateCvUrl(candidateCvUrl)) {
+      showNotice("Candidate CV URL must be an HTTPS URL without embedded credentials.", true);
       return;
     }
     if (!isDevConfiguration()) {
@@ -1888,6 +1986,7 @@
     let category = "CANDIDATE_CREATE_FAILED";
     let candidateId = null;
     let candidateCreated = false;
+    let writeDispatched = false;
     try {
       const payload = {
         [c.name]: candidateName,
@@ -1895,16 +1994,25 @@
         [c.status]: STATUS.needCall
       };
       if (candidatePhone) payload[c.phone] = candidatePhone;
-      const positionId = $("candidate-position").value;
-      if (positionId) {
+      if (candidateCvUrl) payload[c.cvUrl] = candidateCvUrl;
+      const [position, source, assignedTa] = await Promise.all([
+        getSelectedActiveReference("os_sr_pos", "candidate-position"),
+        getSelectedActiveReference("os_sr_csrc", "candidate-source"),
+        getSelectedActiveReference("os_sr_ta", "candidate-assigned-ta")
+      ]);
+      if (position) {
         payload[`${c.positionNavigation}@odata.bind`] =
-          `/${c.positionEntitySet}(${normalizeGuid(positionId)})`;
+          `/${position.entitySetName}(${position.id})`;
       }
-      const sourceId = $("candidate-source").value;
-      if (sourceId) {
+      if (source) {
         payload[`${c.sourceNavigation}@odata.bind`] =
-          `/${c.sourceEntitySet}(${normalizeGuid(sourceId)})`;
+          `/${source.entitySetName}(${source.id})`;
       }
+      if (assignedTa) {
+        payload[`${c.assignedTaNavigation}@odata.bind`] =
+          `/${assignedTa.entitySetName}(${assignedTa.id})`;
+      }
+      writeDispatched = true;
       const result = await xrm().WebApi.createRecord(c.logicalName, payload);
       candidateId = result && typeof result.id === "string" ? normalizeGuid(result.id) : null;
       candidateCreated = Boolean(candidateId);
@@ -1917,7 +2025,8 @@
       const candidate = await xrm().WebApi.retrieveRecord(
         c.logicalName,
         candidateId,
-        `?$select=${[c.id, c.number, c.name, c.email, c.phone, c.status, c.position, c.source, "createdon", "_ownerid_value"].join(",")}`
+        `?$select=${[c.id, c.number, c.name, c.email, c.phone, c.cvUrl, c.status, c.position,
+          c.source, c.assignedTa, "createdon", "_ownerid_value"].join(",")}`
       );
       if (!isCandidateAllowedByDataMode(candidate) || candidate[c.status] !== STATUS.needCall ||
           !candidate[c.number]) {
@@ -1934,12 +2043,165 @@
       }
       showNotice("Candidate created successfully.");
     } catch (error) {
+      if (!writeDispatched) {
+        logSafeFailure("DEV_DIRECT_WRITE_REFERENCE_REVALIDATION_FAILED", error);
+        showNotice("A selected reference is no longer active or available under the configured data policy. Refresh and try again.", true);
+        return;
+      }
       logSafeFailure(`DEV_DIRECT_WRITE_${category}`, error);
       const reconciled = await reconcileAfterFailure(candidateId);
       const message = candidateCreated && category === "CANDIDATE_READBACK_FAILED"
         ? "Candidate was created, but readback failed. Refresh to reconcile before trying again."
         : failureMessage(category, candidateCreated);
       showNotice(reconciled ? message : `${message} Reconciliation did not fully complete.`, true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function setCurrentReferenceOption(selectId, referenceId) {
+    const select = $(selectId);
+    const id = referenceId ? normalizeGuid(referenceId) : "";
+    const existing = Array.from(select.options).find((option) =>
+      option.value.toLowerCase() === id.toLowerCase());
+    if (id && !existing) {
+      const option = document.createElement("option");
+      option.value = id;
+      option.textContent = "Current reference (not selectable by policy)";
+      select.insertBefore(option, select.options[1] || null);
+    }
+    select.value = existing ? existing.value : id;
+  }
+
+  function showEditCandidatePanel() {
+    if (busy || !selectedCandidate || !isCandidateAllowedByDataMode(selectedCandidate)) return;
+    const c = TABLES.candidate;
+    $("edit-candidate-name").value = selectedCandidate[c.name] || "";
+    $("edit-candidate-email").value = selectedCandidate[c.email] || "";
+    $("edit-candidate-phone").value = selectedCandidate[c.phone] || "";
+    $("edit-candidate-cv-url").value = selectedCandidate[c.cvUrl] || "";
+    setCurrentReferenceOption("edit-candidate-position", selectedCandidate[c.position]);
+    setCurrentReferenceOption("edit-candidate-source", selectedCandidate[c.source]);
+    setCurrentReferenceOption("edit-candidate-assigned-ta", selectedCandidate[c.assignedTa]);
+    $("edit-candidate-panel").hidden = false;
+    $("edit-candidate-panel").scrollIntoView({ behavior: "smooth", block: "start" });
+    $("edit-candidate-name").focus();
+  }
+
+  async function updateCandidateThroughCore(event) {
+    event.preventDefault();
+    if (busy || !selectedCandidate) return;
+    hideNotice();
+    const c = TABLES.candidate;
+    if (!isCandidateAllowedByDataMode(selectedCandidate)) {
+      showNotice("Candidate Core is unavailable for this Candidate under the configured data mode.", true);
+      return;
+    }
+    let candidateId;
+    try {
+      candidateId = normalizeGuid(selectedCandidate[c.id]);
+    } catch (error) {
+      logSafeFailure("CANDIDATE_CORE_INVALID_CANDIDATE_REFERENCE", error);
+      showNotice("Candidate reference is invalid. Refresh and select the Candidate again.", true);
+      return;
+    }
+    const candidateName = $("edit-candidate-name").value.trim();
+    const candidateEmail = $("edit-candidate-email").value.trim();
+    const candidatePhone = $("edit-candidate-phone").value.trim();
+    const candidateCvUrl = $("edit-candidate-cv-url").value.trim();
+    if (!candidateName || !candidateEmail) {
+      showNotice("Candidate Name and Email are required.", true);
+      return;
+    }
+    if (environmentPolicy.syntheticDataOnly && !isSyntheticInput(candidateName, candidateEmail)) {
+      showNotice("The configured data mode accepts only synthetic names and reserved .invalid email addresses.", true);
+      return;
+    }
+    if (!isValidCandidateCvUrl(candidateCvUrl)) {
+      showNotice("Candidate CV URL must be an HTTPS URL without embedded credentials.", true);
+      return;
+    }
+
+    const inputs = {
+      CandidateId: candidateId,
+      ExpectedStatus: Number(selectedCandidate[c.status])
+    };
+    const baseline = {};
+    const addTextChange = (inputName, attribute, value, optional) => {
+      const current = optional
+        ? (selectedCandidate[attribute] || null)
+        : (selectedCandidate[attribute] || "");
+      const next = optional ? (value || null) : value;
+      if (current !== next) {
+        inputs[inputName] = next;
+        baseline[attribute] = current;
+      }
+    };
+    const addLookupChange = (inputName, attribute, selectId) => {
+      const selectedId = $(selectId).value;
+      const next = selectedId ? normalizeGuid(selectedId) : null;
+      const current = selectedCandidate[attribute]
+        ? normalizeGuid(selectedCandidate[attribute])
+        : null;
+      if (!sameOptionalGuid(current, next)) {
+        inputs[inputName] = next;
+        baseline[attribute] = current;
+      }
+    };
+    addTextChange("CandidateName", c.name, candidateName, false);
+    addTextChange("CandidateEmail", c.email, candidateEmail, false);
+    addTextChange("CandidatePhone", c.phone, candidatePhone, true);
+    addTextChange("CandidateCvUrl", c.cvUrl, candidateCvUrl, true);
+    addLookupChange("PositionId", c.position, "edit-candidate-position");
+    addLookupChange("CandidateSourceId", c.source, "edit-candidate-source");
+    addLookupChange("AssignedTaId", c.assignedTa, "edit-candidate-assigned-ta");
+    if (Object.keys(baseline).length === 0) {
+      showNotice("No profile changes to save.");
+      return;
+    }
+    if (!Number.isInteger(inputs.ExpectedStatus)) {
+      showNotice("Candidate status could not be verified. Refresh the Candidate and try again.", true);
+      return;
+    }
+
+    setBusy(true);
+    let coreInvoked = false;
+    try {
+      const attributes = Object.keys(baseline);
+      const latest = await xrm().WebApi.retrieveRecord(
+        c.logicalName,
+        candidateId,
+        `?$select=${attributes.join(",")}`
+      );
+      for (const attribute of attributes) {
+        const isLookup = [c.position, c.source, c.assignedTa].includes(attribute);
+        const current = isLookup
+          ? (latest[attribute] ? normalizeGuid(latest[attribute]) : null)
+          : (latest[attribute] == null ? (baseline[attribute] == null ? null : "") : latest[attribute]);
+        const expected = baseline[attribute];
+        if (isLookup ? !sameOptionalGuid(current, expected) : current !== expected) {
+          await refreshCoreCandidate(candidateId);
+          showNotice("Candidate profile changed since it was opened. Review the refreshed values before saving.", true);
+          return;
+        }
+      }
+
+      await Promise.all([
+        inputs.PositionId ? getActiveReference("os_sr_pos", inputs.PositionId) : null,
+        inputs.CandidateSourceId ? getActiveReference("os_sr_csrc", inputs.CandidateSourceId) : null,
+        inputs.AssignedTaId ? getActiveReference("os_sr_ta", inputs.AssignedTaId) : null
+      ]);
+      coreInvoked = true;
+      await invokeCandidateCore("UpdateCandidate", inputs, newCorrelationId());
+      await refreshCoreCandidate(candidateId);
+      showNotice("Candidate profile updated through Candidate Core.");
+    } catch (error) {
+      if (coreInvoked) {
+        await reportCandidateCoreFailure("UpdateCandidate", candidateId, error);
+      } else {
+        logSafeFailure("CANDIDATE_PROFILE_PRECHECK_FAILED", error);
+        showNotice("Candidate profile could not be verified; no update was sent. Refresh and try again.", true);
+      }
     } finally {
       setBusy(false);
     }
@@ -2221,12 +2483,15 @@
       });
     };
     forceSubmit("create-button", "candidate-form");
+    forceSubmit("save-candidate-profile", "edit-candidate-form");
     forceSubmit("submit-call", "call-form");
     forceSubmit("save-schedule", "scheduling-form");
     forceSubmit("confirm-cancellation", "cancellation-form");
     forceSubmit("save-interview-result", "interview-result-form");
 
     $("candidate-form").addEventListener("submit", createCandidate);
+    $("edit-candidate-button").addEventListener("click", showEditCandidatePanel);
+    $("edit-candidate-form").addEventListener("submit", updateCandidateThroughCore);
     $("call-form").addEventListener("submit", recordCall);
     $("scheduling-form").addEventListener("submit", createSchedule);
     $("cancellation-form").addEventListener("submit", cancelRound1);
@@ -2246,6 +2511,7 @@
     $("close-detail").addEventListener("click", () => {
       $("detail-panel").hidden = true;
       $("call-entry-panel").hidden = true;
+      $("edit-candidate-panel").hidden = true;
       $("waiting-status-button").hidden = true;
       $("schedule-round1-button").hidden = true;
       $("record-interview-result-button").hidden = true;
@@ -2292,9 +2558,13 @@
       ]);
       loadStage = "Position and Candidate Source options";
       await Promise.all([
-        loadLookupOptions("os_sr_pos", "candidate-position", "No position selected"),
-        loadLookupOptions("os_sr_csrc", "candidate-source", "No source selected"),
-        loadLookupOptions("os_sr_ta", "scheduling-ta", "Select interviewer"),
+        loadLookupOptions("os_sr_pos", ["candidate-position", "edit-candidate-position"],
+          ["No position selected", "No position selected"]),
+        loadLookupOptions("os_sr_csrc", ["candidate-source", "edit-candidate-source"],
+          ["No source selected", "No source selected"]),
+        loadLookupOptions("os_sr_ta",
+          ["candidate-assigned-ta", "edit-candidate-assigned-ta", "scheduling-ta"],
+          ["No TA assigned", "No TA assigned", "Select interviewer"]),
         loadLookupOptions("os_sr_loc", "scheduling-location", "Select location")
       ]);
       loadStage = "the Candidate list";
@@ -2310,7 +2580,7 @@
       });
       const row = document.createElement("tr");
       const cell = appendCell(row, "Candidate data is unavailable.");
-      cell.colSpan = 10;
+      cell.colSpan = 11;
       cell.className = "empty";
       $("candidate-rows").replaceChildren(row);
     }

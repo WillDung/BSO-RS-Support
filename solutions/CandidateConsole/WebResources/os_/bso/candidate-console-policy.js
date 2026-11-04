@@ -67,10 +67,16 @@
     });
   }
 
+  function allowsReference(label, syntheticDataOnly) {
+    if (typeof label !== "string" || !label.trim() || typeof syntheticDataOnly !== "boolean") return false;
+    const developmentReference = label.startsWith("[DEV]");
+    return syntheticDataOnly ? developmentReference : !developmentReference;
+  }
+
   Object.defineProperty(global, "BsoRsCandidateConsolePolicy", {
     configurable: false,
     enumerable: false,
     writable: false,
-    value: Object.freeze({ resolve })
+    value: Object.freeze({ allowsReference, resolve })
   });
 })(window);

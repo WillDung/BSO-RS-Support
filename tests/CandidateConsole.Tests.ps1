@@ -71,7 +71,7 @@ Assert-Test ($coreInvoke.Contains('CANDIDATE_CORE_OPERATION_REJECTED:') -and
     -not $coreInvoke.Contains('console.error(errorMessage)')) `
     'Expose only allowlisted Candidate Core stage/code diagnostics and never log raw server error text'
 foreach ($action in @(
-    'CreateCandidate', 'RecordCall', 'ProceedToScheduling', 'MarkRound1Scheduled',
+    'CreateCandidate', 'UpdateCandidate', 'RecordCall', 'ProceedToScheduling', 'MarkRound1Scheduled',
     'RecordPass', 'RecordFail', 'RequestReschedule', 'CancelRound1'
 )) {
     Assert-Test ($script.Contains("invokeCandidateCore(`"$action`"") -or
@@ -87,6 +87,7 @@ Assert-Test ($script.Contains('if (!isDevFallbackEnabled()) return createCandida
 Assert-Test ($script.Contains('const forceSubmit = (buttonId, formId) => {') -and
     $script.Contains('form.requestSubmit();') -and
     $script.Contains('forceSubmit("create-button", "candidate-form");') -and
+    $script.Contains('forceSubmit("save-candidate-profile", "edit-candidate-form");') -and
     $script.Contains('forceSubmit("submit-call", "call-form");') -and
     $script.Contains('forceSubmit("save-schedule", "scheduling-form");') -and
     $script.Contains('forceSubmit("confirm-cancellation", "cancellation-form");') -and
@@ -102,8 +103,20 @@ Assert-Test ($script.Contains('&$orderby=createdon desc') -and
     $html.Contains('id="refresh-button"')) 'Load newest Candidates first and expose Refresh'
 Assert-Test ($html.Contains('<th scope="col">Position</th>') -and
     $html.Contains('<th scope="col">Candidate Source</th>') -and
+    $html.Contains('<th scope="col">Assigned TA</th>') -and
     $script.Contains('formatted(candidate, TABLES.candidate.position)') -and
-    $script.Contains('formatted(candidate, TABLES.candidate.source)')) 'Show reference names in the Candidate list'
+    $script.Contains('formatted(candidate, TABLES.candidate.source)') -and
+    $script.Contains('formatted(candidate, TABLES.candidate.assignedTa)')) 'Show Candidate reference names in the list'
+Assert-Test ($html.Contains('id="candidate-cv-url"') -and
+    $html.Contains('id="candidate-assigned-ta"') -and
+    $html.Contains('id="edit-candidate-form"') -and
+    $html.Contains('id="edit-candidate-cv-url"') -and
+    $html.Contains('id="edit-candidate-assigned-ta"') -and
+    $script.Contains('"CandidateCvUrl"') -and $script.Contains('"AssignedTaId"') -and
+    $script.Contains('invokeCandidateCore("UpdateCandidate", inputs, newCorrelationId())') -and
+    $script.Contains('addDetailLink(details, "Candidate CV URL"') -and
+    $script.Contains('getLookupName("os_sr_ta", candidate[TABLES.candidate.assignedTa])')) `
+    'Create, view, and update Candidate CV URL and Assigned TA only through Candidate Core'
 Assert-Test ($script.Contains('row.classList.add("selected")') -and
     $style.Contains('tr.candidate-row.selected')) 'Highlight the selected Candidate row'
 Assert-Test ($html.Contains('id="call-entry-panel"') -and
@@ -156,12 +169,18 @@ Assert-Test ($html.Contains('id="save-schedule"') -and
     $html.Contains('Manual schedule evidence only. No calendar availability check or calendar booking is performed.') -and
     $script.Contains('round1: 100000000') -and
     $script.Contains('round1Scheduled: 100010003')) 'Use the reconciled schedule round and Candidate status values without implying calendar booking'
-Assert-Test ($script.Contains('loadLookupOptions("os_sr_ta", "scheduling-ta"') -and
+Assert-Test ($script.Contains('loadLookupOptions("os_sr_ta"') -and
+    $script.Contains('"candidate-assigned-ta"') -and
+    $script.Contains('"scheduling-ta"') -and
     $script.Contains('loadLookupOptions("os_sr_loc", "scheduling-location"') -and
-    $script.Contains('label.startsWith("[DEV]")')) 'Load only active synthetic TA and Location lookup choices'
-Assert-Test ($script.Contains('getActiveSyntheticReference("os_sr_ta"') -and
-    $script.Contains('getActiveSyntheticReference("os_sr_loc"') -and
-    $script.Contains('reference.statecode !== 0')) 'Revalidate both active [DEV] references before persistence'
+    $script.Contains('isReferenceAllowedByDataMode(label)') -and
+    $script.Contains('policy.allowsReference(label, environmentPolicy.syntheticDataOnly)')) `
+    'Load reference choices according to the configured synthetic-data policy'
+Assert-Test ($script.Contains('getActiveReference("os_sr_ta"') -and
+    $script.Contains('getActiveReference("os_sr_loc"') -and
+    $script.Contains('reference.statecode !== 0') -and
+    $script.Contains('!isReferenceAllowedByDataMode(reference[metadata.PrimaryNameAttribute])')) `
+    'Revalidate active TA and Location references against the same configured data policy before persistence'
 $scheduleStart = $script.IndexOf('async function createSchedule(event)')
 $scheduleEnd = $script.IndexOf('async function loadTableMetadata', $scheduleStart)
 $scheduleFlow = $script.Substring($scheduleStart, $scheduleEnd - $scheduleStart)

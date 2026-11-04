@@ -27,6 +27,14 @@
                         <control id="os_sr_ta_nm" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="os_sr_ta_nm" />
                       </cell>
                     </row>
+                    <row>
+                      <cell id="{bfae2247-a2ab-4a5f-b451-e9e0e8b0f821}">
+                        <labels>
+                          <label description="TA Email" languagecode="1033" />
+                        </labels>
+                        <control id="os_sr_ta_eml" classid="{4273EDBD-AC1D-40d3-9FB2-095C621B552D}" datafieldname="os_sr_ta_eml" />
+                      </cell>
+                    </row>
                   </rows>
                 </section>
               </sections>

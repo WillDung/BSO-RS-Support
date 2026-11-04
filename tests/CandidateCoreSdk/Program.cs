@@ -611,14 +611,19 @@ internal static class Program
         Check(minimalCreate.Receipt!.GetAttributeValue<string>("os_sr_oprc_hash") ==
             saturatedCreate.Receipt!.GetAttributeValue<string>("os_sr_oprc_hash"),
             "SDK saturated CreateCandidate fingerprint equals its minimal applicable-input fingerprint");
-        foreach (string parameter in new[] { "PositionId", "CandidateSourceId" })
+        foreach (string parameter in new[] { "PositionId", "CandidateSourceId", "AssignedTaId" })
         {
             foreach (object? absentEquivalent in new object?[] { null, Guid.Empty })
             {
                 var host = CreateCandidateHost();
                 host.Input[parameter] = absentEquivalent;
                 new ApplyCandidateAction().Execute(host);
-                string attribute = parameter == "PositionId" ? "os_sr_cand_pos" : "os_sr_cand_csrc";
+                string attribute = parameter switch
+                {
+                    "PositionId" => "os_sr_cand_pos",
+                    "CandidateSourceId" => "os_sr_cand_csrc",
+                    _ => "os_sr_cand_ta"
+                };
                 Check(host.CreatedCandidates == 1 && !host.CreatedCandidate!.Contains(attribute),
                     "SDK CreateCandidate normalizes " + parameter + " absent-equivalent to no lookup");
             }
@@ -626,10 +631,20 @@ internal static class Program
             var lookupId = Guid.NewGuid();
             validHost.Input[parameter] = lookupId;
             new ApplyCandidateAction().Execute(validHost);
-            string validAttribute = parameter == "PositionId" ? "os_sr_cand_pos" : "os_sr_cand_csrc";
+            string validAttribute = parameter switch
+            {
+                "PositionId" => "os_sr_cand_pos",
+                "CandidateSourceId" => "os_sr_cand_csrc",
+                _ => "os_sr_cand_ta"
+            };
             var reference = validHost.CreatedCandidate!.GetAttributeValue<EntityReference>(validAttribute);
             Check(reference != null && reference.Id == lookupId &&
-                reference.LogicalName == (parameter == "PositionId" ? "os_sr_pos" : "os_sr_csrc"),
+                reference.LogicalName == (parameter switch
+                {
+                    "PositionId" => "os_sr_pos",
+                    "CandidateSourceId" => "os_sr_csrc",
+                    _ => "os_sr_ta"
+                }),
                 "SDK CreateCandidate preserves valid " + parameter + " reference");
 
             var invalidHost = CreateCandidateHost();
@@ -639,6 +654,44 @@ internal static class Program
             Check(invalidHost.CreatedCandidates == 0 && invalidHost.Receipt == null,
                 "SDK invalid " + parameter + " rejected before any create");
         }
+        var profileCreate = CreateCandidateHost();
+        var profilePositionId = Guid.NewGuid();
+        var profileSourceId = Guid.NewGuid();
+        var profileTaId = Guid.NewGuid();
+        profileCreate.Input["CandidateCvUrl"] = "https://careers.example.invalid/cv/123";
+        profileCreate.Input["PositionId"] = profilePositionId;
+        profileCreate.Input["CandidateSourceId"] = profileSourceId;
+        profileCreate.Input["AssignedTaId"] = profileTaId;
+        new ApplyCandidateAction().Execute(profileCreate);
+        var createdProfile = profileCreate.CreatedCandidate!;
+        Check(createdProfile.GetAttributeValue<string>("os_sr_cand_cvurl") ==
+            "https://careers.example.invalid/cv/123" &&
+            createdProfile.GetAttributeValue<EntityReference>("os_sr_cand_pos")?.Id == profilePositionId &&
+            createdProfile.GetAttributeValue<EntityReference>("os_sr_cand_csrc")?.Id == profileSourceId &&
+            createdProfile.GetAttributeValue<EntityReference>("os_sr_cand_ta")?.Id == profileTaId,
+            "SDK CreateCandidate persists CV URL, Position, Candidate Source, and Assigned TA profile fields");
+        foreach (string invalidCvUrl in new[]
+        {
+            "http://careers.example.invalid/cv",
+            "https://user:password@careers.example.invalid/cv",
+            "/candidate/cv"
+        })
+        {
+            var invalidProfile = CreateCandidateHost();
+            invalidProfile.Input["CandidateCvUrl"] = invalidCvUrl;
+            Reject(() => new ApplyCandidateAction().Execute(invalidProfile),
+                "CANDIDATE_CORE_OPERATION_REJECTED:CREATE_CANDIDATE:INPUT_VALIDATION:INVALID_CV_URL");
+            Check(invalidProfile.CreatedCandidates == 0 && invalidProfile.Receipt == null,
+                "SDK invalid Candidate CV URL is rejected before any create");
+        }
+        var inactiveAssignedTa = CreateCandidateHost();
+        inactiveAssignedTa.Input["AssignedTaId"] = Guid.NewGuid();
+        inactiveAssignedTa.InactiveReferenceTable = "os_sr_ta";
+        Reject(() => new ApplyCandidateAction().Execute(inactiveAssignedTa),
+            "CANDIDATE_CORE_OPERATION_REJECTED:CREATE_CANDIDATE:REFERENCE_VALIDATION:REFERENCE_NOT_AVAILABLE");
+        Check(inactiveAssignedTa.CreatedCandidates == 0 && inactiveAssignedTa.Receipt == null &&
+            !inactiveAssignedTa.ServiceFactorySelections.Contains(null),
+            "SDK inactive Assigned TA is rejected in caller context before SYSTEM storage");
         var createWithNullCandidateId = CreateCandidateHost();
         createWithNullCandidateId.Input["CandidateId"] = null;
         new ApplyCandidateAction().Execute(createWithNullCandidateId);
@@ -819,6 +872,13 @@ internal static class Program
         var validUpdate = new Host(100010000);
         validUpdate.Input["ActionType"] = "UpdateCandidate";
         validUpdate.Input["CandidateName"] = "Synthetic Replacement";
+        var updatedPositionId = Guid.NewGuid();
+        var updatedTaId = Guid.NewGuid();
+        validUpdate.Input["CandidateCvUrl"] = "https://careers.example.invalid/cv/updated";
+        validUpdate.Input["CandidatePhone"] = null;
+        validUpdate.Input["PositionId"] = updatedPositionId;
+        validUpdate.Input["CandidateSourceId"] = null;
+        validUpdate.Input["AssignedTaId"] = updatedTaId;
         validUpdate.Input.Remove("CallOutcome");
         validUpdate.Input.Remove("ContactedAt");
         validUpdate.Input.Remove("ExpectedStatus");
@@ -826,6 +886,18 @@ internal static class Program
         new ApplyCandidateAction().Execute(validUpdate);
         Check(validUpdate.Updates == 1 && validUpdate.CandidateRequests.Count == 1,
             "SDK UpdateCandidate accepts matching ExpectedStatus");
+        var profileUpdateTarget = validUpdate.CandidateRequests.Single().Target;
+        Check(profileUpdateTarget.GetAttributeValue<string>("os_sr_cand_nm") == "Synthetic Replacement" &&
+            profileUpdateTarget.GetAttributeValue<string>("os_sr_cand_cvurl") ==
+                "https://careers.example.invalid/cv/updated" &&
+            profileUpdateTarget.Contains("os_sr_cand_phn") &&
+            profileUpdateTarget.GetAttributeValue<string>("os_sr_cand_phn") == null &&
+            profileUpdateTarget.GetAttributeValue<EntityReference>("os_sr_cand_pos")?.Id == updatedPositionId &&
+            profileUpdateTarget.Contains("os_sr_cand_csrc") &&
+            profileUpdateTarget.GetAttributeValue<EntityReference>("os_sr_cand_csrc") == null &&
+            profileUpdateTarget.GetAttributeValue<EntityReference>("os_sr_cand_ta")?.Id == updatedTaId &&
+            validUpdate.Calls == 0 && validUpdate.Histories == 0,
+            "SDK UpdateCandidate persists profile changes and explicit clears without workflow side effects");
         var staleUpdate = new Host(100010000) { Status = ActionRequest.Answered };
         staleUpdate.Input["ActionType"] = "UpdateCandidate";
         staleUpdate.Input["CandidateName"] = "Synthetic Replacement";

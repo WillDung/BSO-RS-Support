@@ -61,6 +61,53 @@ Phase 4D browser acceptance verified Pass and Fail persistence after a full relo
 
 Phase 4E browser acceptance used synthetic Candidates `CAND-00001023` and `CAND-00001024`. The reschedule branch preserved a Superseded row and a reconfirmed Scheduled row after re-contact; the cancellation branch preserved a Cancelled row. Full reloads showed the schedule history, reasons/timestamps, Candidate states, and Status History. Acceptance-scope readback for those two Candidates is Candidate / Call Log / Status History / Interview Schedule / Receipt = **2 / 3 / 11 / 3 / 0**. See [Current State](CURRENT_STATE.md) and the [Candidate UI implementation note](CANDIDATE_UI_IMPLEMENTATION_NOTE.md).
 
+## P0 Slice 2 calendar extensions (PROPOSED / ARCHITECTURE APPROVED; not provisioned)
+
+**Status (2026-11-05):** Proposal only. No table, column, Choice value, key, plug-in step, or relationship below exists in any environment, and no schema write is authorized. Names are proposals subject to schema review. Tokens marked † are proposed dictionary additions and must be approved before use. Architecture context is in [Integration Design](INTEGRATION_DESIGN.md#p0-slice-2-calendar-availability-and-booking-proposed--architecture-approved); decisions D1–D8 are pending in [Product Decisions](PRODUCT_DECISIONS.md#p0-slice-2-calendar-integration-proposed--architecture-approved).
+
+**Existing fields Slice 2 relies on (verified above):** `os_sr_ta_eml` (required String/Email, max 254) is the TA free/busy and attendee address; `os_sr_loc_rmeml` (optional String/Email, max 254) is the room/resource mailbox address. TA rows need not correspond to Dataverse users. Neither email is validated against Exchange today; Slice 2A validates syntax and allowed domain before calling Graph and treats Graph-reported errors as unknown availability.
+
+### Slice 2A: Availability Query `os_sr_avq`†
+
+A transient integration row; the flow runs asynchronously, so the Console creates a request row and polls its result. It has **no Candidate or `os_sr_intv` lookup** and is never read by Candidate Core.
+
+| Proposed field | Type | Purpose |
+|---|---|---|
+| `os_sr_avq_ref` | AutoNumber Text, `AVQ-{SEQNUM:8}`, primary name | Nonpersonal reference |
+| `os_sr_avq_ta` | Lookup TA Directory, required | Source of TA address |
+| `os_sr_avq_loc` | Lookup Location, optional | Required by the plug-in when mode is Onsite |
+| `os_sr_avq_mod` | Choice: Online / Onsite | Required sources |
+| `os_sr_avq_strt` / `os_sr_avq_end` | DateTime UTC | Requested window |
+| `os_sr_avq_dur`† | Whole number (minutes) | Requested slot length |
+| `os_sr_avq_stat` | Choice: Pending / Available / NoSlots / Failed | Displayed result state |
+| `os_sr_avq_rsn` | String(40) | Deterministic NoSlots reason code |
+| `os_sr_avq_err` | String(40) | Safe deterministic failure category (e.g. `TA_INACTIVE`, `ROOM_EMAIL_MISSING`, `SOURCE_UNKNOWN_ROOM`, `GRAPH_AUTH`, `GRAPH_THROTTLED`, `GRAPH_TIMEOUT`, `MAILBOX_NOT_FOUND`) |
+| `os_sr_avq_slts`† | Memo (JSON) | Computed valid slots only |
+| `os_sr_avq_qat`† / `os_sr_avq_exp`† | DateTime UTC | Queried-at and expiry |
+
+Raw `availabilityView` strings and Graph payloads are **not** persisted (data minimization). A protection plug-in lets the requesting user create Pending rows only and lets only the integration identity write result fields. Retention/purge period is open.
+
+### Slice 2B+: proposed `os_sr_intv` additions
+
+| Proposed field | Type | Lifecycle reason |
+|---|---|---|
+| `os_sr_intv_mod` | Choice: Online / Onsite | Required availability sources; whether Teams is created |
+| `os_sr_intv_bkst`† | Choice: booking state; empty = manual/legacy | External lifecycle, separate from `os_sr_intv_stat` |
+| `os_sr_intv_idem` | String(36), unique key | Booking GUID = `transactionId` = extended-property value |
+| `os_sr_intv_orgeml` | Email | Organizer mailbox snapshot |
+| `os_sr_intv_evt` | String(512) | Immutable event id for get/cancel |
+| `os_sr_intv_ical`† | String(512) | Correlate organizer, attendee, and room copies |
+| `os_sr_intv_ckey`† | String(100) | Detect manual Outlook edits before cancel |
+| `os_sr_intv_atsn`† | Memo (JSON) | Snapshot of invited TA, room, candidate addresses |
+| `os_sr_intv_avat`† / `os_sr_intv_bkat`† / `os_sr_intv_xcxat`† | DateTime UTC | Final recheck passed / booking confirmed / external cancel confirmed |
+| `os_sr_intv_err` | String(40) | Sanitized failure code |
+| `os_sr_intv_lsync` | DateTime UTC | Last reconciliation |
+| `os_sr_intv_join`† | URL (2C only) | Teams join URL; credential-like, restrict read or do not store |
+
+Also proposed for 2B: Choice value `Withdrawn` on `os_sr_intv_stat` for a Proposed row whose booking definitely did not occur (Cancelled stays reserved for the business cancel action), and relaxing `os_sr_intv_loc` to optional with the Onsite rule enforced in the plug-in (D7). No tokens, secrets, or connection credentials are stored in any field.
+
+Proposed dictionary additions (pending approval): `avq` = Availability Query; `dur` = duration; `slts` = computed slots; `qat` = queried at; `exp` = expires at; `bkst` = booking state; `ical` = iCalendar UID; `ckey` = change key; `atsn` = attendee snapshot; `avat` = availability verified at; `bkat` = booked at; `xcxat` = external cancellation confirmed at; `join` = online meeting join URL.
+
 ## Naming standard and private abbreviation dictionary
 
 ### Verified Phase 3C Operation Receipt

@@ -1,5 +1,15 @@
 # Current State
 
+## P0 Slice 2 calendar architecture proposal documented; no tenant work (2026-11-05)
+
+**Status:** `P0_SLICE_2_PROPOSAL_DOCUMENTED`, `P0_SLICE_2_DECISIONS_PENDING_D1_D8`, `P0_SLICE_2A_PREFLIGHT_DRAFT_READY_NOT_AUTHORIZED`. Owner-approved at architecture level: `P0_SLICE_2A_DISPLAY_ONLY_AVAILABILITY_ARCHITECTURE_APPROVED`, `P0_SLICE_2A_CANDIDATE_STATE_INDEPENDENT`, `P0_SLICE_2A_NO_CANDIDATE_CORE_MUTATION`, `P0_SLICE_2A_NO_INTERVIEW_SCHEDULE_MUTATION`, `P0_SLICE_2A_PROPOSAL_DOCUMENTATION_AUTHORIZED`.
+
+All Slice 2 material is **PROPOSED / ARCHITECTURE APPROVED**. It is not implemented, deployed, or runtime accepted. Scheduling remains Dataverse/manual only; no Outlook, Teams, calendar, Graph, flow, custom connector, connection reference, environment variable, or app registration exists for this project. `P0_SLICE_1_LIVE_FUNCTIONALLY_ACCEPTED` is unchanged, and the Slice 1 manual workflow is not connected to Slice 2A. No manual/external scheduling switch was added; that decision belongs to Slice 2B.
+
+Documented in [Integration Design](INTEGRATION_DESIGN.md#p0-slice-2-calendar-availability-and-booking-proposed--architecture-approved) (trusted boundary, capability basis, modes, availability algorithm, 2A write boundary, 2A acceptance contract, per-phase Candidate-state effects, 2B+ summary and failure matrix), [Data Model](DATA_MODEL.md#p0-slice-2-calendar-extensions-proposed--architecture-approved-not-provisioned) (proposed `os_sr_avq` and `os_sr_intv` additions, not provisioned), and [Product Decisions](PRODUCT_DECISIONS.md#p0-slice-2-calendar-integration-proposed--architecture-approved) (D1–D8, all `PENDING OWNER/TECHNICAL LEAD`).
+
+**Execution boundary:** documentation only. No tenant connection, schema change, flow, connector, connection reference, environment variable, web-resource change, publication, live availability query, commit, or push occurred. The Slice 2A preflight is a draft and is not authorized for execution.
+
 ## Normal srapp Candidate Console entrypoint accepted without tenant writes (2026-11-05)
 
 **Status:** `NORMAL_SRAPP_CONSOLE_CACHE_ACCEPTED`, `CANDIDATE_CONSOLE_NORMAL_ENTRYPOINT_ACCEPTED`, `P0_SLICE_1_LIVE_FUNCTIONALLY_ACCEPTED`. This closes the normal-entrypoint gate in the preceding RecordCall/workflow acceptance checkpoint below; it does not reopen Candidate Core or establish clean-BSO or Production acceptance. `CLEAN_BSO_ACCEPTANCE_DEFERRED`, `P0_SOURCE_AHEAD_OF_FROZEN_RELEASE_ARTIFACT`, `BUSINESS_MVP_READY_FOR_PRODUCTION_FALSE`, `REAL_DATA_STILL_PROHIBITED`.

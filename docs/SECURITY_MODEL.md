@@ -1,5 +1,11 @@
 # Security Model
 
+## P0 Slice 2A continuation role stop (2026-11-05)
+
+Fresh readback/export confirms BSO has exactly the original canonical 60 privileges plus Availability Query Create/Read/Append at User depth and previously absent TA/Location AppendTo at Organization depth (65 total). No protected Core/business-write or administrative grant was added; existing assignments are unchanged. Reference Admin remains exactly 20 Global privileges and unassigned.
+
+The new Availability Integration role is unassigned and not auto-assigned. Its map is now **exactly four** Global privileges: Availability Query Read/Write, TA Read and Location Read. Dataverse auto-added four Global SharePoint defaults on creation: `prvCreateSharePointData`, `prvReadSharePointData`, `prvReadSharePointDocument` and `prvWriteSharePointData`. These were not accepted as minimum requirements and were removed under separate Technical Lead authorization. Classification: `P0_SLICE_2A_INFRASTRUCTURE_PROVISIONED` for DEV infrastructure only. Do not assign the role until the Flow identity design is approved. BSO now has 65 entries: the canonical 60 plus Availability Query Create/Read/Append User and TA/Location AppendTo Organization. See the [execution report](P0_SLICE_2A_DEV_PROVISIONING_REPORT.md). The historical 60-entry statements below describe the pre-Slice-2A baseline. Canonical release role XML was not overwritten from the DEV export.
+
 ## Reference Admin scope (deployed, unassigned; 2026-11-04)
 
 The owner-approved P0 scope (2026-11-04) is one separate Reference Admin role with organization-level Create/Read/Write/Append/Append To on TA, Position, Candidate Source, and Location only. Delete, Candidate, Call Log, Status History, Interview Schedule, Operation Receipt, Candidate Core execution, and security/admin privileges are excluded. The role remains unassigned; this does not broaden the BSO role.

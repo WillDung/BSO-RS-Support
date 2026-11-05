@@ -1,6 +1,74 @@
 # Current State
 
-## Concurrent report: P0 Slice 2A bounded DEV provisioning stop (2026-11-05)
+## P0 Slice 2A runtime wiring deployed, feature off (2026-11-05)
+
+**Status:** `P0_SLICE_2A_RUNTIME_WIRING_DEPLOYED_FEATURE_OFF`. This covers DEV wiring only. Nothing has been executed, and there is no runtime, security or Production acceptance. Identity remains `DEV_FUNCTIONAL_IDENTITY_ELEVATED_NOT_SECURITY_ACCEPTANCE`.
+
+In VN LMV IT, seven one-shot writes were made, with 0 retries:
+- The `os_sr_avqg_pkg` guard package (`os_sr_avqg.ProtectAvailabilityQuery`) was deployed with **zero steps**.
+- Two connection references were created and bound to the approved existing `Connected` DEV-owner connections: `os_sr_avchk_outlook_cr` and `os_sr_avchk_dataverse_cr`.
+- The Flow `os_sr_avchk` was created **OFF**, with 0 runs.
+- The Console availability panel HTML and `candidate-console-availability.js` were deployed, and **only those two** WebResources were published.
+
+Results:
+- Effective state is `availabilityEnabled = false`, because the environment resource is unchanged.
+- Solution membership went from 60 to 66.
+- The BSO role (65), the Availability Integration role (4, unassigned) and the Reference Admin role are unchanged.
+- Candidate Core is unchanged, and all 50 legacy guards remain disabled.
+- The seven definitions still have no values.
+- There are zero `os_sr_avq` rows, and business counts are unchanged.
+
+The Flow is untested. Guard steps, definition values and Flow activation all still need a separate authorization.
+
+**Remaining blocker:** `SLICE_2A_SYNTHETIC_MAILBOX_PREREQUISITE_MISSING`.
+
+See the [DEV provisioning report](P0_SLICE_2A_DEV_PROVISIONING_REPORT.md).
+
+## P0 Slice 2A infrastructure provisioned in DEV (2026-11-05)
+
+**Status:** `P0_SLICE_2A_INFRASTRUCTURE_PROVISIONED`. This covers provider-independent DEV infrastructure only. Runtime, provider, guard deployment and Production remain unaccepted.
+
+After the integration-role stop recorded below, the Technical Lead separately authorized removing the four SharePoint defaults and completing the run. The first removal payload (`PrivilegeId`) was rejected with HTTP 400 before execution, and GET proved no change; it was not retried. A separately authorized corrected payload (`Privilege` reference) then removed exactly those four defaults. The run created seven value-less definitions:
+
+- `os_sr_avq_bhrs`
+- `os_sr_avq_durs`
+- `os_sr_avq_lead`
+- `os_sr_avq_hzn`
+- `os_sr_avq_exp`
+- `os_sr_avq_dom`
+- `os_sr_avq_maxc`
+
+It then ran a single `os_sr_avq` entity PublishXml.
+
+Fresh GET and unmanaged export reconciliation found:
+
+- complete schema with both relationships, with 15 children exported via the Include-Subcomponents root;
+- **60** Solution memberships: 52 retained, plus the role root and seven definition roots;
+- BSO **65** entries: canonical 60 plus the exact five-entry delta;
+- the integration role has **exactly four** Global entries and is unassigned;
+- Reference Admin, Core, the 50 disabled guards and Console hashes are unchanged;
+- availability is disabled;
+- zero query rows;
+- unchanged business counts.
+
+Writes:
+
+- overall continuation: 16 acknowledged writes, 1 rejected request and 0 retries;
+- this completion: 12 acknowledged writes.
+
+No provider, Flow, connection, guard deployment, Console publication, Candidate operation, commit or push occurred. See the [execution report](P0_SLICE_2A_DEV_PROVISIONING_REPORT.md).
+
+## Superseded checkpoint: P0 Slice 2A continuation integration-role stop (2026-11-05)
+
+**Status at that point (superseded above):** `P0_SLICE_2A_CONTINUATION_STOP:EXACT_FOUR_INTEGRATION_PRIVILEGES`. Technical Lead accepted the prior partial schema and confirmed its membership stop was a false negative. The new [shared validator](../scripts/BsoRsSolutionMembership.psm1) accepts explicit child membership or exact metadata + owning entity root behavior 0 + exact unmanaged export evidence, without weakening shell/exclusion roots. Offline regression passed 19 membership checks and 122 Slice 2A static checks. `maxc` / Maximum Candidates is approved, with the offline 1-200 bound.
+
+Fresh independent preflight verified exact VN LMV IT/unmanaged Solution, all accepted 52 memberships/original 51, the exact partial schema, canonical BSO 60, absent integration role/seven variables, unchanged Core/reference/guards/Console and zero query rows. Fresh export validated 13 inherited children. The continuation created only the missing optional Location lookup/relationship; complete metadata and new export validated all 15 schema children. BSO then received exactly Availability Query Create/Read/Append User plus previously absent TA/Location AppendTo Organization, yielding an exact **65-entry** map.
+
+The unassigned integration role was created, followed by one acknowledged exact-four `ReplacePrivilegesRole`. GET still returned **eight** entries: the requested four plus Global `prvCreateSharePointData`, `prvReadSharePointData`, `prvReadSharePointDocument`, `prvWriteSharePointData`. These defaults are not accepted minimum requirements. Execution stopped without removing them, retrying or continuing. The role has zero user/team assignments and must remain unassigned. **All seven definitions and publication remain unexecuted.**
+
+Continuation writes **4**, retries **0**, publication **0**. Final Solution count **53** retains all original/partial memberships plus the role root automatically included on creation. Final actual export validates schema inclusion and matches all three complete role maps. Core/reference/50-disabled-guard/Console topology is preserved; availability remains disabled; query rows zero; business counts **47/64/163/45/183**, with zero rows modified in the bounded window. No provider, guard deployment, business operation, commit or push occurred. See the [complete execution report](P0_SLICE_2A_DEV_PROVISIONING_REPORT.md). Frozen release artifacts/manifests remain unchanged; infrastructure completion/runtime acceptance is not claimed.
+
+## Historical concurrent report: P0 Slice 2A bounded DEV provisioning stop (2026-11-05)
 
 **Evidence qualification:** This report and its related documentation appeared concurrently after the offline refactor began. The reported partial schema and reconciliation stop below have **not** been independently verified in this offline session. Preserve the report and require separate verification and explicit authorization before any continuation or repair.
 
@@ -20,7 +88,7 @@ The active provider contract is Office 365 Outlook `Find meeting times (V2)`: re
 
 The separate BSO test identity creates requests; the current DEV owner identity is the Dataverse result writer and owns the Outlook connection. The guard keeps creator/writer and calling/initiating identity checks. **`DEV_FUNCTIONAL_IDENTITY_ELEVATED_NOT_SECURITY_ACCEPTANCE`**; Production identity is a later decision. Reference IDs, active state and normalized addresses remain in Flow memory only; drift before any terminal write gives `REFERENCE_CHANGED` and `[]`. No Candidate/Core path, Interview Schedule, provider payload field or availability schema change was introduced. The Console remains display-only.
 
-Canonical environment values -> renderer -> identical guard configuration remains in force. The new bounded `os_sr_avq_maxc` definition is proposed pending technical-name approval; the existing six settings, 15-minute interval, `SE Asia Standard Time`, conservative 61-day safety cap, and strict Dataverse UTC stop gate remain. A different valid first-live provider timezone requires **STOP, no retry and no broadened conversion**; capture only sanitized shape/timezone evidence for a bounded correction.
+Canonical environment values -> renderer -> identical guard configuration remains in force. At this offline checkpoint, the new bounded `os_sr_avq_maxc` definition was proposed pending technical-name approval; its later approval and unexecuted provisioning are recorded in the continuation entry above. The existing six settings, 15-minute interval, `SE Asia Standard Time`, conservative 61-day safety cap, and strict Dataverse UTC stop gate remain. A different valid first-live provider timezone requires **STOP, no retry and no broadened conversion**; capture only sanitized shape/timezone evidence for a bounded correction.
 
 **Offline result:** `P0_SLICE_2A_OUTLOOK_OFFLINE_REFACTOR_COMPLETE`. Validation passed: 515 Availability Query SDK assertions, 122 Slice 2A static checks, 78 Candidate Console static checks, 21 Console configuration checks, 20 Console behavior tests, and syntax checks for seven JavaScript files. These checks use synthetic data and do not establish tenant, connector, Flow or security acceptance.
 

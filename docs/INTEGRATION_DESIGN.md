@@ -14,6 +14,24 @@ The detailed P0 Slice 2 proposal is in [P0 Slice 2 calendar availability and boo
 
 ## P0 Slice 2 calendar availability and booking (PROPOSED / ARCHITECTURE APPROVED)
 
+**Runtime wiring (2026-11-05): `P0_SLICE_2A_RUNTIME_WIRING_DEPLOYED_FEATURE_OFF`.**
+
+The solution-aware Flow `os_sr_avchk` is deployed **OFF**. Its definition matches [os_sr_avchk.clientdata.json](../solutions/AvailabilityQuery/os_sr_avchk.clientdata.json). It uses the connection references `os_sr_avchk_outlook_cr` (Office 365 Outlook `Find meeting times (V2)`) and `os_sr_avchk_dataverse_cr`. Under DEV Option A, both are bound to existing DEV-owner connections.
+
+The `os_sr_avqg` guard is deployed with no steps. The Flow has never run.
+
+These gates must be cleared before first activation:
+- approved definition values;
+- synthetic mailboxes;
+- an authorization to activate guard steps;
+- verification of the Number parameter type, `sort()` and array serialization, and run-history obscuring.
+
+The drift override applies only after reference validation has produced a snapshot.
+
+See the [execution report](P0_SLICE_2A_DEV_PROVISIONING_REPORT.md).
+
+**Latest infrastructure verification (2026-11-05):** the corrected Include-Subcomponents evidence chain and fresh continuation preflight passed. Both approved relationships and the complete Availability Query schema now read back/export exactly. After an intermediate integration-role stop, a separately authorized completion reached `P0_SLICE_2A_INFRASTRUCTURE_PROVISIONED` for DEV infrastructure only. The unassigned integration role now has exactly four Global entries, and BSO has its exact approved five-entry delta. All seven value-less variable definitions exist, and only `os_sr_avq` entity metadata was published. Availability remains disabled; no provider/runtime wiring occurred. See the [execution report](P0_SLICE_2A_DEV_PROVISIONING_REPORT.md); earlier concurrent-report qualifications below describe the preceding offline checkpoint.
+
 **Latest owner direction and concurrent DEV report (2026-11-05):** the Outlook connector DEV path is feasible, DEV identity Option A is approved for later functional testing using the existing owner connection, synthetic mailbox prerequisites are missing, and the custom Graph path is abandoned. The concurrently appearing [provisioning stop report](P0_SLICE_2A_DEV_PROVISIONING_REPORT.md) states that bounded provider-independent provisioning stopped at `P0_SLICE_2A_RECONCILIATION_FAILED:MEMBERSHIP:10` after partial table/TA-relationship creation, before roles, configuration definitions, publication or provider components. Its tenant observations are **unverified in this offline session**. Do not infer total absence or continue provisioning without separate verification and approval.
 
 **Status (2026-11-05):** The owner supplied `SLICE_2A_OUTLOOK_CONNECTOR_PREFLIGHT_ACCEPTED`, `SLICE_2A_OUTLOOK_CONNECTOR_DEV_PATH_FEASIBLE`, `SLICE_2A_DEV_IDENTITY_OPTION_A_APPROVED`, `SLICE_2A_CUSTOM_GRAPH_PATH_ABANDONED`, and `SLICE_2A_SYNTHETIC_MAILBOX_PREREQUISITE_MISSING`. These supersede the former Slice 2A Graph path. Offline Slice 2A source and tests are in [AvailabilityQuery](../solutions/AvailabilityQuery/), its [schema contract](../solutions/Entities/os_sr_avq/AvailabilityQuery.schema.json), and the [Console panel](../solutions/CandidateConsole/WebResources/os_/bso/candidate-console-availability.js). The Outlook refactor is **not deployed or runtime accepted**; the concurrent partial-schema report and supplied preflight are not independently verified by this offline task. No tenant operation is authorized here.

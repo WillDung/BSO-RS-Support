@@ -27,6 +27,7 @@ internal static partial class Program
         TestReferenceDrift();
         TestConfigurationRendering();
         TestSdkGuard();
+        TestSandboxAssemblyReferences();
         Console.WriteLine("Availability Query SDK checks passed: " + assertions);
         return 0;
     }
@@ -417,6 +418,20 @@ internal static partial class Program
     private static DateTime Utc(string value) =>
         DateTime.Parse(value, null, System.Globalization.DateTimeStyles.AdjustToUniversal |
             System.Globalization.DateTimeStyles.AssumeUniversal);
+
+    // The Dataverse sandbox only supplies .NET Framework and Microsoft.Xrm.Sdk; the package bundles no dependencies.
+    private static void TestSandboxAssemblyReferences()
+    {
+        var allowed = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "mscorlib", "System", "System.Core", "System.Xml", "System.Xml.Linq", "System.ServiceModel",
+            "System.Runtime.Serialization", "System.Web.Extensions", "Microsoft.Xrm.Sdk"
+        };
+        var references = typeof(ProtectAvailabilityQuery).Assembly.GetReferencedAssemblies()
+            .Select(reference => reference.Name).OrderBy(name => name, StringComparer.Ordinal).ToArray();
+        Equal("", string.Join(",", references.Where(name => !allowed.Contains(name))),
+            "Guard assembly references only sandbox-provided assemblies (no System.Memory).");
+    }
 
     private static void Equal<T>(T expected, T actual, string description)
     {

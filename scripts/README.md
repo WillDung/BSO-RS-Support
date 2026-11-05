@@ -1,5 +1,9 @@
 # Scripts
 
+## Solution subcomponent membership
+
+[BsoRsSolutionMembership.psm1](BsoRsSolutionMembership.psm1) is an offline evidence validator. A child is accepted by an exact explicit target-Solution membership, or by the full chain of exact metadata ownership, a target entity root with behavior `0` (Include Subcomponents), and the exact unpacked Solution/entity/attribute/relationship export. Behavior `1`, behavior `2`, missing evidence and cross-Solution evidence do not qualify for inherited inclusion. It performs no tenant requests or writes and never manufactures child membership rows. Run the [synthetic regression suite](../tests/BsoRsSolutionMembership.Tests.ps1) before using it for reconciliation.
+
 ## Phase 3C receipt and API metadata
 
 [Provision-BsoRsOperationReceipt.ps1](Provision-BsoRsOperationReceipt.ps1) defaults to `PlanOnly` with zero authentication/network calls. `Preflight` / `Reconcile` are GET-only guarded modes. Its receipt-only create/correction modes are bounded to the owner-approved table, Candidate relationship, canonical String alternate key, and two exact metadata property corrections observed during provisioning. Consumed create/correction dispatches must never be repeated. Existing receipt metadata requires `Reconcile`, not `Apply`. Historical completion modes are pinned to their retained dispatch evidence and exact known intermediate metadata.

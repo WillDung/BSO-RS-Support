@@ -383,7 +383,7 @@ namespace os_sr_avqg
             }
 
             if (items.Select(item => item.StartUtc).Distinct().Count() != items.Count ||
-                !items.SequenceEqual(items.OrderBy(item => item.StartUtc)))
+                !Enumerable.SequenceEqual(items, items.OrderBy(item => item.StartUtc)))
                 throw new AvailabilityFailure("RESULT_INVALID");
             var canonical = Serialize(items, maximumSlotCount, maximumPayloadLength);
             if (!string.Equals(canonical, json, StringComparison.Ordinal))

@@ -54,7 +54,7 @@ namespace os_sr_avqg
             {
                 throw InvalidConfiguration();
             }
-            if (!expected.AllowedEmailDomains.SequenceEqual(domains, StringComparer.Ordinal))
+            if (!Enumerable.SequenceEqual(expected.AllowedEmailDomains, domains, StringComparer.Ordinal))
                 throw InvalidConfiguration();
 
             var lines = new List<string>
@@ -79,8 +79,8 @@ namespace os_sr_avqg
                 parsed.MaximumHorizonDays != expected.MaximumHorizonDays ||
                 parsed.MinimumLeadTimeMinutes != expected.MinimumLeadTimeMinutes ||
                 parsed.ResultExpiryMinutes != expected.ResultExpiryMinutes ||
-                !parsed.AllowedDurationsMinutes.SequenceEqual(durations) ||
-                !parsed.AllowedEmailDomains.SequenceEqual(domains, StringComparer.Ordinal) ||
+                !Enumerable.SequenceEqual(parsed.AllowedDurationsMinutes, durations) ||
+                !Enumerable.SequenceEqual(parsed.AllowedEmailDomains, domains, StringComparer.Ordinal) ||
                 parsed.BusinessHours.Count != hours.Count ||
                 hours.Any(pair => !parsed.BusinessHours.TryGetValue(pair.Key, out var actual) ||
                     actual.Opens != pair.Value.Opens || actual.Closes != pair.Value.Closes))

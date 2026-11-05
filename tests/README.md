@@ -1,5 +1,9 @@
 # Tests
 
+## Solution subcomponent membership
+
+[Membership evidence regression checks](BsoRsSolutionMembership.Tests.ps1): `pwsh -NoLogo -NoProfile -File .\tests\BsoRsSolutionMembership.Tests.ps1`. Synthetic temporary XML covers the accepted Include-Subcomponents relationship/lookup case without explicit child rows, independent explicit membership, exclusion/shell roots, and missing or mismatched metadata/export/Solution evidence. No tenant requests occur.
+
 ## P0 Slice 2A offline availability
 
 - [Availability Query SDK assertions](AvailabilityQuerySdk/AvailabilityQuerySdk.Tests.csproj): `dotnet run --project .\tests\AvailabilityQuerySdk\AvailabilityQuerySdk.Tests.csproj`; exercises the Outlook V2 request/response adapter, malformed and unsupported-timezone failures, exact attendee and organizer rules, deterministic filtered slots, requester/writer guard using a projected-column SDK fake, reference drift, and canonical environment rendering. All identities and addresses are synthetic; no provider call occurs.

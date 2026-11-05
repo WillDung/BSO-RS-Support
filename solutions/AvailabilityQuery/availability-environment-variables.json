@@ -13,7 +13,7 @@
     { "schemaName": "os_sr_avq_hzn", "displayName": "Availability Maximum Horizon", "type": "WholeNumber", "unit": "days", "minimum": 1, "maximum": 61, "defaultValue": null, "requiredAtDeployment": true },
     { "schemaName": "os_sr_avq_exp", "displayName": "Availability Result Expiry", "type": "WholeNumber", "unit": "minutes", "minimum": 1, "maximum": 1440, "defaultValue": null, "requiredAtDeployment": true },
     { "schemaName": "os_sr_avq_dom", "displayName": "Availability Allowed Email Domains", "type": "Text", "format": "comma-separated exact domains", "defaultValue": null, "requiredAtDeployment": true },
-    { "schemaName": "os_sr_avq_maxc", "displayName": "Availability Maximum Candidates", "type": "WholeNumber", "minimum": 1, "maximum": 200, "defaultValue": null, "requiredAtDeployment": true, "technicalNameStatus": "PROPOSED_PENDING_APPROVAL" }
+    { "schemaName": "os_sr_avq_maxc", "displayName": "Availability Maximum Candidates", "type": "WholeNumber", "minimum": 1, "maximum": 200, "defaultValue": null, "requiredAtDeployment": true, "technicalNameStatus": "TECHNICAL_LEAD_APPROVED" }
   ],
   "businessHoursExampleShape": {
     "monday": { "opens": "09:00", "closes": "17:00" },

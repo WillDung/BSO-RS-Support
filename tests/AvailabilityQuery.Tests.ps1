@@ -22,6 +22,7 @@ $consolePath = Join-Path $root 'solutions\CandidateConsole\WebResources\os_\bso\
 $htmlPath = Join-Path $root 'solutions\CandidateConsole\WebResources\os_\bso\candidate-console.html'
 $configPath = Join-Path $root 'solutions\CandidateConsole\WebResources\os_\bso\candidate-console-environment.js'
 $supersededConnectorPath = Join-Path $root 'solutions\AvailabilityQuery\graph-scheduling.openapi.json'
+$flowDefinitionPath = Join-Path $root 'solutions\AvailabilityQuery\os_sr_avchk.clientdata.json'
 
 $schema = Get-Content -LiteralPath $schemaPath -Raw | ConvertFrom-Json -AsHashtable
 $flow = Get-Content -LiteralPath $flowPath -Raw | ConvertFrom-Json -AsHashtable
@@ -88,7 +89,7 @@ Assert-Test ($environment.fixedConstants.maximumHorizonDays -eq 61) 'Existing co
 Assert-Test (@($environment.definitions | Where-Object { $_.defaultValue -ne $null }).Count -eq 0) 'No tenant runtime configuration is invented.'
 Assert-Test (@($environment.definitions.schemaName | Sort-Object) -join ',' -eq 'os_sr_avq_bhrs,os_sr_avq_dom,os_sr_avq_durs,os_sr_avq_exp,os_sr_avq_hzn,os_sr_avq_lead,os_sr_avq_maxc') 'The canonical environment definitions include the bounded provider limit.'
 $maximum = @($environment.definitions | Where-Object schemaName -eq 'os_sr_avq_maxc')[0]
-Assert-Test ($maximum.minimum -eq 1 -and $maximum.maximum -eq 200 -and $maximum.technicalNameStatus -eq 'PROPOSED_PENDING_APPROVAL') 'Candidate-limit bounds and proposed technical name are explicit.'
+Assert-Test ($maximum.minimum -eq 1 -and $maximum.maximum -eq 200 -and $maximum.technicalNameStatus -eq 'TECHNICAL_LEAD_APPROVED') 'Candidate-limit bounds and approved technical name are explicit.'
 Assert-Test ($environment.deploymentBinding.renderer -eq 'AvailabilityConfigurationRenderer.Render' -and $registration.unsecureConfigurationBinding.renderer -eq $environment.deploymentBinding.renderer) 'Deployment and registration share the canonical renderer.'
 Assert-Test (-not $registration.unsecureConfigurationBinding.manualValuesAllowed -and $registration.unsecureConfigurationBinding.sameRenderedBytesForSteps) 'Both steps must use identical generated values, never hand-maintained copies.'
 Assert-Test ($registration.dateTimeFirstRuntimeGate.action -eq 'STOP' -and -not $registration.dateTimeFirstRuntimeGate.retry -and -not $registration.dateTimeFirstRuntimeGate.automaticNormalization) 'Unproven Dataverse DateTime transport requires stop and no normalization.'
@@ -142,7 +143,43 @@ $panel = [regex]::Match($html, '(?s)<section class="panel" aria-labelledby="avai
 Assert-Test ($panel -match 'availability-form' -and $panel -match 'display-only' -and $panel -notmatch 'CandidateId|MarkRound1Scheduled|os_sr_cact') 'Panel is separate, display-only and Candidate-independent.'
 Assert-Test ($config -notmatch 'availabilityEnabled\s*:\s*true') 'Current browser configuration does not enable availability.'
 Assert-Test ($console -match 'allowsReference\(record\[table\.name\], config\.syntheticDataOnly\)') 'TA and Location choices follow the shared synthetic-reference policy.'
-$sourcePaths = @($pluginPath, $rulesPath, $adapterPath, $consolePath, $rendererPath, $driftPath, $flowPath, $environmentPath, $retentionPath, $rolePath, $registrationPath, $schemaPath)
+$guardSource = (@($pluginPath, $rulesPath, $adapterPath, $driftPath, $rendererPath) | ForEach-Object { Get-Content -LiteralPath $_ -Raw }) -join "`n"
+Assert-Test ($guardSource -notmatch '(?<!Enumerable)\.SequenceEqual\(' -and $guardSource -match 'Enumerable\.SequenceEqual\(') 'Guard source uses explicit Enumerable.SequenceEqual so C# first-class spans cannot bind System.Memory.'
+
+$flowDefinitionText = Get-Content -LiteralPath $flowDefinitionPath -Raw
+$flowDefinition = $flowDefinitionText | ConvertFrom-Json -AsHashtable
+$flowActions = [System.Collections.Generic.Dictionary[string, object]]::new()
+function Add-FlowActions($actions) {
+    foreach ($name in $actions.Keys) {
+        $flowActions.Add($name, $actions[$name])
+        if ($actions[$name].ContainsKey('actions')) { Add-FlowActions $actions[$name].actions }
+        if ($actions[$name].ContainsKey('else')) { Add-FlowActions $actions[$name].else.actions }
+    }
+}
+Add-FlowActions $flowDefinition.properties.definition.actions
+$flowReferences = $flowDefinition.properties.connectionReferences
+Assert-Test ((@($flowReferences.Keys | Sort-Object) -join ',') -eq 'shared_commondataserviceforapps,shared_office365') 'Flow uses only the Dataverse and Office 365 Outlook connectors.'
+Assert-Test ($flowReferences.shared_office365.connection.connectionReferenceLogicalName -eq 'os_sr_avchk_outlook_cr' -and $flowReferences.shared_commondataserviceforapps.connection.connectionReferenceLogicalName -eq 'os_sr_avchk_dataverse_cr') 'Flow binds only through the two solution connection references.'
+$flowTrigger = @($flowDefinition.properties.definition.triggers.Values)
+Assert-Test ($flowTrigger.Count -eq 1 -and $flowTrigger[0].inputs.parameters['subscriptionRequest/entityname'] -eq 'os_sr_avq' -and $flowTrigger[0].inputs.parameters['subscriptionRequest/message'] -eq 1 -and $flowTrigger[0].inputs.parameters['subscriptionRequest/filterexpression'] -eq 'os_sr_avq_stat eq 100000000' -and $flowTrigger[0].runtimeConfiguration.concurrency.runs -eq 1) 'Flow triggers once per new Pending query with concurrency 1.'
+$flowEnvParameters = @($flowDefinition.properties.definition.parameters.GetEnumerator() | Where-Object { $_.Key -notlike '$*' })
+Assert-Test ((@($flowEnvParameters | ForEach-Object { $_.Value.metadata.schemaName } | Sort-Object) -join ',') -eq 'os_sr_avq_bhrs,os_sr_avq_dom,os_sr_avq_durs,os_sr_avq_exp,os_sr_avq_hzn,os_sr_avq_lead,os_sr_avq_maxc' -and @($flowEnvParameters | Where-Object { $_.Value.ContainsKey('defaultValue') }).Count -eq 0) 'Flow references exactly the seven value-less environment-variable definitions.'
+$flowOperations = @($flowActions.Values | Where-Object type -eq 'OpenApiConnection' | ForEach-Object { $_.inputs.host.operationId })
+Assert-Test (@($flowOperations | Where-Object { $_ -notin @('GetItem', 'FindMeetingTimes_V2', 'UpdateOnlyRecord') }).Count -eq 0 -and @($flowOperations | Where-Object { $_ -eq 'FindMeetingTimes_V2' }).Count -eq 1 -and @($flowOperations | Where-Object { $_ -eq 'UpdateOnlyRecord' }).Count -eq 1) 'Flow calls Find meeting times (V2) once and writes exactly one terminal update.'
+$flowWrite = @($flowActions.Values | Where-Object { $_.type -eq 'OpenApiConnection' -and $_.inputs.host.operationId -eq 'UpdateOnlyRecord' })[0]
+Assert-Test ($flowWrite.inputs.parameters.entityName -eq 'os_sr_avqs' -and (@($flowWrite.inputs.parameters.Keys | Where-Object { $_ -like 'item/*' } | Sort-Object) -join ',') -eq 'item/os_sr_avq_err,item/os_sr_avq_exp,item/os_sr_avq_qat,item/os_sr_avq_rsn,item/os_sr_avq_slts,item/os_sr_avq_stat') 'Terminal write touches only the six approved result fields.'
+$flowReads = @($flowActions.Values | Where-Object { $_.type -eq 'OpenApiConnection' -and $_.inputs.host.operationId -eq 'GetItem' } | ForEach-Object { $_.inputs.parameters.entityName } | Sort-Object -Unique)
+Assert-Test (($flowReads -join ',') -eq 'os_sr_avqs,os_sr_locs,os_sr_tas') 'Flow reads only the query, TA and Location.'
+$flowProvider = @($flowActions.Values | Where-Object { $_.type -eq 'OpenApiConnection' -and $_.inputs.host.operationId -eq 'FindMeetingTimes_V2' })[0]
+Assert-Test ($flowProvider.inputs.parameters['body/MinimumAttendeePercentage'] -eq '100' -and $flowProvider.inputs.parameters['body/IsOrganizerOptional'] -eq $true -and $flowProvider.inputs.parameters['body/ActivityDomain'] -eq 'Work' -and @($flowProvider.inputs.parameters.Keys | Where-Object { $_ -match '(?i)timezone|OptionalAttendees' }).Count -eq 0) 'Flow provider inputs match the accepted Outlook contract.'
+Assert-Test (@($flowActions.Values | Where-Object { $_.type -eq 'OpenApiConnection' -and $_.retryPolicy.type -ne 'none' }).Count -eq 0) 'Flow connector actions never retry automatically.'
+Assert-Test (@($flowActions.GetEnumerator() | Where-Object { $_.Value.type -eq 'OpenApiConnection' -and $_.Value.inputs.host.operationId -ne 'UpdateOnlyRecord' -and $_.Key -ne 'Read_query' -and -not $_.Value.runtimeConfiguration.secureData }).Count -eq 0) 'Reference reads and the Outlook call secure run-history inputs and outputs.'
+Assert-Test (@($flowActions.Values | Where-Object { $_.type -eq 'Foreach' -and $_.runtimeConfiguration.concurrency.repetitions -ne 1 }).Count -eq 0) 'Suggestion evaluation is sequential.'
+Assert-Test ($flowDefinitionText -notmatch '(?i)os_sr_cand|os_sr_cact|os_sr_intv|os_sr_csh|os_sr_oprc|SendEmail|CreateEvent|graph\.microsoft|teams|"Http"|shared-' -and $flowDefinitionText -notmatch '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}') 'Flow source has no forbidden operation, connection id or literal mailbox.'
+foreach ($errorCode in @($flowDefinitionText | Select-String -Pattern "'([A-Z_]{6,})'" -AllMatches -CaseSensitive).Matches | ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -notin @('CONFIG', 'REFERENCE', 'REQUEST', 'PROVIDER', 'RESPONSE', 'RESULT', 'NO_COMMON_SLOT') } | Sort-Object -Unique) {
+    Assert-Test ($flow.safeErrors -contains $errorCode) "Flow emits only contract safe error $errorCode."
+}
+$sourcePaths = @($pluginPath, $rulesPath, $adapterPath, $consolePath, $rendererPath, $driftPath, $flowPath, $environmentPath, $retentionPath, $rolePath, $registrationPath, $schemaPath, $flowDefinitionPath)
 $activeSource = ($sourcePaths | ForEach-Object { Get-Content -LiteralPath $_ -Raw }) -join "`n"
 Assert-Test ($activeSource -notmatch '(?i)getSchedule|availabilityView|graph-scheduling|os_sr_cr_grs|Calendars\.ReadBasic|IntegrationApplicationUserId|GRAPH_|DecodeSchedule|ScheduleSource') 'No superseded Graph provider contract remains in active source.'
 Assert-Test ($activeSource -notmatch '(?i)(client_secret\s*[=:]\s*["''][^"'']+|Bearer\s+[A-Za-z0-9._-]{20,}|-----BEGIN (RSA |EC )?PRIVATE KEY-----)') 'No credentials, token or private key were introduced.'

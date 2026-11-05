@@ -1,0 +1,1463 @@
+{
+  "properties": {
+    "connectionReferences": {
+      "shared_commondataserviceforapps": {
+        "runtimeSource": "embedded",
+        "connection": {
+          "connectionReferenceLogicalName": "os_sr_avchk_dataverse_cr"
+        },
+        "api": {
+          "name": "shared_commondataserviceforapps"
+        }
+      },
+      "shared_office365": {
+        "runtimeSource": "embedded",
+        "connection": {
+          "connectionReferenceLogicalName": "os_sr_avchk_outlook_cr"
+        },
+        "api": {
+          "name": "shared_office365"
+        }
+      }
+    },
+    "definition": {
+      "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+      "contentVersion": "1.0.0.0",
+      "parameters": {
+        "$connections": {
+          "defaultValue": {},
+          "type": "Object"
+        },
+        "$authentication": {
+          "defaultValue": {},
+          "type": "SecureObject"
+        },
+        "Availability Business Hours (os_sr_avq_bhrs)": {
+          "type": "String",
+          "metadata": {
+            "schemaName": "os_sr_avq_bhrs"
+          }
+        },
+        "Availability Allowed Durations (os_sr_avq_durs)": {
+          "type": "String",
+          "metadata": {
+            "schemaName": "os_sr_avq_durs"
+          }
+        },
+        "Availability Minimum Lead Time (os_sr_avq_lead)": {
+          "type": "Float",
+          "metadata": {
+            "schemaName": "os_sr_avq_lead"
+          }
+        },
+        "Availability Maximum Horizon (os_sr_avq_hzn)": {
+          "type": "Float",
+          "metadata": {
+            "schemaName": "os_sr_avq_hzn"
+          }
+        },
+        "Availability Result Expiry (os_sr_avq_exp)": {
+          "type": "Float",
+          "metadata": {
+            "schemaName": "os_sr_avq_exp"
+          }
+        },
+        "Availability Allowed Email Domains (os_sr_avq_dom)": {
+          "type": "String",
+          "metadata": {
+            "schemaName": "os_sr_avq_dom"
+          }
+        },
+        "Availability Maximum Candidates (os_sr_avq_maxc)": {
+          "type": "Float",
+          "metadata": {
+            "schemaName": "os_sr_avq_maxc"
+          }
+        }
+      },
+      "triggers": {
+        "When_a_Pending_availability_query_is_added": {
+          "type": "OpenApiConnectionWebhook",
+          "inputs": {
+            "host": {
+              "connectionName": "shared_commondataserviceforapps",
+              "operationId": "SubscribeWebhookTrigger",
+              "apiId": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps"
+            },
+            "parameters": {
+              "subscriptionRequest/message": 1,
+              "subscriptionRequest/entityname": "os_sr_avq",
+              "subscriptionRequest/scope": 4,
+              "subscriptionRequest/filterexpression": "os_sr_avq_stat eq 100000000",
+              "subscriptionRequest/runas": 3
+            },
+            "authentication": "@parameters('$authentication')"
+          },
+          "runtimeConfiguration": {
+            "concurrency": {
+              "runs": 1
+            }
+          }
+        }
+      },
+      "actions": {
+        "Initialize_phase": {
+          "type": "InitializeVariable",
+          "inputs": {
+            "variables": [
+              {
+                "name": "v_phase",
+                "type": "string",
+                "value": "QUERY"
+              }
+            ]
+          },
+          "runAfter": {}
+        },
+        "Initialize_state": {
+          "type": "InitializeVariable",
+          "inputs": {
+            "variables": [
+              {
+                "name": "v_state",
+                "type": "integer",
+                "value": 100000003
+              }
+            ]
+          },
+          "runAfter": {
+            "Initialize_phase": [
+              "Succeeded"
+            ]
+          }
+        },
+        "Initialize_reason": {
+          "type": "InitializeVariable",
+          "inputs": {
+            "variables": [
+              {
+                "name": "v_reason",
+                "type": "string",
+                "value": ""
+              }
+            ]
+          },
+          "runAfter": {
+            "Initialize_state": [
+              "Succeeded"
+            ]
+          }
+        },
+        "Initialize_error": {
+          "type": "InitializeVariable",
+          "inputs": {
+            "variables": [
+              {
+                "name": "v_error",
+                "type": "string",
+                "value": ""
+              }
+            ]
+          },
+          "runAfter": {
+            "Initialize_reason": [
+              "Succeeded"
+            ]
+          }
+        },
+        "Initialize_slots": {
+          "type": "InitializeVariable",
+          "inputs": {
+            "variables": [
+              {
+                "name": "v_slots",
+                "type": "array",
+                "value": []
+              }
+            ]
+          },
+          "runAfter": {
+            "Initialize_error": [
+              "Succeeded"
+            ]
+          }
+        },
+        "Initialize_observations": {
+          "type": "InitializeVariable",
+          "inputs": {
+            "variables": [
+              {
+                "name": "v_obs",
+                "type": "array",
+                "value": []
+              }
+            ]
+          },
+          "runAfter": {
+            "Initialize_slots": [
+              "Succeeded"
+            ]
+          }
+        },
+        "Initialize_response_invalid": {
+          "type": "InitializeVariable",
+          "inputs": {
+            "variables": [
+              {
+                "name": "v_respInvalid",
+                "type": "boolean",
+                "value": false
+              }
+            ]
+          },
+          "runAfter": {
+            "Initialize_observations": [
+              "Succeeded"
+            ]
+          }
+        },
+        "Initialize_timezone_unsupported": {
+          "type": "InitializeVariable",
+          "inputs": {
+            "variables": [
+              {
+                "name": "v_tzUnsupported",
+                "type": "boolean",
+                "value": false
+              }
+            ]
+          },
+          "runAfter": {
+            "Initialize_response_invalid": [
+              "Succeeded"
+            ]
+          }
+        },
+        "Initialize_queried_at": {
+          "type": "InitializeVariable",
+          "inputs": {
+            "variables": [
+              {
+                "name": "v_queriedAt",
+                "type": "string",
+                "value": ""
+              }
+            ]
+          },
+          "runAfter": {
+            "Initialize_timezone_unsupported": [
+              "Succeeded"
+            ]
+          }
+        },
+        "Initialize_expiry_minutes": {
+          "type": "InitializeVariable",
+          "inputs": {
+            "variables": [
+              {
+                "name": "v_expMinutes",
+                "type": "integer",
+                "value": 1
+              }
+            ]
+          },
+          "runAfter": {
+            "Initialize_queried_at": [
+              "Succeeded"
+            ]
+          }
+        },
+        "Initialize_has_snapshot": {
+          "type": "InitializeVariable",
+          "inputs": {
+            "variables": [
+              {
+                "name": "v_hasSnapshot",
+                "type": "boolean",
+                "value": false
+              }
+            ]
+          },
+          "runAfter": {
+            "Initialize_expiry_minutes": [
+              "Succeeded"
+            ]
+          }
+        },
+        "Initialize_ta_snapshot": {
+          "type": "InitializeVariable",
+          "inputs": {
+            "variables": [
+              {
+                "name": "v_ta",
+                "type": "object",
+                "value": {}
+              }
+            ]
+          },
+          "runAfter": {
+            "Initialize_has_snapshot": [
+              "Succeeded"
+            ]
+          }
+        },
+        "Initialize_location_snapshot": {
+          "type": "InitializeVariable",
+          "inputs": {
+            "variables": [
+              {
+                "name": "v_loc",
+                "type": "object",
+                "value": {}
+              }
+            ]
+          },
+          "runAfter": {
+            "Initialize_ta_snapshot": [
+              "Succeeded"
+            ]
+          }
+        },
+        "Initialize_config": {
+          "type": "InitializeVariable",
+          "inputs": {
+            "variables": [
+              {
+                "name": "v_cfg",
+                "type": "object",
+                "value": {}
+              }
+            ]
+          },
+          "runAfter": {
+            "Initialize_location_snapshot": [
+              "Succeeded"
+            ]
+          }
+        },
+        "Initialize_validated_at": {
+          "type": "InitializeVariable",
+          "inputs": {
+            "variables": [
+              {
+                "name": "v_validatedAt",
+                "type": "string",
+                "value": ""
+              }
+            ]
+          },
+          "runAfter": {
+            "Initialize_config": [
+              "Succeeded"
+            ]
+          }
+        },
+        "Read_query": {
+          "type": "OpenApiConnection",
+          "inputs": {
+            "host": {
+              "connectionName": "shared_commondataserviceforapps",
+              "operationId": "GetItem",
+              "apiId": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps"
+            },
+            "parameters": {
+              "entityName": "os_sr_avqs",
+              "recordId": "@triggerOutputs()?['body/os_sr_avqid']",
+              "$select": "os_sr_avqid,os_sr_avq_stat,_os_sr_avq_ta_value,_os_sr_avq_loc_value,os_sr_avq_mod,os_sr_avq_strt,os_sr_avq_end,os_sr_avq_dur"
+            },
+            "authentication": "@parameters('$authentication')"
+          },
+          "runAfter": {
+            "Initialize_validated_at": [
+              "Succeeded"
+            ]
+          },
+          "retryPolicy": {
+            "type": "none"
+          }
+        },
+        "Check_pending": {
+          "type": "If",
+          "expression": "@equals(body('Read_query')?['os_sr_avq_stat'], 100000000)",
+          "actions": {},
+          "else": {
+            "actions": {
+              "Stop_not_pending": {
+                "type": "Terminate",
+                "inputs": {
+                  "runStatus": "Cancelled"
+                },
+                "runAfter": {}
+              }
+            }
+          },
+          "runAfter": {
+            "Read_query": [
+              "Succeeded"
+            ]
+          }
+        },
+        "Evaluate": {
+          "type": "Scope",
+          "actions": {
+            "Set_phase_config": {
+              "type": "SetVariable",
+              "inputs": {
+                "name": "v_phase",
+                "value": "CONFIG"
+              },
+              "runAfter": {}
+            },
+            "Parse_domains": {
+              "type": "Select",
+              "inputs": {
+                "from": "@split(parameters('Availability Allowed Email Domains (os_sr_avq_dom)'), ',')",
+                "select": "@toLower(trim(item()))"
+              },
+              "runAfter": {
+                "Set_phase_config": [
+                  "Succeeded"
+                ]
+              }
+            },
+            "Parse_durations": {
+              "type": "Select",
+              "inputs": {
+                "from": "@split(parameters('Availability Allowed Durations (os_sr_avq_durs)'), ',')",
+                "select": "@int(trim(item()))"
+              },
+              "runAfter": {
+                "Parse_domains": [
+                  "Succeeded"
+                ]
+              }
+            },
+            "Parse_business_hours": {
+              "type": "Compose",
+              "inputs": "@json(parameters('Availability Business Hours (os_sr_avq_bhrs)'))",
+              "runAfter": {
+                "Parse_durations": [
+                  "Succeeded"
+                ]
+              }
+            },
+            "Count_business_hour_keys": {
+              "type": "Compose",
+              "inputs": "@int(xpath(xml(json(concat('{\"r\":', parameters('Availability Business Hours (os_sr_avq_bhrs)'), '}'))), 'count(/r/*)'))",
+              "runAfter": {
+                "Parse_business_hours": [
+                  "Succeeded"
+                ]
+              }
+            },
+            "Present_business_days": {
+              "type": "Query",
+              "inputs": {
+                "from": "@createArray('sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday')",
+                "where": "@contains(outputs('Parse_business_hours'), item())"
+              },
+              "runAfter": {
+                "Count_business_hour_keys": [
+                  "Succeeded"
+                ]
+              }
+            },
+            "Find_invalid_business_days": {
+              "type": "Query",
+              "inputs": {
+                "from": "@body('Present_business_days')",
+                "where": "@not(and(and(equals(length(outputs('Parse_business_hours')[item()]['opens']), 5), equals(substring(outputs('Parse_business_hours')[item()]['opens'], 2, 1), ':'), lessOrEquals(int(substring(outputs('Parse_business_hours')[item()]['opens'], 0, 2)), 23), lessOrEquals(int(substring(outputs('Parse_business_hours')[item()]['opens'], 3, 2)), 59)), and(equals(length(outputs('Parse_business_hours')[item()]['closes']), 5), equals(substring(outputs('Parse_business_hours')[item()]['closes'], 2, 1), ':'), lessOrEquals(int(substring(outputs('Parse_business_hours')[item()]['closes'], 0, 2)), 23), lessOrEquals(int(substring(outputs('Parse_business_hours')[item()]['closes'], 3, 2)), 59)), less(add(mul(int(substring(outputs('Parse_business_hours')[item()]['opens'], 0, 2)), 60), int(substring(outputs('Parse_business_hours')[item()]['opens'], 3, 2))), add(mul(int(substring(outputs('Parse_business_hours')[item()]['closes'], 0, 2)), 60), int(substring(outputs('Parse_business_hours')[item()]['closes'], 3, 2))))))"
+              },
+              "runAfter": {
+                "Present_business_days": [
+                  "Succeeded"
+                ]
+              }
+            },
+            "Find_invalid_domains": {
+              "type": "Query",
+              "inputs": {
+                "from": "@body('Parse_domains')",
+                "where": "@or(equals(item(), ''), contains(item(), '@'), contains(item(), '/'), contains(item(), ' '), contains(item(), '..'), startsWith(item(), '.'), endsWith(item(), '.'))"
+              },
+              "runAfter": {
+                "Find_invalid_business_days": [
+                  "Succeeded"
+                ]
+              }
+            },
+            "Find_invalid_durations": {
+              "type": "Query",
+              "inputs": {
+                "from": "@body('Parse_durations')",
+                "where": "@or(lessOrEquals(item(), 0), greater(item(), 480), not(equals(mod(item(), 15), 0)))"
+              },
+              "runAfter": {
+                "Find_invalid_domains": [
+                  "Succeeded"
+                ]
+              }
+            },
+            "Compose_config": {
+              "type": "Compose",
+              "inputs": {
+                "domains": "@body('Parse_domains')",
+                "durations": "@body('Parse_durations')",
+                "hours": "@outputs('Parse_business_hours')",
+                "lead": "@int(string(parameters('Availability Minimum Lead Time (os_sr_avq_lead)')))",
+                "hzn": "@int(string(parameters('Availability Maximum Horizon (os_sr_avq_hzn)')))",
+                "exp": "@int(string(parameters('Availability Result Expiry (os_sr_avq_exp)')))",
+                "maxc": "@int(string(parameters('Availability Maximum Candidates (os_sr_avq_maxc)')))"
+              },
+              "runAfter": {
+                "Find_invalid_durations": [
+                  "Succeeded"
+                ]
+              }
+            },
+            "Check_config": {
+              "type": "If",
+              "expression": "@and(greater(length(outputs('Compose_config')['domains']), 0), equals(length(outputs('Compose_config')['domains']), length(union(outputs('Compose_config')['domains'], outputs('Compose_config')['domains']))), equals(length(body('Find_invalid_domains')), 0), greater(length(outputs('Compose_config')['durations']), 0), equals(length(outputs('Compose_config')['durations']), length(union(outputs('Compose_config')['durations'], outputs('Compose_config')['durations']))), equals(length(body('Find_invalid_durations')), 0), greater(outputs('Count_business_hour_keys'), 0), equals(outputs('Count_business_hour_keys'), add(add(add(add(add(add(if(contains(outputs('Parse_business_hours'), 'sunday'), 1, 0), if(contains(outputs('Parse_business_hours'), 'monday'), 1, 0)), if(contains(outputs('Parse_business_hours'), 'tuesday'), 1, 0)), if(contains(outputs('Parse_business_hours'), 'wednesday'), 1, 0)), if(contains(outputs('Parse_business_hours'), 'thursday'), 1, 0)), if(contains(outputs('Parse_business_hours'), 'friday'), 1, 0)), if(contains(outputs('Parse_business_hours'), 'saturday'), 1, 0))), equals(length(body('Find_invalid_business_days')), 0), greaterOrEquals(outputs('Compose_config')['lead'], 0), greaterOrEquals(outputs('Compose_config')['hzn'], 1), lessOrEquals(outputs('Compose_config')['hzn'], 61), greaterOrEquals(outputs('Compose_config')['exp'], 1), lessOrEquals(outputs('Compose_config')['exp'], 1440), greaterOrEquals(outputs('Compose_config')['maxc'], 1), lessOrEquals(outputs('Compose_config')['maxc'], 200))",
+              "actions": {
+                "Set_config": {
+                  "type": "SetVariable",
+                  "inputs": {
+                    "name": "v_cfg",
+                    "value": "@outputs('Compose_config')"
+                  },
+                  "runAfter": {}
+                },
+                "Set_expiry_minutes": {
+                  "type": "SetVariable",
+                  "inputs": {
+                    "name": "v_expMinutes",
+                    "value": "@outputs('Compose_config')['exp']"
+                  },
+                  "runAfter": {
+                    "Set_config": [
+                      "Succeeded"
+                    ]
+                  }
+                },
+                "Set_phase_request": {
+                  "type": "SetVariable",
+                  "inputs": {
+                    "name": "v_phase",
+                    "value": "REQUEST"
+                  },
+                  "runAfter": {
+                    "Set_expiry_minutes": [
+                      "Succeeded"
+                    ]
+                  }
+                },
+                "Check_mode": {
+                  "type": "If",
+                  "expression": "@or(equals(body('Read_query')?['os_sr_avq_mod'], 100000000), equals(body('Read_query')?['os_sr_avq_mod'], 100000001))",
+                  "actions": {
+                    "Set_phase_reference": {
+                      "type": "SetVariable",
+                      "inputs": {
+                        "name": "v_phase",
+                        "value": "REFERENCE"
+                      },
+                      "runAfter": {}
+                    },
+                    "Read_ta": {
+                      "type": "OpenApiConnection",
+                      "inputs": {
+                        "host": {
+                          "connectionName": "shared_commondataserviceforapps",
+                          "operationId": "GetItem",
+                          "apiId": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps"
+                        },
+                        "parameters": {
+                          "entityName": "os_sr_tas",
+                          "recordId": "@body('Read_query')?['_os_sr_avq_ta_value']",
+                          "$select": "os_sr_taid,statecode,os_sr_ta_eml"
+                        },
+                        "authentication": "@parameters('$authentication')"
+                      },
+                      "runAfter": {
+                        "Set_phase_reference": [
+                          "Succeeded"
+                        ]
+                      },
+                      "runtimeConfiguration": {
+                        "secureData": {
+                          "properties": [
+                            "inputs",
+                            "outputs"
+                          ]
+                        }
+                      },
+                      "retryPolicy": {
+                        "type": "none"
+                      }
+                    },
+                    "Set_ta_snapshot": {
+                      "type": "SetVariable",
+                      "inputs": {
+                        "name": "v_ta",
+                        "value": {
+                          "id": "@toLower(body('Read_ta')?['os_sr_taid'])",
+                          "state": "@body('Read_ta')?['statecode']",
+                          "email": "@toLower(trim(coalesce(body('Read_ta')?['os_sr_ta_eml'], '')))"
+                        }
+                      },
+                      "runAfter": {
+                        "Read_ta": [
+                          "Succeeded"
+                        ]
+                      }
+                    },
+                    "If_onsite_location_present": {
+                      "type": "If",
+                      "expression": "@and(equals(body('Read_query')?['os_sr_avq_mod'], 100000001), not(empty(body('Read_query')?['_os_sr_avq_loc_value'])))",
+                      "actions": {
+                        "Read_location": {
+                          "type": "OpenApiConnection",
+                          "inputs": {
+                            "host": {
+                              "connectionName": "shared_commondataserviceforapps",
+                              "operationId": "GetItem",
+                              "apiId": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps"
+                            },
+                            "parameters": {
+                              "entityName": "os_sr_locs",
+                              "recordId": "@body('Read_query')?['_os_sr_avq_loc_value']",
+                              "$select": "os_sr_locid,statecode,os_sr_loc_rmeml"
+                            },
+                            "authentication": "@parameters('$authentication')"
+                          },
+                          "runAfter": {},
+                          "runtimeConfiguration": {
+                            "secureData": {
+                              "properties": [
+                                "inputs",
+                                "outputs"
+                              ]
+                            }
+                          },
+                          "retryPolicy": {
+                            "type": "none"
+                          }
+                        },
+                        "Set_location_snapshot": {
+                          "type": "SetVariable",
+                          "inputs": {
+                            "name": "v_loc",
+                            "value": {
+                              "id": "@toLower(body('Read_location')?['os_sr_locid'])",
+                              "state": "@body('Read_location')?['statecode']",
+                              "email": "@toLower(trim(coalesce(body('Read_location')?['os_sr_loc_rmeml'], '')))"
+                            }
+                          },
+                          "runAfter": {
+                            "Read_location": [
+                              "Succeeded"
+                            ]
+                          }
+                        }
+                      },
+                      "else": {
+                        "actions": {}
+                      },
+                      "runAfter": {
+                        "Set_ta_snapshot": [
+                          "Succeeded"
+                        ]
+                      }
+                    },
+                    "Set_phase_validate": {
+                      "type": "SetVariable",
+                      "inputs": {
+                        "name": "v_phase",
+                        "value": "REQUEST"
+                      },
+                      "runAfter": {
+                        "If_onsite_location_present": [
+                          "Succeeded"
+                        ]
+                      }
+                    },
+                    "Set_validated_at": {
+                      "type": "SetVariable",
+                      "inputs": {
+                        "name": "v_validatedAt",
+                        "value": "@utcNow()"
+                      },
+                      "runAfter": {
+                        "Set_phase_validate": [
+                          "Succeeded"
+                        ]
+                      }
+                    },
+                    "Compose_validation_error": {
+                      "type": "Compose",
+                      "inputs": "@if(not(or(equals(body('Read_query')?['os_sr_avq_mod'], 100000000), equals(body('Read_query')?['os_sr_avq_mod'], 100000001))), 'INVALID_REQUEST', if(not(equals(variables('v_ta')?['state'], 0)), 'TA_INACTIVE', if(not(equals(if(equals(coalesce(variables('v_ta')?['email'], ''), ''), 'TA_EMAIL_MISSING', if(not(and(equals(length(split(coalesce(variables('v_ta')?['email'], ''), '@')), 2), greater(length(first(split(coalesce(variables('v_ta')?['email'], ''), '@'))), 0), contains(last(split(coalesce(variables('v_ta')?['email'], ''), '@')), '.'), not(startsWith(last(split(coalesce(variables('v_ta')?['email'], ''), '@')), '.')), not(endsWith(coalesce(variables('v_ta')?['email'], ''), '.')), not(contains(coalesce(variables('v_ta')?['email'], ''), ' ')), not(contains(coalesce(variables('v_ta')?['email'], ''), '..')), not(contains(coalesce(variables('v_ta')?['email'], ''), ',')), not(contains(coalesce(variables('v_ta')?['email'], ''), ';')), not(contains(coalesce(variables('v_ta')?['email'], ''), '<')), not(contains(coalesce(variables('v_ta')?['email'], ''), '>')))), 'TA_EMAIL_INVALID', if(not(contains(variables('v_cfg')['domains'], last(split(coalesce(variables('v_ta')?['email'], ''), '@')))), 'TA_EMAIL_DOMAIN_NOT_ALLOWED', ''))), '')), if(equals(coalesce(variables('v_ta')?['email'], ''), ''), 'TA_EMAIL_MISSING', if(not(and(equals(length(split(coalesce(variables('v_ta')?['email'], ''), '@')), 2), greater(length(first(split(coalesce(variables('v_ta')?['email'], ''), '@'))), 0), contains(last(split(coalesce(variables('v_ta')?['email'], ''), '@')), '.'), not(startsWith(last(split(coalesce(variables('v_ta')?['email'], ''), '@')), '.')), not(endsWith(coalesce(variables('v_ta')?['email'], ''), '.')), not(contains(coalesce(variables('v_ta')?['email'], ''), ' ')), not(contains(coalesce(variables('v_ta')?['email'], ''), '..')), not(contains(coalesce(variables('v_ta')?['email'], ''), ',')), not(contains(coalesce(variables('v_ta')?['email'], ''), ';')), not(contains(coalesce(variables('v_ta')?['email'], ''), '<')), not(contains(coalesce(variables('v_ta')?['email'], ''), '>')))), 'TA_EMAIL_INVALID', if(not(contains(variables('v_cfg')['domains'], last(split(coalesce(variables('v_ta')?['email'], ''), '@')))), 'TA_EMAIL_DOMAIN_NOT_ALLOWED', ''))), if(and(equals(body('Read_query')?['os_sr_avq_mod'], 100000001), empty(body('Read_query')?['_os_sr_avq_loc_value'])), 'LOCATION_REQUIRED', if(and(equals(body('Read_query')?['os_sr_avq_mod'], 100000001), not(equals(variables('v_loc')?['state'], 0))), 'LOCATION_INACTIVE', if(and(equals(body('Read_query')?['os_sr_avq_mod'], 100000001), not(equals(if(equals(coalesce(variables('v_loc')?['email'], ''), ''), 'ROOM_EMAIL_MISSING', if(not(and(equals(length(split(coalesce(variables('v_loc')?['email'], ''), '@')), 2), greater(length(first(split(coalesce(variables('v_loc')?['email'], ''), '@'))), 0), contains(last(split(coalesce(variables('v_loc')?['email'], ''), '@')), '.'), not(startsWith(last(split(coalesce(variables('v_loc')?['email'], ''), '@')), '.')), not(endsWith(coalesce(variables('v_loc')?['email'], ''), '.')), not(contains(coalesce(variables('v_loc')?['email'], ''), ' ')), not(contains(coalesce(variables('v_loc')?['email'], ''), '..')), not(contains(coalesce(variables('v_loc')?['email'], ''), ',')), not(contains(coalesce(variables('v_loc')?['email'], ''), ';')), not(contains(coalesce(variables('v_loc')?['email'], ''), '<')), not(contains(coalesce(variables('v_loc')?['email'], ''), '>')))), 'ROOM_EMAIL_INVALID', if(not(contains(variables('v_cfg')['domains'], last(split(coalesce(variables('v_loc')?['email'], ''), '@')))), 'ROOM_EMAIL_DOMAIN_NOT_ALLOWED', ''))), ''))), if(equals(coalesce(variables('v_loc')?['email'], ''), ''), 'ROOM_EMAIL_MISSING', if(not(and(equals(length(split(coalesce(variables('v_loc')?['email'], ''), '@')), 2), greater(length(first(split(coalesce(variables('v_loc')?['email'], ''), '@'))), 0), contains(last(split(coalesce(variables('v_loc')?['email'], ''), '@')), '.'), not(startsWith(last(split(coalesce(variables('v_loc')?['email'], ''), '@')), '.')), not(endsWith(coalesce(variables('v_loc')?['email'], ''), '.')), not(contains(coalesce(variables('v_loc')?['email'], ''), ' ')), not(contains(coalesce(variables('v_loc')?['email'], ''), '..')), not(contains(coalesce(variables('v_loc')?['email'], ''), ',')), not(contains(coalesce(variables('v_loc')?['email'], ''), ';')), not(contains(coalesce(variables('v_loc')?['email'], ''), '<')), not(contains(coalesce(variables('v_loc')?['email'], ''), '>')))), 'ROOM_EMAIL_INVALID', if(not(contains(variables('v_cfg')['domains'], last(split(coalesce(variables('v_loc')?['email'], ''), '@')))), 'ROOM_EMAIL_DOMAIN_NOT_ALLOWED', ''))), if(and(equals(body('Read_query')?['os_sr_avq_mod'], 100000001), equals(coalesce(variables('v_ta')?['email'], ''), coalesce(variables('v_loc')?['email'], ''))), 'ROOM_EMAIL_INVALID', if(not(and(greater(ticks(body('Read_query')?['os_sr_avq_strt']), ticks(variables('v_validatedAt'))), greater(ticks(body('Read_query')?['os_sr_avq_end']), ticks(body('Read_query')?['os_sr_avq_strt'])), equals(mod(ticks(body('Read_query')?['os_sr_avq_strt']), 9000000000), 0), equals(mod(ticks(body('Read_query')?['os_sr_avq_end']), 9000000000), 0), lessOrEquals(ticks(body('Read_query')?['os_sr_avq_end']), ticks(addDays(variables('v_validatedAt'), min(variables('v_cfg')['hzn'], 61)))), contains(variables('v_cfg')['durations'], body('Read_query')?['os_sr_avq_dur']), equals(mod(body('Read_query')?['os_sr_avq_dur'], 15), 0), greaterOrEquals(sub(ticks(body('Read_query')?['os_sr_avq_end']), ticks(body('Read_query')?['os_sr_avq_strt'])), mul(body('Read_query')?['os_sr_avq_dur'], 600000000)))), 'INVALID_REQUEST', ''))))))))",
+                      "runAfter": {
+                        "Set_validated_at": [
+                          "Succeeded"
+                        ]
+                      },
+                      "runtimeConfiguration": {
+                        "secureData": {
+                          "properties": [
+                            "inputs"
+                          ]
+                        }
+                      }
+                    },
+                    "Check_validation": {
+                      "type": "If",
+                      "expression": "@equals(outputs('Compose_validation_error'), '')",
+                      "actions": {
+                        "Set_has_snapshot": {
+                          "type": "SetVariable",
+                          "inputs": {
+                            "name": "v_hasSnapshot",
+                            "value": true
+                          },
+                          "runAfter": {}
+                        },
+                        "Set_phase_provider": {
+                          "type": "SetVariable",
+                          "inputs": {
+                            "name": "v_phase",
+                            "value": "PROVIDER"
+                          },
+                          "runAfter": {
+                            "Set_has_snapshot": [
+                              "Succeeded"
+                            ]
+                          }
+                        },
+                        "Find_meeting_times": {
+                          "type": "OpenApiConnection",
+                          "inputs": {
+                            "host": {
+                              "connectionName": "shared_office365",
+                              "operationId": "FindMeetingTimes_V2",
+                              "apiId": "/providers/Microsoft.PowerApps/apis/shared_office365"
+                            },
+                            "parameters": {
+                              "body/RequiredAttendees": "@coalesce(variables('v_ta')?['email'], '')",
+                              "body/ResourceAttendees": "@if(equals(body('Read_query')?['os_sr_avq_mod'], 100000001), coalesce(variables('v_loc')?['email'], ''), '')",
+                              "body/MeetingDuration": "@body('Read_query')?['os_sr_avq_dur']",
+                              "body/Start": "@formatDateTime(body('Read_query')?['os_sr_avq_strt'], 'yyyy-MM-ddTHH:mm:ssZ')",
+                              "body/End": "@formatDateTime(body('Read_query')?['os_sr_avq_end'], 'yyyy-MM-ddTHH:mm:ssZ')",
+                              "body/MaxCandidates": "@variables('v_cfg')['maxc']",
+                              "body/MinimumAttendeePercentage": "100",
+                              "body/IsOrganizerOptional": true,
+                              "body/ActivityDomain": "Work"
+                            },
+                            "authentication": "@parameters('$authentication')"
+                          },
+                          "runAfter": {
+                            "Set_phase_provider": [
+                              "Succeeded"
+                            ]
+                          },
+                          "runtimeConfiguration": {
+                            "secureData": {
+                              "properties": [
+                                "inputs",
+                                "outputs"
+                              ]
+                            }
+                          },
+                          "retryPolicy": {
+                            "type": "none"
+                          },
+                          "limit": {
+                            "timeout": "PT2M"
+                          }
+                        },
+                        "Set_queried_at": {
+                          "type": "SetVariable",
+                          "inputs": {
+                            "name": "v_queriedAt",
+                            "value": "@utcNow()"
+                          },
+                          "runAfter": {
+                            "Find_meeting_times": [
+                              "Succeeded"
+                            ]
+                          }
+                        },
+                        "Set_phase_response": {
+                          "type": "SetVariable",
+                          "inputs": {
+                            "name": "v_phase",
+                            "value": "RESPONSE"
+                          },
+                          "runAfter": {
+                            "Set_queried_at": [
+                              "Succeeded"
+                            ]
+                          }
+                        },
+                        "Check_response_shape": {
+                          "type": "If",
+                          "expression": "@and(startsWith(string(body('Find_meeting_times')), '{'), contains(body('Find_meeting_times'), 'emptySuggestionsReason'), contains(body('Find_meeting_times'), 'meetingTimeSuggestions'), equals(string(body('Find_meeting_times')['emptySuggestionsReason']), body('Find_meeting_times')['emptySuggestionsReason']), startsWith(string(body('Find_meeting_times')['meetingTimeSuggestions']), '['), lessOrEquals(length(body('Find_meeting_times')['meetingTimeSuggestions']), variables('v_cfg')['maxc']))",
+                          "actions": {},
+                          "else": {
+                            "actions": {
+                              "Mark_response_invalid": {
+                                "type": "SetVariable",
+                                "inputs": {
+                                  "name": "v_respInvalid",
+                                  "value": true
+                                },
+                                "runAfter": {}
+                              }
+                            }
+                          },
+                          "runAfter": {
+                            "Set_phase_response": [
+                              "Succeeded"
+                            ]
+                          }
+                        },
+                        "For_each_suggestion": {
+                          "type": "Foreach",
+                          "foreach": "@if(variables('v_respInvalid'), createArray(), body('Find_meeting_times')['meetingTimeSuggestions'])",
+                          "actions": {
+                            "Check_suggestion_timezone": {
+                              "type": "If",
+                              "expression": "@and(equals(items('For_each_suggestion')['meetingTimeSlot']['start']['timeZone'], 'UTC'), equals(items('For_each_suggestion')['meetingTimeSlot']['end']['timeZone'], 'UTC'))",
+                              "actions": {},
+                              "else": {
+                                "actions": {
+                                  "Mark_timezone_unsupported": {
+                                    "type": "SetVariable",
+                                    "inputs": {
+                                      "name": "v_tzUnsupported",
+                                      "value": true
+                                    },
+                                    "runAfter": {}
+                                  }
+                                }
+                              },
+                              "runAfter": {}
+                            },
+                            "Compose_slot": {
+                              "type": "Compose",
+                              "inputs": {
+                                "s": "@if(variables('v_tzUnsupported'), '0001-01-01T00:00:00Z', formatDateTime(if(endsWith(items('For_each_suggestion')['meetingTimeSlot']['start']['dateTime'], 'Z'), items('For_each_suggestion')['meetingTimeSlot']['start']['dateTime'], concat(items('For_each_suggestion')['meetingTimeSlot']['start']['dateTime'], 'Z')), 'yyyy-MM-ddTHH:mm:ss.fffffffZ'))",
+                                "e": "@if(variables('v_tzUnsupported'), '0001-01-01T00:00:00Z', formatDateTime(if(endsWith(items('For_each_suggestion')['meetingTimeSlot']['end']['dateTime'], 'Z'), items('For_each_suggestion')['meetingTimeSlot']['end']['dateTime'], concat(items('For_each_suggestion')['meetingTimeSlot']['end']['dateTime'], 'Z')), 'yyyy-MM-ddTHH:mm:ss.fffffffZ'))"
+                              },
+                              "runAfter": {
+                                "Check_suggestion_timezone": [
+                                  "Succeeded"
+                                ]
+                              },
+                              "runtimeConfiguration": {
+                                "secureData": {
+                                  "properties": [
+                                    "inputs"
+                                  ]
+                                }
+                              }
+                            },
+                            "Find_invalid_attendees": {
+                              "type": "Query",
+                              "inputs": {
+                                "from": "@items('For_each_suggestion')['attendeeAvailability']",
+                                "where": "@or(not(contains(createArray('required', 'optional', 'resource'), item()['attendee']['type'])), not(contains(createArray('free', 'tentative', 'busy', 'oof', 'workingElsewhere', 'unknown'), item()['availability'])), not(equals(length(split(trim(item()['attendee']['emailAddress']['address']), '@')), 2)))"
+                              },
+                              "runAfter": {
+                                "Compose_slot": [
+                                  "Succeeded"
+                                ]
+                              },
+                              "runtimeConfiguration": {
+                                "secureData": {
+                                  "properties": [
+                                    "inputs",
+                                    "outputs"
+                                  ]
+                                }
+                              }
+                            },
+                            "Find_ta_entries": {
+                              "type": "Query",
+                              "inputs": {
+                                "from": "@items('For_each_suggestion')['attendeeAvailability']",
+                                "where": "@equals(toLower(trim(item()['attendee']['emailAddress']['address'])), coalesce(variables('v_ta')?['email'], ''))"
+                              },
+                              "runAfter": {
+                                "Find_invalid_attendees": [
+                                  "Succeeded"
+                                ]
+                              },
+                              "runtimeConfiguration": {
+                                "secureData": {
+                                  "properties": [
+                                    "inputs",
+                                    "outputs"
+                                  ]
+                                }
+                              }
+                            },
+                            "Find_room_entries": {
+                              "type": "Query",
+                              "inputs": {
+                                "from": "@items('For_each_suggestion')['attendeeAvailability']",
+                                "where": "@and(equals(body('Read_query')?['os_sr_avq_mod'], 100000001), equals(toLower(trim(item()['attendee']['emailAddress']['address'])), coalesce(variables('v_loc')?['email'], '')))"
+                              },
+                              "runAfter": {
+                                "Find_ta_entries": [
+                                  "Succeeded"
+                                ]
+                              },
+                              "runtimeConfiguration": {
+                                "secureData": {
+                                  "properties": [
+                                    "inputs",
+                                    "outputs"
+                                  ]
+                                }
+                              }
+                            },
+                            "Compose_free": {
+                              "type": "Compose",
+                              "inputs": "@and(and(equals(length(body('Find_ta_entries')), 1), equals(first(body('Find_ta_entries'))?['attendee']?['type'], 'required'), equals(first(body('Find_ta_entries'))?['availability'], 'free')), or(not(equals(body('Read_query')?['os_sr_avq_mod'], 100000001)), and(equals(length(body('Find_room_entries')), 1), equals(first(body('Find_room_entries'))?['attendee']?['type'], 'resource'), equals(first(body('Find_room_entries'))?['availability'], 'free'))))",
+                              "runAfter": {
+                                "Find_room_entries": [
+                                  "Succeeded"
+                                ]
+                              },
+                              "runtimeConfiguration": {
+                                "secureData": {
+                                  "properties": [
+                                    "inputs"
+                                  ]
+                                }
+                              }
+                            },
+                            "Check_observation": {
+                              "type": "If",
+                              "expression": "@not(variables('v_tzUnsupported'))",
+                              "actions": {
+                                "Check_suggestion_valid": {
+                                  "type": "If",
+                                  "expression": "@and(equals(length(body('Find_invalid_attendees')), 0), greater(ticks(outputs('Compose_slot')['e']), ticks(outputs('Compose_slot')['s'])), not(contains(variables('v_obs'), concat(outputs('Compose_slot')['s'], '|', outputs('Compose_slot')['e'], '|', string(not(outputs('Compose_free')))))))",
+                                  "actions": {
+                                    "Append_observation": {
+                                      "type": "AppendToArrayVariable",
+                                      "inputs": {
+                                        "name": "v_obs",
+                                        "value": "@concat(outputs('Compose_slot')['s'], '|', outputs('Compose_slot')['e'], '|', string(outputs('Compose_free')))"
+                                      },
+                                      "runAfter": {}
+                                    },
+                                    "Check_slot_eligible": {
+                                      "type": "If",
+                                      "expression": "@and(outputs('Compose_free'), greaterOrEquals(ticks(outputs('Compose_slot')['s']), ticks(body('Read_query')?['os_sr_avq_strt'])), lessOrEquals(ticks(outputs('Compose_slot')['e']), ticks(body('Read_query')?['os_sr_avq_end'])), equals(sub(ticks(outputs('Compose_slot')['e']), ticks(outputs('Compose_slot')['s'])), mul(body('Read_query')?['os_sr_avq_dur'], 600000000)), equals(mod(ticks(outputs('Compose_slot')['s']), 9000000000), 0), equals(mod(ticks(outputs('Compose_slot')['e']), 9000000000), 0), greaterOrEquals(ticks(outputs('Compose_slot')['s']), ticks(addMinutes(variables('v_queriedAt'), variables('v_cfg')['lead']))), equals(convertFromUtc(outputs('Compose_slot')['s'], 'SE Asia Standard Time', 'yyyy-MM-dd'), convertFromUtc(outputs('Compose_slot')['e'], 'SE Asia Standard Time', 'yyyy-MM-dd')), contains(variables('v_cfg')['hours'], toLower(convertFromUtc(outputs('Compose_slot')['s'], 'SE Asia Standard Time', 'dddd'))), greaterOrEquals(add(mul(int(substring(convertFromUtc(outputs('Compose_slot')['s'], 'SE Asia Standard Time', 'HH:mm'), 0, 2)), 60), int(substring(convertFromUtc(outputs('Compose_slot')['s'], 'SE Asia Standard Time', 'HH:mm'), 3, 2))), add(mul(int(substring(coalesce(variables('v_cfg')['hours']?[toLower(convertFromUtc(outputs('Compose_slot')['s'], 'SE Asia Standard Time', 'dddd'))]?['opens'], '24:00'), 0, 2)), 60), int(substring(coalesce(variables('v_cfg')['hours']?[toLower(convertFromUtc(outputs('Compose_slot')['s'], 'SE Asia Standard Time', 'dddd'))]?['opens'], '24:00'), 3, 2)))), lessOrEquals(add(mul(int(substring(convertFromUtc(outputs('Compose_slot')['e'], 'SE Asia Standard Time', 'HH:mm'), 0, 2)), 60), int(substring(convertFromUtc(outputs('Compose_slot')['e'], 'SE Asia Standard Time', 'HH:mm'), 3, 2))), add(mul(int(substring(coalesce(variables('v_cfg')['hours']?[toLower(convertFromUtc(outputs('Compose_slot')['s'], 'SE Asia Standard Time', 'dddd'))]?['closes'], '00:00'), 0, 2)), 60), int(substring(coalesce(variables('v_cfg')['hours']?[toLower(convertFromUtc(outputs('Compose_slot')['s'], 'SE Asia Standard Time', 'dddd'))]?['closes'], '00:00'), 3, 2)))))",
+                                      "actions": {
+                                        "Append_slot": {
+                                          "type": "AppendToArrayVariable",
+                                          "inputs": {
+                                            "name": "v_slots",
+                                            "value": {
+                                              "startUtc": "@formatDateTime(outputs('Compose_slot')['s'], 'yyyy-MM-ddTHH:mm:ssZ')",
+                                              "endUtc": "@formatDateTime(outputs('Compose_slot')['e'], 'yyyy-MM-ddTHH:mm:ssZ')"
+                                            }
+                                          },
+                                          "runAfter": {}
+                                        }
+                                      },
+                                      "else": {
+                                        "actions": {}
+                                      },
+                                      "runAfter": {
+                                        "Append_observation": [
+                                          "Succeeded"
+                                        ]
+                                      }
+                                    }
+                                  },
+                                  "else": {
+                                    "actions": {
+                                      "Mark_suggestion_invalid": {
+                                        "type": "SetVariable",
+                                        "inputs": {
+                                          "name": "v_respInvalid",
+                                          "value": true
+                                        },
+                                        "runAfter": {}
+                                      }
+                                    }
+                                  },
+                                  "runAfter": {}
+                                }
+                              },
+                              "else": {
+                                "actions": {}
+                              },
+                              "runAfter": {
+                                "Compose_free": [
+                                  "Succeeded"
+                                ]
+                              }
+                            }
+                          },
+                          "runAfter": {
+                            "Check_response_shape": [
+                              "Succeeded"
+                            ]
+                          },
+                          "runtimeConfiguration": {
+                            "concurrency": {
+                              "repetitions": 1
+                            }
+                          }
+                        },
+                        "Set_phase_result": {
+                          "type": "SetVariable",
+                          "inputs": {
+                            "name": "v_phase",
+                            "value": "RESULT"
+                          },
+                          "runAfter": {
+                            "For_each_suggestion": [
+                              "Succeeded"
+                            ]
+                          }
+                        },
+                        "Compose_canonical_slots": {
+                          "type": "Compose",
+                          "inputs": "@sort(union(variables('v_slots'), variables('v_slots')), 'startUtc')",
+                          "runAfter": {
+                            "Set_phase_result": [
+                              "Succeeded"
+                            ]
+                          }
+                        },
+                        "Compose_proposed_result": {
+                          "type": "Compose",
+                          "inputs": "@if(variables('v_tzUnsupported'), json('{\"state\":100000003,\"error\":\"PROVIDER_TIMEZONE_UNSUPPORTED\"}'), if(variables('v_respInvalid'), json('{\"state\":100000003,\"error\":\"PROVIDER_RESPONSE_INVALID\"}'), if(equals(length(outputs('Compose_canonical_slots')), 0), json('{\"state\":100000002,\"reason\":\"NO_COMMON_SLOT\"}'), if(greater(length(outputs('Compose_canonical_slots')), 200), json('{\"state\":100000003,\"error\":\"RESULT_INVALID\"}'), if(greater(length(string(outputs('Compose_canonical_slots'))), 32768), json('{\"state\":100000003,\"error\":\"RESULT_TOO_LARGE\"}'), json('{\"state\":100000001}'))))))",
+                          "runAfter": {
+                            "Compose_canonical_slots": [
+                              "Succeeded"
+                            ]
+                          }
+                        },
+                        "Set_result_state": {
+                          "type": "SetVariable",
+                          "inputs": {
+                            "name": "v_state",
+                            "value": "@outputs('Compose_proposed_result')['state']"
+                          },
+                          "runAfter": {
+                            "Compose_proposed_result": [
+                              "Succeeded"
+                            ]
+                          }
+                        },
+                        "Set_result_reason": {
+                          "type": "SetVariable",
+                          "inputs": {
+                            "name": "v_reason",
+                            "value": "@coalesce(outputs('Compose_proposed_result')?['reason'], '')"
+                          },
+                          "runAfter": {
+                            "Set_result_state": [
+                              "Succeeded"
+                            ]
+                          }
+                        },
+                        "Set_result_error": {
+                          "type": "SetVariable",
+                          "inputs": {
+                            "name": "v_error",
+                            "value": "@coalesce(outputs('Compose_proposed_result')?['error'], '')"
+                          },
+                          "runAfter": {
+                            "Set_result_reason": [
+                              "Succeeded"
+                            ]
+                          }
+                        },
+                        "Set_result_slots": {
+                          "type": "SetVariable",
+                          "inputs": {
+                            "name": "v_slots",
+                            "value": "@if(equals(outputs('Compose_proposed_result')['state'], 100000001), outputs('Compose_canonical_slots'), createArray())"
+                          },
+                          "runAfter": {
+                            "Set_result_error": [
+                              "Succeeded"
+                            ]
+                          }
+                        }
+                      },
+                      "else": {
+                        "actions": {
+                          "Set_validation_error": {
+                            "type": "SetVariable",
+                            "inputs": {
+                              "name": "v_error",
+                              "value": "@outputs('Compose_validation_error')"
+                            },
+                            "runAfter": {}
+                          }
+                        }
+                      },
+                      "runAfter": {
+                        "Compose_validation_error": [
+                          "Succeeded"
+                        ]
+                      }
+                    }
+                  },
+                  "else": {
+                    "actions": {
+                      "Set_invalid_mode": {
+                        "type": "SetVariable",
+                        "inputs": {
+                          "name": "v_error",
+                          "value": "INVALID_REQUEST"
+                        },
+                        "runAfter": {}
+                      }
+                    }
+                  },
+                  "runAfter": {
+                    "Set_phase_request": [
+                      "Succeeded"
+                    ]
+                  }
+                }
+              },
+              "else": {
+                "actions": {
+                  "Set_config_invalid": {
+                    "type": "SetVariable",
+                    "inputs": {
+                      "name": "v_error",
+                      "value": "CONFIGURATION_INVALID"
+                    },
+                    "runAfter": {}
+                  }
+                }
+              },
+              "runAfter": {
+                "Compose_config": [
+                  "Succeeded"
+                ]
+              }
+            }
+          },
+          "runAfter": {
+            "Check_pending": [
+              "Succeeded"
+            ]
+          }
+        },
+        "Map_failure": {
+          "type": "Scope",
+          "actions": {
+            "Set_failure_error": {
+              "type": "SetVariable",
+              "inputs": {
+                "name": "v_error",
+                "value": "@if(equals(variables('v_phase'), 'CONFIG'), 'CONFIGURATION_INVALID', if(equals(variables('v_phase'), 'REFERENCE'), 'REFERENCE_READ_FAILED', if(equals(variables('v_phase'), 'REQUEST'), 'INVALID_REQUEST', if(equals(variables('v_phase'), 'PROVIDER'), 'PROVIDER_UNAVAILABLE', if(and(equals(variables('v_phase'), 'RESPONSE'), variables('v_tzUnsupported')), 'PROVIDER_TIMEZONE_UNSUPPORTED', if(equals(variables('v_phase'), 'RESPONSE'), 'PROVIDER_RESPONSE_INVALID', 'RESULT_INVALID'))))))"
+              },
+              "runAfter": {}
+            },
+            "Clear_failure_reason": {
+              "type": "SetVariable",
+              "inputs": {
+                "name": "v_reason",
+                "value": ""
+              },
+              "runAfter": {
+                "Set_failure_error": [
+                  "Succeeded"
+                ]
+              }
+            },
+            "Clear_failure_slots": {
+              "type": "SetVariable",
+              "inputs": {
+                "name": "v_slots",
+                "value": "@createArray()"
+              },
+              "runAfter": {
+                "Clear_failure_reason": [
+                  "Succeeded"
+                ]
+              }
+            },
+            "If_provider_failure": {
+              "type": "If",
+              "expression": "@equals(variables('v_phase'), 'PROVIDER')",
+              "actions": {
+                "Set_provider_error": {
+                  "type": "SetVariable",
+                  "inputs": {
+                    "name": "v_error",
+                    "value": "@if(equals(actions('Find_meeting_times')?['status'], 'TimedOut'), 'PROVIDER_TIMEOUT', if(equals(outputs('Find_meeting_times')?['statusCode'], 401), 'PROVIDER_AUTH', if(equals(outputs('Find_meeting_times')?['statusCode'], 403), 'PROVIDER_PERMISSION', if(equals(outputs('Find_meeting_times')?['statusCode'], 404), 'MAILBOX_NOT_FOUND', if(equals(outputs('Find_meeting_times')?['statusCode'], 429), 'PROVIDER_THROTTLED', 'PROVIDER_UNAVAILABLE')))))"
+                  },
+                  "runAfter": {}
+                }
+              },
+              "else": {
+                "actions": {}
+              },
+              "runAfter": {
+                "Clear_failure_slots": [
+                  "Succeeded"
+                ]
+              }
+            }
+          },
+          "runAfter": {
+            "Evaluate": [
+              "Failed",
+              "TimedOut"
+            ]
+          }
+        },
+        "If_validated_snapshot": {
+          "type": "If",
+          "expression": "@variables('v_hasSnapshot')",
+          "actions": {
+            "Reread_references": {
+              "type": "Scope",
+              "actions": {
+                "Reread_ta": {
+                  "type": "OpenApiConnection",
+                  "inputs": {
+                    "host": {
+                      "connectionName": "shared_commondataserviceforapps",
+                      "operationId": "GetItem",
+                      "apiId": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps"
+                    },
+                    "parameters": {
+                      "entityName": "os_sr_tas",
+                      "recordId": "@variables('v_ta')['id']",
+                      "$select": "os_sr_taid,statecode,os_sr_ta_eml"
+                    },
+                    "authentication": "@parameters('$authentication')"
+                  },
+                  "runAfter": {},
+                  "runtimeConfiguration": {
+                    "secureData": {
+                      "properties": [
+                        "inputs",
+                        "outputs"
+                      ]
+                    }
+                  },
+                  "retryPolicy": {
+                    "type": "none"
+                  }
+                },
+                "Compose_drift": {
+                  "type": "Compose",
+                  "inputs": "@and(not(empty(variables('v_ta')?['id'])), equals(variables('v_ta')?['state'], 0), greater(length(variables('v_ta')?['email']), 0), equals(toLower(body('Reread_ta')?['os_sr_taid']), variables('v_ta')['id']), equals(body('Reread_ta')?['statecode'], variables('v_ta')['state']), equals(toLower(trim(coalesce(body('Reread_ta')?['os_sr_ta_eml'], ''))), variables('v_ta')['email']))",
+                  "runAfter": {
+                    "Reread_ta": [
+                      "Succeeded"
+                    ]
+                  },
+                  "runtimeConfiguration": {
+                    "secureData": {
+                      "properties": [
+                        "inputs"
+                      ]
+                    }
+                  }
+                },
+                "Check_ta_unchanged": {
+                  "type": "If",
+                  "expression": "@outputs('Compose_drift')",
+                  "actions": {},
+                  "else": {
+                    "actions": {
+                      "Set_ta_changed": {
+                        "type": "SetVariable",
+                        "inputs": {
+                          "name": "v_error",
+                          "value": "REFERENCE_CHANGED"
+                        },
+                        "runAfter": {}
+                      }
+                    }
+                  },
+                  "runAfter": {
+                    "Compose_drift": [
+                      "Succeeded"
+                    ]
+                  }
+                },
+                "If_onsite_reread_location": {
+                  "type": "If",
+                  "expression": "@equals(body('Read_query')?['os_sr_avq_mod'], 100000001)",
+                  "actions": {
+                    "Reread_location": {
+                      "type": "OpenApiConnection",
+                      "inputs": {
+                        "host": {
+                          "connectionName": "shared_commondataserviceforapps",
+                          "operationId": "GetItem",
+                          "apiId": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps"
+                        },
+                        "parameters": {
+                          "entityName": "os_sr_locs",
+                          "recordId": "@variables('v_loc')['id']",
+                          "$select": "os_sr_locid,statecode,os_sr_loc_rmeml"
+                        },
+                        "authentication": "@parameters('$authentication')"
+                      },
+                      "runAfter": {},
+                      "runtimeConfiguration": {
+                        "secureData": {
+                          "properties": [
+                            "inputs",
+                            "outputs"
+                          ]
+                        }
+                      },
+                      "retryPolicy": {
+                        "type": "none"
+                      }
+                    },
+                    "Compose_location_drift": {
+                      "type": "Compose",
+                      "inputs": "@and(not(empty(variables('v_loc')?['id'])), equals(variables('v_loc')?['state'], 0), greater(length(variables('v_loc')?['email']), 0), equals(toLower(body('Reread_location')?['os_sr_locid']), variables('v_loc')['id']), equals(body('Reread_location')?['statecode'], variables('v_loc')['state']), equals(toLower(trim(coalesce(body('Reread_location')?['os_sr_loc_rmeml'], ''))), variables('v_loc')['email']))",
+                      "runAfter": {
+                        "Reread_location": [
+                          "Succeeded"
+                        ]
+                      },
+                      "runtimeConfiguration": {
+                        "secureData": {
+                          "properties": [
+                            "inputs"
+                          ]
+                        }
+                      }
+                    },
+                    "Check_location_unchanged": {
+                      "type": "If",
+                      "expression": "@outputs('Compose_location_drift')",
+                      "actions": {},
+                      "else": {
+                        "actions": {
+                          "Set_location_changed": {
+                            "type": "SetVariable",
+                            "inputs": {
+                              "name": "v_error",
+                              "value": "REFERENCE_CHANGED"
+                            },
+                            "runAfter": {}
+                          }
+                        }
+                      },
+                      "runAfter": {
+                        "Compose_location_drift": [
+                          "Succeeded"
+                        ]
+                      }
+                    }
+                  },
+                  "else": {
+                    "actions": {}
+                  },
+                  "runAfter": {
+                    "Check_ta_unchanged": [
+                      "Succeeded"
+                    ]
+                  }
+                }
+              },
+              "runAfter": {}
+            }
+          },
+          "else": {
+            "actions": {}
+          },
+          "runAfter": {
+            "Map_failure": [
+              "Succeeded",
+              "Skipped",
+              "Failed"
+            ]
+          }
+        },
+        "Map_reread_failure": {
+          "type": "Scope",
+          "actions": {
+            "Set_reread_changed": {
+              "type": "SetVariable",
+              "inputs": {
+                "name": "v_error",
+                "value": "REFERENCE_CHANGED"
+              },
+              "runAfter": {}
+            }
+          },
+          "runAfter": {
+            "If_validated_snapshot": [
+              "Failed",
+              "TimedOut"
+            ]
+          }
+        },
+        "Compose_terminal": {
+          "type": "Compose",
+          "inputs": {
+            "state": "@if(empty(variables('v_error')), variables('v_state'), 100000003)",
+            "reason": "@if(or(not(empty(variables('v_error'))), empty(variables('v_reason'))), null, variables('v_reason'))",
+            "error": "@if(empty(variables('v_error')), null, variables('v_error'))",
+            "slots": "@if(and(empty(variables('v_error')), equals(variables('v_state'), 100000001)), string(variables('v_slots')), '[]')",
+            "queriedAt": "@if(empty(variables('v_queriedAt')), utcNow(), variables('v_queriedAt'))"
+          },
+          "runAfter": {
+            "Map_reread_failure": [
+              "Succeeded",
+              "Skipped"
+            ]
+          }
+        },
+        "Write_terminal_result": {
+          "type": "OpenApiConnection",
+          "inputs": {
+            "host": {
+              "connectionName": "shared_commondataserviceforapps",
+              "operationId": "UpdateOnlyRecord",
+              "apiId": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps"
+            },
+            "parameters": {
+              "entityName": "os_sr_avqs",
+              "recordId": "@body('Read_query')?['os_sr_avqid']",
+              "item/os_sr_avq_stat": "@outputs('Compose_terminal')['state']",
+              "item/os_sr_avq_rsn": "@outputs('Compose_terminal')['reason']",
+              "item/os_sr_avq_err": "@outputs('Compose_terminal')['error']",
+              "item/os_sr_avq_slts": "@outputs('Compose_terminal')['slots']",
+              "item/os_sr_avq_qat": "@outputs('Compose_terminal')['queriedAt']",
+              "item/os_sr_avq_exp": "@addMinutes(outputs('Compose_terminal')['queriedAt'], variables('v_expMinutes'))"
+            },
+            "authentication": "@parameters('$authentication')"
+          },
+          "runAfter": {
+            "Compose_terminal": [
+              "Succeeded"
+            ]
+          },
+          "retryPolicy": {
+            "type": "none"
+          }
+        }
+      },
+      "outputs": {}
+    },
+    "templateName": ""
+  },
+  "schemaVersion": "1.0.0.0"
+}

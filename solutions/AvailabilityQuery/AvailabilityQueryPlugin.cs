@@ -255,7 +255,7 @@ namespace os_sr_avqg
             ITracingService trace)
         {
             var allowedFields = allowed as string[] ?? allowed.ToArray();
-            var isAllowed = allowedFields.SequenceEqual(CreateFields)
+            var isAllowed = Enumerable.SequenceEqual(allowedFields, CreateFields)
                 ? AvailabilityMutationPolicy.IsCreateFieldSetAllowed(entity.Attributes.Keys)
                 : AvailabilityMutationPolicy.IsResultFieldSetAllowed(entity.Attributes.Keys);
             if (!isAllowed)

@@ -477,7 +477,7 @@ namespace os_sr_avqg
                 "TIME_ZONE_UNAVAILABLE", "SOURCE_UNKNOWN_TA", "SOURCE_UNKNOWN_ROOM",
                 "AVAILABILITY_VIEW_INVALID", "GRAPH_AUTH", "GRAPH_PERMISSION", "MAILBOX_NOT_FOUND",
                 "GRAPH_THROTTLED", "GRAPH_TIMEOUT", "GRAPH_UNAVAILABLE", "RESULT_TOO_LARGE",
-                "RESULT_INVALID", "REFERENCE_READ_FAILED"
+                "RESULT_INVALID", "REFERENCE_READ_FAILED", "REFERENCE_CHANGED"
             }).Contains(error, StringComparer.Ordinal);
 
         public static bool IsSafeReason(string? reason) =>

@@ -281,6 +281,13 @@ namespace os_sr_avqg
 
     internal static class PluginConfiguration
     {
+        private static readonly HashSet<string> AllowedKeys = new HashSet<string>(new[]
+        {
+            "IntegrationApplicationUserId", "AllowedEmailDomains", "AllowedDurationsMinutes",
+            "MaximumHorizonDays", "MinimumLeadTimeMinutes", "ResultExpiryMinutes"
+        }.Concat(Enum.GetNames(typeof(DayOfWeek)).Select(day => "BusinessHours." + day)),
+            StringComparer.OrdinalIgnoreCase);
+
         public static AvailabilitySettings Parse(string? configuration)
         {
             if (string.IsNullOrWhiteSpace(configuration))
@@ -294,7 +301,7 @@ namespace os_sr_avqg
                 var safeLine = line ?? "";
                 var separator = safeLine.IndexOf('=');
                 var name = separator > 0 ? safeLine.Substring(0, separator).Trim() : "";
-                if (separator <= 0 || values.ContainsKey(name))
+                if (separator <= 0 || values.ContainsKey(name) || !AllowedKeys.Contains(name))
                     throw new InvalidPluginExecutionException("Availability query configuration is invalid.");
                 values.Add(name, safeLine.Substring(separator + 1).Trim());
             }

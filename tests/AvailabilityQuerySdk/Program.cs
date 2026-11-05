@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Microsoft.Xrm.Sdk;
 using os_sr_avqg;
 
 internal static class Program
@@ -21,6 +22,8 @@ internal static class Program
         TestCanonicalSlotJson();
         TestMutationPolicy();
         TestSafeGraphErrors();
+        TestReferenceDrift();
+        TestConfigurationRendering();
         Console.WriteLine("Availability Query SDK checks passed: " + assertions);
         return 0;
     }
@@ -100,6 +103,12 @@ internal static class Program
 
     private static void TestReferenceAndInputValidation()
     {
+        Equal("INVALID_REQUEST", AvailabilityRules.ValidateQuery(
+            Query(InterviewMode.Online, Start: DateTime.SpecifyKind(Start, DateTimeKind.Unspecified)),
+            Settings(), Now), "Unspecified transport Kind remains rejected; no automatic normalization.");
+        Equal("INVALID_REQUEST", AvailabilityRules.ValidateQuery(
+            Query(InterviewMode.Online, Start: DateTime.SpecifyKind(Start, DateTimeKind.Local)),
+            Settings(), Now), "Local Kind remains rejected.");
         Equal("TA_INACTIVE", AvailabilityRules.ValidateQuery(
             Query(InterviewMode.Online, taActive: false), Settings(), Now), "Inactive TA is rejected.");
         Equal("TA_EMAIL_MISSING", AvailabilityRules.ValidateQuery(
@@ -265,6 +274,188 @@ internal static class Program
         Equal("GRAPH_THROTTLED", AvailabilityRules.NormalizeGraphError(429), "429 is sanitized.");
         Equal("GRAPH_TIMEOUT", AvailabilityRules.NormalizeGraphError(null, true), "Timeout is sanitized.");
         Equal("GRAPH_UNAVAILABLE", AvailabilityRules.NormalizeGraphError(500), "Provider error is sanitized.");
+    }
+
+    private static void TestReferenceDrift()
+    {
+        var ta = new CalendarReferenceSnapshot(BsoUser, 0, "TA@example.invalid ");
+        var room = new CalendarReferenceSnapshot(IntegrationUser, 0, "room@example.invalid");
+        var available = AvailabilityResult.Available(new[] { new AvailableSlot(Start, End) });
+        var cases = new[]
+        {
+            (InterviewMode.Online, new CalendarReferenceSnapshot(BsoUser, 0, "changed@example.invalid"), room, "TA address changed"),
+            (InterviewMode.Online, new CalendarReferenceSnapshot(BsoUser, 1, "ta@example.invalid"), room, "TA became inactive"),
+            (InterviewMode.Onsite, ta, new CalendarReferenceSnapshot(IntegrationUser, 0, "changed@example.invalid"), "Room address changed"),
+            (InterviewMode.Onsite, ta, new CalendarReferenceSnapshot(IntegrationUser, 1, "room@example.invalid"), "Location became inactive"),
+            (InterviewMode.Onsite, new CalendarReferenceSnapshot(Guid.Empty, 0, "ta@example.invalid"), room, "TA id missing"),
+            (InterviewMode.Onsite, ta, new CalendarReferenceSnapshot(BsoUser, 0, "room@example.invalid"), "Location id changed")
+        };
+        foreach (var item in cases)
+        {
+            foreach (var proposed in new[] { available, AvailabilityResult.NoSlots("NO_COMMON_SLOT"),
+                         AvailabilityResult.Failed("GRAPH_TIMEOUT") })
+            {
+                var result = ReferenceDriftPolicy.BeforeTerminalWrite(item.Item1, ta, room,
+                    item.Item2, item.Item3, proposed);
+                Equal(QueryState.Failed, result.State, item.Item4 + ": failed before every terminal write.");
+                Equal("REFERENCE_CHANGED", result.Error, item.Item4 + ": deterministic drift category.");
+                Equal<string?>(null, result.Reason, item.Item4 + ": no stale NoSlots reason.");
+                Equal("[]", SlotResultJson.Serialize(result.Slots, 200, 32768),
+                    item.Item4 + ": no slots returned.");
+                var fields = new[]
+                {
+                    "os_sr_avq_stat", "os_sr_avq_err", "os_sr_avq_rsn",
+                    "os_sr_avq_slts", "os_sr_avq_qat", "os_sr_avq_exp"
+                };
+                Equal(true, AvailabilityMutationPolicy.IsResultFieldSetAllowed(fields),
+                    item.Item4 + ": completion is restricted to operational result fields.");
+                Equal(false, AvailabilityMutationPolicy.IsResultFieldSetAllowed(
+                    fields.Concat(new[] { "os_sr_cand_stat", "os_sr_intv_stat", "os_sr_cact",
+                        "os_sr_csh", "os_sr_oprc", "os_sr_clog" })),
+                    item.Item4 + ": no Candidate/Core mutation path in completion.");
+            }
+        }
+        Equal("REFERENCE_CHANGED", ReferenceDriftPolicy.BeforeTerminalWrite(
+            InterviewMode.Online, ta, null, null, null, available).Error, "Unreadable TA fails closed.");
+        Equal("REFERENCE_CHANGED", ReferenceDriftPolicy.BeforeTerminalWrite(
+            InterviewMode.Onsite, ta, room, ta, null, available).Error, "Unreadable Location fails closed.");
+        Equal(true, SlotResultJson.IsSafeError("REFERENCE_CHANGED"), "Guard permits safe drift failure.");
+        Equal(1, available.Slots.Count, "Drift never mutates the proposed result in memory.");
+
+        var record = new Dictionary<string, object>
+        {
+            ["id"] = BsoUser, ["statecode"] = 0, ["email"] = "ta@example.invalid", ["name"] = "Old name"
+        };
+        CalendarReferenceSnapshot Capture(Dictionary<string, object> row) =>
+            new CalendarReferenceSnapshot((Guid)row["id"], (int)row["statecode"], (string)row["email"]);
+        var beforeNameChange = Capture(record);
+        record["name"] = "New name";
+        var roomRecord = new Dictionary<string, object>
+        {
+            ["id"] = IntegrationUser, ["statecode"] = 0, ["email"] = "room@example.invalid", ["name"] = "Old room"
+        };
+        var beforeRoomNameChange = Capture(roomRecord);
+        roomRecord["name"] = "New room";
+        Equal(available, ReferenceDriftPolicy.BeforeTerminalWrite(InterviewMode.Onsite,
+            beforeNameChange, beforeRoomNameChange, Capture(record), Capture(roomRecord), available),
+            "Unrelated TA/Location display-name changes do not invalidate availability.");
+        Equal(available, ReferenceDriftPolicy.BeforeTerminalWrite(InterviewMode.Online,
+            ta, room, new CalendarReferenceSnapshot(BsoUser, 0, "ta@EXAMPLE.INVALID"), null, available),
+            "Normalization is consistent and Online ignores Location.");
+    }
+
+    private static void TestConfigurationRendering()
+    {
+        var source = ConfigurationSource();
+        var rendered = AvailabilityConfigurationRenderer.Render(source, IntegrationUser);
+        Equal(rendered, AvailabilityConfigurationRenderer.Render(source.Reverse(), IntegrationUser),
+            "Environment enumeration order does not affect rendering.");
+        var reorderedDays = new Dictionary<string, string>(source)
+        {
+            ["os_sr_avq_bhrs"] = "{\"monday\":{\"closes\":\"17:00\",\"opens\":\"09:00\"},\"friday\":{\"opens\":\"10:00\",\"closes\":\"16:00\"}}"
+        };
+        Equal(rendered, AvailabilityConfigurationRenderer.Render(reorderedDays, IntegrationUser),
+            "JSON property order does not affect rendering.");
+        Equal(false, rendered.Contains("\r"), "Canonical output uses LF separators.");
+        var parsed = PluginConfiguration.Parse(rendered);
+        Equal(IntegrationUser, parsed.IntegrationApplicationUserId, "Environment-specific identity round-trips.");
+        Equal(60, parsed.MaximumHorizonDays, "Source horizon round-trips exactly.");
+        Equal(45, parsed.MinimumLeadTimeMinutes, "Source lead time round-trips exactly.");
+        Equal(12, parsed.ResultExpiryMinutes, "Source expiry round-trips exactly.");
+        Equal("30,60,90", string.Join(",", parsed.AllowedDurationsMinutes),
+            "Source duration values and order round-trip exactly.");
+        Equal("example.invalid,calendar.invalid", string.Join(",", parsed.AllowedEmailDomains),
+            "Source allowed domains round-trip exactly.");
+        Equal(2, parsed.BusinessHours.Count, "Exactly the source business days are parsed.");
+        Equal(TimeSpan.FromHours(9), parsed.BusinessHours[DayOfWeek.Monday].Opens, "Monday open round-trips.");
+        Equal(TimeSpan.FromHours(17), parsed.BusinessHours[DayOfWeek.Monday].Closes, "Monday close round-trips.");
+        Equal(TimeSpan.FromHours(10), parsed.BusinessHours[DayOfWeek.Friday].Opens, "Friday open round-trips.");
+        Equal(TimeSpan.FromHours(16), parsed.BusinessHours[DayOfWeek.Friday].Closes, "Friday close round-trips.");
+        foreach (var key in source.Keys)
+        {
+            ConfigurationRejects(() => AvailabilityConfigurationRenderer.Render(
+                source.Where(pair => pair.Key != key), IntegrationUser), "Missing environment setting " + key);
+        }
+        ConfigurationRejects(() => AvailabilityConfigurationRenderer.Render(
+            source.Concat(source.Take(1)), IntegrationUser), "Duplicate environment settings reject.");
+        foreach (var unknown in new[] { "unknown", "client_secret", "access_token", "certificate", "refresh_token" })
+        {
+            ConfigurationRejects(() => AvailabilityConfigurationRenderer.Render(
+                source.Concat(new[] { new KeyValuePair<string, string>(unknown, "synthetic-not-a-secret") }),
+                IntegrationUser), "Unknown/credential settings never render: " + unknown);
+            ConfigurationRejects(() => PluginConfiguration.Parse(rendered + "\n" + unknown + "=synthetic"),
+                "Unknown parser setting rejects: " + unknown);
+        }
+        ConfigurationRejects(() => AvailabilityConfigurationRenderer.Render(source, Guid.Empty),
+            "Missing integration identity rejects.");
+        void RejectValue(string key, string value)
+        {
+            var changed = new Dictionary<string, string>(source) { [key] = value };
+            ConfigurationRejects(() => AvailabilityConfigurationRenderer.Render(changed, IntegrationUser),
+                "Invalid source rejects: " + key);
+        }
+        RejectValue("os_sr_avq_hzn", "62");
+        RejectValue("os_sr_avq_hzn", "0");
+        RejectValue("os_sr_avq_durs", "30,40");
+        RejectValue("os_sr_avq_durs", "30,30");
+        RejectValue("os_sr_avq_dom", "example.invalid\nclient_secret=synthetic");
+        RejectValue("os_sr_avq_exp", "12\nUnknown=value");
+        RejectValue("os_sr_avq_bhrs", "{}");
+        RejectValue("os_sr_avq_bhrs", "{\"monday\":{\"opens\":\"09:00\",\"closes\":\"17:00\",\"secret\":\"x\"}}");
+        RejectValue("os_sr_avq_bhrs", "{\"__type\":\"x\",\"monday\":{\"opens\":\"09:00\",\"closes\":\"17:00\"}}");
+        RejectValue("os_sr_avq_bhrs", "{\"monday\":{\"__type\":\"x\",\"opens\":\"09:00\",\"closes\":\"17:00\"}}");
+        RejectValue("os_sr_avq_bhrs", "{\"monday\":{\"opens\":900,\"closes\":\"17:00\"}}");
+        RejectValue("os_sr_avq_bhrs", "{\"monday\":{\"opens\":\"09:00\",\"opens\":\"10:00\",\"closes\":\"17:00\"}}");
+        RejectValue("os_sr_avq_bhrs", "{\"monday\":{\"opens\":\"09:00\",\"closes\":\"17:00\"},\"monday\":{\"opens\":\"10:00\",\"closes\":\"16:00\"}}");
+        RejectValue("os_sr_avq_bhrs", "{\"monday\":{\"opens\":\"09:00\",\"closes\":\"17:00\"},\"Monday\":{\"opens\":\"10:00\",\"closes\":\"16:00\"}}");
+        RejectValue("os_sr_avq_bhrs", "{\"0\":{\"opens\":\"09:00\",\"closes\":\"17:00\"}}");
+        RejectValue("os_sr_avq_bhrs", "{\"monday\":{\"opens\":\"17:00\",\"closes\":\"09:00\"}}");
+        RejectValue("os_sr_avq_bhrs", source["os_sr_avq_bhrs"] + "{}");
+
+        foreach (var line in rendered.Split('\n'))
+        {
+            ConfigurationRejects(() => PluginConfiguration.Parse(rendered + "\n" + line),
+                "Duplicate parser key rejects.");
+        }
+        ConfigurationRejects(() => PluginConfiguration.Parse(rendered + "\nmaximumhorizondays=60"),
+            "Case-insensitive duplicate parser key rejects.");
+        foreach (var key in new[] { "IntegrationApplicationUserId", "AllowedEmailDomains",
+                     "AllowedDurationsMinutes", "MaximumHorizonDays", "MinimumLeadTimeMinutes",
+                     "ResultExpiryMinutes", "BusinessHours." })
+        {
+            ConfigurationRejects(() => PluginConfiguration.Parse(string.Join("\n",
+                rendered.Split('\n').Where(line => !line.StartsWith(key, StringComparison.Ordinal)))),
+                "Parser rejects missing required setting: " + key);
+        }
+        ConfigurationRejects(() => PluginConfiguration.Parse(rendered.Replace("MaximumHorizonDays=60",
+            "MaximumHorizonDays=62")), "Real parser rejects horizon above 61.");
+        ConfigurationRejects(() => PluginConfiguration.Parse(rendered.Replace("30,60,90", "30,40")),
+            "Real parser rejects durations not divisible by 15.");
+        ConfigurationRejects(() => PluginConfiguration.Parse(rendered + "\nBusinessHours.Holiday=09:00-17:00"),
+            "Unknown business-day parser key rejects.");
+        Equal(false, rendered.Contains("synthetic-not-a-secret"), "Rejected credential input never reaches output.");
+    }
+
+    private static Dictionary<string, string> ConfigurationSource() => new Dictionary<string, string>
+    {
+        ["os_sr_avq_bhrs"] = "{\"friday\":{\"opens\":\"10:00\",\"closes\":\"16:00\"},\"monday\":{\"opens\":\"09:00\",\"closes\":\"17:00\"}}",
+        ["os_sr_avq_durs"] = "30,60,90",
+        ["os_sr_avq_lead"] = "45",
+        ["os_sr_avq_hzn"] = "60",
+        ["os_sr_avq_exp"] = "12",
+        ["os_sr_avq_dom"] = "example.invalid,calendar.invalid"
+    };
+
+    private static void ConfigurationRejects(Action action, string description)
+    {
+        assertions++;
+        try { action(); }
+        catch (InvalidPluginExecutionException exception)
+        {
+            if (exception.Message.Contains("configuration")) return;
+            throw;
+        }
+        throw new InvalidOperationException(description);
     }
 
     private static AvailabilitySettings Settings(int leadMinutes = 0, int horizon = 61)

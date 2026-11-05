@@ -48,7 +48,8 @@
     GRAPH_UNAVAILABLE: "Calendar availability is unavailable.",
     RESULT_TOO_LARGE: "Too many slots were returned. Narrow the requested window.",
     INVALID_REQUEST: "The requested availability window or duration is invalid.",
-    REFERENCE_READ_FAILED: "A selected reference could not be verified."
+    REFERENCE_READ_FAILED: "A selected reference could not be verified.",
+    REFERENCE_CHANGED: "The selected TA or room changed during this query. Start a new availability check."
   };
 
   const $ = (id) => document.getElementById(id);

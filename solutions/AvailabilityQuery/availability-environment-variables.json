@@ -18,9 +18,27 @@
     "monday": { "opens": "09:00", "closes": "17:00" },
     "tuesday": { "opens": "09:00", "closes": "17:00" }
   },
+  "deploymentBinding": {
+    "sourceOfTruth": "Resolved approved environment-variable values for the six definitions above; no separately maintained hand-written plug-in values.",
+    "renderer": "AvailabilityConfigurationRenderer.Render",
+    "input": "Exactly one schema-name/value pair for every definition plus the separate environment-specific nonsecret Dataverse integration application-user GUID. No source values or rendered environment output are committed.",
+    "businessHours": "JSON object keyed by weekday name; exactly opens and closes string properties in HH:mm format per configured day. Missing days mean closed. Reject duplicate days/properties and unknown properties.",
+    "domains": "Comma-separated canonical lowercase DNS domains without trailing dot; separator whitespace is ignored; duplicates reject.",
+    "durations": "Comma-separated positive minutes, maximum 480, each divisible by 15; duplicates reject. List order is preserved.",
+    "output": "Fixed scalar-key order followed by business days in DayOfWeek order; LF line endings, no trailing newline. Both guard steps receive the exact same rendered bytes.",
+    "validation": [
+      "Missing, duplicate, unknown or empty environment settings reject.",
+      "Only the six approved environment definitions and separate nonsecret identity input are accepted; credential/secret inputs reject.",
+      "Maximum horizon is 1-61; durations are multiples of 15.",
+      "Rendered output must parse through the real PluginConfiguration.Parse.",
+      "Parsed identity, domain/duration lists, scalar values, and every business-hour boundary must equal the source semantics exactly.",
+      "The real parser rejects unknown and duplicate keys, including case-insensitive duplicates.",
+      "Change approved environment values, then re-render; never hand-edit unsecure configuration."
+    ]
+  },
   "notes": [
     "Example values are shape-only and are not environment configuration.",
-    "The deployment binding must supply the same non-secret values to the availability guard through its environment-specific unsecure configuration.",
+    "Environment configuration -> AvailabilityConfigurationRenderer.Render -> plug-in unsecure configuration. The renderer is offline deployment code, not a tenant connection or a plug-in runtime environment-variable reader.",
     "No tenant, client, mailbox, credential, or secret value is included."
   ]
 }

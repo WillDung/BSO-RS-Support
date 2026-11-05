@@ -11,12 +11,37 @@
   },
   "actions": [
     { "sequence": 1, "operation": "Read created os_sr_avq row and required inputs only" },
-    { "sequence": 2, "operation": "Read referenced TA and optional Location; fail closed if missing/inactive/invalid" },
+    { "sequence": 2, "operation": "Read active referenced TA and, for Onsite only, Location; fail closed if missing/inactive/invalid; retain required reference snapshots in flow memory only" },
     { "sequence": 3, "operation": "Call the single Graph getSchedule connector operation for TA and, only for Onsite, room" },
     { "sequence": 4, "operation": "Reject missing/error source entries or malformed/wrong-length availabilityView; persist no raw provider data" },
     { "sequence": 5, "operation": "Compute deterministic slots using the offline os_sr_avqg library contract" },
-    { "sequence": 6, "operation": "Update only state, reason, error, computed slots, queried-at, and expiry" }
+    { "sequence": 6, "operation": "Before every terminal write, re-read TA and, for Onsite only, Location; apply ReferenceDriftPolicy.BeforeTerminalWrite to the values used for Graph; any relevant drift or failed re-read overrides the proposed result with Failed, slots [], and REFERENCE_CHANGED" },
+    { "sequence": 7, "operation": "Update only state, reason, error, computed slots, queried-at, and expiry" }
   ],
+  "referenceDrift": {
+    "comparison": "ReferenceDriftPolicy.BeforeTerminalWrite",
+    "memoryOnlyFields": [
+      "TA reference id",
+      "TA active state",
+      "normalized TA email",
+      "Location reference id (Onsite only)",
+      "Location active state (Onsite only)",
+      "normalized room email (Onsite only)"
+    ],
+    "normalization": "Trim and lowercase invariant; use these exact normalized addresses for Graph and the comparison.",
+    "compare": ["reference id", "active state", "normalized mailbox email"],
+    "ignore": ["TA display name", "Location display name", "unrelated display metadata"],
+    "onChangedOrUnreadable": {
+      "state": "Failed",
+      "slots": [],
+      "reason": null,
+      "error": "REFERENCE_CHANGED"
+    },
+    "terminalCoverage": ["Available", "NoSlots", "Failed"],
+    "storage": "Memory only. No mailbox snapshot, raw Graph data, or display-name snapshot is persisted or logged. Secure inputs/outputs on reference reads, Graph actions and snapshot/comparison actions; no raw payload in failure diagnostics.",
+    "recovery": "No automatic replacement query or retry after drift; user may initiate a new query.",
+    "boundary": "The re-read is immediately before the terminal write, not a distributed lock or a booking guarantee."
+  },
   "resultTransitions": [
     "Pending -> Available",
     "Pending -> NoSlots",
@@ -45,7 +70,8 @@
     "MAILBOX_NOT_FOUND",
     "GRAPH_THROTTLED",
     "GRAPH_TIMEOUT",
-    "GRAPH_UNAVAILABLE"
+    "GRAPH_UNAVAILABLE",
+    "REFERENCE_CHANGED"
   ],
   "forbiddenOperations": [
     "Candidate lookup",

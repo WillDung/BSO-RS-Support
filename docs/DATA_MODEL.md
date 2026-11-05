@@ -81,11 +81,13 @@ A transient integration row; the flow runs asynchronously, so the Console create
 | `os_sr_avq_dur` | Whole number (minutes) | Requested slot length |
 | `os_sr_avq_stat` | Choice: Pending / Available / NoSlots / Failed | Displayed result state |
 | `os_sr_avq_rsn` | String(40) | Deterministic NoSlots reason code |
-| `os_sr_avq_err` | String(40) | Safe deterministic failure category (e.g. `TA_INACTIVE`, `ROOM_EMAIL_MISSING`, `SOURCE_UNKNOWN_ROOM`, `GRAPH_AUTH`, `GRAPH_THROTTLED`, `GRAPH_TIMEOUT`, `MAILBOX_NOT_FOUND`) |
+| `os_sr_avq_err` | String(40) | Safe deterministic failure category (e.g. `TA_INACTIVE`, `ROOM_EMAIL_MISSING`, `SOURCE_UNKNOWN_ROOM`, `GRAPH_AUTH`, `GRAPH_THROTTLED`, `GRAPH_TIMEOUT`, `MAILBOX_NOT_FOUND`, `REFERENCE_CHANGED`) |
 | `os_sr_avq_slts` | Memo (JSON) | Computed valid slots only |
 | `os_sr_avq_qat` / `os_sr_avq_exp` | DateTime UTC | Queried-at and expiry |
 
 Raw `availabilityView` strings, Graph payloads, and mailbox addresses are **not** persisted (data minimization). The separate `os_sr_avqg.ProtectAvailabilityQuery` source lets a non-integration requester create Pending rows only and lets only the configured Dataverse integration application user write one terminal result. P0 technical names for Slice 2A are approved. Retention is 30 days; a bounded daily cleanup design exists but is not deployed or run. The offline source contracts are in `solutions/AvailabilityQuery/`.
+
+The Flow retains reference IDs, active states and normalized mailbox addresses in memory only, then re-reads required TA/Location immediately before every terminal write. Relevant drift or an unreadable reference yields Failed / `REFERENCE_CHANGED` / `[]` slots; display-name changes do not invalidate. No snapshot column or schema change is added. See [Integration Design](INTEGRATION_DESIGN.md#slice-2a-availability-algorithm).
 
 ### Slice 2B+: proposed `os_sr_intv` additions
 

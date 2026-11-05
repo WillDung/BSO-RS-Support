@@ -35,14 +35,20 @@
       "images": []
     }
   ],
-  "nonSecretUnsecureConfiguration": {
-    "IntegrationApplicationUserId": "<environment-specific Dataverse application-user GUID>",
-    "AllowedEmailDomains": "<same environment-variable value>",
-    "AllowedDurationsMinutes": "<same environment-variable value>",
-    "BusinessHours.<DayOfWeek>": "<HH:mm-HH:mm per configured business day>",
-    "MinimumLeadTimeMinutes": "<same environment-variable value>",
-    "MaximumHorizonDays": "<same environment-variable value; 1-61>",
-    "ResultExpiryMinutes": "<same environment-variable value>"
+  "unsecureConfigurationBinding": {
+    "renderer": "AvailabilityConfigurationRenderer.Render",
+    "contract": "availability-environment-variables.json#deploymentBinding",
+    "sameRenderedBytesForSteps": true,
+    "manualValuesAllowed": false
+  },
+  "dateTimeFirstRuntimeGate": {
+    "request": "First synthetic availability create sends explicit UTC timestamps ending in Z.",
+    "validation": "Retain strict DateTimeKind.Utc validation.",
+    "trigger": "The plug-in rejects only because the bound DateTime.Kind is not UTC.",
+    "action": "STOP",
+    "retry": false,
+    "automaticNormalization": false,
+    "nextAction": "Localize the actual Dataverse transport representation first; do not infer UTC semantics or alter validation without separate approval."
   },
   "security": [
     "No tenant or user GUID is committed.",

@@ -16,6 +16,8 @@ $rolePath = Join-Path $root 'solutions/AvailabilityQuery/availability-role-delta
 $registrationPath = Join-Path $root 'solutions/AvailabilityQuery/availability-plugin-registration.contract.json'
 $pluginPath = Join-Path $root 'solutions/AvailabilityQuery/AvailabilityQueryPlugin.cs'
 $rulesPath = Join-Path $root 'solutions/AvailabilityQuery/AvailabilityRules.cs'
+$driftPath = Join-Path $root 'solutions/AvailabilityQuery/ReferenceDriftPolicy.cs'
+$rendererPath = Join-Path $root 'solutions/AvailabilityQuery/AvailabilityConfigurationRenderer.cs'
 $consolePath = Join-Path $root 'solutions/CandidateConsole/WebResources/os_/bso/candidate-console-availability.js'
 $htmlPath = Join-Path $root 'solutions/CandidateConsole/WebResources/os_/bso/candidate-console.html'
 $configPath = Join-Path $root 'solutions/CandidateConsole/WebResources/os_/bso/candidate-console-environment.js'
@@ -52,11 +54,27 @@ Assert-Test (@($flow.resultTransitions).Count -eq 3) 'Flow has exactly three ter
 Assert-Test (@($flow.actions | Where-Object { $_.operation -match '(?i)Candidate|os_sr_cact|os_sr_intv|Receipt|Status History|email|event' }).Count -eq 0) 'Flow actions exclude Candidate Core and business writes.'
 Assert-Test ($flow.retry.'429' -match 'Retry-After' -and $flow.retry.'429' -match 'two retries') '429 policy is bounded and Retry-After aware.'
 Assert-Test ($flow.retry.ambiguousTimeout -match 'No blind repeat') 'Ambiguous timeout does not retry blindly.'
+Assert-Test ($flow.safeErrors -contains 'REFERENCE_CHANGED') 'Flow recognizes the deterministic reference-drift failure.'
+Assert-Test ($flow.referenceDrift.terminalCoverage -join ',' -eq 'Available,NoSlots,Failed') 'Drift recheck covers every terminal result.'
+Assert-Test ($flow.referenceDrift.onChangedOrUnreadable.state -eq 'Failed' -and
+    @($flow.referenceDrift.onChangedOrUnreadable.slots).Count -eq 0 -and
+    $flow.referenceDrift.onChangedOrUnreadable.error -eq 'REFERENCE_CHANGED') 'Drift always fails closed with zero slots.'
+Assert-Test ($flow.referenceDrift.memoryOnlyFields.Count -eq 6 -and $flow.referenceDrift.storage -match 'Memory only') 'Reference snapshots remain flow-memory-only.'
+Assert-Test ($flow.actions[-2].operation -match 'Before every terminal write' -and
+    $flow.actions[-2].operation -match 're-read TA' -and
+    $flow.actions[-2].operation -match 'ReferenceDriftPolicy.BeforeTerminalWrite') 'Required reference re-read immediately precedes terminal update.'
 
 Assert-Test ($environment.fixedConstants.timeZone -eq 'SE Asia Standard Time' -and $environment.fixedConstants.availabilityIntervalMinutes -eq 15) 'Timezone and interval are fixed constants.'
 Assert-Test ($environment.fixedConstants.maximumHorizonDays -eq 61) 'Maximum horizon is 61 days.'
 Assert-Test (@($environment.definitions | Where-Object { $_.defaultValue -ne $null }).Count -eq 0) 'No tenant runtime configuration is invented.'
 Assert-Test (@($environment.definitions.schemaName | Sort-Object) -join ',' -eq 'os_sr_avq_bhrs,os_sr_avq_dom,os_sr_avq_durs,os_sr_avq_exp,os_sr_avq_hzn,os_sr_avq_lead') 'Only approved environment-variable definitions are included.'
+Assert-Test ($environment.deploymentBinding.renderer -eq 'AvailabilityConfigurationRenderer.Render' -and
+    $registration.unsecureConfigurationBinding.renderer -eq $environment.deploymentBinding.renderer) 'Deployment and registration share the canonical renderer.'
+Assert-Test (-not $registration.unsecureConfigurationBinding.manualValuesAllowed -and
+    $registration.unsecureConfigurationBinding.sameRenderedBytesForSteps) 'Both steps must use identical generated values, never hand-maintained copies.'
+Assert-Test ($registration.dateTimeFirstRuntimeGate.action -eq 'STOP' -and
+    -not $registration.dateTimeFirstRuntimeGate.retry -and
+    -not $registration.dateTimeFirstRuntimeGate.automaticNormalization) 'Unproven DateTime transport requires stop, no retry and no normalization.'
 Assert-Test ($retention.retentionDays -eq 30 -and $retention.cleanup.frequency -eq 'Daily') 'Approved 30-day daily cleanup policy is bounded.'
 Assert-Test (-not $retention.cleanup.deleteBsoPrivilege) 'BSO has no cleanup Delete privilege.'
 Assert-Test ($role.existingBsoRole.mustNotAdd -contains 'Any Candidate Core privilege') 'BSO role delta prohibits Candidate Core rights.'
@@ -68,12 +86,22 @@ Assert-Test (@($registration.steps | Where-Object { $_.executionUser -ne 'Callin
 
 $plugin = Get-Content -LiteralPath $pluginPath -Raw
 $rules = Get-Content -LiteralPath $rulesPath -Raw
+$drift = Get-Content -LiteralPath $driftPath -Raw
+$renderer = Get-Content -LiteralPath $rendererPath -Raw
 $console = Get-Content -LiteralPath $consolePath -Raw
 $html = Get-Content -LiteralPath $htmlPath -Raw
 $config = Get-Content -LiteralPath $configPath -Raw
 Assert-Test ($plugin -match 'class ProtectAvailabilityQuery' -and $plugin -match 'Stage != 20') 'Separate synchronous PreOperation guard exists.'
 Assert-Test ($plugin -match 'IsCreateCaller' -and $plugin -match 'IsResultUpdateCaller') 'Guard applies independent creator and integration-user boundaries.'
 Assert-Test ($plugin -notmatch 'os_sr_cact|os_sr_cand|os_sr_intv|os_sr_csh|os_sr_oprc') 'Availability plug-in has no Candidate Core references.'
+Assert-Test ($drift -notmatch 'Microsoft\.Xrm|IOrganizationService|os_sr_cact|os_sr_cand|os_sr_intv|os_sr_csh|os_sr_oprc|CreateRecord|UpdateRecord') 'Every drift path is pure: no business-table dependency or mutation service.'
+Assert-Test ($rules -match '"REFERENCE_CHANGED"' -and $console -match 'REFERENCE_CHANGED:') 'Guard category and safe Console mapping both cover drift.'
+Assert-Test ($plugin -match '!AllowedKeys.Contains\(name\)') 'Real parser rejects unknown configuration keys.'
+Assert-Test ($renderer -match 'PluginConfiguration.Parse\(rendered\)' -and
+    $renderer -match 'parsed.BusinessHours.Count != hours.Count') 'Renderer round-trips through the real parser and verifies equality.'
+Assert-Test ($renderer -notmatch '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' -and
+    (Get-Content -LiteralPath $registrationPath -Raw) -notmatch '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}') 'No deployment identity GUID is committed in renderer or registration.'
+Assert-Test ($plugin -match 'time.Kind != DateTimeKind.Utc') 'Strict UTC validation remains unchanged.'
 Assert-Test ($rules -match 'TimeZoneId = "SE Asia Standard Time"' -and $rules -match 'IntervalMinutes = 15') 'Pure calculator fixes the approved timezone and interval.'
 Assert-Test ($rules -match 'HardMaximumHorizonDays = 61' -and $rules -match 'IsTerminalTransition') 'Calculator enforces provider horizon and terminal transition rules.'
 Assert-Test ($console -match 'availabilityEnabled !== true') 'Console panel is off unless explicitly configured.'
@@ -85,7 +113,7 @@ $panel = [regex]::Match($html, '(?s)<section class="panel" aria-labelledby="avai
 Assert-Test ($panel -match 'availability-form' -and $panel -match 'display-only' -and $panel -notmatch 'CandidateId|MarkRound1Scheduled|os_sr_cact') 'Panel is separate, display-only and Candidate-independent.'
 Assert-Test ((Get-Content -LiteralPath $configPath -Raw) -notmatch 'availabilityEnabled\s*:\s*true') 'Current browser configuration does not enable availability.'
 Assert-Test ($console -match 'allowsReference\(record\[table\.name\], config\.syntheticDataOnly\)') 'TA and Location choices follow the shared synthetic-reference policy.'
-$secretScan = (@($pluginPath, $rulesPath, $consolePath, $connectorPath) | ForEach-Object {
+$secretScan = (@($pluginPath, $rulesPath, $consolePath, $connectorPath, $rendererPath, $driftPath) | ForEach-Object {
     Get-Content -LiteralPath $_ -Raw
 }) -join "`n"
 Assert-Test ($secretScan -notmatch '(?i)(client_secret\s*[=:]\s*["''][^"'']+|Bearer\s+[A-Za-z0-9._-]{20,}|-----BEGIN (RSA |EC )?PRIVATE KEY-----)') 'No credentials, token or private key were introduced.'

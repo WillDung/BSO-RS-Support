@@ -2,8 +2,8 @@
 
 ## P0 Slice 2A offline availability
 
-- [Availability Query SDK assertions](AvailabilityQuerySdk/AvailabilityQuerySdk.Tests.csproj): `dotnet run --project .\tests\AvailabilityQuerySdk\AvailabilityQuerySdk.Tests.csproj`; exercises deterministic, Graph-independent availability calculation, fail-closed validation, canonical slot JSON, safe error categories, and caller/field/state mutation policy.
-- [Availability Query source checks](AvailabilityQuery.Tests.ps1): `pwsh -NoLogo -NoProfile -File .\tests\AvailabilityQuery.Tests.ps1`; validates offline schema, connector/Flow contracts, retention, role delta, registration contract, and the Candidate-independent display-only Console boundary.
+- [Availability Query SDK assertions](AvailabilityQuerySdk/AvailabilityQuerySdk.Tests.csproj): `dotnet run --project .\tests\AvailabilityQuerySdk\AvailabilityQuerySdk.Tests.csproj`; exercises deterministic, Graph-independent availability calculation, strict UTC validation, canonical slot JSON, safe errors and mutation policy; reference-drift failures before all terminal outcomes; and canonical environment rendering through the real plug-in parser, including required/duplicate/unknown/credential-setting rejection and exact source-value round-trip checks. All identities and addresses in fixtures are synthetic.
+- [Availability Query source checks](AvailabilityQuery.Tests.ps1): `pwsh -NoLogo -NoProfile -File .\tests\AvailabilityQuery.Tests.ps1`; validates offline schema, connector/Flow contracts, retention, role delta, registration/configuration binding, DateTime first-runtime stop rule, memory-only reference-drift boundary, and the Candidate-independent display-only Console boundary.
 - Availability panel JavaScript syntax: `node --check .\solutions\CandidateConsole\WebResources\os_\bso\candidate-console-availability.js`.
 
 ## Candidate Console environment configuration

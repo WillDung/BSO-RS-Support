@@ -2,11 +2,17 @@
 
 Source for Candidate Core plug-in code used by the legacy signed `os_sr_cact` assembly and the unsigned package-backed `os_sr_cact` assembly, version `1.0.0.0`. This is authored .NET plug-in source, **not an exported/unpacked Solution**. The supported target is .NET Framework 4.6.2 with `Microsoft.CrmSdk.CoreAssemblies` pinned to 9.0.2.60; the SDK assembly is supplied by the Dataverse sandbox. No runtime dependency is merged/uploaded with the package assembly.
 
-## P0 profile-edit correction (offline only; 2026-11-04)
+## Masked lookup Guid.Empty clear correction (offline; 2026-11-05)
+
+The owner Console Assigned TA clear sent `ProfileFieldMask=AssignedTaId` with the lookup omitted and returned HTTP 400 / `0x80040265`. An exact 21-input SDK regression with Dataverse's materialized `AssignedTaId=Guid.Empty` default reproduced `INVALID_GUID_PARAMETER:AssignedTaId` from the shared request parser. The live internal error category is not proven.
+
+`ProfileFieldMask` is the authoritative mutation intent for UpdateCandidate's Position, Candidate Source, and Assigned TA lookups. Unmasked absent/null/`Guid.Empty` values are preserved without validation. Masked absent, null, or `Guid.Empty` clears the lookup and produces one fingerprint; a masked non-empty Guid is set after caller-context active-reference validation; malformed non-Guid values still reject with `INVALID_GUID_PARAMETER:<parameter>`. Required Name/Email, optional Phone/CV text, CreateCandidate empty-lookup omission, required CandidateId/CorrelationId, fingerprint version `1`, historical receipt replay, and the 21-input/five-output API are unchanged.
+
+## P0 profile-edit correction (offline only; 2026-11-04; superseded above)
 
 The owner synthetic Console edit was rejected with `INVALID_GUID_PARAMETER:PositionId` although that unchanged lookup was absent from the request. An SDK regression reproduced the same rejection by supplying the optional-GUID transport defaults.
 
-The SDK adapter now maps `Guid.Empty` to omission for UpdateCandidate's three optional profile lookups only: Position, Candidate Source, and Assigned TA. Explicit null remains a clear; valid references still require caller-context validation. Required CandidateId/CorrelationId and malformed lookup values remain rejected. Domain-level empty-GUID validation, workflow/status/concurrency rules, actor-bound fingerprints, receipts, and the 20-input/five-output API are unchanged. Defaulted and omitted lookup fingerprints match, and replay performs no second update.
+That correction treated `Guid.Empty` as omission for UpdateCandidate's three optional profile lookups only when unmasked: Position, Candidate Source, and Assigned TA. Explicit null remains a clear; valid references still require caller-context validation. Required CandidateId/CorrelationId and malformed lookup values remain rejected. Domain-level empty-GUID validation, workflow/status/concurrency rules, actor-bound fingerprints, receipts, and the 20-input/five-output API are unchanged. Defaulted and omitted lookup fingerprints match, and replay performs no second update.
 
 This correction is source-only. The previously deployed P0 package is not corrected, and no additional package update, publication, tenant validation, or managed release rebuild is authorized. See [Current State](../../docs/CURRENT_STATE.md).
 

@@ -320,12 +320,10 @@ namespace os_sr_cact
                 normalized = id;
                 return true;
             }
-            if (action == "CreateCandidate")
-            {
-                normalized = null;
-                return false;
-            }
-            throw new OperationError("INVALID_GUID_PARAMETER:" + name);
+            // Dataverse materializes omitted optional Guid inputs as Guid.Empty; for a masked
+            // UpdateCandidate lookup that transport default is an absent-equivalent clear.
+            normalized = null;
+            return action != "CreateCandidate";
         }
 
         private static void ValidateCandidateCvUrl(string value)

@@ -338,9 +338,50 @@ static class Program
             Request(updateWithNullLookup).Values["PositionId"] == null,
             "UpdateCandidate explicit null lookup remains a clear operation");
         updateWithNullLookup["PositionId"] = Guid.Empty;
-        Reject(() => Request(updateWithNullLookup), "INVALID_GUID_PARAMETER:PositionId");
+        Check(Request(updateWithNullLookup).Values.ContainsKey("PositionId") &&
+            Request(updateWithNullLookup).Values["PositionId"] == null,
+            "UpdateCandidate masked Guid.Empty lookup normalizes to a clear operation");
         updateWithNullLookup["PositionId"] = "not-a-guid";
         Reject(() => Request(updateWithNullLookup), "INVALID_GUID_PARAMETER:PositionId");
+        foreach (string parameter in new[] { "PositionId", "CandidateSourceId", "AssignedTaId" })
+        {
+            var lookupClearCorrelation = Guid.NewGuid();
+            var clearFingerprints = new List<string>();
+            foreach (string representation in new[] { "omitted", "null", "empty" })
+            {
+                var maskedClearInput = Input("UpdateCandidate", lookupClearCorrelation);
+                maskedClearInput["ProfileFieldMask"] = parameter;
+                maskedClearInput.Remove("CandidateName");
+                maskedClearInput.Remove("CandidateEmail");
+                if (representation == "omitted") maskedClearInput.Remove(parameter);
+                else maskedClearInput[parameter] = representation == "null" ? null : (object)Guid.Empty;
+                var maskedClearRequest = Request(maskedClearInput);
+                Check(maskedClearRequest.Values.ContainsKey(parameter) &&
+                    maskedClearRequest.Values[parameter] == null &&
+                    maskedClearRequest.ProfilePatch[parameter].IsSelected &&
+                    maskedClearRequest.ProfilePatch[parameter].Value == null,
+                    "UpdateCandidate masked " + representation + " " + parameter + " normalizes to clear");
+                clearFingerprints.Add(maskedClearRequest.Fingerprint);
+            }
+            Check(clearFingerprints.Distinct(StringComparer.Ordinal).Count() == 1,
+                "UpdateCandidate omitted, null, and Guid.Empty masked " + parameter + " share one fingerprint");
+            var unmaskedEmptyInput = Input("UpdateCandidate", lookupClearCorrelation);
+            unmaskedEmptyInput[parameter] = Guid.Empty;
+            var unmaskedEmptyRequest = Request(unmaskedEmptyInput);
+            Check(!unmaskedEmptyRequest.Values.ContainsKey(parameter) &&
+                !unmaskedEmptyRequest.ProfilePatch[parameter].IsSelected &&
+                unmaskedEmptyRequest.Fingerprint != clearFingerprints[0],
+                "UpdateCandidate unmasked Guid.Empty " + parameter + " preserves and differs from masked clear");
+            foreach (object malformed in new object[] { "not-a-guid", Guid.NewGuid().ToString("D"), 0, new object() })
+            {
+                var malformedInput = Input("UpdateCandidate");
+                malformedInput["ProfileFieldMask"] = parameter;
+                malformedInput.Remove("CandidateName");
+                malformedInput.Remove("CandidateEmail");
+                malformedInput[parameter] = malformed;
+                Reject(() => Request(malformedInput), "INVALID_GUID_PARAMETER:" + parameter);
+            }
+        }
         updateWithNullLookup = Input("UpdateCandidate");
         updateWithNullLookup["ProfileFieldMask"] = "CandidateName,AssignedTaId";
         updateWithNullLookup["AssignedTaId"] = null;

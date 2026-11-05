@@ -1119,11 +1119,98 @@ internal static class Program
                 var emptyGuidProfile = CreateProfileUpdateHost();
                 emptyGuidProfile.Input["ProfileFieldMask"] = "CandidateName," + field.Parameter;
                 emptyGuidProfile.Input[field.Parameter] = Guid.Empty;
-                Reject(() => new ApplyCandidateAction().Execute(emptyGuidProfile),
-                    "INVALID_GUID_PARAMETER:" + field.Parameter);
-                Check(emptyGuidProfile.Updates == 0 && emptyGuidProfile.Receipt == null,
-                    "SDK masked Guid.Empty is rejected before clearing " + field.Parameter);
+                new ApplyCandidateAction().Execute(emptyGuidProfile);
+                var emptyGuidTarget = emptyGuidProfile.CandidateRequests.Single().Target;
+                Check(emptyGuidProfile.Updates == 1 && emptyGuidProfile.Receipt != null &&
+                    emptyGuidTarget.Attributes.Count == 2 && emptyGuidTarget.Contains(field.Attribute) &&
+                    emptyGuidTarget[field.Attribute] == null && emptyGuidTarget.Contains("os_sr_cand_nm"),
+                    "SDK masked Guid.Empty clears " + field.Parameter + " alongside other masked fields");
             }
+        }
+        var liveShapedClear = CreateProfileUpdateHost();
+        liveShapedClear.Input["ProfileFieldMask"] = "AssignedTaId";
+        liveShapedClear.Input["CandidateName"] = null;
+        liveShapedClear.Input["CandidateEmail"] = null;
+        liveShapedClear.Input["CandidatePhone"] = null;
+        liveShapedClear.Input["CandidateCvUrl"] = null;
+        liveShapedClear.Input["PositionId"] = Guid.Empty;
+        liveShapedClear.Input["CandidateSourceId"] = Guid.Empty;
+        liveShapedClear.Input["AssignedTaId"] = Guid.Empty;
+        liveShapedClear.Input["Reason"] = null;
+        liveShapedClear.Input["CallOutcome"] = new OptionSetValue(0);
+        liveShapedClear.Input["ContactedAt"] = DateTime.MinValue;
+        liveShapedClear.Input["Notes"] = null;
+        liveShapedClear.Input["InterviewerId"] = Guid.Empty;
+        liveShapedClear.Input["LocationId"] = Guid.Empty;
+        liveShapedClear.Input["StartAt"] = DateTime.MinValue;
+        liveShapedClear.Input["EndAt"] = DateTime.MinValue;
+        liveShapedClear.Input["ResultNotes"] = null;
+        Check(liveShapedClear.Input.Count == 21 && saturatedInputNames.SetEquals(liveShapedClear.Input.Keys),
+            "SDK live-shaped Assigned TA clear uses the exact 21-input API shape");
+        new ApplyCandidateAction().Execute(liveShapedClear);
+        var liveShapedTarget = liveShapedClear.CandidateRequests.Single().Target;
+        Check(liveShapedTarget.Attributes.Count == 1 && liveShapedTarget.Contains("os_sr_cand_ta") &&
+            liveShapedTarget["os_sr_cand_ta"] == null && !liveShapedTarget.Contains("ownerid") &&
+            liveShapedClear.Updates == 1 && liveShapedClear.Receipt != null &&
+            liveShapedClear.Receipt.GetAttributeValue<string>("os_sr_oprc_cact") == "UpdateCandidate" &&
+            liveShapedClear.Status == ActionRequest.NeedCall && liveShapedClear.Calls == 0 &&
+            liveShapedClear.Histories == 0 && liveShapedClear.ScheduleCreates == 0 &&
+            liveShapedClear.ScheduleUpdates == 0,
+            "SDK live-shaped masked Assigned TA Guid.Empty default clears only os_sr_cand_ta");
+        foreach (var lookup in profileLookups)
+        {
+            string referenceTable = lookup.Parameter == "PositionId" ? "os_sr_pos" :
+                lookup.Parameter == "CandidateSourceId" ? "os_sr_csrc" : "os_sr_ta";
+            var clearCorrelation = Guid.NewGuid();
+            var clearHashes = new List<string>();
+            foreach (var representation in new[] { "omitted", "null", "empty" })
+            {
+                var maskedClear = CreateProfileUpdateHost();
+                maskedClear.Input["CorrelationId"] = clearCorrelation;
+                maskedClear.Input["ProfileFieldMask"] = lookup.Parameter;
+                maskedClear.Input.Remove("CandidateName");
+                foreach (var other in profileLookups) maskedClear.Input[other.Parameter] = Guid.Empty;
+                if (representation == "omitted") maskedClear.Input.Remove(lookup.Parameter);
+                else maskedClear.Input[lookup.Parameter] = representation == "null" ? null : (object)Guid.Empty;
+                new ApplyCandidateAction().Execute(maskedClear);
+                var maskedClearTarget = maskedClear.CandidateRequests.Single().Target;
+                Check(maskedClearTarget.Attributes.Count == 1 && maskedClearTarget.Contains(lookup.Attribute) &&
+                    maskedClearTarget[lookup.Attribute] == null && maskedClear.Updates == 1 &&
+                    maskedClear.Receipt != null && maskedClear.Status == ActionRequest.NeedCall &&
+                    maskedClear.Calls == 0 && maskedClear.Histories == 0 && maskedClear.ScheduleCreates == 0,
+                    "SDK masked " + representation + " " + lookup.Parameter + " clears only " + lookup.Attribute);
+                clearHashes.Add(maskedClear.Receipt!.GetAttributeValue<string>("os_sr_oprc_hash"));
+            }
+            Check(clearHashes.Distinct(StringComparer.Ordinal).Count() == 1,
+                "SDK omitted, null, and Guid.Empty masked " + lookup.Parameter + " clears share one fingerprint");
+            var preserveHost = CreateProfileUpdateHost();
+            preserveHost.Input["CorrelationId"] = clearCorrelation;
+            preserveHost.Input[lookup.Parameter] = Guid.Empty;
+            new ApplyCandidateAction().Execute(preserveHost);
+            var preserveTarget = preserveHost.CandidateRequests.Single().Target;
+            Check(!preserveTarget.Contains(lookup.Attribute) && preserveTarget.Attributes.Count == 1 &&
+                preserveHost.Receipt!.GetAttributeValue<string>("os_sr_oprc_hash") != clearHashes[0],
+                "SDK unmasked Guid.Empty " + lookup.Parameter + " preserves and differs from masked clear");
+            var setId = Guid.NewGuid();
+            var setHost = CreateProfileUpdateHost();
+            setHost.Input["ProfileFieldMask"] = lookup.Parameter;
+            setHost.Input.Remove("CandidateName");
+            setHost.Input[lookup.Parameter] = setId;
+            new ApplyCandidateAction().Execute(setHost);
+            var setTarget = setHost.CandidateRequests.Single().Target;
+            Check(setTarget.Attributes.Count == 1 &&
+                setTarget.GetAttributeValue<EntityReference>(lookup.Attribute)?.Id == setId &&
+                setHost.ServiceOperations.Contains("Retrieve:" + referenceTable),
+                "SDK masked valid " + lookup.Parameter + " is validated in caller context and set");
+            var inactiveSet = CreateProfileUpdateHost();
+            inactiveSet.Input["ProfileFieldMask"] = lookup.Parameter;
+            inactiveSet.Input.Remove("CandidateName");
+            inactiveSet.Input[lookup.Parameter] = Guid.NewGuid();
+            inactiveSet.InactiveReferenceTable = referenceTable;
+            Reject(() => new ApplyCandidateAction().Execute(inactiveSet),
+                "REFERENCE_NOT_AVAILABLE:" + lookup.Parameter);
+            Check(inactiveSet.Updates == 0 && inactiveSet.Receipt == null,
+                "SDK inactive masked " + lookup.Parameter + " remains rejected before mutation");
         }
         foreach (var lookup in profileLookups)
         {

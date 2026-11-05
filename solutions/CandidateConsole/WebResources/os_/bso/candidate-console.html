@@ -9,6 +9,7 @@
   <script defer src="candidate-console-environment.js?v=39135f67e4c9"></script>
   <script defer src="candidate-console-policy.js?v=29cbcc97c11a"></script>
   <script defer src="candidate-console.js?v=cb26a8d5a859"></script>
+  <script defer src="candidate-console-availability.js?v=p0-slice-2a"></script>
 </head>
 <body>
   <main class="shell">
@@ -29,6 +30,54 @@
     </label>
 
     <p id="notice" class="notice" role="status" aria-live="polite" hidden></p>
+
+    <section class="panel" aria-labelledby="availability-heading">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Calendar Availability</p>
+          <h2 id="availability-heading">Check interview availability</h2>
+        </div>
+      </div>
+      <p class="muted">Display-only. This query does not schedule an interview or change a Candidate or Interview Schedule.</p>
+      <form id="availability-form" class="form-grid">
+        <label class="field">
+          <span>TA <b aria-hidden="true">*</b></span>
+          <select id="availability-ta" required>
+            <option value="">Select a TA</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Interview Mode <b aria-hidden="true">*</b></span>
+          <select id="availability-mode" required>
+            <option value="100000000">Online</option>
+            <option value="100000001">Onsite</option>
+          </select>
+        </label>
+        <label id="availability-location-field" class="field" hidden>
+          <span>Location / Room <b aria-hidden="true">*</b></span>
+          <select id="availability-location">
+            <option value="">Select a room / location</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Window Start (Vietnam time, UTC+07:00) <b aria-hidden="true">*</b></span>
+          <input id="availability-start" type="datetime-local" required>
+        </label>
+        <label class="field">
+          <span>Window End (Vietnam time, UTC+07:00) <b aria-hidden="true">*</b></span>
+          <input id="availability-end" type="datetime-local" required>
+        </label>
+        <label class="field">
+          <span>Interview Duration (minutes) <b aria-hidden="true">*</b></span>
+          <input id="availability-duration" type="number" min="15" max="480" step="15" required>
+        </label>
+        <div class="form-actions field-wide">
+          <button id="availability-submit" class="button button-primary" type="submit">Check availability</button>
+          <button id="availability-refresh" class="button button-secondary" type="button" hidden>Refresh status</button>
+        </div>
+      </form>
+      <div id="availability-result" class="notice" role="status" aria-live="polite" hidden></div>
+    </section>
 
     <section class="panel" aria-labelledby="create-heading">
       <div class="section-heading">

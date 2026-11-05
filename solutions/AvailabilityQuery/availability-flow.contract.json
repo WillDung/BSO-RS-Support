@@ -1,0 +1,64 @@
+{
+  "status": "PROPOSED_SOURCE_OFFLINE_NOT_CREATED",
+  "solutionUniqueName": "os_sr_bso_rs_support",
+  "name": "os_sr_avchk",
+  "displayName": "BSO-RS Availability Check",
+  "trigger": {
+    "table": "os_sr_avq",
+    "message": "Create",
+    "condition": "os_sr_avq_stat == Pending",
+    "concurrency": 1
+  },
+  "actions": [
+    { "sequence": 1, "operation": "Read created os_sr_avq row and required inputs only" },
+    { "sequence": 2, "operation": "Read referenced TA and optional Location; fail closed if missing/inactive/invalid" },
+    { "sequence": 3, "operation": "Call the single Graph getSchedule connector operation for TA and, only for Onsite, room" },
+    { "sequence": 4, "operation": "Reject missing/error source entries or malformed/wrong-length availabilityView; persist no raw provider data" },
+    { "sequence": 5, "operation": "Compute deterministic slots using the offline os_sr_avqg library contract" },
+    { "sequence": 6, "operation": "Update only state, reason, error, computed slots, queried-at, and expiry" }
+  ],
+  "resultTransitions": [
+    "Pending -> Available",
+    "Pending -> NoSlots",
+    "Pending -> Failed"
+  ],
+  "retry": {
+    "429": "Honor Retry-After with at most two retries for this idempotent read, and only while inside an overall request deadline.",
+    "ambiguousTimeout": "No blind repeat. Complete the row as Failed with GRAPH_TIMEOUT if no safe response is available.",
+    "401_403_404": "Fail closed as GRAPH_AUTH, GRAPH_PERMISSION, or MAILBOX_NOT_FOUND; no retry."
+  },
+  "safeErrors": [
+    "TA_INACTIVE",
+    "TA_EMAIL_MISSING",
+    "TA_EMAIL_INVALID",
+    "TA_EMAIL_DOMAIN_NOT_ALLOWED",
+    "LOCATION_REQUIRED",
+    "LOCATION_INACTIVE",
+    "ROOM_EMAIL_MISSING",
+    "ROOM_EMAIL_INVALID",
+    "ROOM_EMAIL_DOMAIN_NOT_ALLOWED",
+    "SOURCE_UNKNOWN_TA",
+    "SOURCE_UNKNOWN_ROOM",
+    "AVAILABILITY_VIEW_INVALID",
+    "GRAPH_AUTH",
+    "GRAPH_PERMISSION",
+    "MAILBOX_NOT_FOUND",
+    "GRAPH_THROTTLED",
+    "GRAPH_TIMEOUT",
+    "GRAPH_UNAVAILABLE"
+  ],
+  "forbiddenOperations": [
+    "Candidate lookup",
+    "os_sr_cact invocation",
+    "Candidate update",
+    "os_sr_intv read or update",
+    "Operation Receipt create or update",
+    "Candidate Status History create or update",
+    "Email send",
+    "Calendar event create/update/cancel"
+  ],
+  "connectionReferences": [
+    "os_sr_cr_grs",
+    "os_sr_cr_dv"
+  ]
+}

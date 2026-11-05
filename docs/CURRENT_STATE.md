@@ -1,8 +1,24 @@
 # Current State
 
-## P0 Slice 2 calendar architecture proposal documented; no tenant work (2026-11-05)
+## P0 Slice 2A offline source implementation (2026-11-05)
 
-**Status:** `P0_SLICE_2_PROPOSAL_DOCUMENTED`, `P0_SLICE_2_DECISIONS_PENDING_D1_D8`, `P0_SLICE_2A_PREFLIGHT_DRAFT_READY_NOT_AUTHORIZED`. Owner-approved at architecture level: `P0_SLICE_2A_DISPLAY_ONLY_AVAILABILITY_ARCHITECTURE_APPROVED`, `P0_SLICE_2A_CANDIDATE_STATE_INDEPENDENT`, `P0_SLICE_2A_NO_CANDIDATE_CORE_MUTATION`, `P0_SLICE_2A_NO_INTERVIEW_SCHEDULE_MUTATION`, `P0_SLICE_2A_PROPOSAL_DOCUMENTATION_AUTHORIZED`.
+**Status:** `P0_SLICE_2A_OFFLINE_IMPLEMENTATION_COMPLETE`; `P0_SLICE_2A_PREFLIGHT_COMPLETE`; `P0_SLICE_2A_IMPLEMENTATION_BLOCKED_PREREQUISITES`; `AVAILABILITY_QUERY_RETENTION_30_DAYS_APPROVED`; `SLICE_2A_DATAVERSE_INTEGRATION_APPLICATION_USER_APPROVED`; `P0_SLICE_2A_TECHNICAL_NAMES_APPROVED`. D1–D8 and the Slice 2A architecture baseline are approved with the technical-lead modifications in [Product Decisions](PRODUCT_DECISIONS.md#p0-slice-2-calendar-integration-proposed--architecture-approved).
+
+**Scope is offline source only.** Added a proposed Availability Query schema contract, isolated `os_sr_avqg_pkg` guard/calculator project, source contracts for one-operation Graph connector, Flow, environment variables, role delta and retention, Console display-only panel, and offline tests. None of those components is included in the live or frozen managed 1.0.0.1 artifact. They are not provisioned, deployed, or runtime accepted. The previously authorized read-only preflight was the only tenant access; no tenant write, connector, Flow, connection, environment variable, Entra app, consent, mailbox, schema, role, query row, or publication occurred during this offline source work. No commit or push was performed.
+
+The panel is disabled unless an environment-specific flag explicitly enables it; it never calls Candidate Core, reads a Candidate, reads/writes `os_sr_intv`, creates Status History or Operation Receipt, or invokes `MarkRound1Scheduled`. Existing Slice 1 manual scheduling remains unchanged and independent. `P0_SLICE_1_LIVE_FUNCTIONALLY_ACCEPTED` is unchanged.
+
+The preflight remains blocked on external Entra/app and consent-policy verification, a suitable licensed scheduling mailbox and CA/MFA compatibility, synthetic TA/room test mailboxes with controlled room booking, and premium-flow licensing. The preflight classified the shared classic DLP group for Dataverse and the Graph custom connector as compatible, but Dataverse action/endpoint filtering remains unverified. Existing `[DEV]` TA/Location rows contain `.invalid` mailbox addresses and are not usable. The approved Dataverse application-user identity remains unselected/unprovisioned. No tenant-specific identity/configuration values are stored in the repository.
+
+The 30-day retention policy is approved; the cleanup job is only a bounded offline design and must receive separate deployment/run authorization. D1–D8 status, role boundaries and remaining prerequisites are in [Product Decisions](PRODUCT_DECISIONS.md#p0-slice-2-calendar-integration-proposed--architecture-approved); technical source status is in [Integration Design](INTEGRATION_DESIGN.md#p0-slice-2-calendar-availability-and-booking-proposed--architecture-approved) and [Data Model](DATA_MODEL.md#p0-slice-2-calendar-extensions-proposed--architecture-approved-offline-source-only).
+
+**Offline validation:** `dotnet run --project .\tests\AvailabilityQuerySdk\AvailabilityQuerySdk.Tests.csproj` passed 79 assertions; `pwsh -NoLogo -NoProfile -File .\tests\AvailabilityQuery.Tests.ps1` passed 47 checks; Candidate Console static and configuration suites passed 78 and 21 checks respectively; `node --check` passed for the new availability panel script. No live availability query or runtime acceptance was performed.
+
+## Historical initial P0 Slice 2 calendar proposal state (superseded 2026-11-05)
+
+The following is the historical state before D1–D8 approval and the read-only preflight. It is superseded by the current top entry above.
+
+**Status at that time:** `P0_SLICE_2_PROPOSAL_DOCUMENTED`, `P0_SLICE_2_DECISIONS_PENDING_D1_D8`, `P0_SLICE_2A_PREFLIGHT_DRAFT_READY_NOT_AUTHORIZED`. Owner-approved at architecture level: `P0_SLICE_2A_DISPLAY_ONLY_AVAILABILITY_ARCHITECTURE_APPROVED`, `P0_SLICE_2A_CANDIDATE_STATE_INDEPENDENT`, `P0_SLICE_2A_NO_CANDIDATE_CORE_MUTATION`, `P0_SLICE_2A_NO_INTERVIEW_SCHEDULE_MUTATION`, `P0_SLICE_2A_PROPOSAL_DOCUMENTATION_AUTHORIZED`.
 
 All Slice 2 material is **PROPOSED / ARCHITECTURE APPROVED**. It is not implemented, deployed, or runtime accepted. Scheduling remains Dataverse/manual only; no Outlook, Teams, calendar, Graph, flow, custom connector, connection reference, environment variable, or app registration exists for this project. `P0_SLICE_1_LIVE_FUNCTIONALLY_ACCEPTED` is unchanged, and the Slice 1 manual workflow is not connected to Slice 2A. No manual/external scheduling switch was added; that decision belongs to Slice 2B.
 

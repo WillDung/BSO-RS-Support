@@ -14,7 +14,7 @@ The detailed P0 Slice 2 proposal is in [P0 Slice 2 calendar availability and boo
 
 ## P0 Slice 2 calendar availability and booking (PROPOSED / ARCHITECTURE APPROVED)
 
-**Status (2026-11-05):** `PROPOSED / ARCHITECTURE APPROVED`. Nothing in this section is implemented, deployed, provisioned, or runtime accepted. No flow, custom connector, connection reference, environment variable, app registration, schema change, or Console change exists for Slice 2. No tenant operation is authorized. Decisions D1–D8 in [Product Decisions](PRODUCT_DECISIONS.md#p0-slice-2-calendar-integration-proposed--architecture-approved) are `PENDING OWNER/TECHNICAL LEAD`.
+**Status (2026-11-05):** `PROPOSED / ARCHITECTURE APPROVED`; D1–D8 are approved with conditions/modifications in [Product Decisions](PRODUCT_DECISIONS.md#p0-slice-2-calendar-integration-proposed--architecture-approved). Offline Slice 2A source and tests are now present in `solutions/AvailabilityQuery/`, `solutions/Entities/os_sr_avq/`, and the Console web-resource source. They are **not provisioned, deployed, or runtime accepted**. No live flow, custom connector, connection reference, environment variable, app registration, Dataverse schema, or Availability Query row exists. No tenant operation is authorized.
 
 The owner approved the Slice 2A architecture on 2026-11-05 with these invariants: `P0_SLICE_2A_DISPLAY_ONLY_AVAILABILITY_ARCHITECTURE_APPROVED`, `P0_SLICE_2A_CANDIDATE_STATE_INDEPENDENT`, `P0_SLICE_2A_NO_CANDIDATE_CORE_MUTATION`, `P0_SLICE_2A_NO_INTERVIEW_SCHEDULE_MUTATION`, `P0_SLICE_2A_PROPOSAL_DOCUMENTATION_AUTHORIZED`. Slices 2B–2D remain proposals beyond architecture level.
 
@@ -22,7 +22,7 @@ The owner approved the Slice 2A architecture on 2026-11-05 with these invariants
 
 ### Trusted integration boundary
 
-Recommended option A: solution-aware Cloud Flows using governed connection references, calling Microsoft Graph through a solution custom connector. Decisions and state transitions stay in tested C# under Dataverse; flows only perform external I/O and write results back.
+Recommended option A: solution-aware Cloud Flows using governed connection references, calling Microsoft Graph through a solution custom connector. Decisions and state transitions stay in tested C# under Dataverse; flows only perform external I/O and write results back. Use the existing `os_sr_bso_rs_support` Solution; do not create a second integration Solution. Graph identity is a dedicated licensed non-human user mailbox using delegated OAuth, while Dataverse uses a distinct dedicated application user/service principal. Their identities and credentials are not interchangeable.
 
 ```text
 Candidate Console (browser JS; no tokens, no secrets)
@@ -30,7 +30,7 @@ Candidate Console (browser JS; no tokens, no secrets)
    ▼
 Dataverse
    ├─ os_sr_cact (Candidate Core) — sole authority for Candidate and schedule state (2B+ only)
-   └─ Slice 2A: os_sr_avq availability-query row (no Candidate link)
+   └─ Slice 2A: os_sr_avq availability-query row (no Candidate or Interview Schedule link)
    │ row trigger
    ▼
 Solution Cloud Flow (I/O only, concurrency 1)
@@ -40,6 +40,8 @@ Solution Cloud Flow (I/O only, concurrency 1)
 
 - **Rejected:** any browser call to Graph, and any Graph secret, token, certificate, or connection credential in Candidate Console JavaScript, web-resource configuration, or Dataverse business rows.
 - Credentials live only in the Power Platform connection bound to the connection reference (and, for the custom connector, in the Entra app registration it uses). Dataverse stores identifiers and sanitized outcome codes only.
+- Flow/custom connector premium licensing for the applicable owners, makers, and run configuration is a pre-deployment prerequisite and must be verified; no license is assumed or assigned.
+- The read-only preflight found the effective classic DLP policy classifies Dataverse and the proposed `graph.microsoft.com` custom connector in the same Confidential group. Dataverse action/endpoint filtering was not visible and remains unverified. Do not infer governance from Advanced Connector Policies.
 - The standard Office 365 Outlook connector is acceptable for reads but is not proposed for writes: its event actions do not expose Graph `transactionId` or extended properties, and its documented V4 update resets omitted fields.
 - Option B (server-side service behind a custom connector) is a fallback if a delegated service account is rejected. Option C (secure backend with application permissions, Exchange RBAC for Applications scoping) is an escalation path: it requires Azure resources, and reading TA calendars would need `Calendars.Read` (event details) rather than free/busy-only access.
 
@@ -83,7 +85,7 @@ Unknown or error availability for any required source is **NOT AVAILABLE**. Fail
 |---|---|
 | **A. Business-data writes** — Candidate, Call Log, Candidate Status History, Operation Receipt, `os_sr_intv`, TA Directory, Location; any `os_sr_cact` invocation | **Prohibited.** The availability panel must not call `os_sr_cact`, update Candidate or `os_sr_intv`, create Status History or Operation Receipt, pre-fill or invoke `MarkRound1Scheduled`, or advance Candidate state. |
 | **B. Integration infrastructure/configuration writes** — `os_sr_avq` table and protection plug-in step, custom connector, Cloud Flow, connection references, environment variable definitions/values, Entra app registration and consent, Console/app web resources and their publication | **Potentially required later; each needs separate explicit authorization.** None is performed by this proposal. |
-| **C. Runtime availability-query rows** — `os_sr_avq` request/result rows created by the BSO and completed by the integration identity | Required by the approved 2A design once B is authorized. Not Candidate business data: no Candidate or `os_sr_intv` lookup, no Candidate Core path. Synthetic-only in DEV; retention/purge is an open item. |
+| **C. Runtime availability-query rows** — `os_sr_avq` request/result rows created by the BSO and completed by the integration identity | Required by the approved 2A design once B is authorized. Not Candidate business data: no Candidate or `os_sr_intv` lookup, no Candidate Core path. Synthetic-only in DEV; 30-day retention is approved, while cleanup remains unimplemented and separately gated. |
 
 ### Slice 2A acceptance contract
 
@@ -101,6 +103,14 @@ Slice 2A acceptance must prove all of the following, using synthetic TA/room tes
 10. No `os_sr_cact` call originates from the availability panel (plug-in trace and Receipt count baseline).
 
 No Candidate state transition is part of Slice 2A acceptance. Additional technical checks: every unknown/error path yields zero slots; the organizer calendar receives no event; no token or secret appears in the browser, Dataverse rows, or flow run history inputs/outputs shown to makers.
+
+### Offline source status and preflight gates
+
+The offline source currently defines the schema contract, isolated guard/calculator project, exact single-operation OpenAPI contract, logical Flow contract, environment-variable definitions without values, role delta, and 30-day cleanup design. The Console panel is separately gated by an environment configuration flag and follows the shared `[DEV]` reference policy. These artifacts are not included in the frozen managed 1.0.0.1 artifact and must not be described as tenant resources.
+
+Preflight results supplied by the owner classify `P0_SLICE_2A_PREFLIGHT_COMPLETE` and `P0_SLICE_2A_IMPLEMENTATION_BLOCKED_PREREQUISITES`. The effective classic DLP policy places Dataverse and Graph in Confidential, but Dataverse action/endpoint filtering is unverified. Existing project Entra app and actual consent policy, licensed scheduling identity with CA/MFA compatibility, synthetic TA/room mailboxes and room AutoAccept/conflict configuration, and premium-flow licensing remain external prerequisites. Existing `[DEV]` references contain `.invalid` mailbox addresses and cannot be used for a live query. Do not create or alter any of these in offline implementation.
+
+The dedicated Dataverse application user is approved conceptually but is not selected or provisioned. The plug-in has an offline non-secret configuration contract for its environment-specific identity binding. Its email-domain, business-hour, duration, lead, horizon, and expiry values must be aligned with the approved environment variables before deployment; no tenant-specific values are committed.
 
 ### Candidate-state effects by phase
 

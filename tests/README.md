@@ -1,5 +1,11 @@
 # Tests
 
+## P0 Slice 2A offline availability
+
+- [Availability Query SDK assertions](AvailabilityQuerySdk/AvailabilityQuerySdk.Tests.csproj): `dotnet run --project .\tests\AvailabilityQuerySdk\AvailabilityQuerySdk.Tests.csproj`; exercises deterministic, Graph-independent availability calculation, fail-closed validation, canonical slot JSON, safe error categories, and caller/field/state mutation policy.
+- [Availability Query source checks](AvailabilityQuery.Tests.ps1): `pwsh -NoLogo -NoProfile -File .\tests\AvailabilityQuery.Tests.ps1`; validates offline schema, connector/Flow contracts, retention, role delta, registration contract, and the Candidate-independent display-only Console boundary.
+- Availability panel JavaScript syntax: `node --check .\solutions\CandidateConsole\WebResources\os_\bso\candidate-console-availability.js`.
+
 ## Candidate Console environment configuration
 
 - [Candidate Console static checks](CandidateConsole.Tests.ps1): `pwsh -NoProfile -File .\tests\CandidateConsole.Tests.ps1`; validates fail-closed configuration/policy wiring, the DEV-only fallback, synthetic-data filtering, exact scoped deployment selection, complete five-resource publish-only inventory/pin guards, one-shot zero-content-write publication, ambiguous-outcome no-retry behavior, exact post-publication hash/state reconciliation, published/effective baseline snapshot guards, safe cache-busting, and existing workflow UI contracts.

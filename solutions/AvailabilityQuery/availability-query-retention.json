@@ -1,0 +1,21 @@
+{
+  "status": "APPROVED_POLICY_SOURCE_OFFLINE_NOT_DEPLOYED",
+  "table": "os_sr_avq",
+  "retentionDays": 30,
+  "cleanup": {
+    "frequency": "Daily",
+    "cutoff": "createdon < current UTC time minus 30 days",
+    "method": "Bounded Dataverse bulk-delete job or equivalent supported cleanup process",
+    "principal": "Dedicated cleanup/integration operator with delete permission scoped only to os_sr_avq",
+    "batchLimit": 1000,
+    "deleteBsoPrivilege": false,
+    "dryRunFirst": true,
+    "auditDisabledOnTable": true
+  },
+  "safety": [
+    "Retention applies to operational availability-query data only.",
+    "No Candidate or Interview Schedule lookup exists.",
+    "No raw Graph availabilityView or Graph response payload is stored.",
+    "Do not run cleanup until the separate deployment/run authorization and bounded dry-run are approved."
+  ]
+}

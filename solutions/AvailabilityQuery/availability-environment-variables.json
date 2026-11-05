@@ -1,0 +1,26 @@
+{
+  "status": "PROPOSED_SOURCE_OFFLINE_NOT_CREATED",
+  "solutionUniqueName": "os_sr_bso_rs_support",
+  "fixedConstants": {
+    "timeZone": "SE Asia Standard Time",
+    "availabilityIntervalMinutes": 15,
+    "maximumHorizonDays": 61
+  },
+  "definitions": [
+    { "schemaName": "os_sr_avq_bhrs", "displayName": "Availability Business Hours", "type": "Text", "format": "json", "defaultValue": null, "requiredAtDeployment": true },
+    { "schemaName": "os_sr_avq_durs", "displayName": "Availability Allowed Durations", "type": "Text", "format": "comma-separated integer minutes", "defaultValue": null, "requiredAtDeployment": true },
+    { "schemaName": "os_sr_avq_lead", "displayName": "Availability Minimum Lead Time", "type": "WholeNumber", "unit": "minutes", "defaultValue": null, "requiredAtDeployment": true },
+    { "schemaName": "os_sr_avq_hzn", "displayName": "Availability Maximum Horizon", "type": "WholeNumber", "unit": "days", "minimum": 1, "maximum": 61, "defaultValue": null, "requiredAtDeployment": true },
+    { "schemaName": "os_sr_avq_exp", "displayName": "Availability Result Expiry", "type": "WholeNumber", "unit": "minutes", "minimum": 1, "maximum": 1440, "defaultValue": null, "requiredAtDeployment": true },
+    { "schemaName": "os_sr_avq_dom", "displayName": "Availability Allowed Email Domains", "type": "Text", "format": "comma-separated exact domains", "defaultValue": null, "requiredAtDeployment": true }
+  ],
+  "businessHoursExampleShape": {
+    "monday": { "opens": "09:00", "closes": "17:00" },
+    "tuesday": { "opens": "09:00", "closes": "17:00" }
+  },
+  "notes": [
+    "Example values are shape-only and are not environment configuration.",
+    "The deployment binding must supply the same non-secret values to the availability guard through its environment-specific unsecure configuration.",
+    "No tenant, client, mailbox, credential, or secret value is included."
+  ]
+}

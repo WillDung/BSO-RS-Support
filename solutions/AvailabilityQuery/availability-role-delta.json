@@ -1,0 +1,39 @@
+{
+  "status": "PROPOSED_SOURCE_OFFLINE_NOT_PROVISIONED",
+  "solutionUniqueName": "os_sr_bso_rs_support",
+  "existingBsoRole": {
+    "name": "BSO-RS Support - BSO",
+    "addPrivileges": [
+      { "privilege": "prvCreateos_sr_avq", "depth": "Basic" },
+      { "privilege": "prvReados_sr_avq", "depth": "Basic" },
+      { "privilege": "prvAppendos_sr_avq", "depth": "Basic" },
+      { "privilege": "prvAppendToos_sr_ta", "depth": "Global", "condition": "Add only if missing from canonical role." },
+      { "privilege": "prvAppendToos_sr_loc", "depth": "Global", "condition": "Add only if missing from canonical role." }
+    ],
+    "mustNotAdd": [
+      "prvWriteos_sr_avq",
+      "prvDeleteos_sr_avq",
+      "prvAssignos_sr_avq",
+      "prvShareos_sr_avq",
+      "Any Candidate Core privilege"
+    ]
+  },
+  "integrationRole": {
+    "name": "BSO-RS Support - Availability Integration",
+    "technicalName": "os_sr_avqint",
+    "assignTo": "Dedicated Dataverse application user/service principal, selected during an authorized preflight",
+    "privileges": [
+      { "privilege": "prvReados_sr_avq", "depth": "Global" },
+      { "privilege": "prvWriteos_sr_avq", "depth": "Global" },
+      { "privilege": "prvReados_sr_ta", "depth": "Global" },
+      { "privilege": "prvReados_sr_loc", "depth": "Global" }
+    ],
+    "platformReadPrivileges": "Add only individually proven minimum requirements during an authorized metadata/security preflight.",
+    "mustNotAdd": [
+      "os_sr_cact execute privilege",
+      "Candidate/Core write privilege",
+      "os_sr_avq Append, AppendTo, Delete, Assign, or Share"
+    ]
+  },
+  "deployment": "No role is changed or assigned by this source."
+}

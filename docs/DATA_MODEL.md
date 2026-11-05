@@ -61,31 +61,31 @@ Phase 4D browser acceptance verified Pass and Fail persistence after a full relo
 
 Phase 4E browser acceptance used synthetic Candidates `CAND-00001023` and `CAND-00001024`. The reschedule branch preserved a Superseded row and a reconfirmed Scheduled row after re-contact; the cancellation branch preserved a Cancelled row. Full reloads showed the schedule history, reasons/timestamps, Candidate states, and Status History. Acceptance-scope readback for those two Candidates is Candidate / Call Log / Status History / Interview Schedule / Receipt = **2 / 3 / 11 / 3 / 0**. See [Current State](CURRENT_STATE.md) and the [Candidate UI implementation note](CANDIDATE_UI_IMPLEMENTATION_NOTE.md).
 
-## P0 Slice 2 calendar extensions (PROPOSED / ARCHITECTURE APPROVED; not provisioned)
+## P0 Slice 2 calendar extensions (PROPOSED / ARCHITECTURE APPROVED; offline source only)
 
-**Status (2026-11-05):** Proposal only. No table, column, Choice value, key, plug-in step, or relationship below exists in any environment, and no schema write is authorized. Names are proposals subject to schema review. Tokens marked † are proposed dictionary additions and must be approved before use. Architecture context is in [Integration Design](INTEGRATION_DESIGN.md#p0-slice-2-calendar-availability-and-booking-proposed--architecture-approved); decisions D1–D8 are pending in [Product Decisions](PRODUCT_DECISIONS.md#p0-slice-2-calendar-integration-proposed--architecture-approved).
+**Status (2026-11-05):** D1–D8 and Slice 2A architecture are approved as documented in [Product Decisions](PRODUCT_DECISIONS.md#p0-slice-2-calendar-integration-proposed--architecture-approved). The canonical offline schema contract is [AvailabilityQuery.schema.json](../solutions/Entities/os_sr_avq/AvailabilityQuery.schema.json). It is not a Dataverse export and is not provisioned. No table, column, Choice value, key, plug-in step, relationship, role, connector, Flow, environment variable, or connection exists in the tenant for Slice 2A. No metadata or tenant write is authorized. The user-approved 30-day retention policy is documented; cleanup is not implemented. See [Integration Design](INTEGRATION_DESIGN.md#p0-slice-2-calendar-availability-and-booking-proposed--architecture-approved) and [Current State](CURRENT_STATE.md).
 
 **Existing fields Slice 2 relies on (verified above):** `os_sr_ta_eml` (required String/Email, max 254) is the TA free/busy and attendee address; `os_sr_loc_rmeml` (optional String/Email, max 254) is the room/resource mailbox address. TA rows need not correspond to Dataverse users. Neither email is validated against Exchange today; Slice 2A validates syntax and allowed domain before calling Graph and treats Graph-reported errors as unknown availability.
 
-### Slice 2A: Availability Query `os_sr_avq`†
+### Slice 2A: Availability Query `os_sr_avq`
 
 A transient integration row; the flow runs asynchronously, so the Console creates a request row and polls its result. It has **no Candidate or `os_sr_intv` lookup** and is never read by Candidate Core.
 
-| Proposed field | Type | Purpose |
+| Approved offline field contract | Type | Purpose |
 |---|---|---|
 | `os_sr_avq_ref` | AutoNumber Text, `AVQ-{SEQNUM:8}`, primary name | Nonpersonal reference |
 | `os_sr_avq_ta` | Lookup TA Directory, required | Source of TA address |
 | `os_sr_avq_loc` | Lookup Location, optional | Required by the plug-in when mode is Onsite |
 | `os_sr_avq_mod` | Choice: Online / Onsite | Required sources |
 | `os_sr_avq_strt` / `os_sr_avq_end` | DateTime UTC | Requested window |
-| `os_sr_avq_dur`† | Whole number (minutes) | Requested slot length |
+| `os_sr_avq_dur` | Whole number (minutes) | Requested slot length |
 | `os_sr_avq_stat` | Choice: Pending / Available / NoSlots / Failed | Displayed result state |
 | `os_sr_avq_rsn` | String(40) | Deterministic NoSlots reason code |
 | `os_sr_avq_err` | String(40) | Safe deterministic failure category (e.g. `TA_INACTIVE`, `ROOM_EMAIL_MISSING`, `SOURCE_UNKNOWN_ROOM`, `GRAPH_AUTH`, `GRAPH_THROTTLED`, `GRAPH_TIMEOUT`, `MAILBOX_NOT_FOUND`) |
-| `os_sr_avq_slts`† | Memo (JSON) | Computed valid slots only |
-| `os_sr_avq_qat`† / `os_sr_avq_exp`† | DateTime UTC | Queried-at and expiry |
+| `os_sr_avq_slts` | Memo (JSON) | Computed valid slots only |
+| `os_sr_avq_qat` / `os_sr_avq_exp` | DateTime UTC | Queried-at and expiry |
 
-Raw `availabilityView` strings and Graph payloads are **not** persisted (data minimization). A protection plug-in lets the requesting user create Pending rows only and lets only the integration identity write result fields. Retention/purge period is open.
+Raw `availabilityView` strings, Graph payloads, and mailbox addresses are **not** persisted (data minimization). The separate `os_sr_avqg.ProtectAvailabilityQuery` source lets a non-integration requester create Pending rows only and lets only the configured Dataverse integration application user write one terminal result. P0 technical names for Slice 2A are approved. Retention is 30 days; a bounded daily cleanup design exists but is not deployed or run. The offline source contracts are in `solutions/AvailabilityQuery/`.
 
 ### Slice 2B+: proposed `os_sr_intv` additions
 
@@ -106,7 +106,7 @@ Raw `availabilityView` strings and Graph payloads are **not** persisted (data mi
 
 Also proposed for 2B: Choice value `Withdrawn` on `os_sr_intv_stat` for a Proposed row whose booking definitely did not occur (Cancelled stays reserved for the business cancel action), and relaxing `os_sr_intv_loc` to optional with the Onsite rule enforced in the plug-in (D7). No tokens, secrets, or connection credentials are stored in any field.
 
-Proposed dictionary additions (pending approval): `avq` = Availability Query; `dur` = duration; `slts` = computed slots; `qat` = queried at; `exp` = expires at; `bkst` = booking state; `ical` = iCalendar UID; `ckey` = change key; `atsn` = attendee snapshot; `avat` = availability verified at; `bkat` = booked at; `xcxat` = external cancellation confirmed at; `join` = online meeting join URL.
+Approved Slice 2A dictionary additions: `avq` = Availability Query; `dur` = duration; `slts` = computed slots; `qat` = queried at; `exp` = expires at; `bhrs` = business hours; `durs` = allowed durations; `lead` = lead time; `hzn` = horizon; `dom` = allowed email domain; `avqg` = availability-query guard; `avchk` = availability check; `grs` = Graph scheduling; `cr` = connection reference; `avqint` = Availability Integration. These names are approved for offline Slice 2A source but do not imply provisioned components. Slice 2B+ tokens `bkst`, `ical`, `ckey`, `atsn`, `avat`, `bkat`, `xcxat`, and `join` remain proposals.
 
 ## Naming standard and private abbreviation dictionary
 

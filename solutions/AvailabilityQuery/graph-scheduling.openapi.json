@@ -1,0 +1,100 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "BSO-RS Graph Scheduling",
+    "description": "Slice 2A free/busy-only surface. Source contract only; no connector is created.",
+    "version": "1.0"
+  },
+  "host": "graph.microsoft.com",
+  "basePath": "/v1.0",
+  "schemes": ["https"],
+  "consumes": ["application/json"],
+  "produces": ["application/json"],
+  "securityDefinitions": {
+    "oauth2": {
+      "type": "oauth2",
+      "flow": "accessCode",
+      "authorizationUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+      "tokenUrl": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+      "scopes": {
+        "https://graph.microsoft.com/Calendars.ReadBasic": "Read free/busy availability only"
+      }
+    }
+  },
+  "security": [{ "oauth2": ["https://graph.microsoft.com/Calendars.ReadBasic"] }],
+  "paths": {
+    "/me/calendar/getSchedule": {
+      "post": {
+        "operationId": "getSchedule",
+        "summary": "Get free/busy schedule",
+        "description": "Reads schedule information for the requested TA and, for Onsite only, room. The connector does not expose event write or email operations.",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": { "$ref": "#/definitions/GetScheduleRequest" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Schedule entries. Consumers must reject any missing/error source and any malformed or wrong-length availabilityView.",
+            "schema": { "$ref": "#/definitions/GetScheduleResponse" }
+          },
+          "default": {
+            "description": "Mapped to a safe error category; response body must not be persisted or shown to the BSO."
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "GetScheduleRequest": {
+      "type": "object",
+      "required": ["schedules", "startTime", "endTime", "availabilityViewInterval"],
+      "properties": {
+        "schedules": { "type": "array", "items": { "type": "string" } },
+        "startTime": { "$ref": "#/definitions/GraphDateTimeTimeZone" },
+        "endTime": { "$ref": "#/definitions/GraphDateTimeTimeZone" },
+        "availabilityViewInterval": { "type": "integer", "enum": [15] }
+      }
+    },
+    "GraphDateTimeTimeZone": {
+      "type": "object",
+      "required": ["dateTime", "timeZone"],
+      "properties": {
+        "dateTime": { "type": "string", "format": "date-time" },
+        "timeZone": { "type": "string", "enum": ["UTC"] }
+      }
+    },
+    "GetScheduleResponse": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/ScheduleInformation" }
+        }
+      }
+    },
+    "ScheduleInformation": {
+      "type": "object",
+      "properties": {
+        "scheduleId": { "type": "string" },
+        "availabilityView": { "type": "string", "pattern": "^[0-3]*$" },
+        "error": {
+          "type": "object",
+          "properties": {
+            "responseCode": { "type": "string" },
+            "message": { "type": "string" }
+          }
+        }
+      }
+    }
+  },
+  "x-ms-connector-metadata": [
+    { "propertyName": "Website", "propertyValue": "https://learn.microsoft.com/graph/api/calendar-getschedule" },
+    { "propertyName": "Privacy policy", "propertyValue": "" },
+    { "propertyName": "Categories", "propertyValue": "Productivity" }
+  ],
+  "x-source-status": "OFFLINE_PROPOSED_NO_AUTHENTICATION_VALUES"
+}

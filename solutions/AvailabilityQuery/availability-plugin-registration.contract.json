@@ -1,0 +1,53 @@
+{
+  "status": "PROPOSED_SOURCE_OFFLINE_NOT_REGISTERED",
+  "solutionUniqueName": "os_sr_bso_rs_support",
+  "packageId": "os_sr_avqg_pkg",
+  "assemblyName": "os_sr_avqg",
+  "namespace": "os_sr_avqg",
+  "pluginType": "os_sr_avqg.ProtectAvailabilityQuery",
+  "steps": [
+    {
+      "name": "os_sr_avqg_stp_cre",
+      "message": "Create",
+      "primaryEntity": "os_sr_avq",
+      "stage": "PreOperation",
+      "stageNumber": 20,
+      "mode": "Synchronous",
+      "executionUser": "Calling User",
+      "images": []
+    },
+    {
+      "name": "os_sr_avqg_stp_upd",
+      "message": "Update",
+      "primaryEntity": "os_sr_avq",
+      "stage": "PreOperation",
+      "stageNumber": 20,
+      "mode": "Synchronous",
+      "executionUser": "Calling User",
+      "filteringAttributes": [
+        "os_sr_avq_stat",
+        "os_sr_avq_rsn",
+        "os_sr_avq_err",
+        "os_sr_avq_slts",
+        "os_sr_avq_qat",
+        "os_sr_avq_exp"
+      ],
+      "images": []
+    }
+  ],
+  "nonSecretUnsecureConfiguration": {
+    "IntegrationApplicationUserId": "<environment-specific Dataverse application-user GUID>",
+    "AllowedEmailDomains": "<same environment-variable value>",
+    "AllowedDurationsMinutes": "<same environment-variable value>",
+    "BusinessHours.<DayOfWeek>": "<HH:mm-HH:mm per configured business day>",
+    "MinimumLeadTimeMinutes": "<same environment-variable value>",
+    "MaximumHorizonDays": "<same environment-variable value; 1-61>",
+    "ResultExpiryMinutes": "<same environment-variable value>"
+  },
+  "security": [
+    "No tenant or user GUID is committed.",
+    "The configured identity is the dedicated Dataverse integration application user, not the Graph connection identity.",
+    "No secure configuration or secret is required by this plug-in.",
+    "Step registration is not permission to grant any Candidate Core privilege."
+  ]
+}

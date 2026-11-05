@@ -1,0 +1,77 @@
+{
+  "status": "PROPOSED_SOURCE_OFFLINE_NOT_PROVISIONED",
+  "solutionUniqueName": "os_sr_bso_rs_support",
+  "table": {
+    "logicalName": "os_sr_avq",
+    "displayName": "Availability Query",
+    "collectionName": "Availability Queries",
+    "ownership": "UserOwned",
+    "auditEnabled": false,
+    "primaryId": "os_sr_avqid",
+    "primaryName": {
+      "logicalName": "os_sr_avq_ref",
+      "type": "AutoNumber",
+      "required": true,
+      "format": "AVQ-{SEQNUM:8}",
+      "maxLength": 100
+    },
+    "choices": {
+      "os_sr_avq_mod": [
+        { "label": "Online", "value": 100000000 },
+        { "label": "Onsite", "value": 100000001 }
+      ],
+      "os_sr_avq_stat": [
+        { "label": "Pending", "value": 100000000 },
+        { "label": "Available", "value": 100000001 },
+        { "label": "NoSlots", "value": 100000002 },
+        { "label": "Failed", "value": 100000003 }
+      ]
+    },
+    "fields": [
+      { "logicalName": "os_sr_avq_ta", "type": "Lookup", "target": "os_sr_ta", "required": true },
+      { "logicalName": "os_sr_avq_loc", "type": "Lookup", "target": "os_sr_loc", "required": false },
+      { "logicalName": "os_sr_avq_mod", "type": "Choice", "required": true },
+      { "logicalName": "os_sr_avq_strt", "type": "DateTime", "behavior": "UserLocal", "apiValue": "UTC", "required": true },
+      { "logicalName": "os_sr_avq_end", "type": "DateTime", "behavior": "UserLocal", "apiValue": "UTC", "required": true },
+      { "logicalName": "os_sr_avq_dur", "type": "WholeNumber", "min": 15, "max": 480, "required": true },
+      { "logicalName": "os_sr_avq_stat", "type": "Choice", "required": true, "serverManaged": true },
+      { "logicalName": "os_sr_avq_rsn", "type": "Text", "maxLength": 40, "required": false, "serverManaged": true },
+      { "logicalName": "os_sr_avq_err", "type": "Text", "maxLength": 40, "required": false, "serverManaged": true },
+      { "logicalName": "os_sr_avq_slts", "type": "Memo", "maxLength": 32768, "required": false, "serverManaged": true, "contract": "canonical-computed-slots-json" },
+      { "logicalName": "os_sr_avq_qat", "type": "DateTime", "behavior": "UserLocal", "apiValue": "UTC", "required": false, "serverManaged": true },
+      { "logicalName": "os_sr_avq_exp", "type": "DateTime", "behavior": "UserLocal", "apiValue": "UTC", "required": false, "serverManaged": true }
+    ],
+    "prohibitedFields": [
+      "Candidate lookup",
+      "Interview Schedule lookup",
+      "Raw Graph availabilityView",
+      "Graph response payload",
+      "Mailbox email address"
+    ],
+    "relationships": [
+      {
+        "schemaName": "os_sr_ta_avq",
+        "referencedEntity": "os_sr_ta",
+        "referencingAttribute": "os_sr_avq_ta",
+        "type": "OneToMany",
+        "cascadeDelete": "Restrict",
+        "cascadeAssign": "NoCascade",
+        "cascadeShare": "NoCascade",
+        "cascadeUnshare": "NoCascade",
+        "cascadeReparent": "NoCascade"
+      },
+      {
+        "schemaName": "os_sr_loc_avq",
+        "referencedEntity": "os_sr_loc",
+        "referencingAttribute": "os_sr_avq_loc",
+        "type": "OneToMany",
+        "cascadeDelete": "Restrict",
+        "cascadeAssign": "NoCascade",
+        "cascadeShare": "NoCascade",
+        "cascadeUnshare": "NoCascade",
+        "cascadeReparent": "NoCascade"
+      }
+    ],
+    "retentionDays": 30
+  }
+}

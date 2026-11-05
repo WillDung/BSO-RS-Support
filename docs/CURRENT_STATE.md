@@ -1,5 +1,48 @@
 # Current State
 
+## RecordCall clock-skew tolerance deployed; Slice 1 workflow and reference administration accepted in DEV (2026-11-05)
+
+**Status:** `RECORD_CALL_CLOCK_SKEW_TOLERANCE_IMPLEMENTED`, `RECORD_CALL_RUNTIME_ACCEPTED`, `P0_SLICE1_CANDIDATE_CORE_REGRESSION_ACCEPTED` (RecordCall → ProceedToScheduling → MarkRound1Scheduled), `TA_ADMINISTRATION_PERSISTENCE_ACCEPTED`, `LOCATION_ADMINISTRATION_PERSISTENCE_ACCEPTED`, `REFERENCE_POLICY_RUNTIME_ACCEPTED`. `P0_SLICE_1_LIVE_FUNCTIONALLY_ACCEPTED` is **not** claimed: normal `srapp` wrapper loading of current Console resources remains a separate open gate.
+
+**Product correction (owner-approved Design B):** The RecordCall future-time rule in [Operation.cs](../solutions/CandidateCore/Operation.cs) now uses the named `MaxRecordCallFutureClockSkew = 5 seconds`. `ContactedAt` with `Kind != Utc` is rejected as `INVALID_CONTACT_TIME`; values up to `utcNow + 5 s` inclusive are accepted; later values are rejected. The submitted value is never clamped or replaced. It is persisted and fingerprinted exactly, and neither `utcNow` nor the tolerance enters the fingerprint. Local/Unspecified Kinds are not normalized. No past-time limit was added. API metadata, Console payload, CallOutcome, ExpectedStatus, Notes, ProfileFieldMask, transitions, mutation matrix, Receipt semantics, fingerprint version and schema are unchanged. The `Operation.cs` change is in HEAD `d4c68be`, which was committed outside this session together with the previous zero-tolerance tests. The updated domain and SDK tests below remain uncommitted working-tree changes.
+
+**Offline validation:**
+- The domain harness passed 253 assertions. Accepted: past, now, +1 tick, +82 ms, +160 ms, +4.999 s and exactly +5 s. Rejected: +5 s +1 tick, +6 s, Local and Unspecified. The same fingerprint is produced at different `utcNow` values; the same CorrelationId with the same ContactedAt replays with no writes; a different ContactedAt returns `CORRELATION_CONFLICT`.
+- The SDK harness passed 500 assertions. Local and Unspecified are rejected without a service call. Within-tolerance and exact +5 s values persist unchanged; +30 s is rejected before any service call. A saturated 21-input RecordCall ignores platform-default profile/schedule inputs; its replay returns DuplicateReplay with no writes, and a different ContactedAt returns a conflict.
+- Phase 3C Receipt 27, Phase 3C deployment 31, Phase 3D runtime 34, R4/R4B/R4L/R4M package 12/29/14/13, Phase 5A runtime/API/security 19/9/27, Phase 5B 12, package updater 36, ReleaseSource 33 and canonical-source fingerprint 14 all passed.
+- PowerShell parsing and `git diff --check` passed.
+- JSON parsing passed for all 101 tracked and untracked `*.json` files using both `ConvertFrom-Json -AsHashtable` and Python's `json`; there were 0 errors.
+  - The first run used plain `ConvertFrom-Json` and reported one error in the unmodified third-party lockfile `.agents/skills/archify/package-lock.json`. That parser does not accept the valid empty-string key that npm uses for the root package. The lockfile itself is valid JSON, and this change did not touch it.
+- `BsoRsProductionReadiness.Tests.ps1` still fails only on the frozen canonical-source/root-component fingerprints. This is a known release-baseline issue and was not repaired.
+
+**Package and DEV deployment:** The package was built out-of-tree from clean packaged sources at HEAD `d4c68be6b2f2792595a3976b1a168041b34b4d58`:
+- `Operation.cs` `e40ab51f…`, `DataversePlugin.cs` `ca6a7593…`.
+- `os_sr_cact_pkg` 1.0.0, package SHA-256 `b1b21d35…6776`, embedded DLL SHA-256 `88726f76…a527`.
+- Assembly `os_sr_cact, Version=1.0.0.0, PublicKeyToken=null`, unsigned.
+
+The pre-update ModifiedOn matched baseline `03:23:56Z`. One existing-package update in VN LMV IT reported PAC success with one dispatch and zero retries. There were no Console, publication, API metadata, role, guard or membership writes. GET-only reconciliation confirmed:
+- package/assembly/handler/API linkage, 21 inputs / five outputs and one ProfileFieldMask;
+- 51 Solution memberships and all 50 legacy guards disabled;
+- canonical roles unchanged and Reference Admin unassigned.
+
+The new operation-linked baseline is ModifiedOn `2026-11-05T05:54:24Z`. The wrapper's final baseline write stopped on its existing-provenance guard, without dispatch; the baseline was then written manually with chained provenance. Server package bytes remain unreadable, and byte equality is not claimed.
+
+**Runtime acceptance (owner identity, synthetic Candidate CAND-00001066, normal Console path):** The unversioned Console frame served the accepted `candidate-console.js` `cb26a8d5…`. Each request was intercepted, structure-checked, forwarded exactly once, and followed by a GET-only snapshot.
+- **RecordCall:** the request contained exactly six keys, with Console-generated `ContactedAt=2026-11-05T05:57:36.058Z` (not altered). It returned HTTP 200 `Applied`, Need Call → Candidate Answered, with +1 Call Log (`ContactedAt` persisted), +1 Status History and +1 Receipt. Profile, Assigned TA and owner were unchanged, and no Schedule was created.
+- **ProceedToScheduling:** returned HTTP 200 `Applied`, Answered → Waiting Manual Scheduling, with +1 Status History and +1 Receipt.
+- **MarkRound1Scheduled:** used `[DEV]` TA and Location with a future one-hour slot. It returned HTTP 200 `Applied`, moving to Round 1 Scheduled with one Interview Schedule (Scheduled, the exact TA/Location/start/end), +1 Status History and +1 Receipt.
+
+A full page reload and readback showed Round 1 Scheduled, with the schedule row ACTIVE / SCHEDULED. The final totals were seven Receipts, one Call, three Status History rows and one Schedule.
+
+**Reference administration and policy (synthetic only):** The `srapp` model-driven forms were used to create:
+- `[DEV] Admin Acceptance TA 20261105` with an `.invalid` email;
+- `[DEV] Admin Acceptance Location 20261105` with an `.invalid` room email and details;
+- one non-`[DEV]` `[SYNTHETIC-E2E] Policy Exclusion TA 20261105`.
+
+GET readback confirmed every field persisted. In synthetic mode, the Console listed both new `[DEV]` references in the Create, Edit and Scheduling selectors, and excluded the non-`[DEV]` TA from every selector. The exclusion TA was then deactivated through the form; readback shows it Inactive. The existing `[DEV]` TA and Location were not modified. Reference Admin remains unassigned, and these writes used the owner development identity.
+
+**Open gates:** Normal `srapp` wrapper loading of current Console resources (the stale versioned-path cache) must be accepted before `P0_SLICE_1_LIVE_FUNCTIONALLY_ACCEPTED`. Clean-BSO acceptance remains deferred. Frozen `cf701740…`/`dbf60872…`, release manifests, ProductionReadiness pins and Solution version `1.0.0.1` are unchanged. No managed rebuild, Production deployment or publication occurred. `P0_SOURCE_AHEAD_OF_FROZEN_RELEASE_ARTIFACT`, `BUSINESS_MVP_READY_FOR_PRODUCTION_FALSE`, `REAL_DATA_STILL_PROHIBITED`.
+
 ## Guid.Empty clear package deployed; profile clear/restore accepted; RecordCall stage unresolved (2026-11-05)
 
 **Status:** `GUID_CLEAR_PACKAGE_UPDATE_ACCEPTED`, `POST_GUID_CLEAR_PACKAGE_BASELINE_ESTABLISHED`, `OPTIONAL_PROFILE_MASKED_OMISSION_RUNTIME_ACCEPTED`, `ASSIGNED_TA_CLEAR_RUNTIME_ACCEPTED`, `ASSIGNED_TA_SET_AFTER_CLEAR_RUNTIME_ACCEPTED`, `CANDIDATE_PROFILE_MAINTENANCE_RUNTIME_ACCEPTED`. Workflow regression stopped at `RECORD_CALL_RUNTIME_FAILED_ACCEPTANCE_STOPPED`. `P0_SLICE1_CANDIDATE_CORE_REGRESSION_ACCEPTED`, TA/Location administration acceptance, and `P0_SLICE_1_LIVE_FUNCTIONALLY_ACCEPTED` are not claimed.

@@ -1265,12 +1265,64 @@ internal static class Program
             Check(nonUtcContact.ServiceOperations.Count == 0 && nonUtcContact.Receipt == null,
                 "SDK adapter passes " + kind + " ContactedAt through unnormalized and rejects before any service call");
         }
+        // The plugin reads DateTime.UtcNow after these values are captured, so +5 s is at or inside the boundary.
+        foreach (var offset in new[] { TimeSpan.FromMinutes(-1), TimeSpan.Zero, TimeSpan.FromMilliseconds(160),
+            ActionRequest.MaxRecordCallFutureClockSkew })
+        {
+            var acceptedContact = new Host(100010000);
+            var submitted = DateTime.UtcNow + offset;
+            acceptedContact.Input["ContactedAt"] = submitted;
+            new ApplyCandidateAction().Execute(acceptedContact);
+            Check((string)acceptedContact.Output["ResultCode"] == "Applied" &&
+                acceptedContact.Calls == 1 && acceptedContact.Histories == 1 && acceptedContact.Receipt != null &&
+                acceptedContact.Status == ActionRequest.Answered &&
+                acceptedContact.CreatedCall!.GetAttributeValue<DateTime>("os_sr_call_ctat") == submitted,
+                "SDK RecordCall accepts ContactedAt offset " + offset.Ticks + " ticks and persists it unchanged");
+        }
         var futureContact = new Host(100010000);
-        futureContact.Input["ContactedAt"] = DateTime.UtcNow.AddSeconds(5);
+        futureContact.Input["ContactedAt"] = DateTime.UtcNow.AddSeconds(30);
         Reject(() => new ApplyCandidateAction().Execute(futureContact), "INVALID_CONTACT_TIME");
         Check(futureContact.ServiceOperations.Count == 0 && futureContact.Receipt == null &&
             futureContact.Calls == 0 && futureContact.Histories == 0,
-            "SDK RecordCall with future UTC ContactedAt is rejected before any service call");
+            "SDK RecordCall beyond the future clock-skew tolerance is rejected before any service call");
+        var saturatedCall = new Host(100010000);
+        var saturatedContact = DateTime.UtcNow.AddMilliseconds(160);
+        saturatedCall.Input["ContactedAt"] = saturatedContact;
+        saturatedCall.Input["Notes"] = null;
+        saturatedCall.Input["CandidateName"] = null;
+        saturatedCall.Input["CandidateEmail"] = "";
+        saturatedCall.Input["CandidatePhone"] = null;
+        saturatedCall.Input["CandidateCvUrl"] = "";
+        saturatedCall.Input["PositionId"] = Guid.Empty;
+        saturatedCall.Input["CandidateSourceId"] = Guid.Empty;
+        saturatedCall.Input["AssignedTaId"] = Guid.Empty;
+        saturatedCall.Input["ProfileFieldMask"] = null;
+        saturatedCall.Input["Reason"] = null;
+        saturatedCall.Input["InterviewerId"] = Guid.Empty;
+        saturatedCall.Input["LocationId"] = Guid.Empty;
+        saturatedCall.Input["StartAt"] = DateTime.MinValue;
+        saturatedCall.Input["EndAt"] = DateTime.MinValue;
+        saturatedCall.Input["ResultNotes"] = null;
+        Check(saturatedCall.Input.Count == 21 && saturatedInputNames.SetEquals(saturatedCall.Input.Keys),
+            "SDK saturated RecordCall uses the exact 21-input API shape");
+        new ApplyCandidateAction().Execute(saturatedCall);
+        Check((string)saturatedCall.Output["ResultCode"] == "Applied" && saturatedCall.Updates == 1 &&
+            saturatedCall.CandidateRequests.Single().Target.Attributes.Keys.All(key => key == "os_sr_cand_stat" || key == "os_sr_cand_ver") &&
+            saturatedCall.Calls == 1 && saturatedCall.Histories == 1 && saturatedCall.Receipt != null &&
+            saturatedCall.CreatedCall!.GetAttributeValue<DateTime>("os_sr_call_ctat") == saturatedContact,
+            "SDK saturated within-tolerance RecordCall ignores platform-default profile and schedule inputs");
+        var replayCall = new Host(100010000) { Receipt = saturatedCall.Receipt, Status = ActionRequest.Answered };
+        foreach (var parameter in saturatedCall.Input) replayCall.Input[parameter.Key] = parameter.Value;
+        new ApplyCandidateAction().Execute(replayCall);
+        Check((string)replayCall.Output["ResultCode"] == "DuplicateReplay" && replayCall.Calls == 0 &&
+            replayCall.Histories == 0 && replayCall.Updates == 0 && replayCall.Receipt == saturatedCall.Receipt,
+            "SDK same CorrelationId and same ContactedAt replays without new writes");
+        var conflictCall = new Host(100010000) { Receipt = saturatedCall.Receipt, Status = ActionRequest.Answered };
+        foreach (var parameter in saturatedCall.Input) conflictCall.Input[parameter.Key] = parameter.Value;
+        conflictCall.Input["ContactedAt"] = saturatedContact.AddMilliseconds(-78);
+        Reject(() => new ApplyCandidateAction().Execute(conflictCall), "CORRELATION_CONFLICT");
+        Check(conflictCall.Calls == 0 && conflictCall.Histories == 0 && conflictCall.Updates == 0,
+            "SDK same CorrelationId with different ContactedAt conflicts without new writes");
         var malicious = new Host(100010000);
         malicious.Input["Actor"] = Guid.NewGuid();
         Reject(() => new ApplyCandidateAction().Execute(malicious), "UNEXPECTED_INPUT:SDK_ADAPTER:OTHER");

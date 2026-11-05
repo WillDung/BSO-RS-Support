@@ -511,21 +511,50 @@ static class Program
         Reject(() => Request(invalid), "REASON_REQUIRED");
         invalid = Input(); invalid["Actor"] = Guid.NewGuid();
         Reject(() => Request(invalid), "UNEXPECTED_INPUT:ACTION_REQUEST:OTHER");
-        invalid = Input(); invalid["ContactedAt"] = Now.AddSeconds(1);
-        Reject(() => Request(invalid), "INVALID_CONTACT_TIME");
+        Check(ActionRequest.MaxRecordCallFutureClockSkew == TimeSpan.FromSeconds(5),
+            "RecordCall future clock-skew tolerance is exactly 5 seconds");
         // Live RecordCall skew: ContactedAt was +160 ms after handler start and +82 ms after handler end.
-        invalid = Input(); invalid["ContactedAt"] = Now.AddMilliseconds(160);
+        foreach (var accepted in new[]
+        {
+            Now.AddMinutes(-1), Now, Now.AddTicks(1), Now.AddMilliseconds(82), Now.AddMilliseconds(160),
+            Now.AddMilliseconds(4999), Now + ActionRequest.MaxRecordCallFutureClockSkew
+        })
+        {
+            var acceptedInput = Input(); acceptedInput["ContactedAt"] = accepted;
+            Check(Request(acceptedInput).Values["ContactedAt"] is DateTime acceptedContact && acceptedContact == accepted &&
+                acceptedContact.Kind == DateTimeKind.Utc,
+                "ContactedAt " + (accepted - Now).Ticks + " ticks from server UTC is accepted unchanged");
+        }
+        invalid = Input(); invalid["ContactedAt"] = Now + ActionRequest.MaxRecordCallFutureClockSkew + TimeSpan.FromTicks(1);
         Reject(() => Request(invalid), "INVALID_CONTACT_TIME");
-        invalid = Input(); invalid["ContactedAt"] = Now.AddMilliseconds(82);
+        invalid = Input(); invalid["ContactedAt"] = Now.AddSeconds(6);
         Reject(() => Request(invalid), "INVALID_CONTACT_TIME");
-        invalid = Input(); invalid["ContactedAt"] = Now.AddTicks(1);
-        Reject(() => Request(invalid), "INVALID_CONTACT_TIME");
-        Check(Request(Input()).Values["ContactedAt"] is DateTime equalContact && equalContact == Now &&
-            equalContact.Kind == DateTimeKind.Utc, "ContactedAt equal to server UTC time is accepted unchanged");
         invalid = Input(); invalid["ContactedAt"] = DateTime.SpecifyKind(Now.AddMinutes(-1), DateTimeKind.Unspecified);
         Reject(() => Request(invalid), "INVALID_CONTACT_TIME");
         invalid = Input(); invalid["ContactedAt"] = DateTime.SpecifyKind(Now.AddMinutes(-1), DateTimeKind.Local);
         Reject(() => Request(invalid), "INVALID_CONTACT_TIME");
+        var skewCorrelation = Guid.NewGuid();
+        var skewInput = Input(correlation: skewCorrelation); skewInput["ContactedAt"] = Now.AddMilliseconds(160);
+        var skewFirst = Request(skewInput);
+        var skewLater = new ActionRequest(Actor, skewInput, Now.AddSeconds(1));
+        Check(skewFirst.Fingerprint == skewLater.Fingerprint,
+            "RecordCall fingerprint excludes server utcNow and the clock-skew tolerance");
+        var skewPast = Input(correlation: skewCorrelation); skewPast["ContactedAt"] = Now.AddMinutes(-1);
+        Check(Request(skewPast).Fingerprint != skewFirst.Fingerprint,
+            "RecordCall fingerprint includes the exact submitted ContactedAt");
+        var skewStore = new MemoryStore { Status = ActionRequest.NeedCall };
+        var skewResult = skewStore.Atomic(skewFirst);
+        Check(!skewResult.Replay && skewResult.Current == ActionRequest.Answered && skewStore.Calls == 1 &&
+            skewStore.Histories == 1 && skewStore.Receipts.Count == 1,
+            "Within-tolerance future RecordCall commits Call Log, History, and Receipt");
+        var skewReplay = skewStore.Atomic(skewLater);
+        Check(skewReplay.Replay && skewReplay.CallId == skewResult.CallId && skewStore.Calls == 1 &&
+            skewStore.Histories == 1 && skewStore.Receipts.Count == 1,
+            "Same CorrelationId and same ContactedAt replays without new writes");
+        var skewConflict = Input(correlation: skewCorrelation); skewConflict["ContactedAt"] = Now.AddMilliseconds(82);
+        Reject(() => skewStore.Atomic(Request(skewConflict)), "CORRELATION_CONFLICT");
+        Check(skewStore.Calls == 1 && skewStore.Histories == 1 && skewStore.Receipts.Count == 1,
+            "Same CorrelationId with different ContactedAt conflicts without new writes");
         var updateStore = new MemoryStore();
         var update = Request(Input("UpdateCandidate"));
         var original = updateStore.Atomic(update);

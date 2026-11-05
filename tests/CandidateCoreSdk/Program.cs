@@ -1257,6 +1257,20 @@ internal static class Program
             host.MainValues[property] = property == "IsInTransaction" ? (object)false : property == "Depth" ? 2 : (object)Guid.Empty;
             Reject(() => new ApplyCandidateAction().Execute(host), "UNSUPPORTED_EXECUTION_CONTEXT");
         }
+        foreach (var kind in new[] { DateTimeKind.Unspecified, DateTimeKind.Local })
+        {
+            var nonUtcContact = new Host(100010000);
+            nonUtcContact.Input["ContactedAt"] = DateTime.SpecifyKind(DateTime.UtcNow.AddMinutes(-1), kind);
+            Reject(() => new ApplyCandidateAction().Execute(nonUtcContact), "INVALID_CONTACT_TIME");
+            Check(nonUtcContact.ServiceOperations.Count == 0 && nonUtcContact.Receipt == null,
+                "SDK adapter passes " + kind + " ContactedAt through unnormalized and rejects before any service call");
+        }
+        var futureContact = new Host(100010000);
+        futureContact.Input["ContactedAt"] = DateTime.UtcNow.AddSeconds(5);
+        Reject(() => new ApplyCandidateAction().Execute(futureContact), "INVALID_CONTACT_TIME");
+        Check(futureContact.ServiceOperations.Count == 0 && futureContact.Receipt == null &&
+            futureContact.Calls == 0 && futureContact.Histories == 0,
+            "SDK RecordCall with future UTC ContactedAt is rejected before any service call");
         var malicious = new Host(100010000);
         malicious.Input["Actor"] = Guid.NewGuid();
         Reject(() => new ApplyCandidateAction().Execute(malicious), "UNEXPECTED_INPUT:SDK_ADAPTER:OTHER");

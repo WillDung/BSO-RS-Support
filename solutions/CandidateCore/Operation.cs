@@ -44,6 +44,8 @@ namespace os_sr_cact
         public const int ScheduleActive = 100000001;
         public const int ScheduleCancelled = 100000002;
         public const int ScheduleSuperseded = 100000003;
+        // Tolerates client/server clock skew only; ContactedAt is persisted and fingerprinted exactly as submitted.
+        public static readonly TimeSpan MaxRecordCallFutureClockSkew = TimeSpan.FromSeconds(5);
         public Guid Actor { get; }
         public Guid Correlation { get; }
         public Guid? CandidateId { get; }
@@ -232,7 +234,8 @@ namespace os_sr_cact
                 int outcome = Required<int>(values, "CallOutcome");
                 if (outcome < NeedCall || outcome > Waiting) throw new OperationError("INVALID_OUTCOME");
                 var time = Required<DateTime>(values, "ContactedAt");
-                if (time.Kind != DateTimeKind.Utc || time > utcNow) throw new OperationError("INVALID_CONTACT_TIME");
+                if (time.Kind != DateTimeKind.Utc || time > utcNow + MaxRecordCallFutureClockSkew)
+                    throw new OperationError("INVALID_CONTACT_TIME");
             }
             if (Action == "RequestReschedule" || Action == "CancelRound1")
             {

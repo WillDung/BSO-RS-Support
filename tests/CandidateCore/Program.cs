@@ -513,6 +513,19 @@ static class Program
         Reject(() => Request(invalid), "UNEXPECTED_INPUT:ACTION_REQUEST:OTHER");
         invalid = Input(); invalid["ContactedAt"] = Now.AddSeconds(1);
         Reject(() => Request(invalid), "INVALID_CONTACT_TIME");
+        // Live RecordCall skew: ContactedAt was +160 ms after handler start and +82 ms after handler end.
+        invalid = Input(); invalid["ContactedAt"] = Now.AddMilliseconds(160);
+        Reject(() => Request(invalid), "INVALID_CONTACT_TIME");
+        invalid = Input(); invalid["ContactedAt"] = Now.AddMilliseconds(82);
+        Reject(() => Request(invalid), "INVALID_CONTACT_TIME");
+        invalid = Input(); invalid["ContactedAt"] = Now.AddTicks(1);
+        Reject(() => Request(invalid), "INVALID_CONTACT_TIME");
+        Check(Request(Input()).Values["ContactedAt"] is DateTime equalContact && equalContact == Now &&
+            equalContact.Kind == DateTimeKind.Utc, "ContactedAt equal to server UTC time is accepted unchanged");
+        invalid = Input(); invalid["ContactedAt"] = DateTime.SpecifyKind(Now.AddMinutes(-1), DateTimeKind.Unspecified);
+        Reject(() => Request(invalid), "INVALID_CONTACT_TIME");
+        invalid = Input(); invalid["ContactedAt"] = DateTime.SpecifyKind(Now.AddMinutes(-1), DateTimeKind.Local);
+        Reject(() => Request(invalid), "INVALID_CONTACT_TIME");
         var updateStore = new MemoryStore();
         var update = Request(Input("UpdateCandidate"));
         var original = updateStore.Atomic(update);

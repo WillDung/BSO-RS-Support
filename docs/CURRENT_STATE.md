@@ -1,5 +1,47 @@
 # Current State
 
+## Normal srapp Candidate Console entrypoint accepted without tenant writes (2026-11-05)
+
+**Status:** `NORMAL_SRAPP_CONSOLE_CACHE_ACCEPTED`, `CANDIDATE_CONSOLE_NORMAL_ENTRYPOINT_ACCEPTED`, `P0_SLICE_1_LIVE_FUNCTIONALLY_ACCEPTED`. This closes the normal-entrypoint gate in the preceding RecordCall/workflow acceptance checkpoint below; it does not reopen Candidate Core or establish clean-BSO or Production acceptance. `CLEAN_BSO_ACCEPTANCE_DEFERRED`, `P0_SOURCE_AHEAD_OF_FROZEN_RELEASE_ARTIFACT`, `BUSINESS_MVP_READY_FOR_PRODUCTION_FALSE`, `REAL_DATA_STILL_PROHIBITED`.
+
+**Read-only diagnosis and classification:** `SRAPP_STALE_RESOURCE_NOT_REPRODUCED_NORMAL_ENTRYPOINT_CURRENT`. Fresh PAC identity and browser global context agreed on owner-approved VN LMV IT and exact `srapp`. Normal Candidate Management navigation already served the accepted resources on the first observation. The earlier stale response was not reproduced, and its historical root cause remains unproven; no browser-only, stale-publication, or platform-cache defect is asserted.
+
+The published and current/unpublished Site Map both reference `subarea_bso_candidate_management` with `Url="$webresource:os_/bso/candidate-console.html"` and no authored version/query token. AppModule `appgraph`, `appmodulexmlmanaged`, and `configxml` were empty on the published read; navigation resolves through its associated `srapp` Site Map. The app's own `webResourceId` resolves to the platform default app icon, not the Candidate Console.
+
+The browser wrapper used `pagetype=webresource&webresourceName=os_%2Fbso%2Fcandidate-console.html`. The platform's `getWebResourceUrl('os_/bso/candidate-console.html')` returned the exact iframe path:
+
+```text
+/%7b639294395670000177%7d/webresources/os_/bso/candidate-console.html
+```
+
+Its script request was:
+
+```text
+/%7b639294395670000177%7d/webresources/os_/bso/candidate-console.js?v=cb26a8d5a859
+```
+
+The HTML contains the relative `candidate-console.js?v=cb26a8d5a859` reference; the browser resolves it under the platform-generated versioned directory. The directory token decodes as .NET UTC ticks `2026-11-05T01:39:27.0000177Z`, consistent with the resource records' `ModifiedOn=2026-11-05T01:39:27Z`. This establishes the observed URL construction, not the cause of the earlier stale response.
+
+**Exact SHA-256 reconciliation:**
+
+| Layer | HTML | JavaScript |
+| --- | --- | --- |
+| Authored source / accepted source | `b922522c7c818ae28b30814bd6adafadb260759f437b5f3a149e117d92d95fba` | `cb26a8d5a859e9a72b27e25ee8220a4ad5704d4473dd37af0ee7b69ec0d55e53` |
+| Current (`RetrieveUnpublishedMultiple`) | Same accepted HTML hash | Same accepted JS hash |
+| Published definition | Same accepted HTML hash | Same accepted JS hash |
+| Normal-wrapper effective response body | Same accepted HTML hash | Same accepted JS hash |
+| Direct unversioned effective response body | Same accepted HTML hash | Same accepted JS hash |
+
+Both definition paths returned `componentstate=0`. Browser response-body lengths were 16,483 / 119,245 bytes, HTTP 200. Normal-wrapper responses reported `fromServiceWorker=true`; read-only inspection of the platform `WebResources` CacheStorage found these exact versioned HTML/JS URLs with the same accepted hashes. Response headers included `Cache-Control: public`, with expiry in November 2027. The presence of caching is not evidence that these bytes are stale. Direct unversioned comparison used GET fetches only; neither acceptance iframe was manually redirected.
+
+**No-write resolution and fresh-path acceptance:** Normal app reopen/navigation and full reload sufficed. A genuinely new browser tab was opened using only `main.aspx?appid=<exact srapp app id>`; the owner completed its sign-in manually. Candidate Management loaded through normal app navigation/default navigation. A subsequent normal-wrapper reload captured and hashed the actual HTML and JS responses above. A navigation-away/back observation reused an iframe and did not yield a complete response pair within the observation timeout; acceptance uses the successful reload response capture, not a substituted fetch. No cache disabling, cache clearing, service-worker unregister, token replacement, publication, or tenant correction was needed.
+
+Candidate Management rendered correctly. Existing synthetic `CAND-00001066` was searched and opened using **Open**, without editing or invoking a business action. Its details showed **Round 1 Scheduled**. Scheduling showed one Round 1 **ACTIVE / SCHEDULED** row, `[DEV]` interviewer/location, Pending result, and **6 November 2026 10:00-11:00** in the browser's displayed local time. No Candidate, TA, or Location mutation occurred.
+
+**Final GET-only topology reconciliation:** Package baseline remains `2026-11-05T05:54:24Z`, version `1.0.0`; 21 API inputs / five outputs / one `ProfileFieldMask`; all 50 legacy guards disabled, zero active. The complete 51-member Solution identity/behavior set matched current authored roots plus the package-backed generated assembly, API/input/output/package memberships, and existing app child. Its sorted `type|objectid|rootcomponentbehavior` fingerprint was `1e95db71bcc4e6145afd0325cd4717d7c9b4e97109ca29f2978455bf676db733`. All 13 app component identities matched authored source. App role associations matched after resolving exported built-in role-template IDs to live role instances; no app/Solution membership drift was found. BSO's 60 privilege/depth entries and Reference Admin's 20 matched canonical role XML exactly. Reference Admin remained unassigned to users and teams. No role/security change occurred.
+
+**Git and execution boundary:** The supplied checkpoint correctly identifies `d4c68be` as containing the RecordCall product correction, but its statement that updated regression tests/docs remain uncommitted was superseded before this investigation: actual starting HEAD was `d435166`, whose existing commit contains those updates, and the worktree was clean. Neither commit nor the tests were changed. This investigation changes documentation only; tenant writes, publication, Candidate business calls, package/release rebuilds, automatic retries, commits and pushes were all zero. Frozen release artifacts, pins/manifests and Solution version `1.0.0.1` remain unchanged.
+
 ## RecordCall clock-skew tolerance deployed; Slice 1 workflow and reference administration accepted in DEV (2026-11-05)
 
 **Status:** `RECORD_CALL_CLOCK_SKEW_TOLERANCE_IMPLEMENTED`, `RECORD_CALL_RUNTIME_ACCEPTED`, `P0_SLICE1_CANDIDATE_CORE_REGRESSION_ACCEPTED` (RecordCall → ProceedToScheduling → MarkRound1Scheduled), `TA_ADMINISTRATION_PERSISTENCE_ACCEPTED`, `LOCATION_ADMINISTRATION_PERSISTENCE_ACCEPTED`, `REFERENCE_POLICY_RUNTIME_ACCEPTED`. `P0_SLICE_1_LIVE_FUNCTIONALLY_ACCEPTED` is **not** claimed: normal `srapp` wrapper loading of current Console resources remains a separate open gate.

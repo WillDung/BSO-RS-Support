@@ -7,23 +7,23 @@ function Assert-Test([bool]$condition, [string]$message) {
 }
 
 $script:checks = 0
-$schemaPath = Join-Path $root 'solutions/Entities/os_sr_avq/AvailabilityQuery.schema.json'
-$connectorPath = Join-Path $root 'solutions/AvailabilityQuery/graph-scheduling.openapi.json'
-$flowPath = Join-Path $root 'solutions/AvailabilityQuery/availability-flow.contract.json'
-$environmentPath = Join-Path $root 'solutions/AvailabilityQuery/availability-environment-variables.json'
-$retentionPath = Join-Path $root 'solutions/AvailabilityQuery/availability-query-retention.json'
-$rolePath = Join-Path $root 'solutions/AvailabilityQuery/availability-role-delta.json'
-$registrationPath = Join-Path $root 'solutions/AvailabilityQuery/availability-plugin-registration.contract.json'
-$pluginPath = Join-Path $root 'solutions/AvailabilityQuery/AvailabilityQueryPlugin.cs'
-$rulesPath = Join-Path $root 'solutions/AvailabilityQuery/AvailabilityRules.cs'
-$driftPath = Join-Path $root 'solutions/AvailabilityQuery/ReferenceDriftPolicy.cs'
-$rendererPath = Join-Path $root 'solutions/AvailabilityQuery/AvailabilityConfigurationRenderer.cs'
-$consolePath = Join-Path $root 'solutions/CandidateConsole/WebResources/os_/bso/candidate-console-availability.js'
-$htmlPath = Join-Path $root 'solutions/CandidateConsole/WebResources/os_/bso/candidate-console.html'
-$configPath = Join-Path $root 'solutions/CandidateConsole/WebResources/os_/bso/candidate-console-environment.js'
+$schemaPath = Join-Path $root 'solutions\Entities\os_sr_avq\AvailabilityQuery.schema.json'
+$flowPath = Join-Path $root 'solutions\AvailabilityQuery\availability-flow.contract.json'
+$environmentPath = Join-Path $root 'solutions\AvailabilityQuery\availability-environment-variables.json'
+$retentionPath = Join-Path $root 'solutions\AvailabilityQuery\availability-query-retention.json'
+$rolePath = Join-Path $root 'solutions\AvailabilityQuery\availability-role-delta.json'
+$registrationPath = Join-Path $root 'solutions\AvailabilityQuery\availability-plugin-registration.contract.json'
+$pluginPath = Join-Path $root 'solutions\AvailabilityQuery\AvailabilityQueryPlugin.cs'
+$rulesPath = Join-Path $root 'solutions\AvailabilityQuery\AvailabilityRules.cs'
+$adapterPath = Join-Path $root 'solutions\AvailabilityQuery\OutlookMeetingTimesAdapter.cs'
+$driftPath = Join-Path $root 'solutions\AvailabilityQuery\ReferenceDriftPolicy.cs'
+$rendererPath = Join-Path $root 'solutions\AvailabilityQuery\AvailabilityConfigurationRenderer.cs'
+$consolePath = Join-Path $root 'solutions\CandidateConsole\WebResources\os_\bso\candidate-console-availability.js'
+$htmlPath = Join-Path $root 'solutions\CandidateConsole\WebResources\os_\bso\candidate-console.html'
+$configPath = Join-Path $root 'solutions\CandidateConsole\WebResources\os_\bso\candidate-console-environment.js'
+$supersededConnectorPath = Join-Path $root 'solutions\AvailabilityQuery\graph-scheduling.openapi.json'
 
 $schema = Get-Content -LiteralPath $schemaPath -Raw | ConvertFrom-Json -AsHashtable
-$connector = Get-Content -LiteralPath $connectorPath -Raw | ConvertFrom-Json -AsHashtable
 $flow = Get-Content -LiteralPath $flowPath -Raw | ConvertFrom-Json -AsHashtable
 $environment = Get-Content -LiteralPath $environmentPath -Raw | ConvertFrom-Json -AsHashtable
 $retention = Get-Content -LiteralPath $retentionPath -Raw | ConvertFrom-Json -AsHashtable
@@ -38,84 +38,113 @@ Assert-Test ($schema.table.primaryName.logicalName -eq 'os_sr_avq_ref' -and $sch
 Assert-Test (@($schema.table.fields | Where-Object logicalName -eq 'os_sr_avq_ta').Count -eq 1) 'Required TA lookup exists.'
 Assert-Test (@($schema.table.fields | Where-Object logicalName -eq 'os_sr_avq_loc').Count -eq 1) 'Optional Location lookup exists.'
 Assert-Test (@($schema.table.fields | Where-Object { $_.logicalName -match 'cand|intv' }).Count -eq 0) 'No Candidate or Interview Schedule fields exist.'
-Assert-Test (@($schema.table.fields | Where-Object { $_.logicalName -match 'availabilityView|graph|email' }).Count -eq 0) 'No raw Graph or mailbox-address fields exist.'
+Assert-Test (@($schema.table.fields | Where-Object { $_.logicalName -match 'provider|payload|email' }).Count -eq 0) 'No provider payload or mailbox-address fields exist.'
 Assert-Test (@($schema.table.fields | Where-Object logicalName -eq 'os_sr_avq_slts').Count -eq 1) 'Only computed slot results are persisted.'
+Assert-Test (@($schema.table.fields.logicalName | Sort-Object) -join ',' -eq 'os_sr_avq_dur,os_sr_avq_end,os_sr_avq_err,os_sr_avq_exp,os_sr_avq_loc,os_sr_avq_mod,os_sr_avq_qat,os_sr_avq_rsn,os_sr_avq_slts,os_sr_avq_stat,os_sr_avq_strt,os_sr_avq_ta') 'Availability Query field contract is unchanged.'
 Assert-Test (@($schema.table.relationships | ForEach-Object schemaName) -join ',' -eq 'os_sr_ta_avq,os_sr_loc_avq') 'Only TA and Location relationships exist.'
 Assert-Test (@($schema.table.relationships | Where-Object { $_.cascadeDelete -ne 'Restrict' -or $_.cascadeAssign -ne 'NoCascade' -or $_.cascadeShare -ne 'NoCascade' -or $_.cascadeUnshare -ne 'NoCascade' -or $_.cascadeReparent -ne 'NoCascade' }).Count -eq 0) 'Relationship cascades are restrictive and non-cascading.'
 
-$pathItems = @($connector.paths.Keys)
-Assert-Test ($pathItems.Count -eq 1 -and $pathItems[0] -eq '/me/calendar/getSchedule') 'Connector exposes only getSchedule.'
-Assert-Test (@($connector.paths['/me/calendar/getSchedule'].Keys) -join ',' -eq 'post') 'Connector has no event or email write method.'
-Assert-Test ($connector.securityDefinitions.oauth2.scopes.Keys -join '' -eq 'https://graph.microsoft.com/Calendars.ReadBasic') 'Connector requests delegated Calendars.ReadBasic only.'
-Assert-Test ((Get-Content -LiteralPath $connectorPath -Raw) -notmatch '(?i)clientSecret|clientId|accessToken|tenantId|Calendars\.ReadWrite|Mail\.Send|/events|sendMail') 'Connector source embeds no identity secret or out-of-scope operation.'
-
+Assert-Test (-not (Test-Path -LiteralPath $supersededConnectorPath)) 'Superseded custom connector source is absent.'
+Assert-Test ($flow.status -eq 'PROPOSED_SOURCE_OFFLINE_NOT_CREATED') 'Flow is a source contract, not a deployed Flow.'
 Assert-Test ($flow.trigger.concurrency -eq 1 -and $flow.trigger.condition -match 'Pending') 'Flow is Pending-only and serial.'
-Assert-Test (@($flow.resultTransitions).Count -eq 3) 'Flow has exactly three terminal result transitions.'
-Assert-Test (@($flow.actions | Where-Object { $_.operation -match '(?i)Candidate|os_sr_cact|os_sr_intv|Receipt|Status History|email|event' }).Count -eq 0) 'Flow actions exclude Candidate Core and business writes.'
+Assert-Test (@($flow.actions.sequence) -join ',' -eq '1,2,3,4,5,6,7,8,9,10,11') 'Flow has the exact ordered eleven-step contract.'
+Assert-Test (@($flow.resultTransitions) -join ',' -eq 'Pending -> Available,Pending -> NoSlots,Pending -> Failed') 'Flow has exactly three terminal transitions.'
+Assert-Test (@($flow.actions | Where-Object { $_.operation -match '(?i)Candidate|os_sr_cact|os_sr_intv|Receipt|Status History|email send|event creat' }).Count -eq 0) 'Flow actions exclude Candidate Core and business writes.'
+Assert-Test ($flow.actions[5].operation -match 'Office 365 Outlook Find meeting times \(V2\)') 'Flow calls the approved Outlook action.'
+Assert-Test ($flow.actions[6].operation -match 'entire provider response' -and $flow.actions[7].operation -match 'OutlookMeetingTimesAdapter') 'Flow validates and filters the entire response.'
+Assert-Test ($flow.actions[8].operation -match 'Before every terminal write' -and $flow.actions[8].operation -match 're-read TA') 'Required reference re-read immediately precedes drift comparison.'
+Assert-Test ($flow.actions[9].operation -match 'ReferenceDriftPolicy.BeforeTerminalWrite' -and $flow.actions[10].operation -match 'exactly one terminal') 'Drift is applied before the single terminal write.'
+Assert-Test ($flow.provider.connector -eq 'Office 365 Outlook' -and $flow.provider.action -eq 'Find meeting times (V2)' -and $flow.provider.operationId -eq 'FindMeetingTimes_V2') 'The standard Outlook V2 provider is authoritative.'
+Assert-Test (@($flow.provider.inputs.Keys | Sort-Object) -join ',' -eq 'ActivityDomain,End,IsOrganizerOptional,MaxCandidates,MeetingDuration,MinimumAttendeePercentage,RequiredAttendees,ResourceAttendees,Start') 'Provider has exactly the approved input keys.'
+Assert-Test ($flow.provider.inputs.RequiredAttendees -match 'TA email' -and $flow.provider.inputs.ResourceAttendees -match 'Empty for Online' -and $flow.provider.inputs.ResourceAttendees -match 'Onsite') 'TA and mode-specific room inputs are explicit.'
+Assert-Test ($flow.provider.inputs.MeetingDuration -match 'duration' -and $flow.provider.inputs.Start -match 'UTC' -and $flow.provider.inputs.End -match 'UTC') 'Duration and UTC request window are explicit.'
+Assert-Test ($flow.provider.inputs.MaxCandidates -match 'os_sr_avq_maxc' -and $flow.provider.inputs.MaxCandidates -match '1-200') 'MaxCandidates is bounded and configured.'
+Assert-Test ($flow.provider.inputs.MinimumAttendeePercentage -is [string] -and $flow.provider.inputs.MinimumAttendeePercentage -ceq '100') 'Minimum attendee percentage is the exact string 100.'
+Assert-Test ($flow.provider.inputs.IsOrganizerOptional -eq $true -and $flow.provider.inputs.ActivityDomain -ceq 'Work') 'Organizer is optional and activity domain is Work.'
+Assert-Test (@($flow.provider.noInputs) -join ',' -eq 'Candidate,Interview Schedule,Timezone') 'No Candidate, Interview Schedule or timezone is passed to the connector.'
+Assert-Test ($flow.provider.evaluationClock -match 'current UTC after the provider call' -and $flow.provider.evaluationClock -match 'never backdate') 'Lead time and queried-at use the same current post-provider instant.'
+Assert-Test (@($flow.provider.response.requiredTopLevel) -join ',' -eq 'emptySuggestionsReason,meetingTimeSuggestions') 'Top-level provider response is explicit.'
+Assert-Test (@($flow.provider.response.requiredSuggestion).Count -eq 5 -and $flow.provider.response.requiredSuggestion -contains 'attendeeAvailability') 'Suggestion time and attendee structures are required.'
+Assert-Test (@($flow.provider.response.requiredAttendeeAvailability) -join ',' -eq 'attendee.emailAddress.address,attendee.type,availability') 'Every attendee supplies address, type and availability.'
+Assert-Test ($flow.provider.response.acceptedAvailability -match 'Exactly free' -and $flow.provider.response.acceptedAvailability -match 'exactly once') 'Expected attendee counts and free-only semantics are explicit.'
+Assert-Test ($flow.provider.response.organizer -match 'never used' -and $flow.provider.response.noValidSuggestions -match 'NO_COMMON_SLOT') 'Organizer is ignored and empty results have a deterministic reason.'
+Assert-Test ($flow.provider.response.unknownOrMalformed -match 'PROVIDER_RESPONSE_INVALID' -and $flow.provider.response.unknownOrMalformed -match 'PROVIDER_TIMEZONE_UNSUPPORTED') 'Malformed shape and unsupported timezone fail safely.'
+Assert-Test ($flow.provider.response.persistence -match 'Only sorted, distinct UTC startUtc/endUtc slots' -and $flow.provider.response.persistence -match 'Never persist or expose') 'Only canonical slots persist, without provider data.'
+Assert-Test ($flow.provider.implementation -match 'not an invocable Power Automate action' -and $flow.provider.implementation -match 'not a deployed Flow') 'Offline reference code is not represented as a live Flow.'
+Assert-Test ($flow.providerTimezoneFirstRuntimeGate.action -eq 'STOP' -and -not $flow.providerTimezoneFirstRuntimeGate.retry -and -not $flow.providerTimezoneFirstRuntimeGate.automaticConversion) 'First unsupported timezone stops without retry or conversion.'
+Assert-Test ($flow.providerTimezoneFirstRuntimeGate.capture -match 'field names, types and timezone' -and $flow.providerTimezoneFirstRuntimeGate.capture -match 'do not persist raw') 'Only sanitized synthetic shape evidence may be captured.'
 Assert-Test ($flow.retry.'429' -match 'Retry-After' -and $flow.retry.'429' -match 'two retries') '429 policy is bounded and Retry-After aware.'
-Assert-Test ($flow.retry.ambiguousTimeout -match 'No blind repeat') 'Ambiguous timeout does not retry blindly.'
+Assert-Test ($flow.retry.ambiguousTimeout -match 'No blind repeat' -and $flow.retry.unsupportedTimezoneOrShape -match 'do not retry') 'Timeout and unsupported-shape stop rules are explicit.'
 Assert-Test ($flow.safeErrors -contains 'REFERENCE_CHANGED') 'Flow recognizes the deterministic reference-drift failure.'
 Assert-Test ($flow.referenceDrift.terminalCoverage -join ',' -eq 'Available,NoSlots,Failed') 'Drift recheck covers every terminal result.'
-Assert-Test ($flow.referenceDrift.onChangedOrUnreadable.state -eq 'Failed' -and
-    @($flow.referenceDrift.onChangedOrUnreadable.slots).Count -eq 0 -and
-    $flow.referenceDrift.onChangedOrUnreadable.error -eq 'REFERENCE_CHANGED') 'Drift always fails closed with zero slots.'
+Assert-Test ($flow.referenceDrift.onChangedOrUnreadable.state -eq 'Failed' -and @($flow.referenceDrift.onChangedOrUnreadable.slots).Count -eq 0 -and $flow.referenceDrift.onChangedOrUnreadable.error -eq 'REFERENCE_CHANGED') 'Drift always fails closed with zero slots.'
 Assert-Test ($flow.referenceDrift.memoryOnlyFields.Count -eq 6 -and $flow.referenceDrift.storage -match 'Memory only') 'Reference snapshots remain flow-memory-only.'
-Assert-Test ($flow.actions[-2].operation -match 'Before every terminal write' -and
-    $flow.actions[-2].operation -match 're-read TA' -and
-    $flow.actions[-2].operation -match 'ReferenceDriftPolicy.BeforeTerminalWrite') 'Required reference re-read immediately precedes terminal update.'
+Assert-Test ($flow.referenceDrift.compare -join ',' -eq 'reference id,active state,normalized mailbox email' -and $flow.referenceDrift.ignore -contains 'TA display name') 'Relevant drift excludes display-name changes.'
+Assert-Test ($flow.identity.requestCreator -match 'Separate BSO' -and $flow.identity.resultWriter -match 'current DEV owner' -and $flow.identity.outlookConnection -match 'not an impersonation') 'Requester, writer and connector identities are explicit.'
+Assert-Test ($flow.identity.classification -eq 'DEV_FUNCTIONAL_IDENTITY_ELEVATED_NOT_SECURITY_ACCEPTANCE' -and $flow.identity.production -match 'later decision') 'Elevated DEV behavior is not security acceptance.'
 
 Assert-Test ($environment.fixedConstants.timeZone -eq 'SE Asia Standard Time' -and $environment.fixedConstants.availabilityIntervalMinutes -eq 15) 'Timezone and interval are fixed constants.'
-Assert-Test ($environment.fixedConstants.maximumHorizonDays -eq 61) 'Maximum horizon is 61 days.'
+Assert-Test ($environment.fixedConstants.maximumHorizonDays -eq 61) 'Existing conservative maximum horizon is 61 days.'
 Assert-Test (@($environment.definitions | Where-Object { $_.defaultValue -ne $null }).Count -eq 0) 'No tenant runtime configuration is invented.'
-Assert-Test (@($environment.definitions.schemaName | Sort-Object) -join ',' -eq 'os_sr_avq_bhrs,os_sr_avq_dom,os_sr_avq_durs,os_sr_avq_exp,os_sr_avq_hzn,os_sr_avq_lead') 'Only approved environment-variable definitions are included.'
-Assert-Test ($environment.deploymentBinding.renderer -eq 'AvailabilityConfigurationRenderer.Render' -and
-    $registration.unsecureConfigurationBinding.renderer -eq $environment.deploymentBinding.renderer) 'Deployment and registration share the canonical renderer.'
-Assert-Test (-not $registration.unsecureConfigurationBinding.manualValuesAllowed -and
-    $registration.unsecureConfigurationBinding.sameRenderedBytesForSteps) 'Both steps must use identical generated values, never hand-maintained copies.'
-Assert-Test ($registration.dateTimeFirstRuntimeGate.action -eq 'STOP' -and
-    -not $registration.dateTimeFirstRuntimeGate.retry -and
-    -not $registration.dateTimeFirstRuntimeGate.automaticNormalization) 'Unproven DateTime transport requires stop, no retry and no normalization.'
+Assert-Test (@($environment.definitions.schemaName | Sort-Object) -join ',' -eq 'os_sr_avq_bhrs,os_sr_avq_dom,os_sr_avq_durs,os_sr_avq_exp,os_sr_avq_hzn,os_sr_avq_lead,os_sr_avq_maxc') 'The canonical environment definitions include the bounded provider limit.'
+$maximum = @($environment.definitions | Where-Object schemaName -eq 'os_sr_avq_maxc')[0]
+Assert-Test ($maximum.minimum -eq 1 -and $maximum.maximum -eq 200 -and $maximum.technicalNameStatus -eq 'PROPOSED_PENDING_APPROVAL') 'Candidate-limit bounds and proposed technical name are explicit.'
+Assert-Test ($environment.deploymentBinding.renderer -eq 'AvailabilityConfigurationRenderer.Render' -and $registration.unsecureConfigurationBinding.renderer -eq $environment.deploymentBinding.renderer) 'Deployment and registration share the canonical renderer.'
+Assert-Test (-not $registration.unsecureConfigurationBinding.manualValuesAllowed -and $registration.unsecureConfigurationBinding.sameRenderedBytesForSteps) 'Both steps must use identical generated values, never hand-maintained copies.'
+Assert-Test ($registration.dateTimeFirstRuntimeGate.action -eq 'STOP' -and -not $registration.dateTimeFirstRuntimeGate.retry -and -not $registration.dateTimeFirstRuntimeGate.automaticNormalization) 'Unproven Dataverse DateTime transport requires stop and no normalization.'
 Assert-Test ($retention.retentionDays -eq 30 -and $retention.cleanup.frequency -eq 'Daily') 'Approved 30-day daily cleanup policy is bounded.'
 Assert-Test (-not $retention.cleanup.deleteBsoPrivilege) 'BSO has no cleanup Delete privilege.'
 Assert-Test ($role.existingBsoRole.mustNotAdd -contains 'Any Candidate Core privilege') 'BSO role delta prohibits Candidate Core rights.'
 Assert-Test (@($role.existingBsoRole.addPrivileges | Where-Object { $_.privilege -match 'Write|Delete|Assign|Share' }).Count -eq 0) 'BSO receives no Availability Query write/delete/assign/share.'
-Assert-Test (@($role.integrationRole.privileges | Where-Object { $_.privilege -match 'os_sr_cact|os_sr_cand|os_sr_intv|os_sr_call|os_sr_csh|os_sr_oprc' }).Count -eq 0) 'Integration role has no Candidate Core business privilege.'
+Assert-Test (@($role.integrationRole.privileges | Where-Object { $_.privilege -match 'os_sr_cact|os_sr_cand|os_sr_intv|os_sr_call|os_sr_csh|os_sr_oprc' }).Count -eq 0) 'Proposed least-privilege model has no Candidate Core business privilege.'
+Assert-Test ($role.integrationRole.assignTo -match '^Unassigned' -and $role.integrationRole.assignTo -match 'current owner' -and $role.deployment -match 'DEV_FUNCTIONAL_IDENTITY_ELEVATED_NOT_SECURITY_ACCEPTANCE') 'No app user or role change is a DEV dependency.'
 Assert-Test ($registration.packageId -eq 'os_sr_avqg_pkg' -and $registration.pluginType -eq 'os_sr_avqg.ProtectAvailabilityQuery') 'Guard package and plugin type are separate from Candidate Core.'
 Assert-Test (@($registration.steps | Where-Object { $_.message -notin @('Create', 'Update') -or $_.stageNumber -ne 20 -or $_.mode -ne 'Synchronous' }).Count -eq 0) 'Both guard registrations are synchronous PreOperation steps.'
 Assert-Test (@($registration.steps | Where-Object { $_.executionUser -ne 'Calling User' }).Count -eq 0) 'Guard steps run as Calling User.'
 
 $plugin = Get-Content -LiteralPath $pluginPath -Raw
 $rules = Get-Content -LiteralPath $rulesPath -Raw
+$adapter = Get-Content -LiteralPath $adapterPath -Raw
 $drift = Get-Content -LiteralPath $driftPath -Raw
 $renderer = Get-Content -LiteralPath $rendererPath -Raw
 $console = Get-Content -LiteralPath $consolePath -Raw
 $html = Get-Content -LiteralPath $htmlPath -Raw
 $config = Get-Content -LiteralPath $configPath -Raw
 Assert-Test ($plugin -match 'class ProtectAvailabilityQuery' -and $plugin -match 'Stage != 20') 'Separate synchronous PreOperation guard exists.'
-Assert-Test ($plugin -match 'IsCreateCaller' -and $plugin -match 'IsResultUpdateCaller') 'Guard applies independent creator and integration-user boundaries.'
+Assert-Test ($plugin -match 'IsCreateCaller' -and $plugin -match 'IsResultUpdateCaller' -and $plugin -match 'ResultWriterUserId') 'Guard applies independent creator and configured writer boundaries.'
+Assert-Test ($plugin -match 'new ColumnSet\("os_sr_avq_stat", "os_sr_avq_ta", "os_sr_avq_loc"') 'Guard reads the actual query columns for result validation.'
 Assert-Test ($plugin -notmatch 'os_sr_cact|os_sr_cand|os_sr_intv|os_sr_csh|os_sr_oprc') 'Availability plug-in has no Candidate Core references.'
 Assert-Test ($drift -notmatch 'Microsoft\.Xrm|IOrganizationService|os_sr_cact|os_sr_cand|os_sr_intv|os_sr_csh|os_sr_oprc|CreateRecord|UpdateRecord') 'Every drift path is pure: no business-table dependency or mutation service.'
 Assert-Test ($rules -match '"REFERENCE_CHANGED"' -and $console -match 'REFERENCE_CHANGED:') 'Guard category and safe Console mapping both cover drift.'
 Assert-Test ($plugin -match '!AllowedKeys.Contains\(name\)') 'Real parser rejects unknown configuration keys.'
-Assert-Test ($renderer -match 'PluginConfiguration.Parse\(rendered\)' -and
-    $renderer -match 'parsed.BusinessHours.Count != hours.Count') 'Renderer round-trips through the real parser and verifies equality.'
-Assert-Test ($renderer -notmatch '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' -and
-    (Get-Content -LiteralPath $registrationPath -Raw) -notmatch '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}') 'No deployment identity GUID is committed in renderer or registration.'
+Assert-Test ($renderer -match 'PluginConfiguration.Parse\(rendered\)' -and $renderer -match 'parsed.BusinessHours.Count != hours.Count') 'Renderer round-trips through the real parser and verifies equality.'
+Assert-Test ($renderer -notmatch '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' -and (Get-Content -LiteralPath $registrationPath -Raw) -notmatch '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}') 'No deployment identity GUID is committed in renderer or registration.'
 Assert-Test ($plugin -match 'time.Kind != DateTimeKind.Utc') 'Strict UTC validation remains unchanged.'
 Assert-Test ($rules -match 'TimeZoneId = "SE Asia Standard Time"' -and $rules -match 'IntervalMinutes = 15') 'Pure calculator fixes the approved timezone and interval.'
-Assert-Test ($rules -match 'HardMaximumHorizonDays = 61' -and $rules -match 'IsTerminalTransition') 'Calculator enforces provider horizon and terminal transition rules.'
+Assert-Test ($rules -match 'HardMaximumHorizonDays = 61' -and $rules -match 'IsTerminalTransition') 'Calculator enforces the existing horizon and terminal transition rules.'
+Assert-Test ($adapter -match 'IsOrganizerOptional => true' -and $adapter -match 'MinimumAttendeePercentage => "100"') 'Adapter request implements organizer independence and the exact percentage.'
+Assert-Test ($adapter -match 'PROVIDER_TIMEZONE_UNSUPPORTED' -and $adapter -match 'StringComparison.Ordinal' -and $adapter -match 'DateTime.SpecifyKind') 'Adapter requires a recognized UTC representation before marking timestamps UTC.'
+Assert-Test ($adapter -match 'taCount == 1' -and $adapter -match 'roomCount == 1' -and $adapter -match 'availability == "free"') 'Adapter requires one free expected attendee of each required type.'
+Assert-Test ($adapter -match 'SortedDictionary<DateTime, AvailableSlot>' -and $adapter -match 'SlotResultJson.Serialize') 'Adapter emits ordered bounded canonical slots.'
+foreach ($errorCode in $flow.safeErrors) {
+    Assert-Test ($rules.Contains('"' + $errorCode + '"')) "Guard permits safe Flow error $errorCode."
+}
 Assert-Test ($console -match 'availabilityEnabled !== true') 'Console panel is off unless explicitly configured.'
 Assert-Test ($console -match 'createRecord\(TABLE\.query\.logicalName' -and $console -match 'retrieveRecord\(query\.logicalName') 'Console creates and polls only an Availability Query.'
 Assert-Test ($console -match 'queryId !== lastQueryId') 'Superseded availability polling cannot overwrite a newer query.'
+Assert-Test ([regex]::Matches($console, 'queryId !== lastQueryId').Count -ge 2) 'The query identity is rechecked after the asynchronous poll returns.'
+Assert-Test ($console -match 'submission !== activeSubmission' -and $console -match 'submission === activeSubmission') 'Superseded submissions cannot publish stale success or error states.'
 Assert-Test ($console -notmatch 'updateRecord|deleteRecord|os_sr_cact|os_sr_cand|os_sr_intv|os_sr_csh|os_sr_oprc|MarkRound1Scheduled|selectedCandidate') 'Console cannot mutate or select Candidate/schedule state.'
+Assert-Test ($console -notmatch 'os_sr_ta_eml|os_sr_loc_rmeml') 'The display-only Console does not retrieve mailbox addresses.'
+Assert-Test ($console -match 'Object\.prototype\.hasOwnProperty\.call\(SAFE_ERRORS, error\)') 'Only owned safe error mappings are displayed.'
 Assert-Test ($console -match 'Asia/Ho_Chi_Minh' -and $console -match 'Pending' -and $console -match 'NoSlots' -and $console -match 'Failed') 'Console displays supported states in Vietnam time.'
 $panel = [regex]::Match($html, '(?s)<section class="panel" aria-labelledby="availability-heading">.*?</section>').Value
 Assert-Test ($panel -match 'availability-form' -and $panel -match 'display-only' -and $panel -notmatch 'CandidateId|MarkRound1Scheduled|os_sr_cact') 'Panel is separate, display-only and Candidate-independent.'
-Assert-Test ((Get-Content -LiteralPath $configPath -Raw) -notmatch 'availabilityEnabled\s*:\s*true') 'Current browser configuration does not enable availability.'
+Assert-Test ($config -notmatch 'availabilityEnabled\s*:\s*true') 'Current browser configuration does not enable availability.'
 Assert-Test ($console -match 'allowsReference\(record\[table\.name\], config\.syntheticDataOnly\)') 'TA and Location choices follow the shared synthetic-reference policy.'
-$secretScan = (@($pluginPath, $rulesPath, $consolePath, $connectorPath, $rendererPath, $driftPath) | ForEach-Object {
-    Get-Content -LiteralPath $_ -Raw
-}) -join "`n"
-Assert-Test ($secretScan -notmatch '(?i)(client_secret\s*[=:]\s*["''][^"'']+|Bearer\s+[A-Za-z0-9._-]{20,}|-----BEGIN (RSA |EC )?PRIVATE KEY-----)') 'No credentials, token or private key were introduced.'
+$sourcePaths = @($pluginPath, $rulesPath, $adapterPath, $consolePath, $rendererPath, $driftPath, $flowPath, $environmentPath, $retentionPath, $rolePath, $registrationPath, $schemaPath)
+$activeSource = ($sourcePaths | ForEach-Object { Get-Content -LiteralPath $_ -Raw }) -join "`n"
+Assert-Test ($activeSource -notmatch '(?i)getSchedule|availabilityView|graph-scheduling|os_sr_cr_grs|Calendars\.ReadBasic|IntegrationApplicationUserId|GRAPH_|DecodeSchedule|ScheduleSource') 'No superseded Graph provider contract remains in active source.'
+Assert-Test ($activeSource -notmatch '(?i)(client_secret\s*[=:]\s*["''][^"'']+|Bearer\s+[A-Za-z0-9._-]{20,}|-----BEGIN (RSA |EC )?PRIVATE KEY-----)') 'No credentials, token or private key were introduced.'
 
 Write-Output "Availability Query static checks passed: $script:checks"

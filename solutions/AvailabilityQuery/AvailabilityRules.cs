@@ -62,7 +62,8 @@ namespace os_sr_avqg
             int minimumLeadTimeMinutes,
             int maximumHorizonDays,
             int resultExpiryMinutes,
-            Guid integrationApplicationUserId,
+            Guid resultWriterUserId,
+            int maximumCandidates,
             int maximumSlotCount = DefaultMaximumSlots,
             int maximumPayloadLength = DefaultMaximumPayloadLength)
         {
@@ -80,9 +81,10 @@ namespace os_sr_avqg
                 minimumLeadTimeMinutes < 0 ||
                 maximumHorizonDays < 1 || maximumHorizonDays > HardMaximumHorizonDays ||
                 resultExpiryMinutes < 1 || resultExpiryMinutes > 1440 ||
-                integrationApplicationUserId == Guid.Empty ||
-                maximumSlotCount < 1 || maximumSlotCount > 1000 ||
-                maximumPayloadLength < 256 || maximumPayloadLength > 262144)
+                resultWriterUserId == Guid.Empty ||
+                maximumSlotCount < 1 || maximumSlotCount > DefaultMaximumSlots ||
+                maximumCandidates < 1 || maximumCandidates > maximumSlotCount ||
+                maximumPayloadLength < 256 || maximumPayloadLength > DefaultMaximumPayloadLength)
                 throw new AvailabilityFailure("CONFIGURATION_INVALID");
 
             AllowedEmailDomains = Array.AsReadOnly(domains);
@@ -92,7 +94,8 @@ namespace os_sr_avqg
             MinimumLeadTimeMinutes = minimumLeadTimeMinutes;
             MaximumHorizonDays = maximumHorizonDays;
             ResultExpiryMinutes = resultExpiryMinutes;
-            IntegrationApplicationUserId = integrationApplicationUserId;
+            ResultWriterUserId = resultWriterUserId;
+            MaximumCandidates = maximumCandidates;
             MaximumSlotCount = maximumSlotCount;
             MaximumPayloadLength = maximumPayloadLength;
             try
@@ -115,7 +118,8 @@ namespace os_sr_avqg
         public int MinimumLeadTimeMinutes { get; }
         public int MaximumHorizonDays { get; }
         public int ResultExpiryMinutes { get; }
-        public Guid IntegrationApplicationUserId { get; }
+        public Guid ResultWriterUserId { get; }
+        public int MaximumCandidates { get; }
         public int MaximumSlotCount { get; }
         public int MaximumPayloadLength { get; }
         public TimeZoneInfo TimeZone { get; }
@@ -162,18 +166,6 @@ namespace os_sr_avqg
         public string? RoomEmail { get; }
     }
 
-    public sealed class ScheduleSource
-    {
-        public ScheduleSource(string? availabilityView, bool hasError)
-        {
-            AvailabilityView = availabilityView;
-            HasError = hasError;
-        }
-
-        public string? AvailabilityView { get; }
-        public bool HasError { get; }
-    }
-
     public sealed class AvailableSlot
     {
         public AvailableSlot(DateTime startUtc, DateTime endUtc)
@@ -215,86 +207,28 @@ namespace os_sr_avqg
 
     public static class AvailabilityRules
     {
-        private static readonly string[] SafeGraphCategories =
+        public static string NormalizeProviderError(int? httpStatus, bool timedOut = false)
         {
-            "GRAPH_AUTH", "GRAPH_PERMISSION", "MAILBOX_NOT_FOUND", "GRAPH_THROTTLED",
-            "GRAPH_TIMEOUT", "GRAPH_UNAVAILABLE"
-        };
-
-        public static string NormalizeGraphError(int? httpStatus, bool timedOut = false)
-        {
-            if (timedOut) return "GRAPH_TIMEOUT";
-            if (httpStatus == 401) return "GRAPH_AUTH";
-            if (httpStatus == 403) return "GRAPH_PERMISSION";
+            if (timedOut) return "PROVIDER_TIMEOUT";
+            if (httpStatus == 401) return "PROVIDER_AUTH";
+            if (httpStatus == 403) return "PROVIDER_PERMISSION";
             if (httpStatus == 404) return "MAILBOX_NOT_FOUND";
-            if (httpStatus == 429) return "GRAPH_THROTTLED";
-            return "GRAPH_UNAVAILABLE";
+            if (httpStatus == 429) return "PROVIDER_THROTTLED";
+            return "PROVIDER_UNAVAILABLE";
         }
+
+        public static AvailabilityResult ProviderFailure(int? httpStatus, bool timedOut = false) =>
+            AvailabilityResult.Failed(NormalizeProviderError(httpStatus, timedOut));
 
         public static AvailabilityResult Calculate(
             AvailabilityQuery query,
-            ScheduleSource? taSchedule,
-            ScheduleSource? roomSchedule,
+            string? providerResponse,
             AvailabilitySettings settings,
             DateTime nowUtc)
         {
             var validation = ValidateQuery(query, settings, nowUtc);
             if (validation != null) return AvailabilityResult.Failed(validation);
-
-            var expectedBlocks = checked((int)((query.EndUtc - query.StartUtc).TotalMinutes /
-                AvailabilitySettings.IntervalMinutes));
-            var taBlocks = DecodeSchedule(taSchedule, expectedBlocks, "SOURCE_UNKNOWN_TA", out var taFailure);
-            if (taBlocks == null) return AvailabilityResult.Failed(taFailure);
-
-            var roomBlocks = Array.Empty<int>();
-            if (query.Mode == InterviewMode.Onsite)
-            {
-                roomBlocks = DecodeSchedule(roomSchedule, expectedBlocks, "SOURCE_UNKNOWN_ROOM", out var roomFailure);
-                if (roomBlocks == null) return AvailabilityResult.Failed(roomFailure);
-            }
-
-            var slots = new List<AvailableSlot>();
-            var durationBlocks = query.DurationMinutes / AvailabilitySettings.IntervalMinutes;
-            var step = TimeSpan.FromMinutes(AvailabilitySettings.IntervalMinutes);
-            var earliestStart = AddMinutesSaturating(nowUtc, settings.MinimumLeadTimeMinutes);
-
-            for (var index = 0; index + durationBlocks <= expectedBlocks; index++)
-            {
-                var start = query.StartUtc.AddTicks(step.Ticks * index);
-                var end = start.AddMinutes(query.DurationMinutes);
-                if (start < earliestStart || !WithinBusinessHours(start, end, settings)) continue;
-
-                var free = true;
-                for (var block = index; block < index + durationBlocks; block++)
-                {
-                    if (taBlocks[block] != 0 ||
-                        (query.Mode == InterviewMode.Onsite && roomBlocks[block] != 0))
-                    {
-                        free = false;
-                        break;
-                    }
-                }
-
-                if (free)
-                {
-                    slots.Add(new AvailableSlot(start, end));
-                    if (slots.Count > settings.MaximumSlotCount)
-                        return AvailabilityResult.Failed("RESULT_TOO_LARGE");
-                }
-            }
-
-            if (slots.Count == 0)
-                return AvailabilityResult.NoSlots("NO_COMMON_SLOT");
-
-            try
-            {
-                SlotResultJson.Serialize(slots, settings.MaximumSlotCount, settings.MaximumPayloadLength);
-            }
-            catch (AvailabilityFailure failure)
-            {
-                return AvailabilityResult.Failed(failure.Category);
-            }
-            return AvailabilityResult.Available(slots);
+            return OutlookMeetingTimesAdapter.Evaluate(query, providerResponse, settings, nowUtc);
         }
 
         public static string? ValidateQuery(
@@ -313,6 +247,9 @@ namespace os_sr_avqg
                 if (!query.LocationActive.Value) return "LOCATION_INACTIVE";
                 var roomError = ValidateEmail(query.RoomEmail, settings, "ROOM_EMAIL");
                 if (roomError != null) return roomError;
+                if (string.Equals(query.TaEmail!.Trim(), query.RoomEmail!.Trim(),
+                        StringComparison.OrdinalIgnoreCase))
+                    return "ROOM_EMAIL_INVALID";
             }
             if (query.StartUtc.Kind != DateTimeKind.Utc || query.EndUtc.Kind != DateTimeKind.Utc ||
                 query.StartUtc <= nowUtc || query.EndUtc <= query.StartUtc ||
@@ -349,40 +286,26 @@ namespace os_sr_avqg
             return null;
         }
 
-        private static int[]? DecodeSchedule(
-            ScheduleSource? schedule, int expectedBlocks, string missingCategory, out string failure)
-        {
-            failure = "AVAILABILITY_VIEW_INVALID";
-            if (schedule == null || schedule.HasError)
-            {
-                failure = missingCategory;
-                return null;
-            }
-            var view = schedule.AvailabilityView;
-            if (view == null || view.Length != expectedBlocks)
-            {
-                return null;
-            }
-
-            var blocks = new int[view.Length];
-            for (var index = 0; index < view.Length; index++)
-            {
-                var code = view[index] - '0';
-                if (code < 0 || code > 3)
-                {
-                    return null;
-                }
-                blocks[index] = code;
-            }
-            return blocks;
-        }
-
         internal static DateTime AddMinutesSaturating(DateTime value, int minutes)
         {
             var ticks = (long)minutes * TimeSpan.TicksPerMinute;
             return ticks > DateTime.MaxValue.Ticks - value.Ticks
                 ? DateTime.MaxValue
                 : value.AddTicks(ticks);
+        }
+
+        internal static bool IsEligibleSlot(AvailableSlot slot, AvailabilityQuery query,
+            AvailabilitySettings settings, DateTime nowUtc)
+        {
+            if (slot.StartUtc.Kind != DateTimeKind.Utc || slot.EndUtc.Kind != DateTimeKind.Utc ||
+                nowUtc.Kind != DateTimeKind.Utc || slot.StartUtc < query.StartUtc ||
+                slot.EndUtc > query.EndUtc || slot.EndUtc <= slot.StartUtc ||
+                slot.EndUtc - slot.StartUtc != TimeSpan.FromMinutes(query.DurationMinutes) ||
+                slot.StartUtc.Ticks % TimeSpan.FromMinutes(AvailabilitySettings.IntervalMinutes).Ticks != 0 ||
+                slot.EndUtc.Ticks % TimeSpan.FromMinutes(AvailabilitySettings.IntervalMinutes).Ticks != 0 ||
+                slot.StartUtc < AddMinutesSaturating(nowUtc, settings.MinimumLeadTimeMinutes))
+                return false;
+            return WithinBusinessHours(slot.StartUtc, slot.EndUtc, settings);
         }
 
         private static bool WithinBusinessHours(DateTime startUtc, DateTime endUtc,
@@ -474,9 +397,9 @@ namespace os_sr_avqg
                 "TA_INACTIVE", "TA_EMAIL_MISSING", "TA_EMAIL_INVALID", "TA_EMAIL_DOMAIN_NOT_ALLOWED",
                 "LOCATION_REQUIRED", "LOCATION_INACTIVE", "ROOM_EMAIL_MISSING", "ROOM_EMAIL_INVALID",
                 "ROOM_EMAIL_DOMAIN_NOT_ALLOWED", "INVALID_REQUEST", "CONFIGURATION_INVALID",
-                "TIME_ZONE_UNAVAILABLE", "SOURCE_UNKNOWN_TA", "SOURCE_UNKNOWN_ROOM",
-                "AVAILABILITY_VIEW_INVALID", "GRAPH_AUTH", "GRAPH_PERMISSION", "MAILBOX_NOT_FOUND",
-                "GRAPH_THROTTLED", "GRAPH_TIMEOUT", "GRAPH_UNAVAILABLE", "RESULT_TOO_LARGE",
+                "TIME_ZONE_UNAVAILABLE", "PROVIDER_RESPONSE_INVALID", "PROVIDER_TIMEZONE_UNSUPPORTED",
+                "PROVIDER_AUTH", "PROVIDER_PERMISSION", "MAILBOX_NOT_FOUND",
+                "PROVIDER_THROTTLED", "PROVIDER_TIMEOUT", "PROVIDER_UNAVAILABLE", "RESULT_TOO_LARGE",
                 "RESULT_INVALID", "REFERENCE_READ_FAILED", "REFERENCE_CHANGED"
             }).Contains(error, StringComparer.Ordinal);
 

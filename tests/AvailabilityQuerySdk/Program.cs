@@ -4,7 +4,7 @@ using System.Linq;
 using Microsoft.Xrm.Sdk;
 using os_sr_avqg;
 
-internal static class Program
+internal static partial class Program
 {
     private static int assertions;
     private static readonly Guid IntegrationUser = Guid.Parse("11111111-2222-3333-4444-555555555555");
@@ -15,90 +15,20 @@ internal static class Program
 
     private static int Main()
     {
-        TestOnlineAndOnsiteAvailability();
-        TestUnknownAndMalformedSources();
+        TestOutlookRequest();
+        TestOutlookAttendees();
+        TestOutlookResponseShape();
+        TestOutlookSlotFiltering();
         TestReferenceAndInputValidation();
         TestRulesAndTimeZone();
         TestCanonicalSlotJson();
         TestMutationPolicy();
-        TestSafeGraphErrors();
+        TestSafeProviderErrors();
         TestReferenceDrift();
         TestConfigurationRendering();
+        TestSdkGuard();
         Console.WriteLine("Availability Query SDK checks passed: " + assertions);
         return 0;
-    }
-
-    private static void TestOnlineAndOnsiteAvailability()
-    {
-        var free = new ScheduleSource(new string('0', 32), false);
-        var available = AvailabilityRules.Calculate(Query(InterviewMode.Online), free, null, Settings(), Now);
-        Equal(QueryState.Available, available.State, "Online free TA is available.");
-        Equal(29, available.Slots.Count, "Online slots are generated on the 15-minute grid.");
-        Equal(Start, available.Slots[0].StartUtc, "First slot is ordered first.");
-        Equal(Utc("2026-01-05T09:00:00Z"), available.Slots[available.Slots.Count - 1].StartUtc,
-            "Last 60-minute slot ends at the business-hours boundary.");
-
-        var taBusy = new ScheduleSource("2" + new string('0', 31), false);
-        var onlineBusy = AvailabilityRules.Calculate(Query(InterviewMode.Online), taBusy, null, Settings(), Now);
-        Equal(QueryState.Available, onlineBusy.State, "Free blocks remain available around a busy interval.");
-        var shortQuery = Query(InterviewMode.Online, Start, Start.AddMinutes(30), 30);
-        onlineBusy = AvailabilityRules.Calculate(shortQuery,
-            new ScheduleSource("20", false), null, Settings(), Now);
-        Equal(QueryState.NoSlots, onlineBusy.State, "Online busy TA is not available.");
-
-        var onsite = AvailabilityRules.Calculate(Query(InterviewMode.Onsite), free, free, Settings(), Now);
-        Equal(QueryState.Available, onsite.State, "Onsite requires both free sources.");
-        Equal(29, onsite.Slots.Count, "Onsite free windows produce deterministic slots.");
-
-        var roomBusy = AvailabilityRules.Calculate(
-            Query(InterviewMode.Onsite, Start, Start.AddMinutes(30), 30),
-            new ScheduleSource("00", false), new ScheduleSource("10", false), Settings(), Now);
-        Equal(QueryState.NoSlots, roomBusy.State, "Tentative/busy room is not free.");
-        var taBusyRoomFree = AvailabilityRules.Calculate(
-            Query(InterviewMode.Onsite, Start, Start.AddMinutes(30), 30),
-            new ScheduleSource("20", false), new ScheduleSource("00", false), Settings(), Now);
-        Equal(QueryState.NoSlots, taBusyRoomFree.State, "Busy TA blocks Onsite even with a free room.");
-
-        var oof = AvailabilityRules.Calculate(shortQuery,
-            new ScheduleSource("30", false), null, Settings(), Now);
-        Equal(QueryState.NoSlots, oof.State, "Out-of-office is busy.");
-        var tentative = AvailabilityRules.Calculate(shortQuery,
-            new ScheduleSource("10", false), null, Settings(), Now);
-        Equal(QueryState.NoSlots, tentative.State, "Tentative is busy.");
-
-        var noSlots = AvailabilityRules.Calculate(shortQuery,
-            new ScheduleSource("20", false), null, Settings(), Now);
-        Equal("NO_COMMON_SLOT", noSlots.Reason, "No-slot reason is deterministic.");
-        Equal(0, noSlots.Slots.Count, "No-slot result has no slots.");
-    }
-
-    private static void TestUnknownAndMalformedSources()
-    {
-        var query = Query(InterviewMode.Online, Start, Start.AddMinutes(30), 30);
-        Equal("SOURCE_UNKNOWN_TA",
-            AvailabilityRules.Calculate(query, null, null, Settings(), Now).Error,
-            "Missing TA source fails closed.");
-        Equal("SOURCE_UNKNOWN_TA",
-            AvailabilityRules.Calculate(query, new ScheduleSource("00", true), null, Settings(), Now).Error,
-            "Source error fails closed.");
-        Equal("AVAILABILITY_VIEW_INVALID",
-            AvailabilityRules.Calculate(query, new ScheduleSource("", false), null, Settings(), Now).Error,
-            "Empty view fails closed.");
-        Equal("AVAILABILITY_VIEW_INVALID",
-            AvailabilityRules.Calculate(query, new ScheduleSource("0", false), null, Settings(), Now).Error,
-            "Wrong-length view fails closed.");
-        Equal("AVAILABILITY_VIEW_INVALID",
-            AvailabilityRules.Calculate(query, new ScheduleSource("40", false), null, Settings(), Now).Error,
-            "Unknown provider code fails closed.");
-
-        var onsite = Query(InterviewMode.Onsite, Start, Start.AddMinutes(30), 30);
-        Equal("SOURCE_UNKNOWN_ROOM",
-            AvailabilityRules.Calculate(onsite, new ScheduleSource("00", false), null, Settings(), Now).Error,
-            "Missing onsite room source fails closed.");
-        Equal("SOURCE_UNKNOWN_ROOM",
-            AvailabilityRules.Calculate(onsite, new ScheduleSource("00", false),
-                new ScheduleSource("00", true), Settings(), Now).Error,
-            "Onsite room error fails closed.");
     }
 
     private static void TestReferenceAndInputValidation()
@@ -127,6 +57,9 @@ internal static class Program
             Query(InterviewMode.Onsite, roomEmail: "not-an-address"), Settings(), Now), "Invalid room address is rejected.");
         Equal("ROOM_EMAIL_DOMAIN_NOT_ALLOWED", AvailabilityRules.ValidateQuery(
             Query(InterviewMode.Onsite, roomEmail: "room@other.invalid"), Settings(), Now), "Disallowed room domain is rejected.");
+        Equal("ROOM_EMAIL_INVALID", AvailabilityRules.ValidateQuery(
+            Query(InterviewMode.Onsite, roomEmail: "TA@example.invalid"), Settings(), Now),
+            "The required TA and room cannot be the same mailbox.");
         Equal(null, AvailabilityRules.ValidateQuery(Query(InterviewMode.Online, locationActive: null),
             Settings(), Now), "Online does not require a Location.");
 
@@ -144,29 +77,6 @@ internal static class Program
 
     private static void TestRulesAndTimeZone()
     {
-        var leadSettings = Settings(leadMinutes: 90);
-        var query = Query(InterviewMode.Online, Start, End, 60);
-        var result = AvailabilityRules.Calculate(query, new ScheduleSource(new string('0', 32), false),
-            null, leadSettings, Utc("2026-01-05T01:00:00Z"));
-        Equal(Utc("2026-01-05T02:30:00Z"), result.Slots[0].StartUtc, "Minimum lead time is enforced.");
-        var extremeLead = AvailabilityRules.Calculate(query,
-            new ScheduleSource(new string('0', 32), false), null, Settings(int.MaxValue), Now);
-        Equal(QueryState.NoSlots, extremeLead.State, "An extreme lead-time setting fails closed without overflow.");
-
-        var beforeOpen = Query(InterviewMode.Online,
-            Utc("2026-01-05T01:45:00Z"), End, 60);
-        var beforeOpenResult = AvailabilityRules.Calculate(beforeOpen,
-            new ScheduleSource(new string('0', 33), false), null, Settings(), Now);
-        Equal(Utc("2026-01-05T02:00:00Z"), beforeOpenResult.Slots[0].StartUtc,
-            "Slots before business hours are excluded.");
-
-        var shortDuration = Query(InterviewMode.Online, Start, End, 45);
-        var durationResult = AvailabilityRules.Calculate(shortDuration,
-            new ScheduleSource(new string('0', 32), false), null, Settings(), Now);
-        Equal(TimeSpan.FromMinutes(45),
-            durationResult.Slots[0].EndUtc - durationResult.Slots[0].StartUtc,
-            "Allowed duration is used exactly.");
-
         var tooLong = Query(InterviewMode.Online,
             Now.AddDays(60), Now.AddDays(61), 60);
         Equal(null, AvailabilityRules.ValidateQuery(tooLong, Settings(), Now),
@@ -176,7 +86,7 @@ internal static class Program
         Equal("INVALID_REQUEST", AvailabilityRules.ValidateQuery(overHorizon, Settings(), Now),
             "A query beyond 61 days is rejected.");
         ThrowsCategory(() => Settings(horizon: 62), "CONFIGURATION_INVALID",
-            "Configured horizon cannot exceed the provider's 62-day maximum.");
+            "Configured horizon cannot exceed the approved 61-day limit.");
 
         var zone = TimeZoneInfo.FindSystemTimeZoneById(AvailabilitySettings.TimeZoneId);
         Equal(TimeSpan.FromHours(7), zone.GetUtcOffset(Utc("2026-01-05T00:00:00Z")),
@@ -218,7 +128,7 @@ internal static class Program
             "RESULT_INVALID", "Slot count is bounded.");
         Equal(false, SlotResultJson.IsSafeError("Request failed: credential leaked"),
             "Exception and credential text is not an allowed category.");
-        Equal(true, SlotResultJson.IsSafeError("GRAPH_TIMEOUT"), "Safe error category is accepted.");
+        Equal(true, SlotResultJson.IsSafeError("PROVIDER_TIMEOUT"), "Safe error category is accepted.");
         Equal(false, SlotResultJson.IsSafeReason("No slots: ta@domain"), "Reason cannot contain provider data.");
     }
 
@@ -231,7 +141,7 @@ internal static class Program
         Equal(false, AvailabilityMutationPolicy.IsCreateCaller(BsoUser, IntegrationUser, IntegrationUser),
             "Mismatched initiating identity is rejected.");
         Equal(true, AvailabilityMutationPolicy.IsResultUpdateCaller(IntegrationUser, IntegrationUser, IntegrationUser),
-            "Integration application user can complete result.");
+            "Configured result writer can complete result.");
         Equal(false, AvailabilityMutationPolicy.IsResultUpdateCaller(BsoUser, BsoUser, IntegrationUser),
             "BSO cannot write results.");
         Equal(false, AvailabilityMutationPolicy.IsResultUpdateCaller(IntegrationUser, BsoUser, IntegrationUser),
@@ -266,14 +176,17 @@ internal static class Program
             "Terminal state cannot transition again.");
     }
 
-    private static void TestSafeGraphErrors()
+    private static void TestSafeProviderErrors()
     {
-        Equal("GRAPH_AUTH", AvailabilityRules.NormalizeGraphError(401), "401 is sanitized.");
-        Equal("GRAPH_PERMISSION", AvailabilityRules.NormalizeGraphError(403), "403 is sanitized.");
-        Equal("MAILBOX_NOT_FOUND", AvailabilityRules.NormalizeGraphError(404), "404 is sanitized.");
-        Equal("GRAPH_THROTTLED", AvailabilityRules.NormalizeGraphError(429), "429 is sanitized.");
-        Equal("GRAPH_TIMEOUT", AvailabilityRules.NormalizeGraphError(null, true), "Timeout is sanitized.");
-        Equal("GRAPH_UNAVAILABLE", AvailabilityRules.NormalizeGraphError(500), "Provider error is sanitized.");
+        Equal("PROVIDER_AUTH", AvailabilityRules.NormalizeProviderError(401), "401 is sanitized.");
+        Equal("PROVIDER_PERMISSION", AvailabilityRules.NormalizeProviderError(403), "403 is sanitized.");
+        Equal("MAILBOX_NOT_FOUND", AvailabilityRules.NormalizeProviderError(404), "404 is sanitized.");
+        Equal("PROVIDER_THROTTLED", AvailabilityRules.NormalizeProviderError(429), "429 is sanitized.");
+        Equal("PROVIDER_TIMEOUT", AvailabilityRules.NormalizeProviderError(null, true), "Timeout is sanitized.");
+        Equal("PROVIDER_UNAVAILABLE", AvailabilityRules.NormalizeProviderError(500), "Provider error is sanitized.");
+        var failed = AvailabilityRules.ProviderFailure(500);
+        Equal(QueryState.Failed, failed.State, "Provider failure is a Failed result.");
+        Equal(0, failed.Slots.Count, "Provider failure cannot expose slots.");
     }
 
     private static void TestReferenceDrift()
@@ -293,7 +206,7 @@ internal static class Program
         foreach (var item in cases)
         {
             foreach (var proposed in new[] { available, AvailabilityResult.NoSlots("NO_COMMON_SLOT"),
-                         AvailabilityResult.Failed("GRAPH_TIMEOUT") })
+                         AvailabilityResult.Failed("PROVIDER_TIMEOUT") })
             {
                 var result = ReferenceDriftPolicy.BeforeTerminalWrite(item.Item1, ta, room,
                     item.Item2, item.Item3, proposed);
@@ -358,7 +271,8 @@ internal static class Program
             "JSON property order does not affect rendering.");
         Equal(false, rendered.Contains("\r"), "Canonical output uses LF separators.");
         var parsed = PluginConfiguration.Parse(rendered);
-        Equal(IntegrationUser, parsed.IntegrationApplicationUserId, "Environment-specific identity round-trips.");
+        Equal(IntegrationUser, parsed.ResultWriterUserId, "Environment-specific writer identity round-trips.");
+        Equal(25, parsed.MaximumCandidates, "Configured candidate limit round-trips exactly.");
         Equal(60, parsed.MaximumHorizonDays, "Source horizon round-trips exactly.");
         Equal(45, parsed.MinimumLeadTimeMinutes, "Source lead time round-trips exactly.");
         Equal(12, parsed.ResultExpiryMinutes, "Source expiry round-trips exactly.");
@@ -396,6 +310,8 @@ internal static class Program
         }
         RejectValue("os_sr_avq_hzn", "62");
         RejectValue("os_sr_avq_hzn", "0");
+        RejectValue("os_sr_avq_maxc", "0");
+        RejectValue("os_sr_avq_maxc", "201");
         RejectValue("os_sr_avq_durs", "30,40");
         RejectValue("os_sr_avq_durs", "30,30");
         RejectValue("os_sr_avq_dom", "example.invalid\nclient_secret=synthetic");
@@ -419,9 +335,9 @@ internal static class Program
         }
         ConfigurationRejects(() => PluginConfiguration.Parse(rendered + "\nmaximumhorizondays=60"),
             "Case-insensitive duplicate parser key rejects.");
-        foreach (var key in new[] { "IntegrationApplicationUserId", "AllowedEmailDomains",
+        foreach (var key in new[] { "ResultWriterUserId", "AllowedEmailDomains",
                      "AllowedDurationsMinutes", "MaximumHorizonDays", "MinimumLeadTimeMinutes",
-                     "ResultExpiryMinutes", "BusinessHours." })
+                     "ResultExpiryMinutes", "MaximumCandidates", "BusinessHours." })
         {
             ConfigurationRejects(() => PluginConfiguration.Parse(string.Join("\n",
                 rendered.Split('\n').Where(line => !line.StartsWith(key, StringComparison.Ordinal)))),
@@ -433,6 +349,8 @@ internal static class Program
             "Real parser rejects durations not divisible by 15.");
         ConfigurationRejects(() => PluginConfiguration.Parse(rendered + "\nBusinessHours.Holiday=09:00-17:00"),
             "Unknown business-day parser key rejects.");
+        ConfigurationRejects(() => PluginConfiguration.Parse(rendered + "\nIntegrationApplicationUserId=" +
+            IntegrationUser.ToString("D")), "The superseded application-user setting is rejected.");
         Equal(false, rendered.Contains("synthetic-not-a-secret"), "Rejected credential input never reaches output.");
     }
 
@@ -443,7 +361,8 @@ internal static class Program
         ["os_sr_avq_lead"] = "45",
         ["os_sr_avq_hzn"] = "60",
         ["os_sr_avq_exp"] = "12",
-        ["os_sr_avq_dom"] = "example.invalid,calendar.invalid"
+        ["os_sr_avq_dom"] = "example.invalid,calendar.invalid",
+        ["os_sr_avq_maxc"] = "25"
     };
 
     private static void ConfigurationRejects(Action action, string description)
@@ -458,7 +377,8 @@ internal static class Program
         throw new InvalidOperationException(description);
     }
 
-    private static AvailabilitySettings Settings(int leadMinutes = 0, int horizon = 61)
+    private static AvailabilitySettings Settings(int leadMinutes = 0, int horizon = 61,
+        int maxCandidates = 25, int maxSlots = 200, int maxPayloadLength = 32768)
     {
         return new AvailabilitySettings(
             new[] { "example.invalid" },
@@ -474,7 +394,10 @@ internal static class Program
             leadMinutes,
             horizon,
             10,
-            IntegrationUser);
+            IntegrationUser,
+            maxCandidates,
+            maxSlots,
+            maxPayloadLength);
     }
 
     private static AvailabilityQuery Query(

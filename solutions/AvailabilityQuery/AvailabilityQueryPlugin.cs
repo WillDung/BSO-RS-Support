@@ -55,7 +55,7 @@ namespace os_sr_avqg
             AvailabilitySettings settings, ITracingService trace)
         {
             if (!AvailabilityMutationPolicy.IsCreateCaller(context.UserId, context.InitiatingUserId,
-                    settings.IntegrationApplicationUserId) ||
+                    settings.ResultWriterUserId) ||
                 !context.InputParameters.Contains("Target") ||
                 !(context.InputParameters["Target"] is Entity target) ||
                 target.LogicalName != Table)
@@ -99,7 +99,7 @@ namespace os_sr_avqg
             AvailabilitySettings settings, ITracingService trace)
         {
             if (!AvailabilityMutationPolicy.IsResultUpdateCaller(context.UserId, context.InitiatingUserId,
-                    settings.IntegrationApplicationUserId) ||
+                    settings.ResultWriterUserId) ||
                 !context.InputParameters.Contains("Target") ||
                 !(context.InputParameters["Target"] is Entity target) ||
                 target.LogicalName != Table ||
@@ -191,22 +191,9 @@ namespace os_sr_avqg
                 query.DurationMinutes % AvailabilitySettings.IntervalMinutes != 0 ||
                 queriedAtUtc.Kind != DateTimeKind.Utc)
                 return false;
-            var earliest = AvailabilityRules.AddMinutesSaturating(queriedAtUtc,
-                settings.MinimumLeadTimeMinutes);
             foreach (var slot in slots)
             {
-                if (slot.StartUtc < query.StartUtc || slot.EndUtc > query.EndUtc ||
-                    slot.EndUtc - slot.StartUtc != TimeSpan.FromMinutes(query.DurationMinutes) ||
-                    slot.StartUtc.Ticks % TimeSpan.TicksPerMinute != 0 ||
-                    slot.EndUtc.Ticks % TimeSpan.TicksPerMinute != 0 ||
-                    slot.StartUtc.Minute % AvailabilitySettings.IntervalMinutes != 0 ||
-                    slot.StartUtc < earliest)
-                    return false;
-                var localStart = TimeZoneInfo.ConvertTimeFromUtc(slot.StartUtc, settings.TimeZone);
-                var localEnd = TimeZoneInfo.ConvertTimeFromUtc(slot.EndUtc, settings.TimeZone);
-                if (localStart.Date != localEnd.Date ||
-                    !settings.BusinessHours.TryGetValue(localStart.DayOfWeek, out var hours) ||
-                    localStart.TimeOfDay < hours.Opens || localEnd.TimeOfDay > hours.Closes)
+                if (!AvailabilityRules.IsEligibleSlot(slot, query, settings, queriedAtUtc))
                     return false;
             }
             return true;
@@ -221,7 +208,10 @@ namespace os_sr_avqg
             {
                 var columns = expectedTable == TaTable
                     ? new ColumnSet("statecode", "os_sr_ta_eml")
-                    : new ColumnSet("statecode", "os_sr_loc_rmeml");
+                    : expectedTable == LocationTable
+                        ? new ColumnSet("statecode", "os_sr_loc_rmeml")
+                        : new ColumnSet("os_sr_avq_stat", "os_sr_avq_ta", "os_sr_avq_loc",
+                            "os_sr_avq_mod", "os_sr_avq_strt", "os_sr_avq_end", "os_sr_avq_dur");
                 return service.Retrieve(expectedTable, reference.Id, columns);
             }
             catch (FaultException<OrganizationServiceFault>)
@@ -283,8 +273,8 @@ namespace os_sr_avqg
     {
         private static readonly HashSet<string> AllowedKeys = new HashSet<string>(new[]
         {
-            "IntegrationApplicationUserId", "AllowedEmailDomains", "AllowedDurationsMinutes",
-            "MaximumHorizonDays", "MinimumLeadTimeMinutes", "ResultExpiryMinutes"
+            "ResultWriterUserId", "AllowedEmailDomains", "AllowedDurationsMinutes",
+            "MaximumHorizonDays", "MinimumLeadTimeMinutes", "ResultExpiryMinutes", "MaximumCandidates"
         }.Concat(Enum.GetNames(typeof(DayOfWeek)).Select(day => "BusinessHours." + day)),
             StringComparer.OrdinalIgnoreCase);
 
@@ -306,16 +296,18 @@ namespace os_sr_avqg
                 values.Add(name, safeLine.Substring(separator + 1).Trim());
             }
 
-            if (!values.TryGetValue("IntegrationApplicationUserId", out var integrationUserText) ||
-                !Guid.TryParse(integrationUserText, out var integrationUserId) ||
+            if (!values.TryGetValue("ResultWriterUserId", out var resultWriterText) ||
+                !Guid.TryParse(resultWriterText, out var resultWriterId) ||
                 !values.TryGetValue("AllowedEmailDomains", out var domainsText) ||
                 !values.TryGetValue("AllowedDurationsMinutes", out var durationsText) ||
                 !values.TryGetValue("MaximumHorizonDays", out var horizonText) ||
                 !values.TryGetValue("MinimumLeadTimeMinutes", out var leadText) ||
                 !values.TryGetValue("ResultExpiryMinutes", out var expiryText) ||
+                !values.TryGetValue("MaximumCandidates", out var candidatesText) ||
                 !int.TryParse(horizonText, NumberStyles.None, CultureInfo.InvariantCulture, out var horizon) ||
                 !int.TryParse(leadText, NumberStyles.None, CultureInfo.InvariantCulture, out var lead) ||
-                !int.TryParse(expiryText, NumberStyles.None, CultureInfo.InvariantCulture, out var expiry))
+                !int.TryParse(expiryText, NumberStyles.None, CultureInfo.InvariantCulture, out var expiry) ||
+                !int.TryParse(candidatesText, NumberStyles.None, CultureInfo.InvariantCulture, out var candidates))
                 throw new InvalidPluginExecutionException("Availability query configuration is invalid.");
 
             var durations = ParseIntegers(durationsText);
@@ -349,7 +341,8 @@ namespace os_sr_avqg
                     lead,
                     horizon,
                     expiry,
-                    integrationUserId);
+                    resultWriterId,
+                    candidates);
             }
             catch (AvailabilityFailure)
             {

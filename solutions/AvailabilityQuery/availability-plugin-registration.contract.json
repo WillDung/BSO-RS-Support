@@ -52,7 +52,8 @@
   },
   "security": [
     "No tenant or user GUID is committed.",
-    "The configured identity is the dedicated Dataverse integration application user, not the Graph connection identity.",
+    "ResultWriterUserId is the current DEV owner identity used by the Dataverse Flow connection; the requester is a separate BSO test identity. A dedicated Dataverse application user is not a DEV prerequisite.",
+    "DEV_FUNCTIONAL_IDENTITY_ELEVATED_NOT_SECURITY_ACCEPTANCE: the DEV owner is elevated; retain both caller and initiating-user checks. Production identity remains a later decision.",
     "No secure configuration or secret is required by this plug-in.",
     "Step registration is not permission to grant any Candidate Core privilege."
   ]

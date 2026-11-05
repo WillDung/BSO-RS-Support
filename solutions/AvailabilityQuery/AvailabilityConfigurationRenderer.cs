@@ -16,11 +16,11 @@ namespace os_sr_avqg
         private static readonly string[] EnvironmentNames =
         {
             "os_sr_avq_bhrs", "os_sr_avq_durs", "os_sr_avq_lead",
-            "os_sr_avq_hzn", "os_sr_avq_exp", "os_sr_avq_dom"
+            "os_sr_avq_hzn", "os_sr_avq_exp", "os_sr_avq_dom", "os_sr_avq_maxc"
         };
 
         public static string Render(IEnumerable<KeyValuePair<string, string>> environmentValues,
-            Guid integrationApplicationUserId)
+            Guid resultWriterUserId)
         {
             var source = new Dictionary<string, string>(StringComparer.Ordinal);
             if (environmentValues == null) throw InvalidConfiguration();
@@ -47,7 +47,8 @@ namespace os_sr_avqg
             {
                 expected = new AvailabilitySettings(domains, durations, hours,
                     ReadInteger(source["os_sr_avq_lead"]), ReadInteger(source["os_sr_avq_hzn"]),
-                    ReadInteger(source["os_sr_avq_exp"]), integrationApplicationUserId);
+                    ReadInteger(source["os_sr_avq_exp"]), resultWriterUserId,
+                    ReadInteger(source["os_sr_avq_maxc"]));
             }
             catch (AvailabilityFailure)
             {
@@ -58,12 +59,13 @@ namespace os_sr_avqg
 
             var lines = new List<string>
             {
-                "IntegrationApplicationUserId=" + integrationApplicationUserId.ToString("D"),
+                "ResultWriterUserId=" + resultWriterUserId.ToString("D"),
                 "AllowedEmailDomains=" + string.Join(",", domains),
                 "AllowedDurationsMinutes=" + string.Join(",", durations.Select(FormatInteger)),
                 "MaximumHorizonDays=" + FormatInteger(expected.MaximumHorizonDays),
                 "MinimumLeadTimeMinutes=" + FormatInteger(expected.MinimumLeadTimeMinutes),
-                "ResultExpiryMinutes=" + FormatInteger(expected.ResultExpiryMinutes)
+                "ResultExpiryMinutes=" + FormatInteger(expected.ResultExpiryMinutes),
+                "MaximumCandidates=" + FormatInteger(expected.MaximumCandidates)
             };
             foreach (var pair in hours.OrderBy(pair => pair.Key))
                 lines.Add("BusinessHours." + pair.Key + "=" +
@@ -72,7 +74,8 @@ namespace os_sr_avqg
 
             var rendered = string.Join("\n", lines);
             var parsed = PluginConfiguration.Parse(rendered);
-            if (parsed.IntegrationApplicationUserId != expected.IntegrationApplicationUserId ||
+            if (parsed.ResultWriterUserId != expected.ResultWriterUserId ||
+                parsed.MaximumCandidates != expected.MaximumCandidates ||
                 parsed.MaximumHorizonDays != expected.MaximumHorizonDays ||
                 parsed.MinimumLeadTimeMinutes != expected.MinimumLeadTimeMinutes ||
                 parsed.ResultExpiryMinutes != expected.ResultExpiryMinutes ||

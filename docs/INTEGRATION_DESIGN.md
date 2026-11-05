@@ -14,7 +14,9 @@ The detailed P0 Slice 2 proposal is in [P0 Slice 2 calendar availability and boo
 
 ## P0 Slice 2 calendar availability and booking (PROPOSED / ARCHITECTURE APPROVED)
 
-**Status (2026-11-05):** `PROPOSED / ARCHITECTURE APPROVED`; D1–D8 are approved with conditions/modifications in [Product Decisions](PRODUCT_DECISIONS.md#p0-slice-2-calendar-integration-proposed--architecture-approved). Offline Slice 2A source and tests are now present in `solutions/AvailabilityQuery/`, `solutions/Entities/os_sr_avq/`, and the Console web-resource source. They are **not provisioned, deployed, or runtime accepted**. No live flow, custom connector, connection reference, environment variable, app registration, Dataverse schema, or Availability Query row exists. No tenant operation is authorized.
+**Latest owner direction and concurrent DEV report (2026-11-05):** the Outlook connector DEV path is feasible, DEV identity Option A is approved for later functional testing using the existing owner connection, synthetic mailbox prerequisites are missing, and the custom Graph path is abandoned. The concurrently appearing [provisioning stop report](P0_SLICE_2A_DEV_PROVISIONING_REPORT.md) states that bounded provider-independent provisioning stopped at `P0_SLICE_2A_RECONCILIATION_FAILED:MEMBERSHIP:10` after partial table/TA-relationship creation, before roles, configuration definitions, publication or provider components. Its tenant observations are **unverified in this offline session**. Do not infer total absence or continue provisioning without separate verification and approval.
+
+**Status (2026-11-05):** The owner supplied `SLICE_2A_OUTLOOK_CONNECTOR_PREFLIGHT_ACCEPTED`, `SLICE_2A_OUTLOOK_CONNECTOR_DEV_PATH_FEASIBLE`, `SLICE_2A_DEV_IDENTITY_OPTION_A_APPROVED`, `SLICE_2A_CUSTOM_GRAPH_PATH_ABANDONED`, and `SLICE_2A_SYNTHETIC_MAILBOX_PREREQUISITE_MISSING`. These supersede the former Slice 2A Graph path. Offline Slice 2A source and tests are in [AvailabilityQuery](../solutions/AvailabilityQuery/), its [schema contract](../solutions/Entities/os_sr_avq/AvailabilityQuery.schema.json), and the [Console panel](../solutions/CandidateConsole/WebResources/os_/bso/candidate-console-availability.js). The Outlook refactor is **not deployed or runtime accepted**; the concurrent partial-schema report and supplied preflight are not independently verified by this offline task. No tenant operation is authorized here.
 
 The owner approved the Slice 2A architecture on 2026-11-05 with these invariants: `P0_SLICE_2A_DISPLAY_ONLY_AVAILABILITY_ARCHITECTURE_APPROVED`, `P0_SLICE_2A_CANDIDATE_STATE_INDEPENDENT`, `P0_SLICE_2A_NO_CANDIDATE_CORE_MUTATION`, `P0_SLICE_2A_NO_INTERVIEW_SCHEDULE_MUTATION`, `P0_SLICE_2A_PROPOSAL_DOCUMENTATION_AUTHORIZED`. Slices 2B–2D remain proposals beyond architecture level.
 
@@ -22,43 +24,39 @@ The owner approved the Slice 2A architecture on 2026-11-05 with these invariants
 
 ### Trusted integration boundary
 
-Recommended option A: solution-aware Cloud Flows using governed connection references, calling Microsoft Graph through a solution custom connector. Decisions and state transitions stay in tested C# under Dataverse; flows only perform external I/O and write results back. Use the existing `os_sr_bso_rs_support` Solution; do not create a second integration Solution. Graph identity is a dedicated licensed non-human user mailbox using delegated OAuth, while Dataverse uses a distinct dedicated application user/service principal. Their identities and credentials are not interchangeable.
+Approved DEV option A is a solution-aware Cloud Flow using the standard Office 365 Outlook **Find meeting times (V2)** action and a Dataverse connection in the existing `os_sr_bso_rs_support` Solution. The request creator is a separate BSO test identity; the result writer is the current DEV owner identity used by the Dataverse Flow connection. The Outlook connection belongs to that owner, not to or impersonating the BSO. The guard checks both calling and initiating identity. `DEV_FUNCTIONAL_IDENTITY_ELEVATED_NOT_SECURITY_ACCEPTANCE`: the owner is elevated, so this is functional DEV wiring, not a least-privilege security acceptance. Production identity remains a later decision.
 
 ```text
 Candidate Console (browser JS; no tokens, no secrets)
    │ Dataverse Web API only, as the signed-in BSO
    ▼
 Dataverse
-   ├─ os_sr_cact (Candidate Core) — sole authority for Candidate and schedule state (2B+ only)
-   └─ Slice 2A: os_sr_avq availability-query row (no Candidate or Interview Schedule link)
+   └─ os_sr_avq availability-query row (no Candidate or Interview Schedule link)
    │ row trigger
    ▼
 Solution Cloud Flow (I/O only, concurrency 1)
-   ├─ connection reference → custom connector "Graph Scheduling" (OAuth, delegated; D1/D2)
-   └─ connection reference → Dataverse (integration identity)
+   ├─ Office 365 Outlook → Find meeting times (V2), current DEV owner connection
+   └─ Dataverse → current DEV owner result-writer connection
 ```
 
-- **Rejected:** any browser call to Graph, and any Graph secret, token, certificate, or connection credential in Candidate Console JavaScript, web-resource configuration, or Dataverse business rows.
-- Credentials live only in the Power Platform connection bound to the connection reference (and, for the custom connector, in the Entra app registration it uses). Dataverse stores identifiers and sanitized outcome codes only.
-- Flow/custom connector premium licensing for the applicable owners, makers, and run configuration is a pre-deployment prerequisite and must be verified; no license is assumed or assigned.
-- The read-only preflight found the effective classic DLP policy classifies Dataverse and the proposed `graph.microsoft.com` custom connector in the same Confidential group. Dataverse action/endpoint filtering was not visible and remains unverified. Do not infer governance from Advanced Connector Policies.
-- The standard Office 365 Outlook connector is acceptable for reads but is not proposed for writes: its event actions do not expose Graph `transactionId` or extended properties, and its documented V4 update resets omitted fields.
-- Option B (server-side service behind a custom connector) is a fallback if a delegated service account is rejected. Option C (secure backend with application permissions, Exchange RBAC for Applications scoping) is an escalation path: it requires Azure resources, and reading TA calendars would need `Calendars.Read` (event details) rather than free/busy-only access.
+- The browser calls Dataverse only. No credentials, tokens, mailbox snapshots, or provider payloads belong in Console configuration, business rows, or logs.
+- The former custom connector, project Entra app, delegated permission, consent, and dedicated Dataverse application-user DEV prerequisites are **`SUPERSEDED_BY_OUTLOOK_CONNECTOR_ARCHITECTURE`**. Do not recreate them for 2A.
+- Connection references remain governed ALM inputs; no connection, role, Flow, or environment configuration is created by this source. Production licensing, DLP, identities, and least privilege remain subject to separate governance, not established by DEV functional feasibility.
 
 ### Capability basis (Microsoft documentation, read 2026-11-05)
 
 | Capability | Proposed use |
 |---|---|
-| [`calendar: getSchedule`](https://learn.microsoft.com/en-us/graph/api/calendar-getschedule) | Free/busy for TA and room; least privilege `Calendars.ReadBasic`. Each [`scheduleInformation`](https://learn.microsoft.com/en-us/graph/api/resources/scheduleinformation) entry can carry its own `error`. Only `availabilityView` code `0` is free. |
+| [Office 365 Outlook: Find meeting times (V2)](https://learn.microsoft.com/en-us/connectors/office365/#find-meeting-times-%28v2%29) | Approved Slice 2A action. Its documented input includes required and resource attendees, duration, window, maximum candidates, attendee percentage, organizer optionality, and activity domain; its V2 response documents attendee address/type/availability. Live response shape remains unverified. |
 | Room as `resource` attendee ([create event](https://learn.microsoft.com/en-us/graph/api/user-post-events)) | Room accepts/declines asynchronously; onsite booking is confirmed only after `accepted` (2B). |
 | Event `transactionId`, extended properties ([event](https://learn.microsoft.com/en-us/graph/api/resources/event)) | Booking GUID as `transactionId` (best effort) and as an extended property for authoritative lookup during reconciliation (2B). |
 | [ImmutableId](https://learn.microsoft.com/en-us/graph/outlook-immutable-id), `iCalUId`, `changeKey` | Stable event identity, cross-copy correlation, and manual-edit detection (2B). No reliance on an undocumented `If-Match` for events. |
 | [Update](https://learn.microsoft.com/en-us/graph/api/event-update) / [cancel](https://learn.microsoft.com/en-us/graph/api/event-cancel) | Attendees-only PATCH to add the candidate; organizer `cancel` (202) for cancellation and reschedule (2B). |
 | [Online meetings on events](https://learn.microsoft.com/en-us/graph/outlook-calendar-online-meetings) | `isOnlineMeeting` + `onlineMeetingProvider=teamsForBusiness` at creation; irreversible once set (2C). |
-| [Throttling](https://learn.microsoft.com/en-us/graph/throttling-limits) | Honour `Retry-After`; at most 4 concurrent requests per app per mailbox, so flow concurrency is 1. |
+| Provider throttling | Flow concurrency is 1; the source contract allows at most two bounded `429` retries honoring `Retry-After`. No retry is allowed after an unsupported first-live timezone or response shape. |
 | [Connection references](https://learn.microsoft.com/en-us/power-apps/maker/data-platform/create-connection-reference) | Solution flows bind to references; connections are supplied at import. |
 
-Items still to verify in a spike: Dataverse-triggered flow start latency, `transactionId` deduplication window, event `If-Match` support, maximum `getSchedule` window, room response latency, Teams lobby behaviour, and `Place.Read.All` consent requirement.
+The event/Teams capabilities in this table are later-slice proposals, not part of the 2A Outlook read. Their runtime behavior, booking identity, permissions and implementation remain open.
 
 ### Business modes
 
@@ -72,20 +70,21 @@ Unknown or error availability for any required source is **NOT AVAILABLE**. Fail
 
 ### Slice 2A availability algorithm
 
-1. Validate inputs in a Dataverse plug-in: TA active, `os_sr_ta_eml` syntactically valid and in the allowed-domain list; for ONSITE, Location active with a valid `os_sr_loc_rmeml`; window in the future and within the maximum length; duration allowed. Validation failure → `Failed` with a deterministic category; Graph is not called.
-2. The flow reads active TA and, for ONSITE only, Location, retaining only reference IDs, active states and normalized mailbox addresses in memory. It calls `getSchedule` for those exact addresses, with a 15-minute interval and UTC times. No snapshot or raw Graph data is persisted or logged.
-3. A required source is Known only if its entry exists, has no `error`, and its `availabilityView` has exactly the expected length with characters `0`–`3`. Any unknown required source → `Failed`, zero slots.
-4. A candidate slot is valid only if every 15-minute block is `0` for every required source (tentative counts as busy under approved D5), it lies within business hours in `SE Asia Standard Time`, starts and ends on the same local day, and meets lead-time rules (D6). From 2B, active Dataverse bookings for the same TA/room are also excluded.
-5. Known sources with no valid slot → `NoSlots` with a deterministic reason. At least one slot → `Available`.
-6. Immediately before **any** terminal write, re-read TA and, for ONSITE only, Location. Apply [ReferenceDriftPolicy.BeforeTerminalWrite](../solutions/AvailabilityQuery/ReferenceDriftPolicy.cs): changed reference ID, active state or normalized mailbox address (or an unreadable required reference) overrides Available, NoSlots or Failed with **Failed**, slots `[]`, error `REFERENCE_CHANGED`, no reason. Display-name-only changes do not invalidate. Do not retry automatically or mutate Candidate/Core. This is not a distributed lock; 2A never guarantees a booking.
-7. Results carry an expiry. In 2A they are advisory display only. Reference-read/Graph/snapshot actions must use secure Flow inputs/outputs so memory-only values do not become retained run-history payloads.
+1. Trigger on a new Pending `os_sr_avq`, read the request and TA, and read Location only for ONSITE. Validate active references, email syntax and allowed domains, future UTC window and allowed duration. Keep only the reference IDs, active states and normalized emails in Flow memory.
+2. Call Office 365 Outlook `Find meeting times (V2)`: `RequiredAttendees` is the TA; `ResourceAttendees` is empty ONLINE and the room ONSITE; `MeetingDuration`, `Start`, and `End` are the request values; `MaxCandidates` is the configured 1–200 bound; `MinimumAttendeePercentage` is string `"100"`; `IsOrganizerOptional` is `true`; `ActivityDomain` is `Work`. There is no Candidate, Interview Schedule or timezone input.
+3. Validate the entire response: required top-level `emptySuggestionsReason` and `meetingTimeSuggestions[]`; each suggestion's `meetingTimeSlot.start/end` each contain `dateTime` and `timeZone`, and `attendeeAvailability[]` entries each contain `attendee.emailAddress.address`, `attendee.type` and `availability`. Optional confidence, organizer availability, reason and locations are shape-checked but never used as availability evidence. Unknown/missing/changed shapes fail with a safe category and no slots.
+4. The adapter recognizes only `timeZone` exactly `UTC` and explicitly supported UTC timestamp formats. Each expected address must appear exactly once as the required TA or resource room and its availability must be exactly `free`. Tentative, busy, oof, workingElsewhere, unknown, missing, duplicate, or malformed attendee data never establishes free time. The organizer calendar does not decide acceptance.
+5. Capture current UTC after the provider call; use that same instant for queried-at and lead-time filtering, never a backdated request or call-start time. Accept only suggestions wholly inside the requested window, of exactly the requested duration, aligned to 15 minutes, meeting lead time, and within business hours on the same local day in `SE Asia Standard Time`. Sort ascending, remove identical duplicates, and enforce slot-count and JSON-length limits. Conflicting duplicate availability observations fail closed.
+6. A valid response with no valid suggestions → `NoSlots` / `NO_COMMON_SLOT`; at least one valid slot → `Available`; provider error, malformed shape or unsupported timezone → `Failed` with a safe category. Never expose or persist `emptySuggestionsReason`, suggestion reason, connector error body, diagnostics, raw payload, addresses, attendee status, locations, confidence, or organizer identity. `os_sr_avq_slts` contains only UTC `startUtc` and `endUtc`.
+7. Immediately before **any** terminal write, re-read TA and, for ONSITE only, Location. Apply [ReferenceDriftPolicy.BeforeTerminalWrite](../solutions/AvailabilityQuery/ReferenceDriftPolicy.cs): changed reference ID, active state or normalized mailbox address (or an unreadable required reference) overrides Available, NoSlots or Failed with **Failed**, slots `[]`, error `REFERENCE_CHANGED`, no reason. Display-name-only changes do not invalidate. Do not retry automatically or mutate Candidate/Core. This is not a distributed lock; 2A never guarantees a booking.
+8. Write exactly one terminal result and expiry. In 2A the result is advisory display only. Secure inputs/outputs on reference reads, Outlook and snapshot/comparison actions so memory-only values do not become retained run-history payloads. The [Flow contract](../solutions/AvailabilityQuery/availability-flow.contract.json) is a source contract, not a deployed Flow; the C# adapter is a tested reference, not a directly invocable Power Automate action.
 
 ### Slice 2A write boundary
 
 | Category | Slice 2A rule |
 |---|---|
 | **A. Business-data writes** — Candidate, Call Log, Candidate Status History, Operation Receipt, `os_sr_intv`, TA Directory, Location; any `os_sr_cact` invocation | **Prohibited.** The availability panel must not call `os_sr_cact`, update Candidate or `os_sr_intv`, create Status History or Operation Receipt, pre-fill or invoke `MarkRound1Scheduled`, or advance Candidate state. |
-| **B. Integration infrastructure/configuration writes** — `os_sr_avq` table and protection plug-in step, custom connector, Cloud Flow, connection references, environment variable definitions/values, Entra app registration and consent, Console/app web resources and their publication | **Potentially required later; each needs separate explicit authorization.** None is performed by this proposal. |
+| **B. Integration infrastructure/configuration writes** — `os_sr_avq` table and protection plug-in step, Cloud Flow, Outlook/Dataverse connection references, environment variable definitions/values, Console/app web resources and publication | **Potentially required later; each needs separate explicit authorization.** None is performed by this offline task. A custom connector, project Entra app, consent and dedicated application user are not DEV prerequisites. |
 | **C. Runtime availability-query rows** — `os_sr_avq` request/result rows created by the BSO and completed by the integration identity | Required by the approved 2A design once B is authorized. Not Candidate business data: no Candidate or `os_sr_intv` lookup, no Candidate Core path. Synthetic-only in DEV; 30-day retention is approved, while cleanup remains unimplemented and separately gated. |
 
 ### Slice 2A acceptance contract
@@ -96,7 +95,7 @@ Slice 2A acceptance must prove all of the following, using synthetic TA/room tes
 2. The `Pending` state is visible.
 3. An `Available` result displays slots.
 4. A `NoSlots` result displays a deterministic reason.
-5. An availability failure displays a safe, deterministic category (no raw Graph payload, token, or exception text).
+5. An availability failure displays a safe, deterministic category (no raw provider payload, token, or exception text).
 6. Candidate rows remain unchanged.
 7. Interview Schedule (`os_sr_intv`) rows remain unchanged.
 8. Candidate Status History remains unchanged.
@@ -107,11 +106,13 @@ No Candidate state transition is part of Slice 2A acceptance. Additional technic
 
 ### Offline source status and preflight gates
 
-The offline source currently defines the schema contract, isolated guard/calculator project, exact single-operation OpenAPI contract, logical Flow contract, environment-variable definitions without values, role delta, and 30-day cleanup design. The Console panel is separately gated by an environment configuration flag and follows the shared `[DEV]` reference policy. These artifacts are not included in the frozen managed 1.0.0.1 artifact and must not be described as tenant resources.
+The offline source defines the unchanged schema contract, isolated guard and Outlook response adapter, logical Flow contract, environment-variable definitions without values, role delta, and 30-day cleanup design. The Console panel is separately gated and follows the shared `[DEV]` reference policy. These artifacts are not included in the frozen managed 1.0.0.1 artifact and must not be described as tenant resources.
 
-Preflight results supplied by the owner classify `P0_SLICE_2A_PREFLIGHT_COMPLETE` and `P0_SLICE_2A_IMPLEMENTATION_BLOCKED_PREREQUISITES`. The effective classic DLP policy places Dataverse and Graph in Confidential, but Dataverse action/endpoint filtering is unverified. Existing project Entra app and actual consent policy, licensed scheduling identity with CA/MFA compatibility, synthetic TA/room mailboxes and room AutoAccept/conflict configuration, and premium-flow licensing remain external prerequisites. Existing `[DEV]` references contain `.invalid` mailbox addresses and cannot be used for a live query. Do not create or alter any of these in offline implementation.
+The owner-supplied preflight states Outlook DEV feasibility but `SLICE_2A_SYNTHETIC_MAILBOX_PREREQUISITE_MISSING` remains the external blocker. Existing `[DEV]` references use `.invalid` addresses and cannot be used for live calendar checks. No mailbox, connection, Flow, schema, role or publication is authorized by the offline refactor.
 
-The dedicated Dataverse application user is approved conceptually but is not selected or provisioned. Canonical configuration binding is **approved environment configuration -> [AvailabilityConfigurationRenderer.Render](../solutions/AvailabilityQuery/AvailabilityConfigurationRenderer.cs) -> plug-in unsecure configuration**. The six environment-variable definitions are the deployment source of truth; the application-user GUID is a separate environment-specific nonsecret input. Do not maintain hand-written duplicate values. The renderer rejects missing, duplicate, unknown or invalid settings, uses deterministic ordering, parses its output through the real `PluginConfiguration.Parse`, and verifies equality to source semantics before returning. Both guard steps receive identical rendered bytes. Domains must be canonical lowercase DNS names; lists preserve source order and business-hour JSON property order is immaterial. No credentials, identity GUID or environment-specific rendered output is committed. See the [binding contract](../solutions/AvailabilityQuery/availability-environment-variables.json).
+Canonical binding is **approved environment configuration -> [AvailabilityConfigurationRenderer.Render](../solutions/AvailabilityQuery/AvailabilityConfigurationRenderer.cs) -> plug-in unsecure configuration**. The existing six business settings plus a proposed `os_sr_avq_maxc` definition provide source values; the result-writer GUID is a separate environment-specific nonsecret input. The new technical name remains pending approval. Do not maintain hand-written duplicate values. The renderer validates all seven values, parses its deterministic output through the real `PluginConfiguration.Parse`, and verifies equality to source semantics. Both guard steps receive identical bytes. The existing 61-day safety cap is retained as policy, not an Outlook connector limitation. No credentials, identity GUID, mailbox values or rendered environment output are committed.
+
+**First-runtime provider timezone gate:** the action has no timezone input. If the first synthetic execution returns a different valid timezone representation from the adapter's explicit UTC contract: **STOP. Do not retry or broaden conversion.** Capture sanitized field names, types and timezone representation only, without raw provider output or mailbox values, and make a separately reviewed bounded correction.
 
 **First-runtime DateTime gate:** retain strict UTC validation. If the first synthetic availability create sends explicit UTC (`...Z`) but the plug-in rejects **only** because the bound `DateTime.Kind` is not UTC: **STOP. Do not retry. Do not normalize automatically. Localize the actual Dataverse transport representation first.** Offline tests do not establish Dataverse transport Kind; changing UTC interpretation requires separate approval.
 
@@ -139,9 +140,9 @@ These are proposals for later approval, not 2A scope:
 | Failure | User-visible | Dataverse state | Retry | Reconciliation | Operator |
 |---|---|---|---|---|---|
 | TA/room busy at recheck | Slot no longer available | Failed; schedule Withdrawn | New query | — | No |
-| `getSchedule` timeout | Availability unknown | `os_sr_avq` Failed | User re-runs (read-only) | — | No |
+| Outlook availability timeout | Availability unknown | `os_sr_avq` Failed | No blind repeat | — | No |
 | Create timeout / lost response | Booking pending verification | Indeterminate | **None blind** | Extended-property lookup | If lookup fails |
-| 401 / 403 | Calendar integration unavailable | Failed `GRAPH_AUTH` | No | — | Yes; alert |
+| 401 / 403 | Calendar integration unavailable | Failed `PROVIDER_AUTH` / `PROVIDER_PERMISSION` | No | — | Yes; alert |
 | 404 mailbox/resource | Calendar not found | Failed / `os_sr_avq` Failed | No | — | Yes; fix reference data |
 | 409 / concurrency | Conflict, refresh | Unchanged or Failed | Re-read first | Compare `changeKey` | If persistent |
 | 429 | Busy, retrying | Unchanged | Bounded, honour `Retry-After` | — | No |

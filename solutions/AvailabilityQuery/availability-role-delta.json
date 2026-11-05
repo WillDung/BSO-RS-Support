@@ -21,7 +21,7 @@
   "integrationRole": {
     "name": "BSO-RS Support - Availability Integration",
     "technicalName": "os_sr_avqint",
-    "assignTo": "Dedicated Dataverse application user/service principal, selected during an authorized preflight",
+    "assignTo": "Unassigned least-privilege model for a later Production identity decision. DEV uses the current owner identity for the Dataverse Flow connection and a separate BSO requester; no role change or application user is required for this offline task.",
     "privileges": [
       { "privilege": "prvReados_sr_avq", "depth": "Global" },
       { "privilege": "prvWriteos_sr_avq", "depth": "Global" },
@@ -35,5 +35,5 @@
       "os_sr_avq Append, AppendTo, Delete, Assign, or Share"
     ]
   },
-  "deployment": "No role is changed or assigned by this source."
+  "deployment": "No role is changed or assigned by this source. DEV_FUNCTIONAL_IDENTITY_ELEVATED_NOT_SECURITY_ACCEPTANCE: the DEV owner is elevated and is not evidence of least-privilege security acceptance."
 }

@@ -44,8 +44,8 @@
     "prohibitedFields": [
       "Candidate lookup",
       "Interview Schedule lookup",
-      "Raw Graph availabilityView",
-      "Graph response payload",
+      "Raw provider availability",
+      "Provider response payload",
       "Mailbox email address"
     ],
     "relationships": [

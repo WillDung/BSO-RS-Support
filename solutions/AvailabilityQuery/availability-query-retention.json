@@ -15,7 +15,7 @@
   "safety": [
     "Retention applies to operational availability-query data only.",
     "No Candidate or Interview Schedule lookup exists.",
-    "No raw Graph availabilityView or Graph response payload is stored.",
+    "No raw provider response, attendee availability, or mailbox snapshot is stored.",
     "Do not run cleanup until the separate deployment/run authorization and bounded dry-run are approved."
   ]
 }

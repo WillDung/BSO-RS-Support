@@ -10,14 +10,57 @@
     "concurrency": 1
   },
   "actions": [
-    { "sequence": 1, "operation": "Read created os_sr_avq row and required inputs only" },
-    { "sequence": 2, "operation": "Read active referenced TA and, for Onsite only, Location; fail closed if missing/inactive/invalid; retain required reference snapshots in flow memory only" },
-    { "sequence": 3, "operation": "Call the single Graph getSchedule connector operation for TA and, only for Onsite, room" },
-    { "sequence": 4, "operation": "Reject missing/error source entries or malformed/wrong-length availabilityView; persist no raw provider data" },
-    { "sequence": 5, "operation": "Compute deterministic slots using the offline os_sr_avqg library contract" },
-    { "sequence": 6, "operation": "Before every terminal write, re-read TA and, for Onsite only, Location; apply ReferenceDriftPolicy.BeforeTerminalWrite to the values used for Graph; any relevant drift or failed re-read overrides the proposed result with Failed, slots [], and REFERENCE_CHANGED" },
-    { "sequence": 7, "operation": "Update only state, reason, error, computed slots, queried-at, and expiry" }
+    { "sequence": 1, "operation": "Trigger on a new Pending os_sr_avq row" },
+    { "sequence": 2, "operation": "Read the created request and required inputs only" },
+    { "sequence": 3, "operation": "Read the referenced TA and, for Onsite only, Location" },
+    { "sequence": 4, "operation": "Validate active references, permitted normalized addresses, mode, window and duration; fail closed before the provider call if invalid" },
+    { "sequence": 5, "operation": "Retain only the validated reference snapshots in Flow memory" },
+    { "sequence": 6, "operation": "Call Office 365 Outlook Find meeting times (V2) using the exact provider inputs below" },
+    { "sequence": 7, "operation": "Validate the entire provider response and required attendee structure; unknown or malformed shapes fail closed" },
+    { "sequence": 8, "operation": "Capture current UTC after the provider call, then filter and normalize suggestions using OutlookMeetingTimesAdapter and AvailabilityRules as the offline reference contract" },
+    { "sequence": 9, "operation": "Before every terminal write, re-read TA and, for Onsite only, Location" },
+    { "sequence": 10, "operation": "Apply ReferenceDriftPolicy.BeforeTerminalWrite to the memory-only snapshots; relevant drift or failed re-read overrides the proposed result with Failed, slots [], and REFERENCE_CHANGED" },
+    { "sequence": 11, "operation": "Write exactly one terminal Available, NoSlots or Failed result using only state, reason, error, canonical slots, queried-at and expiry" }
   ],
+  "provider": {
+    "connector": "Office 365 Outlook",
+    "action": "Find meeting times (V2)",
+    "operationId": "FindMeetingTimes_V2",
+    "inputs": {
+      "RequiredAttendees": "Normalized TA email from the validated snapshot",
+      "ResourceAttendees": "Empty for Online; normalized room email from the validated Location snapshot for Onsite",
+      "MeetingDuration": "Requested duration in minutes",
+      "Start": "Requested UTC window start",
+      "End": "Requested UTC window end",
+      "MaxCandidates": "Resolved os_sr_avq_maxc, integer 1-200",
+      "MinimumAttendeePercentage": "100",
+      "IsOrganizerOptional": true,
+      "ActivityDomain": "Work"
+    },
+    "noInputs": ["Candidate", "Interview Schedule", "Timezone"],
+    "evaluationClock": "Capture current UTC after the provider call. Use that same instant as queried-at and for lead-time filtering; never backdate it to the request or call start.",
+    "response": {
+      "requiredTopLevel": ["emptySuggestionsReason", "meetingTimeSuggestions"],
+      "requiredSuggestion": ["meetingTimeSlot.start.dateTime", "meetingTimeSlot.start.timeZone", "meetingTimeSlot.end.dateTime", "meetingTimeSlot.end.timeZone", "attendeeAvailability"],
+      "optionalSuggestion": ["confidence", "organizerAvailability", "suggestionReason", "locations"],
+      "requiredAttendeeAvailability": ["attendee.emailAddress.address", "attendee.type", "availability"],
+      "acceptedAvailability": "Exactly free for each required attendee; each expected address must appear exactly once with the expected required/resource type.",
+      "organizer": "IsOrganizerOptional is true. organizerAvailability is never used to decide whether a slot is usable.",
+      "unknownOrMalformed": "Failed with PROVIDER_RESPONSE_INVALID, slots []; unsupported timezone uses PROVIDER_TIMEZONE_UNSUPPORTED.",
+      "noValidSuggestions": "NoSlots with NO_COMMON_SLOT and slots [].",
+      "persistence": "Only sorted, distinct UTC startUtc/endUtc slots, subject to count and JSON-length limits. Never persist or expose provider output, reasons, addresses, availability, locations, confidence, organizer or connector error bodies."
+    },
+    "implementation": "The C# adapter is an offline reference implementation and tests, not an invocable Power Automate action. A later authorized Flow must implement and validate the same contract; this file is not a deployed Flow."
+  },
+  "providerTimezoneFirstRuntimeGate": {
+    "acceptedRepresentation": "timeZone exactly UTC, with an explicitly supported UTC dateTime representation; no timezone input is sent to the action.",
+    "trigger": "The first synthetic live execution returns a different valid timezone representation.",
+    "action": "STOP",
+    "retry": false,
+    "automaticConversion": false,
+    "capture": "Capture the actual field names, types and timezone representation in sanitized synthetic evidence only; do not persist raw output, mailbox addresses, connector diagnostics or personal data.",
+    "nextAction": "Make a separately reviewed bounded adapter correction before any new execution; do not infer timezone semantics."
+  },
   "referenceDrift": {
     "comparison": "ReferenceDriftPolicy.BeforeTerminalWrite",
     "memoryOnlyFields": [
@@ -28,7 +71,7 @@
       "Location active state (Onsite only)",
       "normalized room email (Onsite only)"
     ],
-    "normalization": "Trim and lowercase invariant; use these exact normalized addresses for Graph and the comparison.",
+    "normalization": "Trim and lowercase invariant; use these exact normalized addresses for the provider call and comparison.",
     "compare": ["reference id", "active state", "normalized mailbox email"],
     "ignore": ["TA display name", "Location display name", "unrelated display metadata"],
     "onChangedOrUnreadable": {
@@ -38,7 +81,7 @@
       "error": "REFERENCE_CHANGED"
     },
     "terminalCoverage": ["Available", "NoSlots", "Failed"],
-    "storage": "Memory only. No mailbox snapshot, raw Graph data, or display-name snapshot is persisted or logged. Secure inputs/outputs on reference reads, Graph actions and snapshot/comparison actions; no raw payload in failure diagnostics.",
+    "storage": "Memory only. No mailbox snapshot, raw provider data or display-name snapshot is persisted or logged. Secure inputs/outputs on reference reads, Outlook actions and snapshot/comparison actions; no raw payload in failure diagnostics.",
     "recovery": "No automatic replacement query or retry after drift; user may initiate a new query.",
     "boundary": "The re-read is immediately before the terminal write, not a distributed lock or a booking guarantee."
   },
@@ -49,8 +92,9 @@
   ],
   "retry": {
     "429": "Honor Retry-After with at most two retries for this idempotent read, and only while inside an overall request deadline.",
-    "ambiguousTimeout": "No blind repeat. Complete the row as Failed with GRAPH_TIMEOUT if no safe response is available.",
-    "401_403_404": "Fail closed as GRAPH_AUTH, GRAPH_PERMISSION, or MAILBOX_NOT_FOUND; no retry."
+    "ambiguousTimeout": "No blind repeat. Complete the row as Failed with PROVIDER_TIMEOUT if no safe response is available.",
+    "401_403_404": "Fail closed as PROVIDER_AUTH, PROVIDER_PERMISSION or MAILBOX_NOT_FOUND; no retry.",
+    "unsupportedTimezoneOrShape": "Fail closed; stop the first synthetic live execution and do not retry or broaden conversion."
   },
   "safeErrors": [
     "TA_INACTIVE",
@@ -62,15 +106,20 @@
     "ROOM_EMAIL_MISSING",
     "ROOM_EMAIL_INVALID",
     "ROOM_EMAIL_DOMAIN_NOT_ALLOWED",
-    "SOURCE_UNKNOWN_TA",
-    "SOURCE_UNKNOWN_ROOM",
-    "AVAILABILITY_VIEW_INVALID",
-    "GRAPH_AUTH",
-    "GRAPH_PERMISSION",
+    "INVALID_REQUEST",
+    "CONFIGURATION_INVALID",
+    "TIME_ZONE_UNAVAILABLE",
+    "PROVIDER_RESPONSE_INVALID",
+    "PROVIDER_TIMEZONE_UNSUPPORTED",
+    "PROVIDER_AUTH",
+    "PROVIDER_PERMISSION",
     "MAILBOX_NOT_FOUND",
-    "GRAPH_THROTTLED",
-    "GRAPH_TIMEOUT",
-    "GRAPH_UNAVAILABLE",
+    "PROVIDER_THROTTLED",
+    "PROVIDER_TIMEOUT",
+    "PROVIDER_UNAVAILABLE",
+    "RESULT_TOO_LARGE",
+    "RESULT_INVALID",
+    "REFERENCE_READ_FAILED",
     "REFERENCE_CHANGED"
   ],
   "forbiddenOperations": [
@@ -83,8 +132,15 @@
     "Email send",
     "Calendar event create/update/cancel"
   ],
+  "identity": {
+    "requestCreator": "Separate BSO test identity",
+    "resultWriter": "Current DEV owner identity used by the Dataverse Flow connection",
+    "outlookConnection": "Current DEV owner identity; not an impersonation of the BSO",
+    "classification": "DEV_FUNCTIONAL_IDENTITY_ELEVATED_NOT_SECURITY_ACCEPTANCE",
+    "production": "Identity is a later decision."
+  },
   "connectionReferences": [
-    "os_sr_cr_grs",
+    "Office 365 Outlook connection reference (technical name pending approval)",
     "os_sr_cr_dv"
   ]
 }

@@ -1,6 +1,34 @@
 # Current State
 
-## P0 Slice 2A preprovisioning hardening (2026-11-05)
+## Concurrent report: P0 Slice 2A bounded DEV provisioning stop (2026-11-05)
+
+**Evidence qualification:** This report and its related documentation appeared concurrently after the offline refactor began. The reported partial schema and reconciliation stop below have **not** been independently verified in this offline session. Preserve the report and require separate verification and explicit authorization before any continuation or repair.
+
+**Reported status:** `P0_SLICE_2A_RECONCILIATION_FAILED:MEMBERSHIP:10`. The report describes owner authorization for provider-independent infrastructure in exact VN LMV IT / unmanaged `os_sr_bso_rs_support`, superseding the earlier no-provisioning boundary only for that bounded operation. It reports that fresh preflight matched accepted Slice 1 topology, canonical roles, unassigned Reference Admin, Candidate Core and 50 disabled guards, with no partial Slice 2A components at entry.
+
+The report states that three requests were acknowledged: table/nonlookup-field creation, required TA lookup/`os_sr_ta_avq` creation, and a type-10 relationship `AddSolutionComponent`. The next GET did not satisfy the exact explicit-membership-row assertion, so execution stopped with **zero retries and no repair or continuation**. Its final readback reports 52 memberships (original 51 plus the `os_sr_avq` entity root including subcomponents) and the unmanaged export including the TA relationship. This describes an explicit-row assertion problem, not proven absence of export membership. Location lookup/relationship, BSO delta, integration role, and all six variable definitions are reported **not created/applied**. Publication calls are reported **zero**.
+
+The report states that read-only final reconciliation matched complete unchanged BSO/Reference Admin maps, unassigned Reference Admin, package/API/input/output/guard topology, all 50 disabled guards and all five published Console hashes. It reports Candidate/Call/History/Interview/Receipt counts of **47/64/163/45/183**, zero rows modified in the bounded window, zero Availability Query rows, and an effectively disabled availability feature with no deployed panel. Any partial state requires separate verification and explicit reviewed continuation/migration authorization; do not rerun an absent-only provisioner or silently repair.
+
+Owner dispositions are `SLICE_2A_OUTLOOK_CONNECTOR_DEV_PATH_FEASIBLE`, `SLICE_2A_DEV_IDENTITY_OPTION_A_APPROVED`, `SLICE_2A_SYNTHETIC_MAILBOX_PREREQUISITE_MISSING`, and `SLICE_2A_CUSTOM_GRAPH_PATH_ABANDONED`. The report states that no provider components, runtime acceptance, commit or push occurred, Slice 1 was unchanged, and frozen release artifacts/manifests remained unchanged. See the [bounded provisioning stop report](P0_SLICE_2A_DEV_PROVISIONING_REPORT.md) for its schema, write ledger, membership evidence and unexecuted scope.
+
+## P0 Slice 2A Outlook offline source (2026-11-05)
+
+**Owner-supplied approved state:** `SLICE_2A_OUTLOOK_CONNECTOR_PREFLIGHT_ACCEPTED`, `SLICE_2A_OUTLOOK_CONNECTOR_DEV_PATH_FEASIBLE`, `SLICE_2A_DEV_IDENTITY_OPTION_A_APPROVED`, `SLICE_2A_CUSTOM_GRAPH_PATH_ABANDONED`, and `SLICE_2A_SYNTHETIC_MAILBOX_PREREQUISITE_MISSING`. These classifications are accepted as supplied; no tenant preflight or Outlook action was executed during the offline refactor.
+
+The active provider contract is Office 365 Outlook `Find meeting times (V2)`: required TA, Onsite-only resource room, requested duration and UTC window, bounded configured candidate count, string `"100"` minimum attendee percentage, optional organizer, and `Work` activity domain. The [Flow contract](../solutions/AvailabilityQuery/availability-flow.contract.json) and [Outlook adapter](../solutions/AvailabilityQuery/OutlookMeetingTimesAdapter.cs) define strict response/UTC validation, exact free-only attendees, local business rules, canonical slots, and safe failures. The old custom Graph connector, app/consent dependency and availability-block path are not active. The Flow contract and adapter are source only, not a deployed Flow or a claim that C# is directly callable by Power Automate.
+
+The separate BSO test identity creates requests; the current DEV owner identity is the Dataverse result writer and owns the Outlook connection. The guard keeps creator/writer and calling/initiating identity checks. **`DEV_FUNCTIONAL_IDENTITY_ELEVATED_NOT_SECURITY_ACCEPTANCE`**; Production identity is a later decision. Reference IDs, active state and normalized addresses remain in Flow memory only; drift before any terminal write gives `REFERENCE_CHANGED` and `[]`. No Candidate/Core path, Interview Schedule, provider payload field or availability schema change was introduced. The Console remains display-only.
+
+Canonical environment values -> renderer -> identical guard configuration remains in force. The new bounded `os_sr_avq_maxc` definition is proposed pending technical-name approval; the existing six settings, 15-minute interval, `SE Asia Standard Time`, conservative 61-day safety cap, and strict Dataverse UTC stop gate remain. A different valid first-live provider timezone requires **STOP, no retry and no broadened conversion**; capture only sanitized shape/timezone evidence for a bounded correction.
+
+**Offline result:** `P0_SLICE_2A_OUTLOOK_OFFLINE_REFACTOR_COMPLETE`. Validation passed: 515 Availability Query SDK assertions, 122 Slice 2A static checks, 78 Candidate Console static checks, 21 Console configuration checks, 20 Console behavior tests, and syntax checks for seven JavaScript files. These checks use synthetic data and do not establish tenant, connector, Flow or security acceptance.
+
+In this offline session, no tenant write, Outlook execution, connection/Flow creation, schema provisioning, role change, publication, Candidate operation, commit, or push was performed. The confirmed external blocker is `SLICE_2A_SYNTHETIC_MAILBOX_PREREQUISITE_MISSING`; the concurrent report additionally describes `P0_SLICE_2A_RECONCILIATION_FAILED:MEMBERSHIP:10`, unverified here. This offline work does not establish live or security acceptance, change Slice 1, or alter the frozen release.
+
+## Historical P0 Slice 2A preprovisioning hardening (2026-11-05) — `SUPERSEDED_BY_OUTLOOK_CONNECTOR_ARCHITECTURE`
+
+Historical preprovisioning checkpoint; its no-provisioning/absence statements predate the separate, unverified concurrent partial-operation report above.
 
 **Status:** `P0_SLICE_2A_OFFLINE_IMPLEMENTATION_ACCEPTED`; `P0_SLICE_2A_PREPROVISIONING_HARDENING_COMPLETE`; `P0_SLICE_2A_PROVISIONING_NOT_AUTHORIZED`. The two owner-requested hardening items are implemented in offline source/tests only. All external prerequisites below remain unresolved; nothing is provisioned, deployed or runtime accepted. `P0_SLICE_1_LIVE_FUNCTIONALLY_ACCEPTED` and the independent manual workflow remain unchanged.
 
@@ -10,7 +38,7 @@
 
 **Validation:** Availability Query SDK 264 assertions (+185), static checks 61 (+14), Candidate Console static 78 and configuration 21; JavaScript syntax and diff whitespace checks passed. Coverage includes TA email/inactive drift, Onsite room email/Location inactive drift, unreadable/changed IDs, all terminal outcomes, unrelated display-name changes, pure operational-only completion, deterministic rendering, exact real-parser round trips, duplicate/unknown/credential-setting rejection, and strict UTC rejection. Tests use synthetic identities/addresses and make no live requests. No tenant operation, Graph call, provisioning, commit or push occurred during this hardening task.
 
-## P0 Slice 2A offline source implementation (2026-11-05)
+## Historical P0 Slice 2A offline source implementation (2026-11-05) — `SUPERSEDED_BY_OUTLOOK_CONNECTOR_ARCHITECTURE`
 
 **Status:** `P0_SLICE_2A_OFFLINE_IMPLEMENTATION_COMPLETE`; `P0_SLICE_2A_PREFLIGHT_COMPLETE`; `P0_SLICE_2A_IMPLEMENTATION_BLOCKED_PREREQUISITES`; `AVAILABILITY_QUERY_RETENTION_30_DAYS_APPROVED`; `SLICE_2A_DATAVERSE_INTEGRATION_APPLICATION_USER_APPROVED`; `P0_SLICE_2A_TECHNICAL_NAMES_APPROVED`. D1–D8 and the Slice 2A architecture baseline are approved with the technical-lead modifications in [Product Decisions](PRODUCT_DECISIONS.md#p0-slice-2-calendar-integration-proposed--architecture-approved).
 
@@ -24,7 +52,7 @@ The 30-day retention policy is approved; the cleanup job is only a bounded offli
 
 **Offline validation:** `dotnet run --project .\tests\AvailabilityQuerySdk\AvailabilityQuerySdk.Tests.csproj` passed 79 assertions; `pwsh -NoLogo -NoProfile -File .\tests\AvailabilityQuery.Tests.ps1` passed 47 checks; Candidate Console static and configuration suites passed 78 and 21 checks respectively; `node --check` passed for the new availability panel script. No live availability query or runtime acceptance was performed.
 
-## Historical initial P0 Slice 2 calendar proposal state (superseded 2026-11-05)
+## Historical initial P0 Slice 2 calendar proposal state (2026-11-05) — `SUPERSEDED_BY_OUTLOOK_CONNECTOR_ARCHITECTURE`
 
 The following is the historical state before D1–D8 approval and the read-only preflight. It is superseded by the current top entry above.
 

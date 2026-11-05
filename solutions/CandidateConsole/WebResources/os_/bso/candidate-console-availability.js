@@ -27,6 +27,7 @@
   const MAX_POLL_MS = 120000;
   const VIETNAM_OFFSET = "+07:00";
   let lastQueryId = null;
+  let activeSubmission = 0;
   const SAFE_ERRORS = {
     TA_INACTIVE: "The selected TA is inactive.",
     TA_EMAIL_MISSING: "The selected TA has no calendar email.",
@@ -37,15 +38,14 @@
     ROOM_EMAIL_MISSING: "The selected location has no room calendar.",
     ROOM_EMAIL_INVALID: "The selected room calendar address is invalid.",
     ROOM_EMAIL_DOMAIN_NOT_ALLOWED: "The selected room email domain is not allowed.",
-    SOURCE_UNKNOWN_TA: "TA availability could not be verified.",
-    SOURCE_UNKNOWN_ROOM: "Room availability could not be verified.",
-    AVAILABILITY_VIEW_INVALID: "Availability data could not be verified.",
-    GRAPH_AUTH: "Calendar integration authentication is unavailable.",
-    GRAPH_PERMISSION: "Calendar integration does not have permission.",
+    PROVIDER_RESPONSE_INVALID: "Availability data could not be verified.",
+    PROVIDER_TIMEZONE_UNSUPPORTED: "Availability timezone could not be verified. Contact support.",
+    PROVIDER_AUTH: "Calendar integration authentication is unavailable.",
+    PROVIDER_PERMISSION: "Calendar integration does not have permission.",
     MAILBOX_NOT_FOUND: "A calendar mailbox could not be found.",
-    GRAPH_THROTTLED: "Calendar service is busy. Start a new availability check later.",
-    GRAPH_TIMEOUT: "Calendar availability timed out. Start a new availability check.",
-    GRAPH_UNAVAILABLE: "Calendar availability is unavailable.",
+    PROVIDER_THROTTLED: "Calendar service is busy. Start a new availability check later.",
+    PROVIDER_TIMEOUT: "Calendar availability timed out. Start a new availability check.",
+    PROVIDER_UNAVAILABLE: "Calendar availability is unavailable.",
     RESULT_TOO_LARGE: "Too many slots were returned. Narrow the requested window.",
     INVALID_REQUEST: "The requested availability window or duration is invalid.",
     REFERENCE_READ_FAILED: "A selected reference could not be verified.",
@@ -149,6 +149,7 @@
     const query = TABLE.query;
     const row = await api.retrieveRecord(query.logicalName, queryId,
       `?$select=${[query.state, query.reason, query.error, query.slots, query.expiresAt].join(",")}`);
+    if (queryId !== lastQueryId) return true;
     const state = row[query.state];
     if (state === STATE.pending) {
       if (Date.now() - startedAt >= MAX_POLL_MS) {
@@ -157,8 +158,10 @@
         return false;
       }
       showResult("Availability query pending…");
-      window.setTimeout(() => readQuery(queryId, startedAt).catch(() =>
-        showResult("Availability status could not be read. Use Refresh status to try again.", true)),
+      window.setTimeout(() => readQuery(queryId, startedAt).catch(() => {
+        if (queryId === lastQueryId)
+          showResult("Availability status could not be read. Use Refresh status to try again.", true);
+      }),
       POLL_INTERVAL_MS);
       return false;
     }
@@ -180,7 +183,9 @@
         : "No slots are available.";
       showResult(reason);
     } else if (state === STATE.failed) {
-      showResult(SAFE_ERRORS[row[query.error]] || "Availability could not be verified. Contact support.", true);
+      const error = row[query.error];
+      showResult(Object.prototype.hasOwnProperty.call(SAFE_ERRORS, error)
+        ? SAFE_ERRORS[error] : "Availability could not be verified. Contact support.", true);
     } else {
       showResult("Availability result has an unknown state.", true);
     }
@@ -206,6 +211,7 @@
     }
 
     const button = $("availability-submit");
+    const submission = ++activeSubmission;
     button.disabled = true;
     lastQueryId = null;
     $("availability-refresh").hidden = true;
@@ -223,16 +229,19 @@
         payload[`${TABLE.query.location}@odata.bind`] =
           `/${await getEntitySetName(TABLE.location.logicalName)}(${$("availability-location").value})`;
       }
+      if (submission !== activeSubmission) return;
       const created = await xrm.WebApi.createRecord(TABLE.query.logicalName, payload);
+      if (submission !== activeSubmission) return;
       const id = created && typeof created.id === "string" ? created.id.replace(/[{}]/g, "") : "";
       if (!id) throw new Error("QUERY_ID_MISSING");
       lastQueryId = id;
       showResult("Availability query pending…");
       await readQuery(id, Date.now());
     } catch {
-      showResult("Availability query could not be started or read. Contact support if this continues.", true);
+      if (submission === activeSubmission)
+        showResult("Availability query could not be started or read. Contact support if this continues.", true);
     } finally {
-      button.disabled = false;
+      if (submission === activeSubmission) button.disabled = false;
     }
   }
 
@@ -243,8 +252,10 @@
     try {
       await readQuery(id, Date.now());
     } catch {
-      showResult("Availability status could not be read. Contact support if this continues.", true);
-      $("availability-refresh").hidden = false;
+      if (id === lastQueryId) {
+        showResult("Availability status could not be read. Contact support if this continues.", true);
+        $("availability-refresh").hidden = false;
+      }
     }
   }
 
@@ -265,8 +276,8 @@
 
     try {
       const [tas, locations] = await Promise.all([
-        loadReferences(TABLE.ta, ["os_sr_ta_eml"]),
-        loadReferences(TABLE.location, ["os_sr_loc_rmeml"])
+        loadReferences(TABLE.ta),
+        loadReferences(TABLE.location)
       ]);
       $("availability-ta").dataset.nameField = TABLE.ta.name;
       $("availability-location").dataset.nameField = TABLE.location.name;

@@ -2,7 +2,7 @@ using System;
 
 namespace os_sr_avqg
 {
-    // Flow-memory-only values used for Graph, never persisted to the query row.
+    // Flow-memory-only values used for the provider call, never persisted to the query row.
     public sealed class CalendarReferenceSnapshot
     {
         public CalendarReferenceSnapshot(Guid referenceId, int? activeState, string? email)

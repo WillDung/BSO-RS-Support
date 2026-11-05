@@ -12,24 +12,25 @@
     { "schemaName": "os_sr_avq_lead", "displayName": "Availability Minimum Lead Time", "type": "WholeNumber", "unit": "minutes", "defaultValue": null, "requiredAtDeployment": true },
     { "schemaName": "os_sr_avq_hzn", "displayName": "Availability Maximum Horizon", "type": "WholeNumber", "unit": "days", "minimum": 1, "maximum": 61, "defaultValue": null, "requiredAtDeployment": true },
     { "schemaName": "os_sr_avq_exp", "displayName": "Availability Result Expiry", "type": "WholeNumber", "unit": "minutes", "minimum": 1, "maximum": 1440, "defaultValue": null, "requiredAtDeployment": true },
-    { "schemaName": "os_sr_avq_dom", "displayName": "Availability Allowed Email Domains", "type": "Text", "format": "comma-separated exact domains", "defaultValue": null, "requiredAtDeployment": true }
+    { "schemaName": "os_sr_avq_dom", "displayName": "Availability Allowed Email Domains", "type": "Text", "format": "comma-separated exact domains", "defaultValue": null, "requiredAtDeployment": true },
+    { "schemaName": "os_sr_avq_maxc", "displayName": "Availability Maximum Candidates", "type": "WholeNumber", "minimum": 1, "maximum": 200, "defaultValue": null, "requiredAtDeployment": true, "technicalNameStatus": "PROPOSED_PENDING_APPROVAL" }
   ],
   "businessHoursExampleShape": {
     "monday": { "opens": "09:00", "closes": "17:00" },
     "tuesday": { "opens": "09:00", "closes": "17:00" }
   },
   "deploymentBinding": {
-    "sourceOfTruth": "Resolved approved environment-variable values for the six definitions above; no separately maintained hand-written plug-in values.",
+    "sourceOfTruth": "Resolved approved environment-variable values for the seven definitions above; no separately maintained hand-written plug-in values.",
     "renderer": "AvailabilityConfigurationRenderer.Render",
-    "input": "Exactly one schema-name/value pair for every definition plus the separate environment-specific nonsecret Dataverse integration application-user GUID. No source values or rendered environment output are committed.",
+    "input": "Exactly one schema-name/value pair for every definition plus the separate environment-specific nonsecret Dataverse result-writer user GUID. DEV uses the current owner identity used by the Dataverse Flow connection; the requester is a separate BSO test identity. Production identity remains a later decision. No source values or rendered environment output are committed.",
     "businessHours": "JSON object keyed by weekday name; exactly opens and closes string properties in HH:mm format per configured day. Missing days mean closed. Reject duplicate days/properties and unknown properties.",
     "domains": "Comma-separated canonical lowercase DNS domains without trailing dot; separator whitespace is ignored; duplicates reject.",
     "durations": "Comma-separated positive minutes, maximum 480, each divisible by 15; duplicates reject. List order is preserved.",
     "output": "Fixed scalar-key order followed by business days in DayOfWeek order; LF line endings, no trailing newline. Both guard steps receive the exact same rendered bytes.",
     "validation": [
       "Missing, duplicate, unknown or empty environment settings reject.",
-      "Only the six approved environment definitions and separate nonsecret identity input are accepted; credential/secret inputs reject.",
-      "Maximum horizon is 1-61; durations are multiples of 15.",
+      "Only the seven environment definitions and separate nonsecret identity input are accepted; credential/secret inputs reject.",
+      "Maximum horizon is 1-61; durations are multiples of 15; MaxCandidates is 1-200 and no greater than the slot limit.",
       "Rendered output must parse through the real PluginConfiguration.Parse.",
       "Parsed identity, domain/duration lists, scalar values, and every business-hour boundary must equal the source semantics exactly.",
       "The real parser rejects unknown and duplicate keys, including case-insensitive duplicates.",

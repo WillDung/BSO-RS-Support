@@ -6,17 +6,21 @@
 
 **Stop:** `STAGE_A_INCOMPLETE_CONSOLE_LAYER_READBACK`
 
+**Additional finding:** `STAGE_A_CONSOLE_ENVIRONMENT_CACHE_TOKEN_MISMATCH`
+
 **Scope:** Authorized DEV read-only reconciliation and local documentation only. Stage B was not started.
 
 ## Executive result
 
-The exact VN LMV IT target and unmanaged `os_sr_bso_rs_support` Solution were verified before project resources were inspected. The current Flow is OFF and structurally matches the historical pre-hardening deployment, not the hardened local source. The observed Solution membership, role maps, connection bindings, disabled guards, published Console resources, value-less definitions and aggregate counts match the accepted checkpoint.
+The earlier full reconciliation verified the exact VN LMV IT target and unmanaged `os_sr_bso_rs_support` Solution before inspecting project resources. At that time the Flow was OFF and structurally matched the historical pre-hardening deployment, not the hardened local source. The observed Solution membership, role maps, connection bindings, disabled guards, published Console resources, value-less definitions and aggregate counts matched the accepted checkpoint.
 
-Stage A is **not a complete pass**: the unpublished/current Console copies and authenticated effective-served bytes were not independently read in this assessment. An anonymous request to each of the two changed resources and the environment resource redirected to sign-in. The published resource hashes and fail-closed source gate are fresh evidence, but they do not prove all three live layers agree. The current guard package's server-side bytes were also not independently hashed.
+The subsequent Console-only continuation reconfirmed the exact target and independently re-read all six published resources. Their hashes still match the accepted published checkpoint. However, the published HTML's environment-script cache token matches the unconfigured source template, not the deployed environment configuration. The repository generator and refresh guard require the token to match the deployed configuration hash. This is a **generated-pair mismatch**, not evidence that the tenant changed since the accepted checkpoint; the matching historical HTML hash shows the mismatch was already present in those published bytes.
 
-The previous version of this report incorrectly concluded that authentication was unavailable. That conclusion was unsupported: both workspace MCP servers responded, an existing authenticated context was available, and fresh tenant reads succeeded. This is a readback-coverage block, **not an authentication block or an observed topology drift**.
+Stage A remains **blocked** because current/unpublished resource bytes and authenticated normal-application served bytes remain independently unread. This classification does not waive the generated-pair mismatch, which also requires a reviewed disposition. The published configuration and module are fail-closed, but the effective browser-served flag is not established. The guard package's server-side bytes were not independently hashed.
 
-The full observation window was **2026-11-06 06:10:39-06:34:08 UTC**. The aggregate count window was **06:24:53-06:25:20 UTC**. These are point-in-time observations, not a transactionally consistent tenant snapshot.
+An earlier version of this report incorrectly concluded that tenant authentication was unavailable. Both workspace MCP servers and the existing PAC context did support the earlier tenant reads; that conclusion remains superseded. The separate integrated browser context available during this continuation was not authenticated to the target.
+
+The full-inventory observation window was **2026-11-06 06:10:39-06:34:08 UTC**, with aggregate counts read during **06:24:53-06:25:20 UTC**. The Console-only continuation's reads ran approximately **06:52-07:01 UTC**. Sections 1-6 and 8 retain the earlier full-inventory evidence and were not re-read during the continuation. These are point-in-time observations, not a transactionally consistent tenant snapshot.
 
 ## 1. Target and Solution
 
@@ -108,20 +112,29 @@ No Candidate Core operation was invoked. No `os_`-prefixed custom connector was 
 
 ## 7. Console and feature gate
 
-These are SHA-256 hashes of base64-decoded **published Dataverse WebResource content**. All six match the historical published checkpoint; the five non-environment resources also match their authored repository files.
+The continuation compared the six relevant [authored resources](../solutions/CandidateConsole/WebResources/os_/bso/) with a fresh published read. Authored hashes are over exact repository file bytes; published hashes are over base64-decoded WebResource content returned by `pac env fetch` with the exact environment specified. A separate Dataverse MCP metadata query returned exactly these six names with `componentstate = 0`; that query is not unpublished-content evidence.
 
-| Published resource | SHA-256 |
-|---|---|
-| `candidate-console.html` | `b0d3cede68669fc4bc080100a3318d433cd116b159cee32f8d96f20bd086086e` |
-| `candidate-console-availability.js` | `97487ef0c2a6ece4185a2b1d17a76804d9b58535cbeaee3c27b0596fd4ae7921` |
-| `candidate-console-environment.js` | `58e03dc262b790b7431f34ca5554422fc86f0d62f6e8b6160805a6b2d906335c` |
-| `candidate-console.js` | `cb26a8d5a859e9a72b27e25ee8220a4ad5704d4473dd37af0ee7b69ec0d55e53` |
-| `candidate-console-policy.js` | `29cbcc97c11a39e9a0d3f0177a3582e2edf96d388796612bee1d3149724d6348` |
-| `candidate-console.css` | `6681994a0d57e46ed1b3f0be291556fba37be262f822c8b483d31d00f1130fde` |
+| Exact resource name | Authored SHA-256 | Published SHA-256 | Current/unpublished | Authenticated normal-app served |
+|---|---|---|---|---|
+| `os_/bso/candidate-console.html` | `b0d3cede68669fc4bc080100a3318d433cd116b159cee32f8d96f20bd086086e` | `b0d3cede68669fc4bc080100a3318d433cd116b159cee32f8d96f20bd086086e` | Not retrieved | Not retrieved |
+| `os_/bso/candidate-console-availability.js` | `97487ef0c2a6ece4185a2b1d17a76804d9b58535cbeaee3c27b0596fd4ae7921` | `97487ef0c2a6ece4185a2b1d17a76804d9b58535cbeaee3c27b0596fd4ae7921` | Not retrieved | Not retrieved |
+| `os_/bso/candidate-console-environment.js` | `39135f67e4c96959bc0cb983c3b986bdfed1966df34432713180fe11ac0d6c1f` | `58e03dc262b790b7431f34ca5554422fc86f0d62f6e8b6160805a6b2d906335c` | Not retrieved | Not retrieved |
+| `os_/bso/candidate-console.js` | `cb26a8d5a859e9a72b27e25ee8220a4ad5704d4473dd37af0ee7b69ec0d55e53` | `cb26a8d5a859e9a72b27e25ee8220a4ad5704d4473dd37af0ee7b69ec0d55e53` | Not retrieved | Not retrieved |
+| `os_/bso/candidate-console-policy.js` | `29cbcc97c11a39e9a0d3f0177a3582e2edf96d388796612bee1d3149724d6348` | `29cbcc97c11a39e9a0d3f0177a3582e2edf96d388796612bee1d3149724d6348` | Not retrieved | Not retrieved |
+| `os_/bso/candidate-console.css` | `6681994a0d57e46ed1b3f0be291556fba37be262f822c8b483d31d00f1130fde` | `6681994a0d57e46ed1b3f0be291556fba37be262f822c8b483d31d00f1130fde` | Not retrieved | Not retrieved |
 
-The published HTML references the availability module. The published environment resource has no `availabilityEnabled` property, and the published module requires `availabilityEnabled === true` before loading references or creating a query. On the **published content examined**, this gate is false. The environment resource intentionally differs from the repository's unconfigured template.
+### Deployment transformation and mismatch
 
-The ordinary published-resource query and an empty `componentstate = 1` result do **not** substitute for `RetrieveUnpublishedMultiple`. Authenticated effective-served bytes were also not read: anonymous resource requests returned HTTP 302. Therefore current/unpublished = published = served is **not freshly established**, and the effective browser-served gate is not independently verified. No WebResource, app, sitemap or other component was published.
+The published environment file intentionally differs from the repository's unconfigured template. Its configuration object has the generator's expected property set and exact approved DEV target binding; its script bytes match the [generator](../scripts/New-BsoRsCandidateConsoleEnvironmentConfig.ps1) template when rendered with the published object's JSON. The published object has no `availabilityEnabled` property. The published availability module requires that property to be strictly `true` both before loading references and before creating a query, so the **published definitions** are fail-closed. This is not a browser-runtime flag verification.
+
+The same generator and the [scoped refresh guard](../scripts/Deploy-BsoRsCandidateConsole.ps1) require a generated HTML copy whose environment-script version is the first 12 hex digits of the bound configuration's SHA-256. The published HTML instead has `v=39135f67e4c9`, matching the **authored unconfigured** environment template; the bound published configuration requires `v=58e03dc262b7`. Applying only the generator's prescribed token substitution to the authored HTML yields SHA-256 `699afe50dc3a1bb898ddb3cac301edc36b3bb7a861429dfad5e50b5158403e25`, not the observed `b0d3cede...`. The published HTML still matches the earlier accepted checkpoint, so this finding establishes a mismatch with the generated-pair rule, not a newly observed tenant change or proof of stale served content. No repair or publication was attempted.
+
+### Independent layers not established
+
+- **Current/unpublished:** Microsoft documents [`RetrieveUnpublishedMultiple`](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/reference/retrieveunpublishedmultiple?view=dataverse-latest) as a read-only function bound to the WebResource collection. The available Dataverse MCP did not expose it as a public Custom API, and PAC FetchXML does not establish this layer. The documented local Dataverse CLI/Python authentication helper was absent; the existing Azure CLI context did not match the PAC user. An existing Azure PowerShell context did match PAC, but the identified repository deployment helper is write-capable and guarded by an older five-resource inventory; it was not run or modified. No independent unpublished hashes were produced. This is a caller/capability gap, not evidence that the server function is unavailable.
+- **Authenticated served bytes:** The integrated browser context exposed no existing target `srapp` page. A read-only navigation to the target `WhoAmI` endpoint returned HTTP 401; no sign-in was initiated. The published DEV configuration enables Candidate Core, and the Console's normal initialization loads the Candidate list. Opening `srapp` without a demonstrated way to prevent Candidate operations would therefore exceed this task's boundary. No normal-app HTML, JavaScript, CSS or configuration response bodies were captured. The earlier anonymous redirects and historical direct `/WebResources/` fetches are not accepted as authenticated normal-entrypoint evidence.
+
+Thus current/unpublished = published = authenticated served is **not established** for any of the six resources. No WebResource, app, sitemap, cache or service worker was modified.
 
 ## 8. Aggregate row counts
 
@@ -140,6 +153,10 @@ Counts were collected sequentially within the window above. Equal counts do not 
 
 ## 9. Offline checks and open decisions
 
+**Console-only continuation:** The synthetic configuration-generator suite passed **21** checks and the Candidate Console static suite passed **78** checks. The six authored hashes, captured published hashes and generated-pair transformation were cross-checked, and relative-link and `git diff --check` validation passed. These offline checks do not establish the missing live layers.
+
+The following checks belong to the earlier full-inventory assessment; they were not repeated as part of the Console-only continuation.
+
 | Check | Result |
 |---|---|
 | Availability Query static checks | Passed: **168** |
@@ -156,15 +173,15 @@ The Flow contract permits up to two 429 retries honoring `Retry-After`, while th
 
 ## 10. Decision and next gates
 
-Stage B is **not ready to start** from this incomplete assessment. First obtain authorized read-only evidence for the current/unpublished Console copies and authenticated served bytes, and recheck time-sensitive state. Establish a supported, single-Flow authoring surface and its conditional concurrency behavior; the observed SDK RowVersion alone is not proof of an `If-Match`-protected update. Any material unexpected drift must stop the sequence, not trigger repair.
+Stage B is **not ready to start**. The generated HTML/configuration cache-token mismatch needs an explicitly reviewed disposition; this assessment does not authorize or perform a repair. Obtain independently authenticated current/unpublished hashes through a supported read-only caller, and capture actual responses through an authenticated normal `srapp` entrypoint only under a method that respects the no-Candidate-operations boundary. Do not substitute direct resource fetches. Recheck time-sensitive state before any later stage. Establish a supported, single-Flow authoring surface and its conditional concurrency behavior; the observed SDK RowVersion alone is not proof of an `If-Match`-protected update.
 
 The missing synthetic mailbox prerequisite, value-less configuration, unapproved guard execution order, undeployed privacy hardening and runtime privacy-verification gates continue to prevent functional activation. The original classification `SLICE_2A_SYNTHETIC_MAILBOX_PREREQUISITE_MISSING` remains the historical prerequisite status; this assessment did not test mailbox availability. Stage B and all activation require separate authorization.
 
-This assessment performed **zero tenant writes**, **zero write retries**, **zero publication calls**, **zero availability or Candidate operations**, and **zero Outlook/calendar/mailbox operations**. Some failed or repeated read-only probes were corrected without a write. No commit or push was performed by this assessment.
+The full assessment and this continuation each performed **zero tenant writes**, **zero write retries**, **zero publication calls**, **zero availability or Candidate operations**, and **zero Outlook/calendar/mailbox operations**. Some failed or repeated read-only probes were corrected without a write. No commit or push was performed by either assessment.
 
 ## Sources
 
 - [Project Context](PROJECT_CONTEXT.md), [Current State](CURRENT_STATE.md), [Master Production Rules](../MASTER_PRODUCTION_RULES.md), and [Workflow](../WORKFLOW.md).
 - [Pre-activation readiness plan](P0_SLICE_2A_PRE_ACTIVATION_READINESS.md), [DEV provisioning report](P0_SLICE_2A_DEV_PROVISIONING_REPORT.md), [Integration Design](INTEGRATION_DESIGN.md), and [Product Decisions](PRODUCT_DECISIONS.md).
 - [Flow definition](../solutions/AvailabilityQuery/os_sr_avchk.clientdata.json), [Flow contract](../solutions/AvailabilityQuery/availability-flow.contract.json), [registration contract](../solutions/AvailabilityQuery/availability-plugin-registration.contract.json), [environment-variable contract](../solutions/AvailabilityQuery/availability-environment-variables.json), and [role delta contract](../solutions/AvailabilityQuery/availability-role-delta.json).
-- [Availability Query tests](../tests/AvailabilityQuery.Tests.ps1), [SDK test project](../tests/AvailabilityQuerySdk/), [membership tests](../tests/BsoRsSolutionMembership.Tests.ps1), [release-source test](../tests/BsoRsReleaseSource.Tests.ps1), and [production-readiness test](../tests/BsoRsProductionReadiness.Tests.ps1).
+- [Console configuration tests](../tests/CandidateConsoleConfiguration.Tests.ps1), [Console static tests](../tests/CandidateConsole.Tests.ps1), [Availability Query tests](../tests/AvailabilityQuery.Tests.ps1), [SDK test project](../tests/AvailabilityQuerySdk/), [membership tests](../tests/BsoRsSolutionMembership.Tests.ps1), [release-source test](../tests/BsoRsReleaseSource.Tests.ps1), and [production-readiness test](../tests/BsoRsProductionReadiness.Tests.ps1).

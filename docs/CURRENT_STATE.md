@@ -1,5 +1,9 @@
 # Current State
 
+## P0 Slice 2A Stage A live preflight blocked (2026-11-06)
+
+**Classification:** `P0_SLICE_2A_STAGE_A_LIVE_PREFLIGHT_BLOCKED`; exact stop `STAGE_A_BLOCKED_AUTHENTICATION`. Read-only inspection was authorized, but no active target-specific PAC environment URL or Dataverse connection was available. No tenant request was made, so current live resources, roles, configuration, and row counts remain unverified. Historical DEV reports are not fresh readback. Stage B is not ready. See the [Stage A live preflight report](P0_SLICE_2A_STAGE_A_LIVE_PREFLIGHT_REPORT.md).
+
 ## P0 Slice 2A offline Flow hardening (2026-11-06)
 
 **Local source classification:** `P0_SLICE_2A_OFFLINE_FLOW_HARDENING_COMPLETE`. This covers local source and offline regression checks only. The deployed VN LMV IT Flow remains unchanged and OFF; local changes have not been synchronized or redeployed.

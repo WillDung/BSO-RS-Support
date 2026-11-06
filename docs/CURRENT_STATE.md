@@ -1,8 +1,8 @@
 # Current State
 
-## P0 Slice 2A Stage A live preflight blocked (2026-11-06)
+## P0 Slice 2A Stage A live reconciliation (2026-11-06)
 
-**Classification:** `P0_SLICE_2A_STAGE_A_LIVE_PREFLIGHT_BLOCKED`; exact stop `STAGE_A_BLOCKED_AUTHENTICATION`. Read-only inspection was authorized, but no active target-specific PAC environment URL or Dataverse connection was available. No tenant request was made, so current live resources, roles, configuration, and row counts remain unverified. Historical DEV reports are not fresh readback. Stage B is not ready. See the [Stage A live preflight report](P0_SLICE_2A_STAGE_A_LIVE_PREFLIGHT_REPORT.md).
+**Classification:** `P0_SLICE_2A_STAGE_A_LIVE_PREFLIGHT_BLOCKED`; exact stop `STAGE_A_INCOMPLETE_CONSOLE_LAYER_READBACK`. The exact DEV environment, organization and unmanaged Solution were verified, and fresh read-only reconciliation found the Flow OFF and structurally equal to the historical pre-hardening definition, 66 expected Solution members, unchanged roles and disabled guards, seven value-less definitions, matching published Console hashes, unchanged aggregate business counts and zero Availability Query rows. The published configuration and module are fail-closed, but current/unpublished and authenticated served Console bytes were not independently read. Stage B is not ready, and no tenant writes or activation occurred. The earlier authentication-block claim was incorrect and is superseded by the [Stage A live preflight report](P0_SLICE_2A_STAGE_A_LIVE_PREFLIGHT_REPORT.md).
 
 ## P0 Slice 2A offline Flow hardening (2026-11-06)
 
@@ -12,7 +12,7 @@ Action-level secure inputs/outputs were added to each local Flow path that handl
 
 The Number `Float` parameter conversion, `sort()`/`union()` ordering and array `string()` serialization remain unchanged pending bounded synthetic runtime verification. Availability has not been run, and the synthetic mailbox prerequisite remains missing. See the [offline hardening and first-runtime matrix](P0_SLICE_2A_DEV_PROVISIONING_REPORT.md#offline-flow-hardening-and-pre-activation-verification-2026-11-06).
 
-The separate [pre-activation readiness report and controlled execution plan](P0_SLICE_2A_PRE_ACTIVATION_READINESS.md) is `P0_SLICE_2A_PRE_ACTIVATION_PLAN_BLOCKED`: the current live Flow bytes have not been freshly read, configuration values and synthetic mailboxes are missing, and guard execution order is unspecified. This planning status does not change the reported DEV or local source classifications.
+The separate [pre-activation readiness report and controlled execution plan](P0_SLICE_2A_PRE_ACTIVATION_READINESS.md) remains `P0_SLICE_2A_PRE_ACTIVATION_PLAN_BLOCKED`. Its original assessment lacked a live Flow read; the later Stage A report now records that read and the remaining coverage gaps. Configuration values and synthetic mailbox evidence are absent, and guard execution order is unspecified. This planning status does not change the reported DEV or local source classifications.
 
 ## P0 Slice 2A runtime wiring deployed, feature off (2026-11-05)
 

@@ -1,181 +1,170 @@
 # P0 Slice 2A Stage A Live Preflight Report
 
-**Assessment date:** 2026-11-06  
-**Classification:** `P0_SLICE_2A_STAGE_A_LIVE_PREFLIGHT_BLOCKED`  
-**Stop:** `STAGE_A_BLOCKED_AUTHENTICATION`  
-**Scope:** Authorized read-only live inspection was attempted only to the point of local authentication-context discovery. No tenant request was made.
+**Assessment date:** 2026-11-06
+
+**Classification:** `P0_SLICE_2A_STAGE_A_LIVE_PREFLIGHT_BLOCKED`
+
+**Stop:** `STAGE_A_INCOMPLETE_CONSOLE_LAYER_READBACK`
+
+**Scope:** Authorized DEV read-only reconciliation and local documentation only. Stage B was not started.
 
 ## Executive result
 
-The task explicitly authorized read-only inspection. The session did not have an active PAC environment context or target organization URL to verify. No Dataverse MCP tool or Dataverse CLI was available, and this workspace has neither `.env` nor `scripts/auth.py`. The one PAC profile shown was a generic `UNIVERSAL` operating-system profile, with no active environment URL.
+The exact VN LMV IT target and unmanaged `os_sr_bso_rs_support` Solution were verified before project resources were inspected. The current Flow is OFF and structurally matches the historical pre-hardening deployment, not the hardened local source. The observed Solution membership, role maps, connection bindings, disabled guards, published Console resources, value-less definitions and aggregate counts match the accepted checkpoint.
 
-Without an authenticated, target-specific connection, the exact organization, unmanaged Solution, Flow, connection references, security metadata, environment-variable values, and row counts cannot be verified. No `pac org who` or Dataverse Web API request was issued. No credentials were requested, created, or changed.
+Stage A is **not a complete pass**: the unpublished/current Console copies and authenticated effective-served bytes were not independently read in this assessment. An anonymous request to each of the two changed resources and the environment resource redirected to sign-in. The published resource hashes and fail-closed source gate are fresh evidence, but they do not prove all three live layers agree. The current guard package's server-side bytes were also not independently hashed.
 
-This is an authentication block, not evidence of live drift. Historical deployment reports remain comparison evidence only. Stage B is **not technically ready** because its required fresh live baseline is incomplete.
+The previous version of this report incorrectly concluded that authentication was unavailable. That conclusion was unsupported: both workspace MCP servers responded, an existing authenticated context was available, and fresh tenant reads succeeded. This is a readback-coverage block, **not an authentication block or an observed topology drift**.
 
-## 1. Target identity
+The full observation window was **2026-11-06 06:10:39-06:34:08 UTC**. The aggregate count window was **06:24:53-06:25:20 UTC**. These are point-in-time observations, not a transactionally consistent tenant snapshot.
 
-| Item | Result |
+## 1. Target and Solution
+
+| Check | Fresh result |
 |---|---|
-| Requested environment | User-supplied DEV environment label redacted; **not verified** |
-| Organization URL / organization identity | Not available from an active PAC context; **not verified** |
-| PAC CLI | Available, version 2.13.1; `pac auth list` showed no active target environment URL |
-| Dataverse MCP | No Dataverse MCP tool was available in this session |
-| Dataverse CLI | Not installed/available |
-| Workspace auth bootstrap | `.env` and `scripts/auth.py` are absent |
-| Solution `os_sr_bso_rs_support` | Historical report says unmanaged; current state **not read** |
-| Flow `os_sr_avchk` | Historical report identifies it as OFF; current ID, unique-name match, state, and Solution membership **not read** |
+| Environment and organization | Exact URL, environment ID, organization ID and organization unique name matched the previously verified VN LMV IT checkpoint; identity was not selected by display name alone. Identifiers are intentionally not reproduced here. |
+| Solution | Exactly one `os_sr_bso_rs_support`, unmanaged, version `1.0.0.1`; its identity matches the checkpoint. |
+| Membership | **66** distinct component type/object pairs; all original **60** and the **6** historical wiring additions remain, with no extras or missing entries. Root behaviors match the checkpoint. |
+| Availability root | The `os_sr_avq` entity root is present with `Include Subcomponents` (`rootcomponentbehavior = 0`). |
+| Flow membership | The existing `os_sr_avchk` workflow is one of the six wiring additions. |
 
-No similarly named environment was selected, and no attempt was made to switch profiles or establish a new connection.
+The earlier unmanaged export established inherited table subcomponents; no fresh export was made in this assessment. The current table description confirms the TA and optional Location lookups, required request fields, and exact Mode and Status Choice values. Lookup cascade settings, AutoNumber format and Memo maximum length were not independently re-read here; the [DEV provisioning report](P0_SLICE_2A_DEV_PROVISIONING_REPORT.md) is historical evidence for those details.
 
-## 2. Read-only operation inventory
+## 2. Live Flow identity, state and definition
 
-Local-only operations performed:
+Exactly one modern Flow definition has `workflow.name = os_sr_avchk`; its workflow ID matches the historical checkpoint and its Solution membership is confirmed. The Dataverse `uniquename` field is blank, so it must not be presented as a verified nonblank unique-name field. The `description` is `Slice 2A Availability Check`; the local contract uses a different display-name phrase. No rename was performed.
 
-- Inspected PAC authentication profiles with `pac auth list`.
-- Checked whether a Dataverse CLI, Dataverse MCP tool, workspace `.env`, or `scripts/auth.py` was available.
-- Read repository requirements, Slice 2A reports/contracts, and relevant Flow/plugin source.
-- Ran the offline validation commands listed below and computed local source fingerprints.
-
-Tenant operations: **0 reads, 0 writes, 0 publication calls, 0 provider calls, 0 retries**. No Candidate or Availability Query data was queried.
-
-## 3. Current Flow reconciliation
-
-**Live definition:** Not retrieved. Current live state, definition bytes/hash, ETag, ModifiedOn, run count, trigger/filter, connection references, action-level secureData, connector operations, and retry settings are all **unverified**. No live-versus-source structural diff can be produced.
-
-Offline and historical evidence, kept separate:
-
-| Evidence | Value / qualification |
+| Property | Fresh result |
 |---|---|
-| Local hardened [clientdata](../solutions/AvailabilityQuery/os_sr_avchk.clientdata.json) SHA-256 | `0E1A1DE9CFECE98440B1EC8B52DCD76648A25826A06BCF36FAFCEFBB39C701B0` |
-| Local [Flow contract](../solutions/AvailabilityQuery/availability-flow.contract.json) SHA-256 | `DF5EEEAD064F0FC0BE2448E854A868E8539CB53C5D58322E53A2D8EAE9FCCC35` |
-| Historical pre-hardening clientdata SHA-256 | `F901BAAE0ABC5F2A2ECCF74BF59E76FE05189A6E13BF86A981D6D6E4DBEB8811`; historical deployment evidence says the deployed definition matched this source at deployment time |
-| Historical Flow metadata | The provisioning report records OFF and zero runs at its readback time; it records a different display name from the current local contract. Neither is fresh live evidence. |
-| Local trigger contract | Create of a Pending `os_sr_avq`, concurrency 1 |
-| Local connector retry policy | The authored clientdata sets connector `retryPolicy.type` to `none`, including the Outlook action. This does not establish live behavior. |
+| State / status | Draft/OFF: `statecode = 0`, `statuscode = 1` |
+| ModifiedOn | `2026-11-05T16:06:28Z` |
+| Concurrency evidence | SDK `RowVersion = 13151363`, also returned as `versionnumber`; unchanged on a later read. No HTTP ETag or supported conditional single-Flow update behavior was established. |
+| Runs | Dataverse `flowrun` aggregate returned **0** visible/retained rows for this Flow; PAC's run-list command returned no results. This does not prove history beyond retention or access limits. |
+| Trigger | Dataverse Added/Create on Pending `os_sr_avq`, Organization scope, run as Flow owner; concurrency **1**. |
+| Connectors | Dataverse and Office 365 Outlook, using the two references in section 4. |
+| Connector behavior | Seven connector actions use `retryPolicy.type = none`. `FindMeetingTimes_V2` has a `PT2M` timeout. No provider operation was executed. |
 
-The local source hash is an exact-byte SHA-256 of the repository file. No current live bytes were available to hash or normalize; the historical hash must not be treated as the current deployed hash.
+### Hashes and structural comparison
 
-## 4. Guard package and registration
+The live hash is SHA-256 of the UTF-8 encoding of the **decoded `clientdata` string** returned by Dataverse, not a hash of the enclosing HTTP response. Source-file hashes are over their exact file bytes. For comparison, JSON was parsed with duplicate-key rejection and serialized as UTF-8 with recursively sorted object keys, compact separators, preserved array order and no insignificant structural whitespace; this canonical hash is separate from the exact-byte hash.
 
-**Current package, handler, steps, duplicate registrations, enabled state, and Solution membership:** not read.
+| Definition | Bytes | Exact SHA-256 | Canonical JSON SHA-256 |
+|---|---:|---|---|
+| Current live decoded `clientdata` | 37,575 | `BA19AC8D1D306B0934F3A4B35839BA4041437441064C28D051950C3B898F7A37` | `1B60A8E30C19728F16DBC7EE5F16F7EDD4015010B2F09890D6716580E378F864` |
+| Historical pre-hardening source | 68,580 | `F901BAAE0ABC5F2A2ECCF74BF59E76FE05189A6E13BF86A981D6D6E4DBEB8811` | `1B60A8E30C19728F16DBC7EE5F16F7EDD4015010B2F09890D6716580E378F864` |
+| Current hardened [source](../solutions/AvailabilityQuery/os_sr_avchk.clientdata.json) | 74,698 | `0E1A1DE9CFECE98440B1EC8B52DCD76648A25826A06BCF36FAFCEFBB39C701B0` | `059106A6B6168313FE19067D81566BBB5BC11B85D3A145B4BCB07FBD251ECB66` |
 
-The [historical provisioning report](P0_SLICE_2A_DEV_PROVISIONING_REPORT.md) records package `os_sr_avqg_pkg` version 1.0.0, assembly `os_sr_avqg` version 1.0.0.0, handler `os_sr_avqg.ProtectAvailabilityQuery`, and zero registered steps at that report's readback time. This is not a current inventory.
+The live and historical definitions are **structurally identical**; their raw hashes differ because their JSON serialization differs. The live-versus-hardened comparison has **26 sanitized structural differences**, all in `runtimeConfiguration.secureData`: the hardened source adds trigger-output protection and action protection or expands input-only settings to include outputs. Removing only those settings from both parsed definitions makes them identical. Trigger filters, concurrency, expressions, connector operations, references, result writes and retry policies are otherwise unchanged.
 
-The offline [registration contract](../solutions/AvailabilityQuery/availability-plugin-registration.contract.json) defines synchronous PreOperation (stage 20) Create and Update steps. The [handler](../solutions/AvailabilityQuery/AvailabilityQueryPlugin.cs) itself rejects execution outside stage 20 / synchronous mode. No `executionOrder` is defined in that contract, and repository search found no established plugin-step `executionOrder`/`rank` convention.
+For the contract's 32 sensitive actions, the live definition has **19 with no secure-data setting, 5 with inputs only, and 8 with inputs and outputs**. One additional hardened action outside that 32-action inventory also adds protection. The live trigger has no `secureData` setting. Thus the deployed Flow does **not** contain the later run-history privacy hardening. Even after a separately authorized update, action-type retention and actual run-history suppression require the synthetic runtime gates in the [readiness plan](P0_SLICE_2A_PRE_ACTIVATION_READINESS.md); they are not established by source inspection.
 
-**Unapproved proposal only:** use `executionOrder = 10` for both the Create and Update steps. The two messages have no ordering dependency on each other; an explicit value avoids relying on an omitted/default setting. Before adopting it, inspect all live same-message/entity/stage registrations and confirm no ordering dependency or collision. This proposal is not an approval to register steps.
+The local [Flow contract](../solutions/AvailabilityQuery/availability-flow.contract.json) exact-file SHA-256 is `DF5EEEAD064F0FC0BE2448E854A868E8539CB53C5D58322E53A2D8EAE9FCCC35`.
 
-## 5. Connection references
+## 3. Guard package and registrations
 
-Current reference records, connector identities, binding targets, connection status, and owner identities were **not read**.
+- The current package is `os_sr_avqg_pkg` version `1.0.0`; its package-backed sandbox assembly is `os_sr_avqg` version `1.0.0.0` and contains the single handler `os_sr_avqg.ProtectAvailabilityQuery`. The package and assembly are present in the Solution; the handler is included through the assembly.
+- There are **zero** registrations for that handler, and therefore zero active guard steps.
+- For the Availability Query Create and Update filters, the read returned **zero** entity-specific PreOperation registrations and zero unfiltered Create/Update PreOperation registrations. This does not replace a fresh check for platform or other applicable registrations before a future write.
+- Historical build hashes are package `ec596db5b07197f6dc4bf84e135ad6c05daccbed3412635c17057327892fa719` and DLL `296634c9b75ca25977da33b1e623ab32b72495fd33e3c43c3649f33ea5f8ea01`. The current package record identifies a file-backed package, but its binary content was not independently obtained; server byte equality is **not claimed**.
 
-The historical provisioning report records two references—`os_sr_avchk_outlook_cr` and `os_sr_avchk_dataverse_cr`—bound to existing connected DEV-owner connections. No connection or credential operation was performed in this task.
+The [registration contract](../solutions/AvailabilityQuery/availability-plugin-registration.contract.json) still omits `executionOrder`. The earlier suggestion of rank **10** for each step remains an **unapproved proposal**. No collision was observed in the bounded registration reads above; all relevant registrations and ordering dependencies must be rechecked immediately before any separately approved registration.
 
-## 6. Environment-variable readback
+## 4. Connection references
 
-Current definitions, types, defaults, duplicate definitions, and effective-value presence were **not read**. Historical evidence says all seven definitions existed without configured values.
+| Reference | Fresh binding evidence |
+|---|---|
+| `os_sr_avchk_outlook_cr` | Active; Office 365 Outlook connector; binding matches the approved historical DEV connection, which reports `Connected`. |
+| `os_sr_avchk_dataverse_cr` | Active; Microsoft Dataverse connector; binding matches the approved historical DEV connection, which reports `Connected`. |
 
-| Schema name | Offline contract type | Current live value state |
+For both connections, the recorded creator and authenticated account matched the active approved DEV-owner identity in a private comparison. No account identifiers, connection parameters or credentials are recorded here. No new connection, consent, permission, license, credential or role assignment was created. This remains `DEV_FUNCTIONAL_IDENTITY_ELEVATED_NOT_SECURITY_ACCEPTANCE`.
+
+## 5. Environment-variable definitions
+
+All seven exact definition identities and types match the provisioning checkpoint. Aggregate readback found **zero non-null defaults** and **zero associated value records**; no value contents were requested.
+
+| Definition | Live Dataverse type | Default/value |
 |---|---|---|
-| `os_sr_avq_bhrs` | Text | Not read |
-| `os_sr_avq_durs` | Text | Not read |
-| `os_sr_avq_lead` | WholeNumber | Not read |
-| `os_sr_avq_hzn` | WholeNumber | Not read |
-| `os_sr_avq_exp` | WholeNumber | Not read |
-| `os_sr_avq_dom` | Text | Not read |
-| `os_sr_avq_maxc` | WholeNumber | Not read |
+| `os_sr_avq_bhrs` | String | None / none |
+| `os_sr_avq_durs` | String | None / none |
+| `os_sr_avq_lead` | Number | None / none |
+| `os_sr_avq_hzn` | Number | None / none |
+| `os_sr_avq_exp` | Number | None / none |
+| `os_sr_avq_dom` | String | None / none |
+| `os_sr_avq_maxc` | Number | None / none |
 
-The offline contract fixes timezone to `SE Asia Standard Time`, interval to 15 minutes, maximum horizon to 61 days, and maximum candidates to 1–200. These are source facts, not environment readback. No values were read or written.
+The offline [configuration contract](../solutions/AvailabilityQuery/availability-environment-variables.json) fixes the timezone to `SE Asia Standard Time`, interval to 15 minutes, horizon to at most 61 days and maximum candidates to 1-200. These are contract constraints, not configured tenant values. The synthetic-mailbox prerequisite was not tested or supplied in this assessment.
 
-## 7. Security and preservation inventory
+## 6. Roles and Candidate Core
 
-All current role and assignment state is **unverified**.
+All privilege IDs, names and depths were compared with the complete accepted checkpoint maps:
 
-Historical evidence records:
+- **BSO:** exactly **65** entries, no missing or extra entries. Availability Query has Create, Read and Append at User depth and no Write, Delete, Assign or Share; TA and Location AppendTo remain Global.
+- **Availability Integration:** exactly **4 Global** entries: Availability Query Read/Write and TA/Location Read. No user, team or application-user assignments were returned.
+- **Reference Admin:** exactly **20** entries, unchanged; no user, team or application-user assignments were returned.
+- **Candidate Core:** package identity, version and historical UTC ModifiedOn match; its package-backed assembly and two types, API identity/settings, all **21** request parameters and **5** response properties match the checkpoint. Server package byte equality is not claimed. A historical retained signed assembly is separate from the package-backed assembly.
+- **Legacy guards:** all **50** package-backed `ProtectCandidateCore` registrations match the checkpoint and remain disabled.
 
-- `BSO-RS Support - BSO`: 65 privilege/depth entries, with the approved Availability Query Create, Read, and Append User-depth delta; TA/Location AppendTo are Organization-depth only where needed.
-- `BSO-RS Support - Availability Integration`: four Global privileges—Availability Query Read/Write, TA Read, Location Read—and unassigned.
-- Reference Admin: unchanged and unassigned.
-- Candidate Core package/API unchanged; all 50 legacy Candidate Core guards disabled.
+No Candidate Core operation was invoked. No `os_`-prefixed custom connector was returned; the live Flow uses only the two standard connector references above. This is not a directory-wide Entra application inventory.
 
-The offline role contract reflects the intended deltas but is not a live role map. No role, assignment, Candidate Core component, or guard was changed.
+## 7. Console and feature gate
 
-## 8. Solution, Console, and release topology
+These are SHA-256 hashes of base64-decoded **published Dataverse WebResource content**. All six match the historical published checkpoint; the five non-environment resources also match their authored repository files.
 
-Current Solution membership, Console hashes/effective gate, Candidate Core metadata, custom connectors, and plugin topology were **not read**.
+| Published resource | SHA-256 |
+|---|---|
+| `candidate-console.html` | `b0d3cede68669fc4bc080100a3318d433cd116b159cee32f8d96f20bd086086e` |
+| `candidate-console-availability.js` | `97487ef0c2a6ece4185a2b1d17a76804d9b58535cbeaee3c27b0596fd4ae7921` |
+| `candidate-console-environment.js` | `58e03dc262b790b7431f34ca5554422fc86f0d62f6e8b6160805a6b2d906335c` |
+| `candidate-console.js` | `cb26a8d5a859e9a72b27e25ee8220a4ad5704d4473dd37af0ee7b69ec0d55e53` |
+| `candidate-console-policy.js` | `29cbcc97c11a39e9a0d3f0177a3582e2edf96d388796612bee1d3149724d6348` |
+| `candidate-console.css` | `6681994a0d57e46ed1b3f0be291556fba37be262f822c8b483d31d00f1130fde` |
 
-Historical evidence records 66 Solution memberships; Console availability resources deployed with effective `availabilityEnabled = false`; Candidate Core unchanged; and no custom project Graph connector. These remain historical comparison values only.
+The published HTML references the availability module. The published environment resource has no `availabilityEnabled` property, and the published module requires `availabilityEnabled === true` before loading references or creating a query. On the **published content examined**, this gate is false. The environment resource intentionally differs from the repository's unconfigured template.
 
-The current working tree has no modified files under `solutions/`. The frozen release manifest was not modified. Offline canonical-source measurement remains ahead of that frozen baseline:
+The ordinary published-resource query and an empty `componentstate = 1` result do **not** substitute for `RetrieveUnpublishedMultiple`. Authenticated effective-served bytes were also not read: anonymous resource requests returned HTTP 302. Therefore current/unpublished = published = served is **not freshly established**, and the effective browser-served gate is not independently verified. No WebResource, app, sitemap or other component was published.
 
-| Inventory | Files | SHA-256 |
-|---|---:|---|
-| Current canonical Solution source | 191 | `6fc18176a1b891a417b7c48e14da2a6b7fbc08a0958c1831c022666337afc3d6` |
-| Frozen manifest expectation | 171 | `fff8b7879c2b756f3a2b1753159135a0dc00a890a20e4445870a0fd23ea984d1` |
+## 8. Aggregate row counts
 
-The production-readiness test failed its frozen fingerprint assertion, consistent with the previously documented `P0_SOURCE_AHEAD_OF_FROZEN_RELEASE_ARTIFACT`. No pin was changed to conceal the drift.
+Only server-side counts were read; no Candidate field values or business rows were retrieved.
 
-## 9. Dataverse row counts
+| Table | Historical checkpoint | Fresh count |
+|---|---:|---:|
+| Candidate | 47 | 47 |
+| Call Log | 64 | 64 |
+| Candidate Status History | 163 | 163 |
+| Interview Schedule | 45 | 45 |
+| Operation Receipt | 183 | 183 |
+| Availability Query | 0 | 0 |
 
-No current counts were queried. Historical report values are:
+Counts were collected sequentially within the window above. Equal counts do not exclude concurrent updates or offsetting inserts/deletes; no causal claim about unrelated tenant activity is made.
 
-| Table | Historical count | Current count |
-|---|---:|---|
-| Candidate | 47 | Not read |
-| Call Log | 64 | Not read |
-| Candidate Status History | 163 | Not read |
-| Interview Schedule | 45 | Not read |
-| Operation Receipt | 183 | Not read |
-| Availability Query | 0 | Not read |
-
-The historical values have no current Stage A observation window and cannot establish preservation or attribute tenant activity.
-
-## 10. Offline contract discrepancies and proposals
-
-### A. 429 retry policy
-
-The local Flow contract allows up to two 429 retries honoring `Retry-After` within an overall deadline. The authored Outlook action has `retryPolicy.type = none`.
-
-**Recommendation:** retain zero retries for initial live acceptance. `Find meeting times (V2)` is a read operation, but retries would make additional provider calls, could extend the bounded request, and the repository has no verified live backoff/deadline behavior. Reconcile the contract in a separately reviewed source change; any future retry policy needs an explicit total deadline, `Retry-After` handling, cap, and acceptance decision. No Flow behavior was changed.
-
-### B. Guard execution order
-
-`executionOrder` is absent from the registration contract and no repository convention was found. The proposal is `10` for each step, conditional on live registration reconciliation and explicit approval. No step was created or changed.
-
-### C. DEV environment label in the Flow contract
-
-The release-source failure is triggered by the `deploymentState` value in the [Flow contract](../solutions/AvailabilityQuery/availability-flow.contract.json). The value contains a non-secret DEV environment label; the release-neutrality test rejects it because canonical release source must not name a DEV target. It is not evidence of a credential or organization URL.
-
-**Smallest proposed correction:** replace the field value with neutral, non-assertive wording such as `Deployment state is not established by this offline contract.` Do not apply that correction in this Stage A report or alter frozen release artifacts/manifests; it requires a separately scoped source/fingerprint update.
-
-## 11. Offline validation
+## 9. Offline checks and open decisions
 
 | Check | Result |
 |---|---|
-| `AvailabilityQuery.Tests.ps1` | Passed: 168 |
-| Availability Query SDK harness | Passed: 520 |
-| `BsoRsSolutionMembership.Tests.ps1` | Passed: 19 |
-| Flow/registration/environment-variable JSON syntax and duplicate-key validation | Passed: 4 files |
-| `git diff --check` | Passed |
-| `BsoRsReleaseSource.Tests.ps1` | Failed: `Canonical release source contains no DEV target configuration or credential-like values`; cause is the non-secret DEV label in the contract's `deploymentState` field above |
-| `BsoRsProductionReadiness.Tests.ps1` | Failed: `Verify the frozen canonical source and root-component fingerprints`; see the 191-versus-171 inventory above |
+| Availability Query static checks | Passed: **168** |
+| Availability Query SDK harness | Passed: **520** |
+| Solution membership regression | Passed: **19** |
+| Flow, Flow contract, registration and environment-variable JSON syntax and duplicate keys | Passed: **4** files |
+| Release-source test | **Failed:** the Flow contract `deploymentState` contains a non-secret DEV environment label rejected by the release-neutrality assertion. |
+| Production-readiness test | **Failed:** canonical source/root fingerprint differs from the frozen release manifest. |
+| Documentation link check and `git diff --check` | Passed after this report update. |
 
-These are offline checks only; none verifies tenant state or Flow runtime behavior.
+The current canonical Solution source measured **191** files with fingerprint `6fc18176a1b891a417b7c48e14da2a6b7fbc08a0958c1831c022666337afc3d6`; the frozen manifest expects **171** and `fff8b7879c2b756f3a2b1753159135a0dc00a890a20e4445870a0fd23ea984d1`. No Solution source, frozen manifest or pin was changed to conceal either failure.
 
-## 12. Sources reviewed
+The Flow contract permits up to two 429 retries honoring `Retry-After`, while the live and authored connector actions use no retries. **Proposal, not approval:** retain zero retries for initial live acceptance; separately review any bounded retry design for deadline, throttling, idempotency and ambiguous timeouts. Separately scope any neutral `deploymentState` wording correction and release-fingerprint decision.
 
-- [Project Context](PROJECT_CONTEXT.md), [Current State](CURRENT_STATE.md), [Project Rules](../PROJECT_RULES.md), [Workflow](../WORKFLOW.md), and [Master Production Rules](../MASTER_PRODUCTION_RULES.md).
-- [Pre-activation readiness report](P0_SLICE_2A_PRE_ACTIVATION_READINESS.md), [DEV provisioning report](P0_SLICE_2A_DEV_PROVISIONING_REPORT.md), [Integration Design](INTEGRATION_DESIGN.md), and [Product Decisions](PRODUCT_DECISIONS.md).
-- [Flow clientdata](../solutions/AvailabilityQuery/os_sr_avchk.clientdata.json), [Flow contract](../solutions/AvailabilityQuery/availability-flow.contract.json), [registration contract](../solutions/AvailabilityQuery/availability-plugin-registration.contract.json), [environment-variable contract](../solutions/AvailabilityQuery/availability-environment-variables.json), and [role delta contract](../solutions/AvailabilityQuery/availability-role-delta.json).
-- [Availability Query static tests](../tests/AvailabilityQuery.Tests.ps1), [SDK test project](../tests/AvailabilityQuerySdk/), [Solution membership tests](../tests/BsoRsSolutionMembership.Tests.ps1), [release-source test](../tests/BsoRsReleaseSource.Tests.ps1), and [production-readiness test](../tests/BsoRsProductionReadiness.Tests.ps1).
+## 10. Decision and next gates
 
-## 13. Risks, blockers, and Stage B recommendation
+Stage B is **not ready to start** from this incomplete assessment. First obtain authorized read-only evidence for the current/unpublished Console copies and authenticated served bytes, and recheck time-sensitive state. Establish a supported, single-Flow authoring surface and its conditional concurrency behavior; the observed SDK RowVersion alone is not proof of an `If-Match`-protected update. Any material unexpected drift must stop the sequence, not trigger repair.
 
-The blocking issue is the absence of an authenticated target-specific connection. Consequently, Stage A cannot verify environment identity or any live reconciliation item. Do not infer drift from missing read access, and do not proceed to Stage B from historical reports.
+The missing synthetic mailbox prerequisite, value-less configuration, unapproved guard execution order, undeployed privacy hardening and runtime privacy-verification gates continue to prevent functional activation. The original classification `SLICE_2A_SYNTHETIC_MAILBOX_PREREQUISITE_MISSING` remains the historical prerequisite status; this assessment did not test mailbox availability. Stage B and all activation require separate authorization.
 
-**Stage B recommendation:** not ready. After a valid existing target connection becomes available, confirm the exact environment URL before the first tenant operation, verify organization and unmanaged Solution identity, and repeat the complete read-only baseline. Any unexpected live difference must stop the sequence; no automatic repair or retry is authorized.
+This assessment performed **zero tenant writes**, **zero write retries**, **zero publication calls**, **zero availability or Candidate operations**, and **zero Outlook/calendar/mailbox operations**. Some failed or repeated read-only probes were corrected without a write. No commit or push was performed by this assessment.
 
-## 14. Zero-write evidence
+## Sources
 
-No Dataverse Web API request, `pac org who`, Flow-management request, connection inspection request, or other tenant operation was issued. There were **zero tenant reads and zero tenant writes**, so the write count is 0 and retry count is 0. No Flow update/activation, plugin registration, environment-variable update, row creation, mailbox/provider access, role change, publication, commit, or push occurred.
+- [Project Context](PROJECT_CONTEXT.md), [Current State](CURRENT_STATE.md), [Master Production Rules](../MASTER_PRODUCTION_RULES.md), and [Workflow](../WORKFLOW.md).
+- [Pre-activation readiness plan](P0_SLICE_2A_PRE_ACTIVATION_READINESS.md), [DEV provisioning report](P0_SLICE_2A_DEV_PROVISIONING_REPORT.md), [Integration Design](INTEGRATION_DESIGN.md), and [Product Decisions](PRODUCT_DECISIONS.md).
+- [Flow definition](../solutions/AvailabilityQuery/os_sr_avchk.clientdata.json), [Flow contract](../solutions/AvailabilityQuery/availability-flow.contract.json), [registration contract](../solutions/AvailabilityQuery/availability-plugin-registration.contract.json), [environment-variable contract](../solutions/AvailabilityQuery/availability-environment-variables.json), and [role delta contract](../solutions/AvailabilityQuery/availability-role-delta.json).
+- [Availability Query tests](../tests/AvailabilityQuery.Tests.ps1), [SDK test project](../tests/AvailabilityQuerySdk/), [membership tests](../tests/BsoRsSolutionMembership.Tests.ps1), [release-source test](../tests/BsoRsReleaseSource.Tests.ps1), and [production-readiness test](../tests/BsoRsProductionReadiness.Tests.ps1).

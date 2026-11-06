@@ -1,5 +1,13 @@
 # Current State
 
+## P0 Slice 2A fast-track offline preparation (2026-11-06)
+
+**Classification:** `P0_SLICE_2A_FAST_TRACK_PREPARATION_BLOCKED`. The independent workstreams prepared the Console correction plan, assessed the conditional Flow-update method, and reviewed governance without changing tenant resources. The Console correction is not execution-ready: current/unpublished WebResource concurrency semantics and publication exclusion remain unproven. The supported version-conditional OFF Flow update is also unproven. Each later operation needs its own approved scope.
+
+The Console configuration and HTML were reproduced offline: the only proposed HTML change is the environment-script token from `39135f67e4c9` to `58e03dc262b7`. The official Stage A result below remains drift detected; preparation does not approve a correction or exception. Browser non-GET effects remain `BROWSER_NON_GET_EFFECT_UNDETERMINED`. The current caller matched across a fresh explicit-target PAC check and Dataverse `WhoAmI`, but could not be independently tied to the previously approved caller pin, so no project-resource reads were made in this assessment.
+
+The targeted offline Console and Availability checks passed. The existing release-source and Production-readiness gates still fail, including the frozen 191-versus-171 source discrepancy; no release fingerprint or security privilege was changed. The Flow OFF state, roles, guards, configuration, and row counts below remain historical, not freshly verified by this preparation. See the [consolidated readiness report](P0_SLICE_2A_FAST_TRACK_EXECUTION_READINESS.md), [Console correction plan](P0_SLICE_2A_STAGE_A1_CONSOLE_CORRECTION_PLAN.md), [Flow update method assessment](P0_SLICE_2A_STAGE_B_FLOW_UPDATE_METHOD.md), and [independent QA review](P0_SLICE_2A_FAST_TRACK_QA_REVIEW.md).
+
 ## P0 Slice 2A Stage A live reconciliation (2026-11-06)
 
 **Classification:** `P0_SLICE_2A_STAGE_A_LIVE_PREFLIGHT_DRIFT_DETECTED`; stop `STAGE_A_CONSOLE_ENVIRONMENT_CACHE_TOKEN_MISMATCH`. Final Console readback reconfirmed the exact DEV organization and found all six current/unpublished and authenticated normal-app served hashes equal to the current and historical published hashes. The earlier incomplete Console-layer evidence gap is resolved for those six resources.

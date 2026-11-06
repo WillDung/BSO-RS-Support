@@ -96,6 +96,11 @@
           "runtimeConfiguration": {
             "concurrency": {
               "runs": 1
+            },
+            "secureData": {
+              "properties": [
+                "outputs"
+              ]
             }
           }
         }
@@ -367,6 +372,14 @@
             },
             "authentication": "@parameters('$authentication')"
           },
+          "runtimeConfiguration": {
+            "secureData": {
+              "properties": [
+                "inputs",
+                "outputs"
+              ]
+            }
+          },
           "runAfter": {
             "Initialize_validated_at": [
               "Succeeded"
@@ -609,6 +622,14 @@
                         "Read_ta": [
                           "Succeeded"
                         ]
+                      },
+                      "runtimeConfiguration": {
+                        "secureData": {
+                          "properties": [
+                            "inputs",
+                            "outputs"
+                          ]
+                        }
                       }
                     },
                     "If_onsite_location_present": {
@@ -657,6 +678,14 @@
                             "Read_location": [
                               "Succeeded"
                             ]
+                          },
+                          "runtimeConfiguration": {
+                            "secureData": {
+                              "properties": [
+                                "inputs",
+                                "outputs"
+                              ]
+                            }
                           }
                         }
                       },
@@ -704,7 +733,8 @@
                       "runtimeConfiguration": {
                         "secureData": {
                           "properties": [
-                            "inputs"
+                            "inputs",
+                            "outputs"
                           ]
                         }
                       }
@@ -814,6 +844,14 @@
                               }
                             }
                           },
+                          "runtimeConfiguration": {
+                            "secureData": {
+                              "properties": [
+                                "inputs",
+                                "outputs"
+                              ]
+                            }
+                          },
                           "runAfter": {
                             "Set_phase_response": [
                               "Succeeded"
@@ -840,6 +878,14 @@
                                   }
                                 }
                               },
+                              "runtimeConfiguration": {
+                                "secureData": {
+                                  "properties": [
+                                    "inputs",
+                                    "outputs"
+                                  ]
+                                }
+                              },
                               "runAfter": {}
                             },
                             "Compose_slot": {
@@ -856,7 +902,8 @@
                               "runtimeConfiguration": {
                                 "secureData": {
                                   "properties": [
-                                    "inputs"
+                                    "inputs",
+                                    "outputs"
                                   ]
                                 }
                               }
@@ -932,7 +979,8 @@
                               "runtimeConfiguration": {
                                 "secureData": {
                                   "properties": [
-                                    "inputs"
+                                    "inputs",
+                                    "outputs"
                                   ]
                                 }
                               }
@@ -951,6 +999,14 @@
                                         "name": "v_obs",
                                         "value": "@concat(outputs('Compose_slot')['s'], '|', outputs('Compose_slot')['e'], '|', string(outputs('Compose_free')))"
                                       },
+                                      "runtimeConfiguration": {
+                                        "secureData": {
+                                          "properties": [
+                                            "inputs",
+                                            "outputs"
+                                          ]
+                                        }
+                                      },
                                       "runAfter": {}
                                     },
                                     "Check_slot_eligible": {
@@ -966,11 +1022,27 @@
                                               "endUtc": "@formatDateTime(outputs('Compose_slot')['e'], 'yyyy-MM-ddTHH:mm:ssZ')"
                                             }
                                           },
+                                          "runtimeConfiguration": {
+                                            "secureData": {
+                                              "properties": [
+                                                "inputs",
+                                                "outputs"
+                                              ]
+                                            }
+                                          },
                                           "runAfter": {}
                                         }
                                       },
                                       "else": {
                                         "actions": {}
+                                      },
+                                      "runtimeConfiguration": {
+                                        "secureData": {
+                                          "properties": [
+                                            "inputs",
+                                            "outputs"
+                                          ]
+                                        }
                                       },
                                       "runAfter": {
                                         "Append_observation": [
@@ -989,6 +1061,14 @@
                                         },
                                         "runAfter": {}
                                       }
+                                    }
+                                  },
+                                  "runtimeConfiguration": {
+                                    "secureData": {
+                                      "properties": [
+                                        "inputs",
+                                        "outputs"
+                                      ]
                                     }
                                   },
                                   "runAfter": {}
@@ -1012,6 +1092,12 @@
                           "runtimeConfiguration": {
                             "concurrency": {
                               "repetitions": 1
+                            },
+                            "secureData": {
+                              "properties": [
+                                "inputs",
+                                "outputs"
+                              ]
                             }
                           }
                         },
@@ -1030,6 +1116,14 @@
                         "Compose_canonical_slots": {
                           "type": "Compose",
                           "inputs": "@sort(union(variables('v_slots'), variables('v_slots')), 'startUtc')",
+                          "runtimeConfiguration": {
+                            "secureData": {
+                              "properties": [
+                                "inputs",
+                                "outputs"
+                              ]
+                            }
+                          },
                           "runAfter": {
                             "Set_phase_result": [
                               "Succeeded"
@@ -1039,6 +1133,14 @@
                         "Compose_proposed_result": {
                           "type": "Compose",
                           "inputs": "@if(variables('v_tzUnsupported'), json('{\"state\":100000003,\"error\":\"PROVIDER_TIMEZONE_UNSUPPORTED\"}'), if(variables('v_respInvalid'), json('{\"state\":100000003,\"error\":\"PROVIDER_RESPONSE_INVALID\"}'), if(equals(length(outputs('Compose_canonical_slots')), 0), json('{\"state\":100000002,\"reason\":\"NO_COMMON_SLOT\"}'), if(greater(length(outputs('Compose_canonical_slots')), 200), json('{\"state\":100000003,\"error\":\"RESULT_INVALID\"}'), if(greater(length(string(outputs('Compose_canonical_slots'))), 32768), json('{\"state\":100000003,\"error\":\"RESULT_TOO_LARGE\"}'), json('{\"state\":100000001}'))))))",
+                          "runtimeConfiguration": {
+                            "secureData": {
+                              "properties": [
+                                "inputs",
+                                "outputs"
+                              ]
+                            }
+                          },
                           "runAfter": {
                             "Compose_canonical_slots": [
                               "Succeeded"
@@ -1086,6 +1188,14 @@
                           "inputs": {
                             "name": "v_slots",
                             "value": "@if(equals(outputs('Compose_proposed_result')['state'], 100000001), outputs('Compose_canonical_slots'), createArray())"
+                          },
+                          "runtimeConfiguration": {
+                            "secureData": {
+                              "properties": [
+                                "inputs",
+                                "outputs"
+                              ]
+                            }
                           },
                           "runAfter": {
                             "Set_result_error": [
@@ -1155,6 +1265,14 @@
             "Check_pending": [
               "Succeeded"
             ]
+          },
+          "runtimeConfiguration": {
+            "secureData": {
+              "properties": [
+                "inputs",
+                "outputs"
+              ]
+            }
           }
         },
         "Map_failure": {
@@ -1220,6 +1338,14 @@
               "Failed",
               "TimedOut"
             ]
+          },
+          "runtimeConfiguration": {
+            "secureData": {
+              "properties": [
+                "inputs",
+                "outputs"
+              ]
+            }
           }
         },
         "If_validated_snapshot": {
@@ -1268,7 +1394,8 @@
                   "runtimeConfiguration": {
                     "secureData": {
                       "properties": [
-                        "inputs"
+                        "inputs",
+                        "outputs"
                       ]
                     }
                   }
@@ -1338,7 +1465,8 @@
                       "runtimeConfiguration": {
                         "secureData": {
                           "properties": [
-                            "inputs"
+                            "inputs",
+                            "outputs"
                           ]
                         }
                       }
@@ -1355,7 +1483,15 @@
                               "name": "v_error",
                               "value": "REFERENCE_CHANGED"
                             },
-                            "runAfter": {}
+                            "runAfter": {},
+                            "runtimeConfiguration": {
+                              "secureData": {
+                                "properties": [
+                                  "inputs",
+                                  "outputs"
+                                ]
+                              }
+                            }
                           }
                         }
                       },
@@ -1376,11 +1512,27 @@
                   }
                 }
               },
-              "runAfter": {}
+              "runAfter": {},
+              "runtimeConfiguration": {
+                "secureData": {
+                  "properties": [
+                    "inputs",
+                    "outputs"
+                  ]
+                }
+              }
             }
           },
           "else": {
             "actions": {}
+          },
+          "runtimeConfiguration": {
+            "secureData": {
+              "properties": [
+                "inputs",
+                "outputs"
+              ]
+            }
           },
           "runAfter": {
             "Map_failure": [
@@ -1418,6 +1570,14 @@
             "slots": "@if(and(empty(variables('v_error')), equals(variables('v_state'), 100000001)), string(variables('v_slots')), '[]')",
             "queriedAt": "@if(empty(variables('v_queriedAt')), utcNow(), variables('v_queriedAt'))"
           },
+          "runtimeConfiguration": {
+            "secureData": {
+              "properties": [
+                "inputs",
+                "outputs"
+              ]
+            }
+          },
           "runAfter": {
             "Map_reread_failure": [
               "Succeeded",
@@ -1449,6 +1609,14 @@
             "Compose_terminal": [
               "Succeeded"
             ]
+          },
+          "runtimeConfiguration": {
+            "secureData": {
+              "properties": [
+                "inputs",
+                "outputs"
+              ]
+            }
           },
           "retryPolicy": {
             "type": "none"

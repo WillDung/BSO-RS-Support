@@ -46,7 +46,8 @@ Assert-Test (@($schema.table.relationships | ForEach-Object schemaName) -join ',
 Assert-Test (@($schema.table.relationships | Where-Object { $_.cascadeDelete -ne 'Restrict' -or $_.cascadeAssign -ne 'NoCascade' -or $_.cascadeShare -ne 'NoCascade' -or $_.cascadeUnshare -ne 'NoCascade' -or $_.cascadeReparent -ne 'NoCascade' }).Count -eq 0) 'Relationship cascades are restrictive and non-cascading.'
 
 Assert-Test (-not (Test-Path -LiteralPath $supersededConnectorPath)) 'Superseded custom connector source is absent.'
-Assert-Test ($flow.status -eq 'PROPOSED_SOURCE_OFFLINE_NOT_CREATED') 'Flow is a source contract, not a deployed Flow.'
+Assert-Test ($flow.status -eq 'DEPLOYED_FLOW_FEATURE_OFF_LOCAL_SOURCE_HARDENING_PENDING' -and
+    $flow.deploymentState -match 'remains deployed OFF and unchanged') 'Local Flow hardening is not represented as a live deployment.'
 Assert-Test ($flow.trigger.concurrency -eq 1 -and $flow.trigger.condition -match 'Pending') 'Flow is Pending-only and serial.'
 Assert-Test (@($flow.actions.sequence) -join ',' -eq '1,2,3,4,5,6,7,8,9,10,11') 'Flow has the exact ordered eleven-step contract.'
 Assert-Test (@($flow.resultTransitions) -join ',' -eq 'Pending -> Available,Pending -> NoSlots,Pending -> Failed') 'Flow has exactly three terminal transitions.'
@@ -71,7 +72,9 @@ Assert-Test ($flow.provider.response.acceptedAvailability -match 'Exactly free' 
 Assert-Test ($flow.provider.response.organizer -match 'never used' -and $flow.provider.response.noValidSuggestions -match 'NO_COMMON_SLOT') 'Organizer is ignored and empty results have a deterministic reason.'
 Assert-Test ($flow.provider.response.unknownOrMalformed -match 'PROVIDER_RESPONSE_INVALID' -and $flow.provider.response.unknownOrMalformed -match 'PROVIDER_TIMEZONE_UNSUPPORTED') 'Malformed shape and unsupported timezone fail safely.'
 Assert-Test ($flow.provider.response.persistence -match 'Only sorted, distinct UTC startUtc/endUtc slots' -and $flow.provider.response.persistence -match 'Never persist or expose') 'Only canonical slots persist, without provider data.'
-Assert-Test ($flow.provider.implementation -match 'not an invocable Power Automate action' -and $flow.provider.implementation -match 'not a deployed Flow') 'Offline reference code is not represented as a live Flow.'
+Assert-Test ($flow.provider.implementation -match 'not an invocable Power Automate action' -and
+    $flow.provider.implementation -match 'not itself a deployed Flow' -and
+    $flow.provider.implementation -match 'separate solution-aware Power Automate Flow is deployed OFF') 'Offline adapter source is distinguished from the deployed OFF Flow.'
 Assert-Test ($flow.providerTimezoneFirstRuntimeGate.action -eq 'STOP' -and -not $flow.providerTimezoneFirstRuntimeGate.retry -and -not $flow.providerTimezoneFirstRuntimeGate.automaticConversion) 'First unsupported timezone stops without retry or conversion.'
 Assert-Test ($flow.providerTimezoneFirstRuntimeGate.capture -match 'field names, types and timezone' -and $flow.providerTimezoneFirstRuntimeGate.capture -match 'do not persist raw') 'Only sanitized synthetic shape evidence may be captured.'
 Assert-Test ($flow.retry.'429' -match 'Retry-After' -and $flow.retry.'429' -match 'two retries') '429 policy is bounded and Retry-After aware.'
@@ -80,6 +83,8 @@ Assert-Test ($flow.safeErrors -contains 'REFERENCE_CHANGED') 'Flow recognizes th
 Assert-Test ($flow.referenceDrift.terminalCoverage -join ',' -eq 'Available,NoSlots,Failed') 'Drift recheck covers every terminal result.'
 Assert-Test ($flow.referenceDrift.onChangedOrUnreadable.state -eq 'Failed' -and @($flow.referenceDrift.onChangedOrUnreadable.slots).Count -eq 0 -and $flow.referenceDrift.onChangedOrUnreadable.error -eq 'REFERENCE_CHANGED') 'Drift always fails closed with zero slots.'
 Assert-Test ($flow.referenceDrift.memoryOnlyFields.Count -eq 6 -and $flow.referenceDrift.storage -match 'Memory only') 'Reference snapshots remain flow-memory-only.'
+Assert-Test ($flow.runHistoryPrivacy.status -eq 'SOURCE_PROTECTIONS_ADDED_RUNTIME_VERIFICATION_REQUIRED' -and
+    $flow.runHistoryPrivacy.platformEvidence -match 'does not establish offline') 'Run-history privacy is not claimed without platform runtime verification.'
 Assert-Test ($flow.referenceDrift.compare -join ',' -eq 'reference id,active state,normalized mailbox email' -and $flow.referenceDrift.ignore -contains 'TA display name') 'Relevant drift excludes display-name changes.'
 Assert-Test ($flow.identity.requestCreator -match 'Separate BSO' -and $flow.identity.resultWriter -match 'current DEV owner' -and $flow.identity.outlookConnection -match 'not an impersonation') 'Requester, writer and connector identities are explicit.'
 Assert-Test ($flow.identity.classification -eq 'DEV_FUNCTIONAL_IDENTITY_ELEVATED_NOT_SECURITY_ACCEPTANCE' -and $flow.identity.production -match 'later decision') 'Elevated DEV behavior is not security acceptance.'
@@ -151,9 +156,29 @@ $flowDefinition = $flowDefinitionText | ConvertFrom-Json -AsHashtable
 $flowActions = [System.Collections.Generic.Dictionary[string, object]]::new()
 function Add-FlowActions($actions) {
     foreach ($name in $actions.Keys) {
-        $flowActions.Add($name, $actions[$name])
-        if ($actions[$name].ContainsKey('actions')) { Add-FlowActions $actions[$name].actions }
-        if ($actions[$name].ContainsKey('else')) { Add-FlowActions $actions[$name].else.actions }
+        $action = $actions[$name]
+        $flowActions.Add($name, $action)
+        foreach ($containerName in @('actions', 'else', 'default')) {
+            if (-not $action.ContainsKey($containerName)) { continue }
+            $container = $action[$containerName]
+            if ($containerName -eq 'actions') {
+                $children = $container
+            } elseif ($container.ContainsKey('actions')) {
+                $children = $container.actions
+            } else {
+                continue
+            }
+            if ($children -is [System.Collections.IDictionary]) {
+                Add-FlowActions $children
+            }
+        }
+        if ($action.ContainsKey('cases')) {
+            foreach ($caseName in $action.cases.Keys) {
+                if ($action.cases[$caseName].ContainsKey('actions')) {
+                    Add-FlowActions $action.cases[$caseName].actions
+                }
+            }
+        }
     }
 }
 Add-FlowActions $flowDefinition.properties.definition.actions
@@ -164,6 +189,9 @@ $flowTrigger = @($flowDefinition.properties.definition.triggers.Values)
 Assert-Test ($flowTrigger.Count -eq 1 -and $flowTrigger[0].inputs.parameters['subscriptionRequest/entityname'] -eq 'os_sr_avq' -and $flowTrigger[0].inputs.parameters['subscriptionRequest/message'] -eq 1 -and $flowTrigger[0].inputs.parameters['subscriptionRequest/filterexpression'] -eq 'os_sr_avq_stat eq 100000000' -and $flowTrigger[0].runtimeConfiguration.concurrency.runs -eq 1) 'Flow triggers once per new Pending query with concurrency 1.'
 $flowEnvParameters = @($flowDefinition.properties.definition.parameters.GetEnumerator() | Where-Object { $_.Key -notlike '$*' })
 Assert-Test ((@($flowEnvParameters | ForEach-Object { $_.Value.metadata.schemaName } | Sort-Object) -join ',') -eq 'os_sr_avq_bhrs,os_sr_avq_dom,os_sr_avq_durs,os_sr_avq_exp,os_sr_avq_hzn,os_sr_avq_lead,os_sr_avq_maxc' -and @($flowEnvParameters | Where-Object { $_.Value.ContainsKey('defaultValue') }).Count -eq 0) 'Flow references exactly the seven value-less environment-variable definitions.'
+$numericFlowParameters = @($flowEnvParameters | Where-Object { $_.Value.metadata.schemaName -in @('os_sr_avq_lead', 'os_sr_avq_hzn', 'os_sr_avq_exp', 'os_sr_avq_maxc') })
+Assert-Test (@($numericFlowParameters | Where-Object { $_.Value.type -ne 'Float' }).Count -eq 0 -and
+    @($numericFlowParameters | Where-Object { $flowDefinitionText -notmatch [regex]::Escape("@int(string(parameters('$($_.Key)')))") }).Count -eq 0) 'Number parameter declarations and integer conversions remain unchanged pending runtime verification.'
 $flowOperations = @($flowActions.Values | Where-Object type -eq 'OpenApiConnection' | ForEach-Object { $_.inputs.host.operationId })
 Assert-Test (@($flowOperations | Where-Object { $_ -notin @('GetItem', 'FindMeetingTimes_V2', 'UpdateOnlyRecord') }).Count -eq 0 -and @($flowOperations | Where-Object { $_ -eq 'FindMeetingTimes_V2' }).Count -eq 1 -and @($flowOperations | Where-Object { $_ -eq 'UpdateOnlyRecord' }).Count -eq 1) 'Flow calls Find meeting times (V2) once and writes exactly one terminal update.'
 $flowWrite = @($flowActions.Values | Where-Object { $_.type -eq 'OpenApiConnection' -and $_.inputs.host.operationId -eq 'UpdateOnlyRecord' })[0]
@@ -174,7 +202,43 @@ $flowProvider = @($flowActions.Values | Where-Object { $_.type -eq 'OpenApiConne
 Assert-Test ($flowProvider.inputs.parameters['body/MinimumAttendeePercentage'] -eq '100' -and $flowProvider.inputs.parameters['body/IsOrganizerOptional'] -eq $true -and $flowProvider.inputs.parameters['body/ActivityDomain'] -eq 'Work' -and @($flowProvider.inputs.parameters.Keys | Where-Object { $_ -match '(?i)timezone|OptionalAttendees' }).Count -eq 0) 'Flow provider inputs match the accepted Outlook contract.'
 Assert-Test (@($flowActions.Values | Where-Object { $_.type -eq 'OpenApiConnection' -and $_.retryPolicy.type -ne 'none' }).Count -eq 0) 'Flow connector actions never retry automatically.'
 Assert-Test (@($flowActions.GetEnumerator() | Where-Object { $_.Value.type -eq 'OpenApiConnection' -and $_.Value.inputs.host.operationId -ne 'UpdateOnlyRecord' -and $_.Key -ne 'Read_query' -and -not $_.Value.runtimeConfiguration.secureData }).Count -eq 0) 'Reference reads and the Outlook call secure run-history inputs and outputs.'
+$sensitiveFlowActions = @(
+    'Read_query', 'Read_ta', 'Set_ta_snapshot', 'Read_location', 'Set_location_snapshot',
+    'Compose_validation_error', 'Find_meeting_times', 'Check_response_shape', 'For_each_suggestion',
+    'Check_suggestion_timezone', 'Compose_slot', 'Find_invalid_attendees', 'Find_ta_entries',
+    'Find_room_entries', 'Compose_free', 'Check_suggestion_valid', 'Append_observation',
+    'Check_slot_eligible', 'Append_slot', 'Compose_canonical_slots', 'Compose_proposed_result',
+    'Set_result_slots', 'Evaluate', 'Map_failure', 'If_validated_snapshot', 'Reread_references',
+    'Reread_ta', 'Compose_drift', 'Reread_location', 'Compose_location_drift',
+    'Compose_terminal', 'Write_terminal_result'
+)
+Assert-Test (@($sensitiveFlowActions | Where-Object {
+    -not $flowActions.ContainsKey($_) -or
+    (@($flowActions[$_].runtimeConfiguration.secureData.properties | Sort-Object) -join ',') -ne 'inputs,outputs'
+}).Count -eq 0) 'Every recursively nested action that handles snapshots, provider observations or slots secures its own inputs and outputs.'
+Assert-Test ((@($flow.runHistoryPrivacy.sensitiveActions | Sort-Object) -join ',') -eq
+    (@($sensitiveFlowActions | Sort-Object) -join ',')) 'Privacy contract and recursive protection regression cover the same action set.'
+Assert-Test (@($flowActions.GetEnumerator() | Where-Object {
+    $_.Value.type -eq 'Foreach' -and $_.Key -eq 'For_each_suggestion' -and
+    $_.Value.runtimeConfiguration.concurrency.repetitions -ne 1
+}).Count -eq 0) 'The provider-observation loop remains sequential while its full input/output is secured.'
+Assert-Test ((@($flowDefinition.properties.definition.triggers.Values)[0].runtimeConfiguration.secureData.properties -join ',') -eq 'outputs') 'The Dataverse trigger secures its row payload in run history.'
 Assert-Test (@($flowActions.Values | Where-Object { $_.type -eq 'Foreach' -and $_.runtimeConfiguration.concurrency.repetitions -ne 1 }).Count -eq 0) 'Suggestion evaluation is sequential.'
+Assert-Test ($flowActions.Compose_canonical_slots.inputs -ceq "@sort(union(variables('v_slots'), variables('v_slots')), 'startUtc')") 'Canonical slots are deduplicated then ordered by UTC start.'
+$observationCondition = $flowActions.Check_suggestion_valid.expression
+Assert-Test ($observationCondition -match "not\(contains\(variables\('v_obs'\)" -and
+    $observationCondition -match "string\(not\(outputs\('Compose_free'\)\)\)") 'Contradictory duplicate interval observations invalidate the provider response.'
+$checkModeActions = $flowDefinition.properties.definition.actions.Evaluate.actions.Check_config.actions.Check_mode.actions
+Assert-Test ($checkModeActions.Check_validation.expression -ceq "@equals(outputs('Compose_validation_error'), '')" -and
+    $checkModeActions.Check_validation.runAfter.ContainsKey('Compose_validation_error') -and
+    $checkModeActions.Check_validation.actions.Set_has_snapshot.inputs.value -eq $true) 'A reference snapshot exists only after initial TA and Location validation passes.'
+Assert-Test ($flowActions.If_validated_snapshot.expression -ceq "@variables('v_hasSnapshot')" -and
+    @($flowActions.If_validated_snapshot.runAfter.Map_failure).Count -eq 3) 'Reference-drift re-reads only run after a validated snapshot, including provider-failure handling.'
+Assert-Test ($flowActions.Compose_drift.inputs -match "os_sr_taid" -and
+    $flowActions.Compose_drift.inputs -match "statecode" -and
+    $flowActions.Compose_drift.inputs -match "os_sr_ta_eml" -and
+    $flowActions.Compose_drift.inputs -notmatch "name") 'TA drift compares only identity, active state and normalized email, not display name.'
+Assert-Test ((@($flowActions.Write_terminal_result.inputs.parameters.Keys | Where-Object { $_ -like 'item/*' } | Sort-Object) -join ',') -eq 'item/os_sr_avq_err,item/os_sr_avq_exp,item/os_sr_avq_qat,item/os_sr_avq_rsn,item/os_sr_avq_slts,item/os_sr_avq_stat') 'Terminal write remains limited to the six approved result fields.'
 Assert-Test ($flowDefinitionText -notmatch '(?i)os_sr_cand|os_sr_cact|os_sr_intv|os_sr_csh|os_sr_oprc|SendEmail|CreateEvent|graph\.microsoft|teams|"Http"|shared-' -and $flowDefinitionText -notmatch '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}') 'Flow source has no forbidden operation, connection id or literal mailbox.'
 foreach ($errorCode in @($flowDefinitionText | Select-String -Pattern "'([A-Z_]{6,})'" -AllMatches -CaseSensitive).Matches | ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -notin @('CONFIG', 'REFERENCE', 'REQUEST', 'PROVIDER', 'RESPONSE', 'RESULT', 'NO_COMMON_SLOT') } | Sort-Object -Unique) {
     Assert-Test ($flow.safeErrors -contains $errorCode) "Flow emits only contract safe error $errorCode."

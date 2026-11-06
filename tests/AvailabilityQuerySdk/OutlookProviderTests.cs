@@ -39,6 +39,14 @@ internal static partial class Program
         var room = Attendee("room@example.invalid", "resource", "free");
         Equal(QueryState.Available, Evaluate(online, Suggestion(Start, Start.AddHours(1), ta)).State,
             "Online TA free is available.");
+        Equal(QueryState.Available, Evaluate(online, Suggestion(Start, Start.AddHours(1), ta,
+            Attendee("unexpected@example.invalid", "optional", "busy"))).State,
+            "An additional provider attendee cannot substitute for or alter exact TA matching.");
+        AssertNoSlots(AvailabilityRules.Calculate(online, Provider(
+            Suggestion(Start, Start.AddHours(1), Attendee("ta@example.invalid", "required", "busy")),
+            Suggestion(Start, Start.AddHours(1), Attendee("ta@example.invalid", "required", "busy"))),
+            Settings(), Now),
+            "Identical duplicate non-free observations never establish availability");
         foreach (var unavailable in new[] { "tentative", "busy", "oof", "workingElsewhere", "unknown" })
         {
             AssertNoSlots(Evaluate(online, Suggestion(Start, Start.AddHours(1),

@@ -61,7 +61,7 @@ No guard steps were registered. No Flow activation or run took place.
 
 ### Flow `os_sr_avchk`
 
-The source is [os_sr_avchk.clientdata.json](../solutions/AvailabilityQuery/os_sr_avchk.clientdata.json) (SHA256 `f901baae…8811`). The live clientdata is JSON-equal to that source, and the offline checker passes on the live copy.
+At deployment, [os_sr_avchk.clientdata.json](../solutions/AvailabilityQuery/os_sr_avchk.clientdata.json) (SHA256 `f901baae…8811`) matched the live clientdata. The offline hardening below changes the local file only; it is no longer asserted to match the deployed Flow.
 
 The Flow runs these steps:
 1. A Dataverse "Added" trigger on `os_sr_avq`, filtered to `Pending`, with Organization scope, run as the Flow owner, and concurrency 1.
@@ -76,7 +76,7 @@ The Flow runs these steps:
 10. Apply the `REFERENCE_CHANGED` override.
 11. Write the six result fields once with `UpdateOnlyRecord`.
 
-Reads and the provider call are secured. The Flow does not use Candidate, Candidate Core, `os_sr_intv`, Status History, Operation Receipt, events, email, Teams or Graph connectors.
+The deployment-time source secured the reference reads and provider call. The Flow does not use Candidate, Candidate Core, `os_sr_intv`, Status History, Operation Receipt, events, email, Teams or Graph connectors.
 
 **Interpretation:** the drift override applies only after reference validation has produced a snapshot. Otherwise, pre-validation errors such as `TA_INACTIVE` would always become `REFERENCE_CHANGED`.
 
@@ -87,6 +87,34 @@ Reads and the provider call are secured. The Flow does not use Candidate, Candid
 - obscuring of variables and loops in run history.
 
 The guard remains the server-side backstop that re-validates every slot. The Flow is **untested**, and it cannot be activated until the seven definitions have approved values.
+
+### Offline Flow hardening and pre-activation verification (2026-11-06)
+
+**Local classification:** `P0_SLICE_2A_OFFLINE_FLOW_HARDENING_COMPLETE`. This describes source and offline regression readiness only. The deployed VN LMV IT Flow remains unchanged and OFF; no Flow update, activation, publish, tenant access, provider call or mailbox access occurred.
+
+The Flow source now applies action-level secure inputs/outputs at each sensitive boundary: query/reference reads; TA and Location snapshot setters; validation expressions that consume mailbox addresses; Outlook response validation; the suggestion loop and attendee filters; observation and slot construction; reference rereads/comparisons; and terminal result construction/write. The trigger output and containing scopes are also marked. Protection is placed on each relevant action; parent settings are not treated as inherited by child actions.
+
+The Microsoft [secure data guidance](https://learn.microsoft.com/en-us/power-automate/guidance/coding-guidelines/use-secure-inputs-outputs-triggers) documents secure inputs/outputs as action settings, but available offline evidence does not establish that each action type in this definition retains its setting after solution import and in run history. This remains `RUNTIME_VERIFICATION_REQUIRED`, particularly for trigger outputs, SetVariable, Scope, If and Foreach. Before activation, a separately authorized synthetic run must inspect sanitized run history for addresses, snapshots, provider response/diagnostics, attendee observations, loop items and derived data. Any rejected, dropped or ineffective secure-data setting is a hard stop; do not activate.
+
+Number environment-variable parameters remain `Float`, converted with `int(string(...))`; sorting remains `sort(union(...), 'startUtc')`, and slots are serialized with `string()`. Static source review cannot prove Power Automate binding, WDL function edge behavior, canonical object serialization, or null/lazy evaluation. Keep these as `RUNTIME_VERIFICATION_REQUIRED`; do not change them speculatively.
+
+Offline SDK regression coverage verifies identical free duplicates are deduplicated; identical non-free observations never establish free; contradictory same-interval observations fail closed; duplicate/missing expected attendees do not establish free; an extra valid attendee cannot replace the expected TA; unknown availability and malformed shapes fail closed; and an empty suggestion list returns NoSlots. These validate the C# reference adapter, not execution of the Flow. The Flow remains untested.
+
+The trigger is Create-only, Pending-filtered and concurrency 1. This does not prove transactional exactly-once behavior or prevent all overlapping external changes. The server-side guard remains authoritative. The requester BSO identity and elevated DEV owner result-writer/Outlook connection remain distinct; `DEV_FUNCTIONAL_IDENTITY_ELEVATED_NOT_SECURITY_ACCEPTANCE` is unchanged.
+
+#### First-runtime verification matrix
+
+| Area | Bounded synthetic probe | Pass condition / stop |
+|---|---|---|
+| Number parameters | Resolve one authorized integer Number value through the Flow parameter and `int(string(...))`. | Correct integer; any binding/conversion fault stops. |
+| WDL and serialization | Feed unsorted, repeated known suggestions; inspect terminal slot text and size. | Exact distinct ascending UTC `{startUtc,endUtc}` array; stable parse; within 200 and 32,768 characters. |
+| Null/malformed shapes | Use empty suggestions, missing nested fields, null/malformed attendee entries, unknown values and bad UTC representation. | Safe deterministic Failed/NoSlots result; never Available from malformed data; no raw payload in logs. |
+| Availability observations | Probe exact free TA/room, non-free, missing/duplicate expected entries, extra attendee, repeated same result and contradictory same interval. | Exact TA plus Onsite room required; conflicts fail closed; no unknown or non-free observation establishes free. |
+| Run-history privacy | Inspect trigger and each sensitive action/loop for secure settings and sanitized run history. | No address, reference snapshot, response, diagnostics, attendee observation or loop data visible; otherwise stop. |
+| Reference drift | After a valid initial snapshot, change ID, active state or normalized email; separately cause a reread failure; change only display name. Repeat for Available, NoSlots and provider-error outcomes. | Relevant change/unreadable reference yields Failed / `REFERENCE_CHANGED` / empty reason / `[]`; display-name-only change does not. Pre-validation errors retain their own categories. |
+| UTC and Outlook shape | First synthetic Outlook response only; capture sanitized field types/time-zone representation. | Exact accepted UTC representation; any different timezone or malformed shape stops with no retry or automatic conversion. |
+| Identity and preservation | Use separate test BSO requester and approved DEV owner connection; read back affected rows and role/package topology. | Requester is not impersonated by connector identity; no Candidate/Core mutation; Integration role remains unassigned; all 50 legacy guards remain disabled. |
+| Lifecycle and concurrency | Observe one new Pending request and a non-Pending control; inspect run count and final row. | Non-Pending has no result write; one terminal update for the observed run. Do not infer a transactional exactly-once guarantee from concurrency 1. |
 
 ### Final reconciliation (fresh GET)
 

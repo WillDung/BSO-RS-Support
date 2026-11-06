@@ -1,5 +1,6 @@
 {
-  "status": "PROPOSED_SOURCE_OFFLINE_NOT_CREATED",
+  "status": "DEPLOYED_FLOW_FEATURE_OFF_LOCAL_SOURCE_HARDENING_PENDING",
+  "deploymentState": "The VN LMV IT Flow remains deployed OFF and unchanged by this offline source update.",
   "solutionUniqueName": "os_sr_bso_rs_support",
   "name": "os_sr_avchk",
   "displayName": "BSO-RS Availability Check",
@@ -50,7 +51,7 @@
       "noValidSuggestions": "NoSlots with NO_COMMON_SLOT and slots [].",
       "persistence": "Only sorted, distinct UTC startUtc/endUtc slots, subject to count and JSON-length limits. Never persist or expose provider output, reasons, addresses, availability, locations, confidence, organizer or connector error bodies."
     },
-    "implementation": "The C# adapter is an offline reference implementation and tests, not an invocable Power Automate action. A later authorized Flow must implement and validate the same contract; this file is not a deployed Flow."
+    "implementation": "The C# adapter is an offline reference implementation and tests, not an invocable Power Automate action and not itself a deployed Flow. The separate solution-aware Power Automate Flow is deployed OFF in DEV; local hardening source changes still require separate review and deployment."
   },
   "providerTimezoneFirstRuntimeGate": {
     "acceptedRepresentation": "timeZone exactly UTC, with an explicitly supported UTC dateTime representation; no timezone input is sent to the action.",
@@ -81,9 +82,49 @@
       "error": "REFERENCE_CHANGED"
     },
     "terminalCoverage": ["Available", "NoSlots", "Failed"],
-    "storage": "Memory only. No mailbox snapshot, raw provider data or display-name snapshot is persisted or logged. Secure inputs/outputs on reference reads, Outlook actions and snapshot/comparison actions; no raw payload in failure diagnostics.",
+    "storage": "Memory only. No mailbox snapshot, raw provider data or display-name snapshot is written to the business row. Local source applies action-level secure inputs/outputs to every sensitive path; run-history suppression remains runtime-verification-required.",
     "recovery": "No automatic replacement query or retry after drift; user may initiate a new query.",
     "boundary": "The re-read is immediately before the terminal write, not a distributed lock or a booking guarantee."
+  },
+  "runHistoryPrivacy": {
+    "status": "SOURCE_PROTECTIONS_ADDED_RUNTIME_VERIFICATION_REQUIRED",
+    "rule": "Secure each action that receives, generates, copies, evaluates, loops over or persists reference snapshots, provider responses, attendee observations or availability slots. Parent protection is not treated as protection for children.",
+    "sensitiveActions": [
+      "Read_query",
+      "Read_ta",
+      "Set_ta_snapshot",
+      "Read_location",
+      "Set_location_snapshot",
+      "Compose_validation_error",
+      "Find_meeting_times",
+      "Check_response_shape",
+      "For_each_suggestion",
+      "Check_suggestion_timezone",
+      "Compose_slot",
+      "Find_invalid_attendees",
+      "Find_ta_entries",
+      "Find_room_entries",
+      "Compose_free",
+      "Check_suggestion_valid",
+      "Append_observation",
+      "Check_slot_eligible",
+      "Append_slot",
+      "Compose_canonical_slots",
+      "Compose_proposed_result",
+      "Set_result_slots",
+      "Evaluate",
+      "Map_failure",
+      "If_validated_snapshot",
+      "Reread_references",
+      "Reread_ta",
+      "Compose_drift",
+      "Reread_location",
+      "Compose_location_drift",
+      "Compose_terminal",
+      "Write_terminal_result"
+    ],
+    "platformEvidence": "Microsoft Power Automate guidance documents secure inputs and outputs as action settings but does not establish offline that every action type used here persists those settings through solution import and run history.",
+    "runtimeGate": "Before activation, use only authorized synthetic mailboxes and inspect sanitized run history for trigger output, SetVariable, Scope, If, Foreach, Query, Compose and connector action inputs/outputs. If any sensitive value is visible or a secureData setting is rejected or dropped, stop; do not activate and propose an architecture correction."
   },
   "resultTransitions": [
     "Pending -> Available",
@@ -140,7 +181,7 @@
     "production": "Identity is a later decision."
   },
   "connectionReferences": [
-    "Office 365 Outlook connection reference (technical name pending approval)",
-    "os_sr_cr_dv"
+    "os_sr_avchk_outlook_cr (Office 365 Outlook)",
+    "os_sr_avchk_dataverse_cr (Microsoft Dataverse)"
   ]
 }

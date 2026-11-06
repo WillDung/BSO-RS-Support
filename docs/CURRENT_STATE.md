@@ -1,5 +1,13 @@
 # Current State
 
+## P0 Slice 2A offline Flow hardening (2026-11-06)
+
+**Local source classification:** `P0_SLICE_2A_OFFLINE_FLOW_HARDENING_COMPLETE`. This covers local source and offline regression checks only. The deployed VN LMV IT Flow remains unchanged and OFF; local changes have not been synchronized or redeployed.
+
+Action-level secure inputs/outputs were added to each local Flow path that handles reference snapshots, Outlook response data, attendee observations, or availability slots. Recursive static tests guard nested actions. Microsoft guidance documents secure action settings, but whether every action type retains them through solution import and run history is `RUNTIME_VERIFICATION_REQUIRED`; no claim of effective run-history suppression is made.
+
+The Number `Float` parameter conversion, `sort()`/`union()` ordering and array `string()` serialization remain unchanged pending bounded synthetic runtime verification. Availability has not been run, and the synthetic mailbox prerequisite remains missing. See the [offline hardening and first-runtime matrix](P0_SLICE_2A_DEV_PROVISIONING_REPORT.md#offline-flow-hardening-and-pre-activation-verification-2026-11-06).
+
 ## P0 Slice 2A runtime wiring deployed, feature off (2026-11-05)
 
 **Status:** `P0_SLICE_2A_RUNTIME_WIRING_DEPLOYED_FEATURE_OFF`. This covers DEV wiring only. Nothing has been executed, and there is no runtime, security or Production acceptance. Identity remains `DEV_FUNCTIONAL_IDENTITY_ELEVATED_NOT_SECURITY_ACCEPTANCE`.

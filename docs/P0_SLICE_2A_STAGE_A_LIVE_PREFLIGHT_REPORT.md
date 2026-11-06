@@ -10,6 +10,8 @@
 
 **Scope:** Authorized DEV Console evidence and local documentation only. No repair, publication or Stage B was started. Normal application startup generated platform requests described below.
 
+**Later evidence:** The [Workflow capability proof](P0_SLICE_2A_WORKFLOW_CONCURRENCY_PROOF.md) established the exact-ETag concurrency sub-capability after this preflight. It did not verify an OFF/privacy-preserving update or change the Stage A drift result; the preflight observations below remain historical.
+
 ## Executive result
 
 The earlier full reconciliation verified the exact VN LMV IT target and unmanaged `os_sr_bso_rs_support` Solution before inspecting project resources. At that time the Flow was OFF and structurally matched the historical pre-hardening deployment, not the hardened local source. The observed Solution membership, role maps, connection bindings, disabled guards, published Console resources, value-less definitions and aggregate counts matched the accepted checkpoint.

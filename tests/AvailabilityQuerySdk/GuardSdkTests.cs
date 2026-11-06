@@ -35,6 +35,53 @@ internal static partial class Program
             host.Execute();
             Equal(1, host.Reads.Count, "Terminal " + state + " reads only the Pending query.");
         }
+        foreach (var state in new[] { QueryState.Available, QueryState.NoSlots, QueryState.Failed })
+        {
+            var omittedNulls = ResultTarget(state);
+            if (state != QueryState.NoSlots) omittedNulls.Attributes.Remove("os_sr_avq_rsn");
+            if (state != QueryState.Failed) omittedNulls.Attributes.Remove("os_sr_avq_err");
+            host = new GuardHost("Update", IntegrationUser, IntegrationUser, omittedNulls);
+            host.Execute();
+            Equal(state == QueryState.Available ? 2 : 1, host.Reads.Count,
+                "Terminal " + state + " still accepts omitted null result fields.");
+        }
+        foreach (var error in new[] { "PROVIDER_THROTTLED", "PROVIDER_TIMEOUT", "PROVIDER_UNAVAILABLE",
+                     "PROVIDER_RESPONSE_INVALID", "PROVIDER_TIMEZONE_UNSUPPORTED" })
+        {
+            var failure = ResultTarget(QueryState.Failed);
+            failure["os_sr_avq_err"] = error;
+            host = new GuardHost("Update", IntegrationUser, IntegrationUser, failure);
+            host.Execute();
+            Equal(1, host.Reads.Count, "Safe " + error + " completion reads only the Pending query.");
+        }
+
+        var noSlotsWithError = ResultTarget(QueryState.NoSlots);
+        noSlotsWithError["os_sr_avq_err"] = "PROVIDER_THROTTLED";
+        GuardRejects(new GuardHost("Update", IntegrationUser, IntegrationUser, noSlotsWithError),
+            "INVALID_RESULT", "NoSlots cannot carry a provider error.");
+        var failedWithReason = ResultTarget(QueryState.Failed);
+        failedWithReason["os_sr_avq_rsn"] = "NO_COMMON_SLOT";
+        GuardRejects(new GuardHost("Update", IntegrationUser, IntegrationUser, failedWithReason),
+            "INVALID_RESULT", "Failed cannot carry a NoSlots reason.");
+        var failedWithSlots = ResultTarget(QueryState.Failed);
+        failedWithSlots["os_sr_avq_slts"] = SlotResultJson.Serialize(
+            new[] { new AvailableSlot(Start, Start.AddHours(1)) }, 200, 32768);
+        GuardRejects(new GuardHost("Update", IntegrationUser, IntegrationUser, failedWithSlots),
+            "INVALID_RESULT", "Failed cannot carry an available slot.");
+        var failedWithRawError = ResultTarget(QueryState.Failed);
+        failedWithRawError["os_sr_avq_err"] = "SYNTHETIC_PROVIDER_BODY";
+        GuardRejects(new GuardHost("Update", IntegrationUser, IntegrationUser, failedWithRawError),
+            "INVALID_RESULT", "A raw provider error is not an allowed category.");
+
+        var expiryAtLimit = ResultTarget(QueryState.NoSlots);
+        expiryAtLimit["os_sr_avq_exp"] = Now.AddMinutes(12).AddSeconds(1);
+        host = new GuardHost("Update", IntegrationUser, IntegrationUser, expiryAtLimit);
+        host.Execute();
+        Equal(1, host.Reads.Count, "Configured expiry plus one second is accepted.");
+        var expiryPastLimit = ResultTarget(QueryState.NoSlots);
+        expiryPastLimit["os_sr_avq_exp"] = Now.AddMinutes(12).AddSeconds(1).AddTicks(1);
+        GuardRejects(new GuardHost("Update", IntegrationUser, IntegrationUser, expiryPastLimit),
+            "INVALID_EXPIRY", "Expiry beyond the configured bound is rejected.");
 
         GuardRejects(new GuardHost("Update", BsoUser, BsoUser, ResultTarget(QueryState.Available)),
             "UPDATE_CALLER", "The BSO requester cannot write a result.");
@@ -71,6 +118,27 @@ internal static partial class Program
         create.Attributes.Remove("os_sr_avq_stat");
         GuardRejects(new GuardHost("Create", IntegrationUser, IntegrationUser, create),
             "CREATE_CALLER", "The result writer cannot create requester rows.");
+
+        foreach (var field in new[] { "os_sr_avq_strt", "os_sr_avq_end" })
+        {
+            foreach (var kind in new[] { DateTimeKind.Unspecified, DateTimeKind.Local })
+            {
+                var invalid = new Entity("os_sr_avq")
+                {
+                    ["os_sr_avq_ta"] = new EntityReference("os_sr_ta", BsoUser),
+                    ["os_sr_avq_mod"] = new OptionSetValue((int)InterviewMode.Online),
+                    ["os_sr_avq_strt"] = start,
+                    ["os_sr_avq_end"] = start.AddHours(8),
+                    ["os_sr_avq_dur"] = 60
+                };
+                invalid[field] = DateTime.SpecifyKind(invalid.GetAttributeValue<DateTime>(field), kind);
+                host = new GuardHost("Create", BsoUser, BsoUser, invalid);
+                GuardRejects(host, "INVALID_REQUEST", field + " rejects " + kind + " transport Kind.");
+                Equal(0, host.Reads.Count, "Invalid UTC Kind is rejected before a reference read.");
+                Equal(false, invalid.Contains("os_sr_avq_stat"),
+                    "Rejected create does not receive a Pending state in the guard target.");
+            }
+        }
     }
 
     private static Entity ResultTarget(QueryState state)
@@ -78,6 +146,8 @@ internal static partial class Program
         var target = new Entity("os_sr_avq", Guid.Parse("22222222-3333-4444-5555-666666666666"))
         {
             ["os_sr_avq_stat"] = new OptionSetValue((int)state),
+            ["os_sr_avq_rsn"] = null,
+            ["os_sr_avq_err"] = null,
             ["os_sr_avq_slts"] = state == QueryState.Available
                 ? SlotResultJson.Serialize(new[] { new AvailableSlot(Start, Start.AddHours(1)) }, 200, 32768)
                 : "[]",

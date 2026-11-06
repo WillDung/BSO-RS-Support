@@ -40,7 +40,7 @@ function row(state, extra = {}) {
   };
 }
 
-async function createUi({ enabled = true, create, read } = {}) {
+async function createUi({ enabled = true, create, read, clock } = {}) {
   const elements = new Map();
   const get = (id) => {
     if (!elements.has(id)) elements.set(id, new Element(id));
@@ -93,7 +93,11 @@ async function createUi({ enabled = true, create, read } = {}) {
   class Option {
     constructor(label, value) { this.textContent = label; this.value = value; }
   }
-  const context = vm.createContext({ window, document, Option, Intl });
+  const TestDate = clock ? class extends Date {
+    constructor(...args) { super(...(args.length ? args : [clock()])); }
+    static now() { return clock(); }
+  } : Date;
+  const context = vm.createContext({ window, document, Option, Intl, Date: TestDate });
   vm.runInContext(source, context);
   get("availability-mode").value = "100000000";
   get("availability-ta").value = ids[0];
@@ -128,6 +132,10 @@ test("the panel creates and polls only its query without requesting mailbox addr
   assert.deepEqual(Object.keys(ui.calls.creates[0].payload).sort(), [
     "os_sr_avq_dur", "os_sr_avq_end", "os_sr_avq_mod", "os_sr_avq_strt", "os_sr_avq_ta@odata.bind"
   ]);
+  assert.equal(ui.calls.creates[0].payload.os_sr_avq_mod, 100000000);
+  assert.equal(ui.calls.creates[0].payload.os_sr_avq_dur, 60);
+  assert.equal(ui.calls.creates[0].payload.os_sr_avq_strt, "2099-01-05T02:00:00.000Z");
+  assert.equal(ui.calls.creates[0].payload.os_sr_avq_end, "2099-01-05T10:00:00.000Z");
   assert.equal(ui.calls.reads.length, 1);
   assert.equal(ui.calls.reads[0].table, "os_sr_avq");
   assert.equal(ui.calls.reads[0].id, ui.ids[0]);
@@ -140,7 +148,23 @@ test("onsite adds only the Location lookup to the availability request", async (
   await ui.submit();
   const payload = ui.calls.creates[0].payload;
   assert.equal(payload["os_sr_avq_loc@odata.bind"], `/os_sr_locs(${ui.ids[1]})`);
+  assert.equal(payload.os_sr_avq_mod, 100000001);
   assert.equal(Object.keys(payload).some((key) => /cand|intv|cact/i.test(key)), false);
+});
+
+test("invalid local inputs stop before creating or polling a query", async () => {
+  for (const [field, value] of [
+    ["availability-start", "2099-01-05T09:00+07:00"],
+    ["availability-duration", "50"]
+  ]) {
+    const ui = await createUi();
+    ui.get(field).value = value;
+    await ui.submit();
+    assert.equal(ui.calls.creates.length, 0);
+    assert.equal(ui.calls.reads.length, 0);
+    assert.equal(ui.calls.timers.length, 0);
+    assert.match(ui.get("availability-result").textContent, /future Vietnam-time window/);
+  }
 });
 
 test("safe errors are mapped and raw provider text is never shown", async () => {
@@ -159,6 +183,12 @@ test("safe errors are mapped and raw provider text is never shown", async () => 
       "Availability could not be verified. Contact support.");
     assert.doesNotMatch(ui.get("availability-result").textContent, /SYNTHETIC_PROVIDER_BODY/);
   }
+
+  const noSlots = await createUi({
+    read: async () => row(100000002, { os_sr_avq_rsn: "SYNTHETIC_PROVIDER_REASON" })
+  });
+  await noSlots.submit();
+  assert.equal(noSlots.get("availability-result").textContent, "No slots are available.");
 });
 
 test("available, pending, and expired states remain display-only", async () => {
@@ -177,10 +207,74 @@ test("available, pending, and expired states remain display-only", async () => {
   assert.equal(pending.calls.timers.length, 1);
 
   const expired = await createUi({
-    read: async () => row(100000001, { os_sr_avq_exp: "2000-01-01T00:00:00Z" })
+    read: async () => row(100000001, {
+      os_sr_avq_exp: "2000-01-01T00:00:00Z",
+      os_sr_avq_slts: '[{"startUtc":"2099-01-05T02:00:00Z","endUtc":"2099-01-05T03:00:00Z"}]'
+    })
   });
   await expired.submit();
   assert.match(expired.get("availability-result").textContent, /expired/i);
+  assert.equal(expired.get("availability-result").children.length, 0);
+
+  const invalid = await createUi({
+    read: async () => row(100000001, {
+      os_sr_avq_slts: '[{"startUtc":"2099-01-05T02:00:00Z","endUtc":"2099-01-05T03:00:00Z",' +
+        '"providerPayload":"SYNTHETIC_PROVIDER_BODY"}]'
+    })
+  });
+  await invalid.submit();
+  assert.equal(invalid.get("availability-result").textContent, "Availability result could not be verified.");
+});
+
+test("lost or missing create acknowledgments never cause an automatic replacement query", async () => {
+  for (const create of [
+    async () => { throw new Error("SYNTHETIC_CREATE_FAILURE"); },
+    async () => ({})
+  ]) {
+    const ui = await createUi({ create });
+    await ui.submit();
+    assert.equal(ui.calls.creates.length, 1);
+    assert.equal(ui.calls.reads.length, 0);
+    assert.equal(ui.calls.timers.length, 0);
+    assert.equal(ui.get("availability-result").textContent,
+      "Availability query could not be started or read. Contact support if this continues.");
+    await ui.get("availability-refresh").listeners.click();
+    assert.equal(ui.calls.creates.length, 1);
+    assert.equal(ui.calls.reads.length, 0);
+  }
+});
+
+test("a failed query read is not automatically repeated or exposed", async () => {
+  const ui = await createUi({
+    read: async () => { throw new Error("SYNTHETIC_READ_FAILURE"); }
+  });
+  await ui.submit();
+  assert.equal(ui.calls.creates.length, 1);
+  assert.equal(ui.calls.reads.length, 1);
+  assert.equal(ui.calls.timers.length, 0);
+  assert.equal(ui.get("availability-result").textContent,
+    "Availability query could not be started or read. Contact support if this continues.");
+});
+
+test("refreshing an acknowledged Pending query is read-only", async () => {
+  let reads = 0;
+  let now = Date.now();
+  const ui = await createUi({
+    clock: () => now,
+    read: async () => ++reads < 3
+      ? row(100000000)
+      : row(100000002, { os_sr_avq_rsn: "NO_COMMON_SLOT" })
+  });
+  await ui.submit();
+  now += 120000;
+  await ui.calls.timers.shift()();
+  assert.equal(ui.get("availability-refresh").hidden, false);
+  assert.match(ui.get("availability-result").textContent, /still pending/i);
+  await ui.get("availability-refresh").listeners.click();
+  assert.equal(ui.calls.creates.length, 1);
+  assert.deepEqual(ui.calls.reads.map((call) => call.id), [ui.ids[0], ui.ids[0], ui.ids[0]]);
+  assert.equal(ui.calls.timers.length, 0);
+  assert.equal(ui.get("availability-result").textContent, "No common slots were found in the requested window.");
 });
 
 test("an older in-flight poll cannot overwrite the newest query result", async () => {

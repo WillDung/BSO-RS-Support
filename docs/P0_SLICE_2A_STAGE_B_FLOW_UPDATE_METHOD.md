@@ -4,6 +4,8 @@
 
 **Classification: `STAGE_B_CONDITIONAL_UPDATE_METHOD_BLOCKED`.**
 
+**Later evidence:** The [Workflow capability proof](P0_SLICE_2A_WORKFLOW_CONCURRENCY_PROOF.md) established the exact-ETag concurrency sub-capability and independently resolved the caller pin for its bounded reads. The complete OFF/privacy-preserving update remains unproven and unauthorized; this document preserves the earlier assessment.
+
 No Flow update, publication, activation, or other tenant write is authorized or performed by this assessment. The method is blocked because the reviewed authoritative material does not demonstrate a version-specific conditional update of this particular solution-aware Flow's `workflow.clientdata`, including preservation of its state and solution membership. The public example's `If-Match: *` is not a same-version guard. This is a lack of demonstrated proof, not a claim that Microsoft does not support such an operation.
 
 The target Flow must remain OFF. Its last observed OFF state is **historical**, not a fresh verification. The separate Stage A Console cache-token discrepancy remains open under `P0_SLICE_2A_STAGE_A_LIVE_PREFLIGHT_DRIFT_DETECTED`; neither that discrepancy nor this method assessment authorizes a correction or exception.

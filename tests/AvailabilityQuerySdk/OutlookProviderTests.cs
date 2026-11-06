@@ -91,6 +91,36 @@ internal static partial class Program
             "A free organizer cannot override a busy TA");
     }
 
+    private static void TestDocumentedOutlookFixture()
+    {
+        var now = Utc("2026-11-06T12:00:00Z");
+        var start = Utc("2026-11-09T02:00:00Z");
+        var end = Utc("2026-11-09T05:00:00Z");
+        var online = Query(InterviewMode.Online, start, end, locationActive: null, roomEmail: null);
+        var onsite = Query(InterviewMode.Onsite, start, end);
+        var settings = Settings(horizon: 7);
+        var ta = Attendee("ta@example.invalid", "required", "free");
+        var room = Attendee("room@example.invalid", "resource", "free");
+        string P1(params string[] attendees) =>
+            "{\"emptySuggestionsReason\":\"\",\"meetingTimeSuggestions\":[{\"meetingTimeSlot\":{" +
+            "\"start\":{\"dateTime\":\"2026-11-09T02:00:00\",\"timeZone\":\"UTC\"}," +
+            "\"end\":{\"dateTime\":\"2026-11-09T03:00:00\",\"timeZone\":\"UTC\"}}," +
+            "\"attendeeAvailability\":[" + string.Join(",", attendees) + "]}]}";
+        const string s1 =
+            "[{\"startUtc\":\"2026-11-09T02:00:00Z\",\"endUtc\":\"2026-11-09T03:00:00Z\"}]";
+
+        AssertAvailable(AvailabilityRules.Calculate(online, P1(ta), settings, now), s1,
+            "Documented Online free fixture");
+        AssertAvailable(AvailabilityRules.Calculate(onsite, P1(ta, room), settings, now), s1,
+            "Documented Onsite free fixture");
+        AssertNoSlots(AvailabilityRules.Calculate(online,
+            "{\"emptySuggestionsReason\":\"SYNTHETIC_ONLY\",\"meetingTimeSuggestions\":[]}", settings, now),
+            "Documented empty-suggestions fixture");
+        AssertNoSlots(AvailabilityRules.Calculate(onsite,
+            P1(ta, Attendee("room@example.invalid", "resource", "busy")), settings, now),
+            "Documented Onsite busy-room fixture");
+    }
+
     private static void TestOutlookResponseShape()
     {
         var query = Query(InterviewMode.Online);
@@ -269,11 +299,23 @@ internal static partial class Program
     private static string ProviderTime(DateTime value) =>
         value.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff", CultureInfo.InvariantCulture);
 
+    private static void AssertAvailable(AvailabilityResult result, string slots, string description)
+    {
+        Equal(QueryState.Available, result.State, description + " produces Available.");
+        Equal<string?>(null, result.Reason, description + " has no reason.");
+        Equal<string?>(null, result.Error, description + " has no error.");
+        Equal(slots, SlotResultJson.Serialize(result.Slots, 200, 32768),
+            description + " returns the exact canonical UTC array.");
+    }
+
     private static void AssertNoSlots(AvailabilityResult result, string description)
     {
         Equal(QueryState.NoSlots, result.State, description + " produces NoSlots.");
         Equal("NO_COMMON_SLOT", result.Reason, description + " uses the deterministic reason.");
+        Equal<string?>(null, result.Error, description + " has no error.");
         Equal(0, result.Slots.Count, description + " cannot return slots.");
+        Equal("[]", SlotResultJson.Serialize(result.Slots, 200, 32768),
+            description + " serializes exactly as an empty array.");
     }
 
     private static void AssertFailed(AvailabilityResult result, string category, string description)
@@ -282,5 +324,7 @@ internal static partial class Program
         Equal(category, result.Error, description + " returns a safe category.");
         Equal(0, result.Slots.Count, description + " cannot return slots.");
         Equal<string?>(null, result.Reason, description + " cannot expose a provider reason.");
+        Equal("[]", SlotResultJson.Serialize(result.Slots, 200, 32768),
+            description + " serializes exactly as an empty array.");
     }
 }

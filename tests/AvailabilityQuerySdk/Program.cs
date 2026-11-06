@@ -17,6 +17,7 @@ internal static partial class Program
     {
         TestOutlookRequest();
         TestOutlookAttendees();
+        TestDocumentedOutlookFixture();
         TestOutlookResponseShape();
         TestOutlookSlotFiltering();
         TestReferenceAndInputValidation();
@@ -179,15 +180,20 @@ internal static partial class Program
 
     private static void TestSafeProviderErrors()
     {
-        Equal("PROVIDER_AUTH", AvailabilityRules.NormalizeProviderError(401), "401 is sanitized.");
-        Equal("PROVIDER_PERMISSION", AvailabilityRules.NormalizeProviderError(403), "403 is sanitized.");
-        Equal("MAILBOX_NOT_FOUND", AvailabilityRules.NormalizeProviderError(404), "404 is sanitized.");
-        Equal("PROVIDER_THROTTLED", AvailabilityRules.NormalizeProviderError(429), "429 is sanitized.");
-        Equal("PROVIDER_TIMEOUT", AvailabilityRules.NormalizeProviderError(null, true), "Timeout is sanitized.");
-        Equal("PROVIDER_UNAVAILABLE", AvailabilityRules.NormalizeProviderError(500), "Provider error is sanitized.");
-        var failed = AvailabilityRules.ProviderFailure(500);
-        Equal(QueryState.Failed, failed.State, "Provider failure is a Failed result.");
-        Equal(0, failed.Slots.Count, "Provider failure cannot expose slots.");
+        var cases = new (int? Status, bool TimedOut, string Error)[]
+        {
+            (401, false, "PROVIDER_AUTH"),
+            (403, false, "PROVIDER_PERMISSION"),
+            (404, false, "MAILBOX_NOT_FOUND"),
+            (429, false, "PROVIDER_THROTTLED"),
+            (null, true, "PROVIDER_TIMEOUT"),
+            (429, true, "PROVIDER_TIMEOUT"),
+            (500, false, "PROVIDER_UNAVAILABLE"),
+            (null, false, "PROVIDER_UNAVAILABLE")
+        };
+        foreach (var item in cases)
+            AssertFailed(AvailabilityRules.ProviderFailure(item.Status, item.TimedOut),
+                item.Error, "Synthetic provider failure " + (item.Status?.ToString() ?? "no status"));
     }
 
     private static void TestReferenceDrift()
@@ -195,14 +201,16 @@ internal static partial class Program
         var ta = new CalendarReferenceSnapshot(BsoUser, 0, "TA@example.invalid ");
         var room = new CalendarReferenceSnapshot(IntegrationUser, 0, "room@example.invalid");
         var available = AvailabilityResult.Available(new[] { new AvailableSlot(Start, End) });
-        var cases = new[]
+        var cases = new (InterviewMode, CalendarReferenceSnapshot?, CalendarReferenceSnapshot?, string)[]
         {
             (InterviewMode.Online, new CalendarReferenceSnapshot(BsoUser, 0, "changed@example.invalid"), room, "TA address changed"),
             (InterviewMode.Online, new CalendarReferenceSnapshot(BsoUser, 1, "ta@example.invalid"), room, "TA became inactive"),
             (InterviewMode.Onsite, ta, new CalendarReferenceSnapshot(IntegrationUser, 0, "changed@example.invalid"), "Room address changed"),
             (InterviewMode.Onsite, ta, new CalendarReferenceSnapshot(IntegrationUser, 1, "room@example.invalid"), "Location became inactive"),
             (InterviewMode.Onsite, new CalendarReferenceSnapshot(Guid.Empty, 0, "ta@example.invalid"), room, "TA id missing"),
-            (InterviewMode.Onsite, ta, new CalendarReferenceSnapshot(BsoUser, 0, "room@example.invalid"), "Location id changed")
+            (InterviewMode.Onsite, ta, new CalendarReferenceSnapshot(BsoUser, 0, "room@example.invalid"), "Location id changed"),
+            (InterviewMode.Online, null, room, "TA unreadable"),
+            (InterviewMode.Onsite, ta, null, "Location unreadable")
         };
         foreach (var item in cases)
         {
@@ -229,10 +237,6 @@ internal static partial class Program
                     item.Item4 + ": no Candidate/Core mutation path in completion.");
             }
         }
-        Equal("REFERENCE_CHANGED", ReferenceDriftPolicy.BeforeTerminalWrite(
-            InterviewMode.Online, ta, null, null, null, available).Error, "Unreadable TA fails closed.");
-        Equal("REFERENCE_CHANGED", ReferenceDriftPolicy.BeforeTerminalWrite(
-            InterviewMode.Onsite, ta, room, ta, null, available).Error, "Unreadable Location fails closed.");
         Equal(true, SlotResultJson.IsSafeError("REFERENCE_CHANGED"), "Guard permits safe drift failure.");
         Equal(1, available.Slots.Count, "Drift never mutates the proposed result in memory.");
 

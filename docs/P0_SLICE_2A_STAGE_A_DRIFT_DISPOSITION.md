@@ -6,6 +6,8 @@
 **Browser request finding:** `BROWSER_NON_GET_EFFECT_UNDETERMINED`  
 **Official Stage A status:** remains `P0_SLICE_2A_STAGE_A_LIVE_PREFLIGHT_DRIFT_DETECTED`. This offline recommendation is not an acceptance, exception, or deployment authorization.
 
+**Later evidence:** The [Workflow capability proof](P0_SLICE_2A_WORKFLOW_CONCURRENCY_PROOF.md) established the exact-ETag concurrency sub-capability for the prior bounded reads, superseding this assessment's missing-method finding. The complete OFF/privacy-preserving update and Stage A disposition remain blocked.
+
 ## Executive decision
 
 Recommend correcting the generated HTML/configuration pair before Stage B rather than accepting an exception. The expected correction is limited to the target-generated `os_/bso/candidate-console.html`: its environment-script query token changes to match the already-published configuration. No canonical source, configuration, JavaScript, Candidate Core, or other resource change is indicated.

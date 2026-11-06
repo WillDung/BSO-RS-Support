@@ -201,3 +201,65 @@ No canonical DEV bytes were persisted. Only sanitized metadata, hashes and compa
 Performed: independent historical-pin/source comparison; exact-target fresh caller gate; successful metadata and both exact-name definition reads; singleton/no-pagination checks; private object/version/ETag comparison; Base64 decode/length/SHA-256 in memory; review of applicable Microsoft contracts; report-relative-link, privacy-pattern, newline, trailing-whitespace and diff checks.
 
 No source or tests changed, so no implementation regression suite was needed or run by Agent A. No stale-tag experiment, divergent-draft test, PATCH, publication, normalization test, operational freeze, audit query, browser observation, served-byte verification or rollback was performed. No claim is made about present Flow/guard/role/configuration/business state beyond the bounded HTML/table reads above. Prior acceptance, hashes and failing release gates remain historical where not explicitly refreshed.
+
+## 9. Public-contract recheck and vendor-support request (2026-11-06)
+
+**Disposition:** `WEBRESOURCE_CONDITIONAL_UPDATE_UNPROVEN` for a racing unpublished edit; generic exact-ETag support is documented. The earlier ordinary **collection** and unpublished-function reads returned equal tags without a divergent draft. They do not establish the behavior of an ordinary single-record GET followed by a draft-only concurrent edit. This recheck used public Microsoft sources only and made no tenant or browser request.
+
+- The [WebResource message reference](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/reference/entities/webresource#messages) documents ordinary GET, unpublished retrieval and PATCH; [`content`](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/reference/entities/webresource#BKMK_Content) is Base64.
+- Microsoft documents [table eligibility](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/perform-conditional-operations-using-web-api#table-must-have-optimistic-concurrency-enabled) and [`If-Match` update with a mismatching version returning 412](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/perform-conditional-operations-using-web-api#apply-optimistic-concurrency-on-update). The earlier metadata read found eligibility true. [`If-Match: *`](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/perform-conditional-operations-using-web-api#prevent-create-in-upsert) only prevents creation.
+- [RetrieveUnpublishedRequest remarks](https://learn.microsoft.com/en-us/dotnet/api/microsoft.crm.sdk.messages.retrieveunpublishedrequest?view=dataverse-sdk-latest#remarks) distinguish the current unpublished version from ordinary retrieval after an unpublished update. [RetrieveUnpublishedMultiple](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/reference/retrieveunpublishedmultiple?view=dataverse-latest) lists WebResource as a collection-bound function. Neither source identifies the version checked by the proposed PATCH in this race.
+- [PublishXml](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/reference/publishxml?view=dataverse-latest) lists `ParameterXml` as its action parameter; the [schema](https://learn.microsoft.com/en-us/power-apps/developer/model-driven-apps/publish-request-schema#schema) permits a WebResource GUID. The reviewed contracts do not establish atomic compare-and-publish or an ETag parameter.
+
+**The request below is a draft, not submitted.** Opening a support case and any subsequent tenant writes, including PATCH and publication, require separate authorization. No freeze has been established. Do not send tenant identifiers, source content or credentials as part of this investigation.
+
+### Microsoft support request
+
+**Subject:** Does an unpublished WebResource edit invalidate an ordinary GET ETag for conditional PATCH?
+
+Please confirm the supported Dataverse Web API contract for an existing unmanaged HTML WebResource with `IsOptimisticConcurrencyEnabled = true`. We need to avoid overwriting a concurrent unpublished edit. A prior ordinary collection read and `RetrieveUnpublishedMultiple` returned equal tags and content, but there was no divergent draft; this does not prove the race. Published and current/unpublished here mean **definition representations**, not managed/unmanaged solution layers.
+
+In the following hypothetical sequence, `WEBRESOURCE_ID` is the resource's `webresourceid`; `E0` and the Base64 values are placeholders. No test against our tenant is requested or authorized:
+
+1. Editor A reads the published definition and its opaque `@odata.etag` as `E0`, and independently reads the current definition. Initially their content matches:
+
+   ```http
+   GET /api/data/v9.2/webresourceset(WEBRESOURCE_ID)?$select=webresourceid,content,versionnumber
+   GET /api/data/v9.2/webresourceset/Microsoft.Dynamics.CRM.RetrieveUnpublishedMultiple()?$select=webresourceid,content,versionnumber&$filter=webresourceid%20eq%20WEBRESOURCE_ID
+   ```
+
+2. Before A updates, editor B saves different `content` to the same WebResource, for example using `PATCH /api/data/v9.2/webresourceset(WEBRESOURCE_ID)` with `{"content":"BASE64_B"}`, **without publishing**. Independent reads now show B's current draft differs from the unchanged published definition; record both returned ETags without assuming their relationship.
+3. A then attempts the following conditional update using the exact earlier ETag, including its `W/` prefix and quotes if returned:
+
+   ```http
+   PATCH /api/data/v9.2/webresourceset(WEBRESOURCE_ID)
+   Content-Type: application/json
+   If-Match: E0
+
+   {"content":"BASE64_A"}
+   ```
+
+Is `E0` guaranteed to be invalidated by B's unpublished-only edit, so A receives **HTTP 412** and neither B's draft nor the published content changes? Which version does the server compare? Also, if a divergent draft already existed when A read it and B subsequently edited that draft, is the `@odata.etag` returned by `RetrieveUnpublishedMultiple` supported as the exact `If-Match` value for this ordinary PATCH? Please specify the supported fresh-token source and behavior for both cases, or a supported alternative if neither token protects the draft. Do not treat `If-Match: *` as concurrency protection.
+
+Please also confirm the safe successful sequence: after separate authorization and an actually confirmed editor/publisher freeze, obtain a vendor-confirmed fresh current token, preserving its `W/` prefix and quotes if returned, and PATCH only `content` once:
+
+```http
+PATCH /api/data/v9.2/webresourceset(WEBRESOURCE_ID)
+Content-Type: application/json
+If-Match: FRESH_CURRENT_ETAG
+
+{"content":"BASE64_A"}
+```
+
+On HTTP 204, verify current content changed while published content did not, and reconfirm the freeze and current bytes immediately before one separately authorized publication:
+
+```http
+POST /api/data/v9.2/PublishXml
+Content-Type: application/json
+
+{"ParameterXml":"<importexportxml><webresources><webresource>WEBRESOURCE_ID</webresource></webresources></importexportxml>"}
+```
+
+Is that `webresourceid` the correct one-resource publication identifier, and is there a documented version-conditional or atomic compare-and-publish mechanism? The request must not publish other WebResources, app modules or sitemaps; no `PublishAllXml` or whole-Solution publish is intended. After publication we would independently read both definitions and verify the intended bytes. On 412, any other unexpected response, timeout or uncertain readback, we would stop without retrying, publishing or automatically restoring. If the sequence is not supported, please identify a supported way to prevent both draft overwrites and the separate PATCH-to-publish race.
+
+**Recheck validation:** `git --no-pager diff --check -- docs\P0_SLICE_2A_WEBRESOURCE_CONCURRENCY_PROOF.md` passed. In-memory PowerShell checks resolved 12 local Markdown links (no local fragments), fetched nine Microsoft source URLs and verified seven section anchors, parsed the four hypothetical HTTP blocks and the one-resource PublishXml JSON/XML, and found no added-line sensitive-pattern or non-Microsoft-host matches. The first two versions of the request-shape checker failed to recognize indented and CRLF Markdown fences; the corrected checker passed. These checks do not test Dataverse behavior.

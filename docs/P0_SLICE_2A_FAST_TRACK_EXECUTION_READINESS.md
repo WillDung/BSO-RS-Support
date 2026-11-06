@@ -4,6 +4,8 @@
 
 **Overall classification:** `P0_SLICE_2A_FAST_TRACK_PREPARATION_BLOCKED`.
 
+**Later evidence:** The [Workflow capability proof](P0_SLICE_2A_WORKFLOW_CONCURRENCY_PROOF.md) resolved this assessment's caller-pin and exact-ETag method gaps for the prior bounded reads. It did not establish OFF/privacy-preserving update acceptance; this report's original assessment and operation ledger remain historical.
+
 The requested offline preparation and independent review were completed, but neither a safe single-resource Console correction nor a version-conditional Flow update is ready for execution. The Console plan lacks demonstrated current-layer concurrency protection and an enforceable publication exclusion window. The Flow update method lacks demonstrated, supported version-conditional semantics for this solution-aware Flow. Separate owner authorization is also required; this assessment authorizes no tenant change.
 
 The official Stage A classification remains `P0_SLICE_2A_STAGE_A_LIVE_PREFLIGHT_DRIFT_DETECTED`, with disposition `P0_SLICE_2A_STAGE_A_CORRECTION_REQUIRED`. Preparation is not a correction, accepted exception, Stage A pass, Stage B approval, security acceptance, or Production release.

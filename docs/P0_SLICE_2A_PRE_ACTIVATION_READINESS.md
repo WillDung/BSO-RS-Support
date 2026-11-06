@@ -4,7 +4,7 @@
 **Decision:** `P0_SLICE_2A_PRE_ACTIVATION_PLAN_BLOCKED`  
 **Scope:** Offline repository assessment and future change plan only. This is not deployment, activation, runtime, security, or Production authorization.
 
-**Subsequent evidence:** The later [Stage A live reconciliation](P0_SLICE_2A_STAGE_A_LIVE_PREFLIGHT_REPORT.md) supersedes this assessment's statements that the live Flow had not been read. It records the fresh readback and remaining incomplete Console-layer evidence; this document remains the original offline plan.
+**Subsequent evidence:** The later [Stage A live reconciliation](P0_SLICE_2A_STAGE_A_LIVE_PREFLIGHT_REPORT.md) supersedes this assessment's statements that the live Flow had not been read. Its final Console continuation also reconciled all six published/current/served resources; the cache-token mismatch remains a blocking drift. This document remains the original offline plan.
 
 ## Executive decision
 

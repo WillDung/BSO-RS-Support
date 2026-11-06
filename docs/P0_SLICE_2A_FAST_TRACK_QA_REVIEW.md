@@ -2,6 +2,8 @@
 
 **Disposition:** Independent offline QA; not an approval to change, publish, activate, or release anything.
 
+**Later evidence:** The [Workflow capability proof](P0_SLICE_2A_WORKFLOW_CONCURRENCY_PROOF.md) established the exact-ETag concurrency sub-capability and resolved the caller pin for its bounded reads. C1 below records the earlier evidence gap; OFF/privacy preservation and separate execution approval remain open.
+
 **Official Stage A classification remains:** `P0_SLICE_2A_STAGE_A_LIVE_PREFLIGHT_DRIFT_DETECTED`. The browser-effect classification remains `BROWSER_NON_GET_EFFECT_UNDETERMINED`. Neither this review nor the earlier recommendation closes the drift or grants an exception.
 
 ## Bounded preflight and evidence

@@ -13,8 +13,10 @@ internal static partial class Program
     private static readonly DateTime Start = Utc("2026-01-05T02:00:00Z");
     private static readonly DateTime End = Utc("2026-01-05T10:00:00Z");
 
-    private static int Main()
+    private static int Main(string[] args)
     {
+        if (args.Length == 1 && args[0] == "--calendar-bridge")
+            return RunCalendarBridge();
         TestOutlookRequest();
         TestOutlookAttendees();
         TestDocumentedOutlookFixture();
@@ -28,6 +30,7 @@ internal static partial class Program
         TestReferenceDrift();
         TestConfigurationRendering();
         TestSdkGuard();
+        TestCalendarBridge();
         TestSandboxAssemblyReferences();
         Console.WriteLine("Availability Query SDK checks passed: " + assertions);
         return 0;
@@ -87,6 +90,10 @@ internal static partial class Program
             Now.AddDays(61), Now.AddDays(62), 60);
         Equal("INVALID_REQUEST", AvailabilityRules.ValidateQuery(overHorizon, Settings(), Now),
             "A query beyond 61 days is rejected.");
+        var nearMaximum = new DateTime(9999, 12, 30, 0, 0, 0, DateTimeKind.Utc);
+        Equal(null, AvailabilityRules.ValidateQuery(Query(InterviewMode.Online,
+            nearMaximum.AddDays(1).AddHours(2), nearMaximum.AddDays(1).AddHours(10), 60),
+            Settings(), nearMaximum), "Horizon arithmetic fails safely at the DateTime range boundary.");
         ThrowsCategory(() => Settings(horizon: 62), "CONFIGURATION_INVALID",
             "Configured horizon cannot exceed the approved 61-day limit.");
 

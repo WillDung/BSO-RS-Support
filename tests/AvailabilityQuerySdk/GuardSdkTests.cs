@@ -22,12 +22,57 @@ internal static partial class Program
         Equal(true, host.Reads.All(name => name == "os_sr_avq" || name == "os_sr_ta"),
             "Available completion has no Candidate Core read path.");
 
+        foreach (var email in new[] { "", "not-an-address", "ta@other.invalid" })
+        {
+            host = new GuardHost("Update", IntegrationUser, IntegrationUser, ResultTarget(QueryState.Available));
+            host.TaRow["os_sr_ta_eml"] = email;
+            GuardRejects(host, "INVALID_RESULT", "Available cannot use an invalid current TA address.");
+        }
+        host = new GuardHost("Update", IntegrationUser, IntegrationUser, ResultTarget(QueryState.Available));
+        host.TaRow["statecode"] = new OptionSetValue(1);
+        GuardRejects(host, "INVALID_RESULT", "Available cannot use an inactive current TA.");
+        host = new GuardHost("Update", IntegrationUser, IntegrationUser, ResultTarget(QueryState.Available));
+        host.QueryRow["os_sr_avq_mod"] = new OptionSetValue(-1);
+        GuardRejects(host, "INVALID_RESULT", "Available rejects an unsupported persisted mode.");
+        host = new GuardHost("Update", IntegrationUser, IntegrationUser, ResultTarget(QueryState.Available));
+        host.TaRow["os_sr_ta_eml"] = 123;
+        GuardRejects(host, "REFERENCE_READ_FAILED", "Malformed reference data cannot leak a cast exception.");
+        host = new GuardHost("Update", IntegrationUser, IntegrationUser, ResultTarget(QueryState.Available));
+        host.QueryRow["os_sr_avq_stat"] = "SYNTHETIC_RAW_STATE";
+        GuardRejects(host, "INVALID_REQUEST", "Malformed persisted state receives a safe category.");
+        host = new GuardHost("Update", IntegrationUser, IntegrationUser, ResultTarget(QueryState.Available))
+        {
+            ReturnWrongReferenceId = true
+        };
+        GuardRejects(host, "REFERENCE_READ_FAILED", "Reference resolution verifies the returned identity.");
+        foreach (var field in new[] { "os_sr_avq_slts", "os_sr_avq_rsn", "os_sr_avq_err" })
+        {
+            var malformed = ResultTarget(QueryState.Available);
+            malformed[field] = 123;
+            GuardRejects(new GuardHost("Update", IntegrationUser, IntegrationUser, malformed),
+                "INVALID_RESULT", "Malformed result text receives a privacy-safe category.");
+        }
+        var immutableOnly = new Entity("os_sr_avq", available.Id)
+        {
+            ["os_sr_avq_dur"] = 30
+        };
+        GuardRejects(new GuardHost("Update", IntegrationUser, IntegrationUser, immutableOnly),
+            "UNEXPECTED_ATTRIBUTE", "Request-only Update must reach and fail the guard.");
+        var ownerOnly = new Entity("os_sr_avq", available.Id)
+        {
+            ["ownerid"] = new EntityReference("systemuser", IntegrationUser)
+        };
+        GuardRejects(new GuardHost("Update", IntegrationUser, IntegrationUser, ownerOnly),
+            "UNEXPECTED_ATTRIBUTE", "Ownership-only Update must reach and fail the guard.");
+
         host = new GuardHost("Update", IntegrationUser, IntegrationUser, ResultTarget(QueryState.Available));
         host.QueryRow["os_sr_avq_mod"] = new OptionSetValue((int)InterviewMode.Onsite);
         host.QueryRow["os_sr_avq_loc"] = host.LocationRow.ToEntityReference();
         host.Execute();
         Equal(3, host.Reads.Count, "Onsite completion reads query, TA and Location only.");
         Equal(true, host.Reads.Contains("os_sr_loc"), "Onsite completion reads the required Location.");
+        host.LocationRow["statecode"] = new OptionSetValue(1);
+        GuardRejects(host, "INVALID_RESULT", "Available cannot use an inactive current Onsite room.");
 
         foreach (var state in new[] { QueryState.NoSlots, QueryState.Failed })
         {
@@ -78,6 +123,12 @@ internal static partial class Program
         host = new GuardHost("Update", IntegrationUser, IntegrationUser, expiryAtLimit);
         host.Execute();
         Equal(1, host.Reads.Count, "Configured expiry plus one second is accepted.");
+        var maximumExpiry = ResultTarget(QueryState.Failed);
+        maximumExpiry["os_sr_avq_qat"] = DateTime.SpecifyKind(DateTime.MaxValue.AddMinutes(-1), DateTimeKind.Utc);
+        maximumExpiry["os_sr_avq_exp"] = DateTime.SpecifyKind(DateTime.MaxValue, DateTimeKind.Utc);
+        host = new GuardHost("Update", IntegrationUser, IntegrationUser, maximumExpiry);
+        host.Execute();
+        Equal(1, host.Reads.Count, "Expiry comparison does not overflow on a valid bounded interval.");
         var expiryPastLimit = ResultTarget(QueryState.NoSlots);
         expiryPastLimit["os_sr_avq_exp"] = Now.AddMinutes(12).AddSeconds(1).AddTicks(1);
         GuardRejects(new GuardHost("Update", IntegrationUser, IntegrationUser, expiryPastLimit),
@@ -116,6 +167,10 @@ internal static partial class Program
         Equal((int)QueryState.Pending, create.GetAttributeValue<OptionSetValue>("os_sr_avq_stat").Value,
             "The separate BSO requester can create only Pending.");
         create.Attributes.Remove("os_sr_avq_stat");
+        create["ownerid"] = new EntityReference("systemuser", IntegrationUser);
+        GuardRejects(new GuardHost("Create", BsoUser, BsoUser, create),
+            "UNEXPECTED_ATTRIBUTE", "Requester cannot choose a different query owner.");
+        create.Attributes.Remove("ownerid");
         GuardRejects(new GuardHost("Create", IntegrationUser, IntegrationUser, create),
             "CREATE_CALLER", "The result writer cannot create requester rows.");
 
@@ -216,6 +271,8 @@ internal static partial class Program
         }
 
         public Entity QueryRow { get; }
+        public Entity TaRow => ta;
+        public bool ReturnWrongReferenceId { get; set; }
         public Entity LocationRow { get; }
         public List<string> Reads { get; } = new List<string>();
         public List<string> QueryColumns { get; } = new List<string>();
@@ -253,7 +310,8 @@ internal static partial class Program
             if (id != source.Id) throw new InvalidOperationException("Unexpected row id.");
             Reads.Add(logicalName);
             if (logicalName == "os_sr_avq") QueryColumns.AddRange(columns.Columns);
-            var result = new Entity(logicalName, id);
+            var result = new Entity(logicalName,
+                ReturnWrongReferenceId && logicalName == "os_sr_ta" ? Guid.Empty : id);
             foreach (var pair in source.Attributes)
                 if (columns.AllColumns || columns.Columns.Contains(pair.Key))
                     result[pair.Key] = pair.Value;

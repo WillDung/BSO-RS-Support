@@ -370,7 +370,10 @@
               "recordId": "@triggerOutputs()?['body/os_sr_avqid']",
               "$select": "os_sr_avqid,os_sr_avq_stat,_os_sr_avq_ta_value,_os_sr_avq_loc_value,os_sr_avq_mod,os_sr_avq_strt,os_sr_avq_end,os_sr_avq_dur"
             },
-            "authentication": "@parameters('$authentication')"
+            "authentication": "@parameters('$authentication')",
+            "retryPolicy": {
+              "type": "none"
+            }
           },
           "runtimeConfiguration": {
             "secureData": {
@@ -384,14 +387,11 @@
             "Initialize_validated_at": [
               "Succeeded"
             ]
-          },
-          "retryPolicy": {
-            "type": "none"
           }
         },
         "Check_pending": {
           "type": "If",
-          "expression": "@equals(body('Read_query')?['os_sr_avq_stat'], 100000000)",
+          "expression": "@and(equals(body('Read_query')?['os_sr_avq_stat'], 100000000), not(empty(triggerOutputs()?['body/os_sr_avqid'])), equals(toLower(coalesce(body('Read_query')?['os_sr_avqid'], '')), toLower(coalesce(triggerOutputs()?['body/os_sr_avqid'], ''))))",
           "actions": {},
           "else": {
             "actions": {
@@ -408,6 +408,14 @@
             "Read_query": [
               "Succeeded"
             ]
+          },
+          "runtimeConfiguration": {
+            "secureData": {
+              "properties": [
+                "inputs",
+                "outputs"
+              ]
+            }
           }
         },
         "Evaluate": {
@@ -458,7 +466,7 @@
               "type": "Compose",
               "inputs": "@int(xpath(xml(json(concat('{\"r\":', parameters('Availability Business Hours (os_sr_avq_bhrs)'), '}'))), 'count(/r/*)'))",
               "runAfter": {
-                "Parse_business_hours": [
+                "Validate_business_hours": [
                   "Succeeded"
                 ]
               }
@@ -523,7 +531,7 @@
                 "maxc": "@int(string(parameters('Availability Maximum Candidates (os_sr_avq_maxc)')))"
               },
               "runAfter": {
-                "Find_invalid_durations": [
+                "Validate_config_lists": [
                   "Succeeded"
                 ]
               }
@@ -574,7 +582,11 @@
                         "name": "v_phase",
                         "value": "REFERENCE"
                       },
-                      "runAfter": {}
+                      "runAfter": {
+                        "Validate_request_shape": [
+                          "Succeeded"
+                        ]
+                      }
                     },
                     "Read_ta": {
                       "type": "OpenApiConnection",
@@ -589,7 +601,10 @@
                           "recordId": "@body('Read_query')?['_os_sr_avq_ta_value']",
                           "$select": "os_sr_taid,statecode,os_sr_ta_eml"
                         },
-                        "authentication": "@parameters('$authentication')"
+                        "authentication": "@parameters('$authentication')",
+                        "retryPolicy": {
+                          "type": "none"
+                        }
                       },
                       "runAfter": {
                         "Set_phase_reference": [
@@ -603,9 +618,6 @@
                             "outputs"
                           ]
                         }
-                      },
-                      "retryPolicy": {
-                        "type": "none"
                       }
                     },
                     "Set_ta_snapshot": {
@@ -619,7 +631,7 @@
                         }
                       },
                       "runAfter": {
-                        "Read_ta": [
+                        "Validate_ta_response": [
                           "Succeeded"
                         ]
                       },
@@ -649,7 +661,10 @@
                               "recordId": "@body('Read_query')?['_os_sr_avq_loc_value']",
                               "$select": "os_sr_locid,statecode,os_sr_loc_rmeml"
                             },
-                            "authentication": "@parameters('$authentication')"
+                            "authentication": "@parameters('$authentication')",
+                            "retryPolicy": {
+                              "type": "none"
+                            }
                           },
                           "runAfter": {},
                           "runtimeConfiguration": {
@@ -659,9 +674,6 @@
                                 "outputs"
                               ]
                             }
-                          },
-                          "retryPolicy": {
-                            "type": "none"
                           }
                         },
                         "Set_location_snapshot": {
@@ -672,6 +684,53 @@
                               "id": "@toLower(body('Read_location')?['os_sr_locid'])",
                               "state": "@body('Read_location')?['statecode']",
                               "email": "@toLower(trim(coalesce(body('Read_location')?['os_sr_loc_rmeml'], '')))"
+                            }
+                          },
+                          "runAfter": {
+                            "Validate_location_response": [
+                              "Succeeded"
+                            ]
+                          },
+                          "runtimeConfiguration": {
+                            "secureData": {
+                              "properties": [
+                                "inputs",
+                                "outputs"
+                              ]
+                            }
+                          }
+                        },
+                        "Validate_location_response": {
+                          "type": "ParseJson",
+                          "inputs": {
+                            "content": "@body('Read_location')",
+                            "schema": {
+                              "type": "object",
+                              "properties": {
+                                "os_sr_locid": {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+                                  "not": {
+                                    "enum": [
+                                      "00000000-0000-0000-0000-000000000000"
+                                    ]
+                                  }
+                                },
+                                "statecode": {
+                                  "type": "integer"
+                                },
+                                "os_sr_loc_rmeml": {
+                                  "type": [
+                                    "string",
+                                    "null"
+                                  ]
+                                }
+                              },
+                              "additionalProperties": true,
+                              "required": [
+                                "os_sr_locid",
+                                "statecode"
+                              ]
                             }
                           },
                           "runAfter": {
@@ -724,7 +783,7 @@
                     },
                     "Compose_validation_error": {
                       "type": "Compose",
-                      "inputs": "@if(not(or(equals(body('Read_query')?['os_sr_avq_mod'], 100000000), equals(body('Read_query')?['os_sr_avq_mod'], 100000001))), 'INVALID_REQUEST', if(not(equals(variables('v_ta')?['state'], 0)), 'TA_INACTIVE', if(not(equals(if(equals(coalesce(variables('v_ta')?['email'], ''), ''), 'TA_EMAIL_MISSING', if(not(and(equals(length(split(coalesce(variables('v_ta')?['email'], ''), '@')), 2), greater(length(first(split(coalesce(variables('v_ta')?['email'], ''), '@'))), 0), contains(last(split(coalesce(variables('v_ta')?['email'], ''), '@')), '.'), not(startsWith(last(split(coalesce(variables('v_ta')?['email'], ''), '@')), '.')), not(endsWith(coalesce(variables('v_ta')?['email'], ''), '.')), not(contains(coalesce(variables('v_ta')?['email'], ''), ' ')), not(contains(coalesce(variables('v_ta')?['email'], ''), '..')), not(contains(coalesce(variables('v_ta')?['email'], ''), ',')), not(contains(coalesce(variables('v_ta')?['email'], ''), ';')), not(contains(coalesce(variables('v_ta')?['email'], ''), '<')), not(contains(coalesce(variables('v_ta')?['email'], ''), '>')))), 'TA_EMAIL_INVALID', if(not(contains(variables('v_cfg')['domains'], last(split(coalesce(variables('v_ta')?['email'], ''), '@')))), 'TA_EMAIL_DOMAIN_NOT_ALLOWED', ''))), '')), if(equals(coalesce(variables('v_ta')?['email'], ''), ''), 'TA_EMAIL_MISSING', if(not(and(equals(length(split(coalesce(variables('v_ta')?['email'], ''), '@')), 2), greater(length(first(split(coalesce(variables('v_ta')?['email'], ''), '@'))), 0), contains(last(split(coalesce(variables('v_ta')?['email'], ''), '@')), '.'), not(startsWith(last(split(coalesce(variables('v_ta')?['email'], ''), '@')), '.')), not(endsWith(coalesce(variables('v_ta')?['email'], ''), '.')), not(contains(coalesce(variables('v_ta')?['email'], ''), ' ')), not(contains(coalesce(variables('v_ta')?['email'], ''), '..')), not(contains(coalesce(variables('v_ta')?['email'], ''), ',')), not(contains(coalesce(variables('v_ta')?['email'], ''), ';')), not(contains(coalesce(variables('v_ta')?['email'], ''), '<')), not(contains(coalesce(variables('v_ta')?['email'], ''), '>')))), 'TA_EMAIL_INVALID', if(not(contains(variables('v_cfg')['domains'], last(split(coalesce(variables('v_ta')?['email'], ''), '@')))), 'TA_EMAIL_DOMAIN_NOT_ALLOWED', ''))), if(and(equals(body('Read_query')?['os_sr_avq_mod'], 100000001), empty(body('Read_query')?['_os_sr_avq_loc_value'])), 'LOCATION_REQUIRED', if(and(equals(body('Read_query')?['os_sr_avq_mod'], 100000001), not(equals(variables('v_loc')?['state'], 0))), 'LOCATION_INACTIVE', if(and(equals(body('Read_query')?['os_sr_avq_mod'], 100000001), not(equals(if(equals(coalesce(variables('v_loc')?['email'], ''), ''), 'ROOM_EMAIL_MISSING', if(not(and(equals(length(split(coalesce(variables('v_loc')?['email'], ''), '@')), 2), greater(length(first(split(coalesce(variables('v_loc')?['email'], ''), '@'))), 0), contains(last(split(coalesce(variables('v_loc')?['email'], ''), '@')), '.'), not(startsWith(last(split(coalesce(variables('v_loc')?['email'], ''), '@')), '.')), not(endsWith(coalesce(variables('v_loc')?['email'], ''), '.')), not(contains(coalesce(variables('v_loc')?['email'], ''), ' ')), not(contains(coalesce(variables('v_loc')?['email'], ''), '..')), not(contains(coalesce(variables('v_loc')?['email'], ''), ',')), not(contains(coalesce(variables('v_loc')?['email'], ''), ';')), not(contains(coalesce(variables('v_loc')?['email'], ''), '<')), not(contains(coalesce(variables('v_loc')?['email'], ''), '>')))), 'ROOM_EMAIL_INVALID', if(not(contains(variables('v_cfg')['domains'], last(split(coalesce(variables('v_loc')?['email'], ''), '@')))), 'ROOM_EMAIL_DOMAIN_NOT_ALLOWED', ''))), ''))), if(equals(coalesce(variables('v_loc')?['email'], ''), ''), 'ROOM_EMAIL_MISSING', if(not(and(equals(length(split(coalesce(variables('v_loc')?['email'], ''), '@')), 2), greater(length(first(split(coalesce(variables('v_loc')?['email'], ''), '@'))), 0), contains(last(split(coalesce(variables('v_loc')?['email'], ''), '@')), '.'), not(startsWith(last(split(coalesce(variables('v_loc')?['email'], ''), '@')), '.')), not(endsWith(coalesce(variables('v_loc')?['email'], ''), '.')), not(contains(coalesce(variables('v_loc')?['email'], ''), ' ')), not(contains(coalesce(variables('v_loc')?['email'], ''), '..')), not(contains(coalesce(variables('v_loc')?['email'], ''), ',')), not(contains(coalesce(variables('v_loc')?['email'], ''), ';')), not(contains(coalesce(variables('v_loc')?['email'], ''), '<')), not(contains(coalesce(variables('v_loc')?['email'], ''), '>')))), 'ROOM_EMAIL_INVALID', if(not(contains(variables('v_cfg')['domains'], last(split(coalesce(variables('v_loc')?['email'], ''), '@')))), 'ROOM_EMAIL_DOMAIN_NOT_ALLOWED', ''))), if(and(equals(body('Read_query')?['os_sr_avq_mod'], 100000001), equals(coalesce(variables('v_ta')?['email'], ''), coalesce(variables('v_loc')?['email'], ''))), 'ROOM_EMAIL_INVALID', if(not(and(greater(ticks(body('Read_query')?['os_sr_avq_strt']), ticks(variables('v_validatedAt'))), greater(ticks(body('Read_query')?['os_sr_avq_end']), ticks(body('Read_query')?['os_sr_avq_strt'])), equals(mod(ticks(body('Read_query')?['os_sr_avq_strt']), 9000000000), 0), equals(mod(ticks(body('Read_query')?['os_sr_avq_end']), 9000000000), 0), lessOrEquals(ticks(body('Read_query')?['os_sr_avq_end']), ticks(addDays(variables('v_validatedAt'), min(variables('v_cfg')['hzn'], 61)))), contains(variables('v_cfg')['durations'], body('Read_query')?['os_sr_avq_dur']), equals(mod(body('Read_query')?['os_sr_avq_dur'], 15), 0), greaterOrEquals(sub(ticks(body('Read_query')?['os_sr_avq_end']), ticks(body('Read_query')?['os_sr_avq_strt'])), mul(body('Read_query')?['os_sr_avq_dur'], 600000000)))), 'INVALID_REQUEST', ''))))))))",
+                      "inputs": "@if(or(not(equals(variables('v_ta')['id'], toLower(body('Read_query')['_os_sr_avq_ta_value']))), and(equals(body('Read_query')?['os_sr_avq_mod'], 100000001), not(empty(body('Read_query')?['_os_sr_avq_loc_value'])), not(equals(variables('v_loc')?['id'], toLower(coalesce(body('Read_query')?['_os_sr_avq_loc_value'], '')))))), 'REFERENCE_READ_FAILED', if(not(or(equals(body('Read_query')?['os_sr_avq_mod'], 100000000), equals(body('Read_query')?['os_sr_avq_mod'], 100000001))), 'INVALID_REQUEST', if(not(equals(variables('v_ta')?['state'], 0)), 'TA_INACTIVE', if(not(equals(if(equals(coalesce(variables('v_ta')?['email'], ''), ''), 'TA_EMAIL_MISSING', if(not(and(equals(length(split(coalesce(variables('v_ta')?['email'], ''), '@')), 2), greater(length(first(split(coalesce(variables('v_ta')?['email'], ''), '@'))), 0), contains(last(split(coalesce(variables('v_ta')?['email'], ''), '@')), '.'), not(startsWith(last(split(coalesce(variables('v_ta')?['email'], ''), '@')), '.')), not(endsWith(coalesce(variables('v_ta')?['email'], ''), '.')), and(not(contains(coalesce(variables('v_ta')?['email'], ''), ' ')), not(contains(coalesce(variables('v_ta')?['email'], ''), '\t')), not(contains(coalesce(variables('v_ta')?['email'], ''), '\r')), not(contains(coalesce(variables('v_ta')?['email'], ''), '\n')), not(contains(coalesce(variables('v_ta')?['email'], ''), '\"')), not(contains(coalesce(variables('v_ta')?['email'], ''), '\\')), not(contains(coalesce(variables('v_ta')?['email'], ''), '/')), not(contains(coalesce(variables('v_ta')?['email'], ''), '(')), not(contains(coalesce(variables('v_ta')?['email'], ''), ')')), not(startsWith(first(split(coalesce(variables('v_ta')?['email'], ''), '@')), '.')), not(endsWith(first(split(coalesce(variables('v_ta')?['email'], ''), '@')), '.'))), not(contains(coalesce(variables('v_ta')?['email'], ''), '..')), not(contains(coalesce(variables('v_ta')?['email'], ''), ',')), not(contains(coalesce(variables('v_ta')?['email'], ''), ';')), not(contains(coalesce(variables('v_ta')?['email'], ''), '<')), not(contains(coalesce(variables('v_ta')?['email'], ''), '>')))), 'TA_EMAIL_INVALID', if(not(contains(variables('v_cfg')['domains'], last(split(coalesce(variables('v_ta')?['email'], ''), '@')))), 'TA_EMAIL_DOMAIN_NOT_ALLOWED', ''))), '')), if(equals(coalesce(variables('v_ta')?['email'], ''), ''), 'TA_EMAIL_MISSING', if(not(and(equals(length(split(coalesce(variables('v_ta')?['email'], ''), '@')), 2), greater(length(first(split(coalesce(variables('v_ta')?['email'], ''), '@'))), 0), contains(last(split(coalesce(variables('v_ta')?['email'], ''), '@')), '.'), not(startsWith(last(split(coalesce(variables('v_ta')?['email'], ''), '@')), '.')), not(endsWith(coalesce(variables('v_ta')?['email'], ''), '.')), and(not(contains(coalesce(variables('v_ta')?['email'], ''), ' ')), not(contains(coalesce(variables('v_ta')?['email'], ''), '\t')), not(contains(coalesce(variables('v_ta')?['email'], ''), '\r')), not(contains(coalesce(variables('v_ta')?['email'], ''), '\n')), not(contains(coalesce(variables('v_ta')?['email'], ''), '\"')), not(contains(coalesce(variables('v_ta')?['email'], ''), '\\')), not(contains(coalesce(variables('v_ta')?['email'], ''), '/')), not(contains(coalesce(variables('v_ta')?['email'], ''), '(')), not(contains(coalesce(variables('v_ta')?['email'], ''), ')')), not(startsWith(first(split(coalesce(variables('v_ta')?['email'], ''), '@')), '.')), not(endsWith(first(split(coalesce(variables('v_ta')?['email'], ''), '@')), '.'))), not(contains(coalesce(variables('v_ta')?['email'], ''), '..')), not(contains(coalesce(variables('v_ta')?['email'], ''), ',')), not(contains(coalesce(variables('v_ta')?['email'], ''), ';')), not(contains(coalesce(variables('v_ta')?['email'], ''), '<')), not(contains(coalesce(variables('v_ta')?['email'], ''), '>')))), 'TA_EMAIL_INVALID', if(not(contains(variables('v_cfg')['domains'], last(split(coalesce(variables('v_ta')?['email'], ''), '@')))), 'TA_EMAIL_DOMAIN_NOT_ALLOWED', ''))), if(and(equals(body('Read_query')?['os_sr_avq_mod'], 100000001), empty(body('Read_query')?['_os_sr_avq_loc_value'])), 'LOCATION_REQUIRED', if(and(equals(body('Read_query')?['os_sr_avq_mod'], 100000001), not(equals(variables('v_loc')?['state'], 0))), 'LOCATION_INACTIVE', if(and(equals(body('Read_query')?['os_sr_avq_mod'], 100000001), not(equals(if(equals(coalesce(variables('v_loc')?['email'], ''), ''), 'ROOM_EMAIL_MISSING', if(not(and(equals(length(split(coalesce(variables('v_loc')?['email'], ''), '@')), 2), greater(length(first(split(coalesce(variables('v_loc')?['email'], ''), '@'))), 0), contains(last(split(coalesce(variables('v_loc')?['email'], ''), '@')), '.'), not(startsWith(last(split(coalesce(variables('v_loc')?['email'], ''), '@')), '.')), not(endsWith(coalesce(variables('v_loc')?['email'], ''), '.')), and(not(contains(coalesce(variables('v_loc')?['email'], ''), ' ')), not(contains(coalesce(variables('v_loc')?['email'], ''), '\t')), not(contains(coalesce(variables('v_loc')?['email'], ''), '\r')), not(contains(coalesce(variables('v_loc')?['email'], ''), '\n')), not(contains(coalesce(variables('v_loc')?['email'], ''), '\"')), not(contains(coalesce(variables('v_loc')?['email'], ''), '\\')), not(contains(coalesce(variables('v_loc')?['email'], ''), '/')), not(contains(coalesce(variables('v_loc')?['email'], ''), '(')), not(contains(coalesce(variables('v_loc')?['email'], ''), ')')), not(startsWith(first(split(coalesce(variables('v_loc')?['email'], ''), '@')), '.')), not(endsWith(first(split(coalesce(variables('v_loc')?['email'], ''), '@')), '.'))), not(contains(coalesce(variables('v_loc')?['email'], ''), '..')), not(contains(coalesce(variables('v_loc')?['email'], ''), ',')), not(contains(coalesce(variables('v_loc')?['email'], ''), ';')), not(contains(coalesce(variables('v_loc')?['email'], ''), '<')), not(contains(coalesce(variables('v_loc')?['email'], ''), '>')))), 'ROOM_EMAIL_INVALID', if(not(contains(variables('v_cfg')['domains'], last(split(coalesce(variables('v_loc')?['email'], ''), '@')))), 'ROOM_EMAIL_DOMAIN_NOT_ALLOWED', ''))), ''))), if(equals(coalesce(variables('v_loc')?['email'], ''), ''), 'ROOM_EMAIL_MISSING', if(not(and(equals(length(split(coalesce(variables('v_loc')?['email'], ''), '@')), 2), greater(length(first(split(coalesce(variables('v_loc')?['email'], ''), '@'))), 0), contains(last(split(coalesce(variables('v_loc')?['email'], ''), '@')), '.'), not(startsWith(last(split(coalesce(variables('v_loc')?['email'], ''), '@')), '.')), not(endsWith(coalesce(variables('v_loc')?['email'], ''), '.')), and(not(contains(coalesce(variables('v_loc')?['email'], ''), ' ')), not(contains(coalesce(variables('v_loc')?['email'], ''), '\t')), not(contains(coalesce(variables('v_loc')?['email'], ''), '\r')), not(contains(coalesce(variables('v_loc')?['email'], ''), '\n')), not(contains(coalesce(variables('v_loc')?['email'], ''), '\"')), not(contains(coalesce(variables('v_loc')?['email'], ''), '\\')), not(contains(coalesce(variables('v_loc')?['email'], ''), '/')), not(contains(coalesce(variables('v_loc')?['email'], ''), '(')), not(contains(coalesce(variables('v_loc')?['email'], ''), ')')), not(startsWith(first(split(coalesce(variables('v_loc')?['email'], ''), '@')), '.')), not(endsWith(first(split(coalesce(variables('v_loc')?['email'], ''), '@')), '.'))), not(contains(coalesce(variables('v_loc')?['email'], ''), '..')), not(contains(coalesce(variables('v_loc')?['email'], ''), ',')), not(contains(coalesce(variables('v_loc')?['email'], ''), ';')), not(contains(coalesce(variables('v_loc')?['email'], ''), '<')), not(contains(coalesce(variables('v_loc')?['email'], ''), '>')))), 'ROOM_EMAIL_INVALID', if(not(contains(variables('v_cfg')['domains'], last(split(coalesce(variables('v_loc')?['email'], ''), '@')))), 'ROOM_EMAIL_DOMAIN_NOT_ALLOWED', ''))), if(and(equals(body('Read_query')?['os_sr_avq_mod'], 100000001), equals(coalesce(variables('v_ta')?['email'], ''), coalesce(variables('v_loc')?['email'], ''))), 'ROOM_EMAIL_INVALID', if(not(and(greater(ticks(body('Read_query')?['os_sr_avq_strt']), ticks(variables('v_validatedAt'))), greater(ticks(body('Read_query')?['os_sr_avq_end']), ticks(body('Read_query')?['os_sr_avq_strt'])), equals(mod(ticks(body('Read_query')?['os_sr_avq_strt']), 9000000000), 0), equals(mod(ticks(body('Read_query')?['os_sr_avq_end']), 9000000000), 0), lessOrEquals(ticks(body('Read_query')?['os_sr_avq_end']), ticks(addDays(variables('v_validatedAt'), min(variables('v_cfg')['hzn'], 61)))), contains(variables('v_cfg')['durations'], body('Read_query')?['os_sr_avq_dur']), equals(mod(body('Read_query')?['os_sr_avq_dur'], 15), 0), greaterOrEquals(sub(ticks(body('Read_query')?['os_sr_avq_end']), ticks(body('Read_query')?['os_sr_avq_strt'])), mul(body('Read_query')?['os_sr_avq_dur'], 600000000)))), 'INVALID_REQUEST', '')))))))))",
                       "runAfter": {
                         "Set_validated_at": [
                           "Succeeded"
@@ -782,7 +841,10 @@
                               "body/IsOrganizerOptional": true,
                               "body/ActivityDomain": "Work"
                             },
-                            "authentication": "@parameters('$authentication')"
+                            "authentication": "@parameters('$authentication')",
+                            "retryPolicy": {
+                              "type": "none"
+                            }
                           },
                           "runAfter": {
                             "Set_phase_provider": [
@@ -796,9 +858,6 @@
                                 "outputs"
                               ]
                             }
-                          },
-                          "retryPolicy": {
-                            "type": "none"
                           },
                           "limit": {
                             "timeout": "PT2M"
@@ -830,7 +889,7 @@
                         },
                         "Check_response_shape": {
                           "type": "If",
-                          "expression": "@and(startsWith(string(body('Find_meeting_times')), '{'), contains(body('Find_meeting_times'), 'emptySuggestionsReason'), contains(body('Find_meeting_times'), 'meetingTimeSuggestions'), equals(string(body('Find_meeting_times')['emptySuggestionsReason']), body('Find_meeting_times')['emptySuggestionsReason']), startsWith(string(body('Find_meeting_times')['meetingTimeSuggestions']), '['), lessOrEquals(length(body('Find_meeting_times')['meetingTimeSuggestions']), variables('v_cfg')['maxc']))",
+                          "expression": "@and(lessOrEquals(length(string(body('Find_meeting_times'))), 1048576), lessOrEquals(length(body('Find_meeting_times')['meetingTimeSuggestions']), variables('v_cfg')['maxc']))",
                           "actions": {},
                           "else": {
                             "actions": {
@@ -853,19 +912,62 @@
                             }
                           },
                           "runAfter": {
-                            "Set_phase_response": [
+                            "Validate_provider_response": [
                               "Succeeded"
                             ]
                           }
                         },
                         "For_each_suggestion": {
                           "type": "Foreach",
-                          "foreach": "@if(variables('v_respInvalid'), createArray(), body('Find_meeting_times')['meetingTimeSuggestions'])",
+                          "foreach": "@if(variables('v_respInvalid'), json('[]'), body('Find_meeting_times')['meetingTimeSuggestions'])",
                           "actions": {
                             "Check_suggestion_timezone": {
                               "type": "If",
                               "expression": "@and(equals(items('For_each_suggestion')['meetingTimeSlot']['start']['timeZone'], 'UTC'), equals(items('For_each_suggestion')['meetingTimeSlot']['end']['timeZone'], 'UTC'))",
-                              "actions": {},
+                              "actions": {
+                                "Validate_UTC_timestamps": {
+                                  "type": "ParseJson",
+                                  "inputs": {
+                                    "content": {
+                                      "start": "@items('For_each_suggestion')['meetingTimeSlot']['start']['dateTime']",
+                                      "end": "@items('For_each_suggestion')['meetingTimeSlot']['end']['dateTime']"
+                                    },
+                                    "schema": {
+                                      "type": "object",
+                                      "properties": {
+                                        "start": {
+                                          "type": "string",
+                                          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]{1,7})?Z?$",
+                                          "not": {
+                                            "pattern": "\\s"
+                                          }
+                                        },
+                                        "end": {
+                                          "type": "string",
+                                          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]{1,7})?Z?$",
+                                          "not": {
+                                            "pattern": "\\s"
+                                          }
+                                        }
+                                      },
+                                      "additionalProperties": false,
+                                      "required": [
+                                        "start",
+                                        "end"
+                                      ]
+                                    }
+                                  },
+                                  "runAfter": {},
+                                  "runtimeConfiguration": {
+                                    "secureData": {
+                                      "properties": [
+                                        "inputs",
+                                        "outputs"
+                                      ]
+                                    }
+                                  }
+                                }
+                              },
                               "else": {
                                 "actions": {
                                   "Mark_timezone_unsupported": {
@@ -912,7 +1014,7 @@
                               "type": "Query",
                               "inputs": {
                                 "from": "@items('For_each_suggestion')['attendeeAvailability']",
-                                "where": "@or(not(contains(createArray('required', 'optional', 'resource'), item()['attendee']['type'])), not(contains(createArray('free', 'tentative', 'busy', 'oof', 'workingElsewhere', 'unknown'), item()['availability'])), not(equals(length(split(trim(item()['attendee']['emailAddress']['address']), '@')), 2)))"
+                                "where": "@contains(item()['attendee']['emailAddress']['address'], '..')"
                               },
                               "runAfter": {
                                 "Compose_slot": [
@@ -970,7 +1072,7 @@
                             },
                             "Compose_free": {
                               "type": "Compose",
-                              "inputs": "@and(and(equals(length(body('Find_ta_entries')), 1), equals(first(body('Find_ta_entries'))?['attendee']?['type'], 'required'), equals(first(body('Find_ta_entries'))?['availability'], 'free')), or(not(equals(body('Read_query')?['os_sr_avq_mod'], 100000001)), and(equals(length(body('Find_room_entries')), 1), equals(first(body('Find_room_entries'))?['attendee']?['type'], 'resource'), equals(first(body('Find_room_entries'))?['availability'], 'free'))))",
+                              "inputs": "@and(if(equals(length(body('Find_ta_entries')), 1), and(equals(first(body('Find_ta_entries'))['attendee']['type'], 'required'), equals(first(body('Find_ta_entries'))['availability'], 'free')), false), if(equals(body('Read_query')?['os_sr_avq_mod'], 100000001), if(equals(length(body('Find_room_entries')), 1), and(equals(first(body('Find_room_entries'))['attendee']['type'], 'resource'), equals(first(body('Find_room_entries'))['availability'], 'free')), false), true))",
                               "runAfter": {
                                 "Find_room_entries": [
                                   "Succeeded"
@@ -1187,7 +1289,7 @@
                           "type": "SetVariable",
                           "inputs": {
                             "name": "v_slots",
-                            "value": "@if(equals(outputs('Compose_proposed_result')['state'], 100000001), outputs('Compose_canonical_slots'), createArray())"
+                            "value": "@if(equals(outputs('Compose_proposed_result')['state'], 100000001), outputs('Compose_canonical_slots'), json('[]'))"
                           },
                           "runtimeConfiguration": {
                             "secureData": {
@@ -1201,6 +1303,199 @@
                             "Set_result_error": [
                               "Succeeded"
                             ]
+                          }
+                        },
+                        "Validate_provider_response": {
+                          "type": "ParseJson",
+                          "inputs": {
+                            "content": "@body('Find_meeting_times')",
+                            "schema": {
+                              "type": "object",
+                              "properties": {
+                                "emptySuggestionsReason": {
+                                  "type": "string"
+                                },
+                                "meetingTimeSuggestions": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "meetingTimeSlot": {
+                                        "type": "object",
+                                        "properties": {
+                                          "start": {
+                                            "type": "object",
+                                            "properties": {
+                                              "dateTime": {
+                                                "type": "string"
+                                              },
+                                              "timeZone": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "additionalProperties": false,
+                                            "required": [
+                                              "dateTime",
+                                              "timeZone"
+                                            ]
+                                          },
+                                          "end": {
+                                            "type": "object",
+                                            "properties": {
+                                              "dateTime": {
+                                                "type": "string"
+                                              },
+                                              "timeZone": {
+                                                "type": "string"
+                                              }
+                                            },
+                                            "additionalProperties": false,
+                                            "required": [
+                                              "dateTime",
+                                              "timeZone"
+                                            ]
+                                          }
+                                        },
+                                        "additionalProperties": false,
+                                        "required": [
+                                          "start",
+                                          "end"
+                                        ]
+                                      },
+                                      "attendeeAvailability": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "attendee": {
+                                              "type": "object",
+                                              "properties": {
+                                                "type": {
+                                                  "type": "string",
+                                                  "enum": [
+                                                    "required",
+                                                    "optional",
+                                                    "resource"
+                                                  ]
+                                                },
+                                                "emailAddress": {
+                                                  "type": "object",
+                                                  "properties": {
+                                                    "address": {
+                                                      "type": "string",
+                                                      "pattern": "^[^\\s@,;<>]+@[^\\s@,;<>]+\\.[^\\s@,;<>]+$"
+                                                    },
+                                                    "name": {
+                                                      "type": "string"
+                                                    }
+                                                  },
+                                                  "additionalProperties": false,
+                                                  "required": [
+                                                    "address"
+                                                  ]
+                                                }
+                                              },
+                                              "additionalProperties": false,
+                                              "required": [
+                                                "type",
+                                                "emailAddress"
+                                              ]
+                                            },
+                                            "availability": {
+                                              "type": "string",
+                                              "enum": [
+                                                "free",
+                                                "tentative",
+                                                "busy",
+                                                "oof",
+                                                "workingElsewhere",
+                                                "unknown"
+                                              ]
+                                            }
+                                          },
+                                          "additionalProperties": false,
+                                          "required": [
+                                            "attendee",
+                                            "availability"
+                                          ]
+                                        }
+                                      },
+                                      "confidence": {
+                                        "type": "number",
+                                        "minimum": 0,
+                                        "maximum": 100
+                                      },
+                                      "organizerAvailability": {
+                                        "type": "string"
+                                      },
+                                      "suggestionReason": {
+                                        "type": "string"
+                                      },
+                                      "locations": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "displayName": {
+                                              "type": "string"
+                                            },
+                                            "locationEmailAddress": {
+                                              "type": "string"
+                                            },
+                                            "address": {
+                                              "type": "object",
+                                              "properties": {
+                                                "street": {
+                                                  "type": "string"
+                                                },
+                                                "city": {
+                                                  "type": "string"
+                                                },
+                                                "state": {
+                                                  "type": "string"
+                                                },
+                                                "countryOrRegion": {
+                                                  "type": "string"
+                                                },
+                                                "postalCode": {
+                                                  "type": "string"
+                                                }
+                                              },
+                                              "additionalProperties": false
+                                            }
+                                          },
+                                          "additionalProperties": false
+                                        }
+                                      }
+                                    },
+                                    "additionalProperties": false,
+                                    "required": [
+                                      "meetingTimeSlot",
+                                      "attendeeAvailability"
+                                    ]
+                                  },
+                                  "maxItems": 200
+                                }
+                              },
+                              "additionalProperties": false,
+                              "required": [
+                                "emptySuggestionsReason",
+                                "meetingTimeSuggestions"
+                              ]
+                            }
+                          },
+                          "runAfter": {
+                            "Set_phase_response": [
+                              "Succeeded"
+                            ]
+                          },
+                          "runtimeConfiguration": {
+                            "secureData": {
+                              "properties": [
+                                "inputs",
+                                "outputs"
+                              ]
+                            }
                           }
                         }
                       },
@@ -1220,6 +1515,146 @@
                         "Compose_validation_error": [
                           "Succeeded"
                         ]
+                      }
+                    },
+                    "Validate_request_shape": {
+                      "type": "ParseJson",
+                      "inputs": {
+                        "content": "@body('Read_query')",
+                        "schema": {
+                          "type": "object",
+                          "properties": {
+                            "os_sr_avqid": {
+                              "type": "string",
+                              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+                              "not": {
+                                "enum": [
+                                  "00000000-0000-0000-0000-000000000000"
+                                ]
+                              }
+                            },
+                            "_os_sr_avq_ta_value": {
+                              "type": "string",
+                              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+                              "not": {
+                                "enum": [
+                                  "00000000-0000-0000-0000-000000000000"
+                                ]
+                              }
+                            },
+                            "_os_sr_avq_loc_value": {
+                              "type": [
+                                "string",
+                                "null"
+                              ],
+                              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+                              "not": {
+                                "enum": [
+                                  "00000000-0000-0000-0000-000000000000"
+                                ]
+                              }
+                            },
+                            "os_sr_avq_stat": {
+                              "type": "integer",
+                              "enum": [
+                                100000000
+                              ]
+                            },
+                            "os_sr_avq_mod": {
+                              "type": "integer",
+                              "enum": [
+                                100000000,
+                                100000001
+                              ]
+                            },
+                            "os_sr_avq_strt": {
+                              "type": "string",
+                              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]{1,7})?Z$",
+                              "not": {
+                                "pattern": "\\s"
+                              }
+                            },
+                            "os_sr_avq_end": {
+                              "type": "string",
+                              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]{1,7})?Z$",
+                              "not": {
+                                "pattern": "\\s"
+                              }
+                            },
+                            "os_sr_avq_dur": {
+                              "type": "integer",
+                              "minimum": 15,
+                              "maximum": 480,
+                              "multipleOf": 15
+                            }
+                          },
+                          "additionalProperties": true,
+                          "required": [
+                            "os_sr_avqid",
+                            "_os_sr_avq_ta_value",
+                            "os_sr_avq_stat",
+                            "os_sr_avq_mod",
+                            "os_sr_avq_strt",
+                            "os_sr_avq_end",
+                            "os_sr_avq_dur"
+                          ]
+                        }
+                      },
+                      "runAfter": {},
+                      "runtimeConfiguration": {
+                        "secureData": {
+                          "properties": [
+                            "inputs",
+                            "outputs"
+                          ]
+                        }
+                      }
+                    },
+                    "Validate_ta_response": {
+                      "type": "ParseJson",
+                      "inputs": {
+                        "content": "@body('Read_ta')",
+                        "schema": {
+                          "type": "object",
+                          "properties": {
+                            "os_sr_taid": {
+                              "type": "string",
+                              "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+                              "not": {
+                                "enum": [
+                                  "00000000-0000-0000-0000-000000000000"
+                                ]
+                              }
+                            },
+                            "statecode": {
+                              "type": "integer"
+                            },
+                            "os_sr_ta_eml": {
+                              "type": [
+                                "string",
+                                "null"
+                              ]
+                            }
+                          },
+                          "additionalProperties": true,
+                          "required": [
+                            "os_sr_taid",
+                            "statecode"
+                          ]
+                        }
+                      },
+                      "runAfter": {
+                        "Read_ta": [
+                          "Succeeded"
+                        ]
+                      },
+                      "runtimeConfiguration": {
+                        "secureData": {
+                          "properties": [
+                            "inputs",
+                            "outputs"
+                          ]
+                        }
                       }
                     }
                   },
@@ -1256,6 +1691,195 @@
               },
               "runAfter": {
                 "Compose_config": [
+                  "Succeeded"
+                ]
+              }
+            },
+            "Validate_business_hours": {
+              "type": "ParseJson",
+              "inputs": {
+                "content": "@outputs('Parse_business_hours')",
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sunday": {
+                      "type": "object",
+                      "properties": {
+                        "opens": {
+                          "type": "string",
+                          "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+                        },
+                        "closes": {
+                          "type": "string",
+                          "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "opens",
+                        "closes"
+                      ]
+                    },
+                    "monday": {
+                      "type": "object",
+                      "properties": {
+                        "opens": {
+                          "type": "string",
+                          "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+                        },
+                        "closes": {
+                          "type": "string",
+                          "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "opens",
+                        "closes"
+                      ]
+                    },
+                    "tuesday": {
+                      "type": "object",
+                      "properties": {
+                        "opens": {
+                          "type": "string",
+                          "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+                        },
+                        "closes": {
+                          "type": "string",
+                          "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "opens",
+                        "closes"
+                      ]
+                    },
+                    "wednesday": {
+                      "type": "object",
+                      "properties": {
+                        "opens": {
+                          "type": "string",
+                          "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+                        },
+                        "closes": {
+                          "type": "string",
+                          "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "opens",
+                        "closes"
+                      ]
+                    },
+                    "thursday": {
+                      "type": "object",
+                      "properties": {
+                        "opens": {
+                          "type": "string",
+                          "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+                        },
+                        "closes": {
+                          "type": "string",
+                          "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "opens",
+                        "closes"
+                      ]
+                    },
+                    "friday": {
+                      "type": "object",
+                      "properties": {
+                        "opens": {
+                          "type": "string",
+                          "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+                        },
+                        "closes": {
+                          "type": "string",
+                          "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "opens",
+                        "closes"
+                      ]
+                    },
+                    "saturday": {
+                      "type": "object",
+                      "properties": {
+                        "opens": {
+                          "type": "string",
+                          "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+                        },
+                        "closes": {
+                          "type": "string",
+                          "pattern": "^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"
+                        }
+                      },
+                      "additionalProperties": false,
+                      "required": [
+                        "opens",
+                        "closes"
+                      ]
+                    }
+                  },
+                  "additionalProperties": false,
+                  "minProperties": 1
+                }
+              },
+              "runAfter": {
+                "Parse_business_hours": [
+                  "Succeeded"
+                ]
+              }
+            },
+            "Validate_config_lists": {
+              "type": "ParseJson",
+              "inputs": {
+                "content": {
+                  "domains": "@body('Parse_domains')",
+                  "durations": "@body('Parse_durations')"
+                },
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "domains": {
+                      "type": "array",
+                      "minItems": 1,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "string",
+                        "maxLength": 253,
+                        "pattern": "^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+                      }
+                    },
+                    "durations": {
+                      "type": "array",
+                      "minItems": 1,
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "integer",
+                        "minimum": 15,
+                        "maximum": 480,
+                        "multipleOf": 15
+                      }
+                    }
+                  },
+                  "additionalProperties": false,
+                  "required": [
+                    "domains",
+                    "durations"
+                  ]
+                }
+              },
+              "runAfter": {
+                "Find_invalid_durations": [
                   "Succeeded"
                 ]
               }
@@ -1302,7 +1926,7 @@
               "type": "SetVariable",
               "inputs": {
                 "name": "v_slots",
-                "value": "@createArray()"
+                "value": "@json('[]')"
               },
               "runAfter": {
                 "Clear_failure_reason": [
@@ -1368,7 +1992,10 @@
                       "recordId": "@variables('v_ta')['id']",
                       "$select": "os_sr_taid,statecode,os_sr_ta_eml"
                     },
-                    "authentication": "@parameters('$authentication')"
+                    "authentication": "@parameters('$authentication')",
+                    "retryPolicy": {
+                      "type": "none"
+                    }
                   },
                   "runAfter": {},
                   "runtimeConfiguration": {
@@ -1378,9 +2005,6 @@
                         "outputs"
                       ]
                     }
-                  },
-                  "retryPolicy": {
-                    "type": "none"
                   }
                 },
                 "Compose_drift": {
@@ -1439,7 +2063,10 @@
                           "recordId": "@variables('v_loc')['id']",
                           "$select": "os_sr_locid,statecode,os_sr_loc_rmeml"
                         },
-                        "authentication": "@parameters('$authentication')"
+                        "authentication": "@parameters('$authentication')",
+                        "retryPolicy": {
+                          "type": "none"
+                        }
                       },
                       "runAfter": {},
                       "runtimeConfiguration": {
@@ -1449,9 +2076,6 @@
                             "outputs"
                           ]
                         }
-                      },
-                      "retryPolicy": {
-                        "type": "none"
                       }
                     },
                     "Compose_location_drift": {
@@ -1603,7 +2227,10 @@
               "item/os_sr_avq_qat": "@outputs('Compose_terminal')['queriedAt']",
               "item/os_sr_avq_exp": "@addMinutes(outputs('Compose_terminal')['queriedAt'], variables('v_expMinutes'))"
             },
-            "authentication": "@parameters('$authentication')"
+            "authentication": "@parameters('$authentication')",
+            "retryPolicy": {
+              "type": "none"
+            }
           },
           "runAfter": {
             "Compose_terminal": [
@@ -1617,9 +2244,6 @@
                 "outputs"
               ]
             }
-          },
-          "retryPolicy": {
-            "type": "none"
           }
         }
       },

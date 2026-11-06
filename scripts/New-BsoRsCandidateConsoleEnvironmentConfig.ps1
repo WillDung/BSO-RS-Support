@@ -10,6 +10,7 @@ param(
     [switch]$ReleaseProfile,
     [bool]$CandidateCoreEnabled = $true,
     [bool]$SyntheticDataOnly = $true,
+    [switch]$AvailabilityEnabled,
     [switch]$DevDirectWriteFallbackEnabled,
     [ValidateSet('OFF', 'SAFE')][string]$DiagnosticsMode = 'OFF'
 )
@@ -18,6 +19,11 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $releaseNeutral = $Mode -ceq 'UNCONFIGURED'
+if ($AvailabilityEnabled -and
+    ($Mode -cne 'DEV' -or -not $SyntheticDataOnly -or
+     -not $CandidateCoreEnabled -or $ReleaseProfile)) {
+    throw 'Availability can be enabled only for bound synthetic-only DEV with Candidate Core enabled and no release profile. Generation does not authorize deployment or activation.'
+}
 if ($Mode -ne 'PROD' -and -not $SyntheticDataOnly) {
     throw 'DEV and TEST configurations must remain synthetic-only.'
 }
@@ -104,6 +110,9 @@ $configuration = [ordered]@{
     devDirectWriteFallbackEnabled = [bool]$DevDirectWriteFallbackEnabled
     diagnosticsMode = $DiagnosticsMode
 }
+if ($AvailabilityEnabled) {
+    $configuration.availabilityEnabled = $true
+}
 $json = ConvertTo-Json -InputObject $configuration -Depth 4 -Compress
 $source = @"
 (function (global) {
@@ -134,6 +143,19 @@ $generatedHtml = [regex]::Replace(
     $configScriptPattern,
     "candidate-console-environment.js?v=$($hash.Substring(0, 12))"
 )
+if ($AvailabilityEnabled) {
+    $availabilityScriptPattern = 'candidate-console-availability\.js\?v=[0-9a-z-]+'
+    if ([regex]::Matches($generatedHtml, $availabilityScriptPattern).Count -ne 1) {
+        throw 'Candidate Console HTML must contain exactly one versioned availability script.'
+    }
+    $availabilityPath = Join-Path $repositoryRoot 'solutions\CandidateConsole\WebResources\os_\bso\candidate-console-availability.js'
+    $availabilityHash = (Get-FileHash -LiteralPath $availabilityPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $generatedHtml = [regex]::Replace(
+        $generatedHtml,
+        $availabilityScriptPattern,
+        "candidate-console-availability.js?v=$($availabilityHash.Substring(0, 12))"
+    )
+}
 [IO.File]::WriteAllBytes($configurationFullPath, $sourceBytes)
 [IO.File]::WriteAllText($htmlFullPath, $generatedHtml, [Text.UTF8Encoding]::new($false))
 
@@ -143,6 +165,7 @@ $generatedHtml = [regex]::Replace(
     ReleaseProfile = [bool]$ReleaseProfile
     CandidateCoreEnabled = $CandidateCoreEnabled
     SyntheticDataOnly = $SyntheticDataOnly
+    AvailabilityEnabled = [bool]$AvailabilityEnabled
     DevDirectWriteFallbackEnabled = [bool]$DevDirectWriteFallbackEnabled
     DiagnosticsMode = $DiagnosticsMode
     OutputConfigurationPath = $configurationFullPath

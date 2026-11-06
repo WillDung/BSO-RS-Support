@@ -1,123 +1,129 @@
 "use strict";
 
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
 const test = require("node:test");
-const vm = require("node:vm");
-
-const source = fs.readFileSync(path.join(
-  __dirname, "..", "solutions", "CandidateConsole", "WebResources", "os_", "bso",
-  "candidate-console-availability.js"
-), "utf8");
-
-class Element {
-  constructor(id) {
-    this.id = id;
-    this.value = "";
-    this.textContent = "";
-    this.hidden = false;
-    this.disabled = false;
-    this.dataset = {};
-    this.listeners = {};
-    this.children = [];
-    this.classList = { toggle() {} };
-  }
-
-  addEventListener(name, handler) { this.listeners[name] = handler; }
-  replaceChildren(...children) { this.children = children; }
-  append(child) { this.children.push(child); }
-  add(option) { this.children.push(option); }
-  reportValidity() { return true; }
-  querySelectorAll() { return []; }
-}
-
-function row(state, extra = {}) {
-  return {
-    os_sr_avq_stat: state,
-    os_sr_avq_exp: new Date(Date.now() + 600000).toISOString(),
-    ...extra
-  };
-}
-
-async function createUi({ enabled = true, create, read, clock } = {}) {
-  const elements = new Map();
-  const get = (id) => {
-    if (!elements.has(id)) elements.set(id, new Element(id));
-    return elements.get(id);
-  };
-  const calls = { references: [], creates: [], reads: [], timers: [] };
-  const ids = [
-    "11111111-1111-4111-8111-111111111111",
-    "22222222-2222-4222-8222-222222222222"
-  ];
-  const api = {
-    async retrieveMultipleRecords(table, query) {
-      calls.references.push({ table, query });
-      if (table === "os_sr_ta") {
-        return { entities: [{ os_sr_taid: ids[0], os_sr_ta_nm: "[DEV] Synthetic TA" }] };
-      }
-      if (table === "os_sr_loc") {
-        return { entities: [{ os_sr_locid: ids[1], os_sr_loc_nm: "[DEV] Synthetic room" }] };
-      }
-      throw new Error("Unexpected reference table");
-    },
-    async createRecord(table, payload) {
-      calls.creates.push({ table, payload });
-      const id = ids[(calls.creates.length - 1) % ids.length];
-      return create ? create(id) : { id };
-    },
-    async retrieveRecord(table, id, query) {
-      calls.reads.push({ table, id, query });
-      return read ? read(id) : row(100000002, { os_sr_avq_rsn: "NO_COMMON_SLOT" });
-    }
-  };
-  const window = {
-    BsoRsCandidateConsoleConfiguration: { availabilityEnabled: enabled, syntheticDataOnly: true },
-    BsoRsCandidateConsolePolicy: {
-      allowsReference: (name, syntheticOnly) => syntheticOnly && name.startsWith("[DEV]")
-    },
-    Xrm: {
-      WebApi: api,
-      Utility: { async getEntityMetadata(name) { return { EntitySetName: name + "s" }; } }
-    },
-    setTimeout(callback) { calls.timers.push(callback); }
-  };
-  const document = {
-    readyState: "loading",
-    addEventListener() {},
-    getElementById: get,
-    createElement: (name) => new Element(name),
-    createTextNode: (text) => ({ textContent: text })
-  };
-  class Option {
-    constructor(label, value) { this.textContent = label; this.value = value; }
-  }
-  const TestDate = clock ? class extends Date {
-    constructor(...args) { super(...(args.length ? args : [clock()])); }
-    static now() { return clock(); }
-  } : Date;
-  const context = vm.createContext({ window, document, Option, Intl, Date: TestDate });
-  vm.runInContext(source, context);
-  get("availability-mode").value = "100000000";
-  get("availability-ta").value = ids[0];
-  get("availability-location").value = ids[1];
-  get("availability-start").value = "2099-01-05T09:00";
-  get("availability-end").value = "2099-01-05T17:00";
-  get("availability-duration").value = "60";
-  await window.BsoRsAvailabilityQuery.initialize();
-  return {
-    calls,
-    get,
-    ids,
-    submit: () => get("availability-form").listeners.submit({ preventDefault() {} })
-  };
-}
+const { createUi, row } = require(".\\helpers\\AvailabilityConsoleHarness.cjs");
 
 test("disabled availability does not read or create anything", async () => {
   const ui = await createUi({ enabled: false });
   assert.equal(ui.calls.references.length, 0);
+  assert.equal(ui.get("availability-submit").disabled, true);
+  await ui.submit();
+  await ui.refresh();
+  assert.equal(ui.calls.creates.length, 0);
   assert.match(ui.get("availability-result").textContent, /not configured/);
+});
+
+test("the strict feature flag cannot bypass the actual environment identity and DEV synthetic policy", async () => {
+  for (const options of [
+    { enabled: "true" },
+    { runtime: { organizationUrl: "https://different-console.invalid" } },
+    { runtime: { organizationId: "55555555-5555-4555-8555-555555555555" } },
+    { runtime: { organizationId: null } },
+    { runtime: { organizationUrl: "http://synthetic-console.invalid" } },
+    { configuration: { candidateCoreEnabled: false } },
+    { configuration: { mode: "TEST" } },
+    { configuration: { mode: "PROD", syntheticDataOnly: false } },
+    { syntheticDataOnly: false },
+    { policy: null },
+    { policy: { allowsReference: () => true } },
+    { policy: { resolve: () => { throw new Error("SYNTHETIC_POLICY_DETAIL"); } } }
+  ]) {
+    const ui = await createUi(options);
+    await ui.submit();
+    await ui.refresh();
+    assert.equal(ui.calls.references.length, 0);
+    assert.equal(ui.calls.creates.length, 0);
+    assert.equal(ui.calls.reads.length, 0);
+    assert.equal(ui.get("availability-submit").disabled, true);
+    assert.match(ui.get("availability-result").textContent, /not configured|identity/);
+    assert.doesNotMatch(ui.get("availability-result").textContent, /SYNTHETIC_POLICY_DETAIL/);
+  }
+});
+
+test("context identity drift fails closed before dispatch, refresh and queued polling", async () => {
+  const submit = await createUi();
+  submit.runtime.organizationId = "55555555-5555-4555-8555-555555555555";
+  await submit.submit();
+  assert.equal(submit.calls.creates.length, 0);
+
+  const pending = await createUi({ read: async () => row(100000000) });
+  await pending.submit();
+  pending.runtime.organizationUrl = "https://different-console.invalid";
+  await pending.calls.timers.shift()();
+  await pending.refresh();
+  assert.equal(pending.calls.reads.length, 1);
+  assert.equal(pending.calls.creates.length, 1);
+  assert.equal(pending.calls.timers.length, 0);
+  assert.match(pending.get("availability-result").textContent, /identity/);
+
+  let metadataReady;
+  const preparing = await createUi({
+    metadata: () => new Promise((resolve) => { metadataReady = resolve; })
+  });
+  const submitting = preparing.submit();
+  await waitFor(() => metadataReady);
+  preparing.runtime.organizationUrl = "https://different-console.invalid";
+  metadataReady({ EntitySetName: "os_sr_tas" });
+  await submitting;
+  assert.equal(preparing.calls.creates.length, 0);
+});
+
+test("reference, mode, and onsite location validation does not trust native form validation", async () => {
+  for (const values of [
+    { "availability-ta": "" },
+    { "availability-ta": "33333333-3333-4333-8333-333333333333" },
+    { "availability-ta": "invalid-guid" },
+    { "availability-mode": "100000002" },
+    { "availability-mode": "100000001", "availability-location": "" },
+    { "availability-mode": "100000001", "availability-location": "invalid-guid" }
+  ]) {
+    const ui = await createUi({ values });
+    await ui.submit();
+    assert.equal(ui.calls.creates.length, 0);
+    assert.equal(ui.calls.metadata.length, 0);
+    assert.match(ui.get("availability-result").textContent, /Select an active TA/);
+  }
+});
+
+test("empty, restricted and failed reference loads have explicit states and cannot submit", async () => {
+  const noTa = await createUi({ references: async () => ({ entities: [] }) });
+  assert.match(noTa.get("availability-result").textContent, /No active TAs/);
+  assert.equal(noTa.get("availability-submit").disabled, true);
+  await noTa.submit();
+  assert.equal(noTa.calls.creates.length, 0);
+
+  const roomsMissing = await createUi({
+    references: async (table) => ({ entities: table === "os_sr_ta"
+      ? [{ os_sr_taid: "11111111-1111-4111-8111-111111111111", os_sr_ta_nm: "[DEV] Synthetic TA" }]
+      : [] })
+  });
+  assert.equal(roomsMissing.get("availability-submit").disabled, false);
+  roomsMissing.get("availability-mode").value = "100000001";
+  roomsMissing.get("availability-mode").listeners.change();
+  assert.match(roomsMissing.get("availability-result").textContent, /No active rooms/);
+  assert.equal(roomsMissing.get("availability-location").required, true);
+  assert.equal(roomsMissing.get("availability-location-field").hidden, false);
+  assert.equal(roomsMissing.get("availability-submit").disabled, true);
+  roomsMissing.get("availability-mode").value = "100000000";
+  roomsMissing.get("availability-mode").listeners.change();
+  assert.equal(roomsMissing.get("availability-location").disabled, true);
+  await roomsMissing.submit();
+  assert.equal(roomsMissing.calls.creates.length, 1);
+  assert.equal("os_sr_avq_loc@odata.bind" in roomsMissing.calls.creates[0].payload, false);
+
+  const restricted = await createUi({
+    references: async () => ({ entities: [
+      { os_sr_taid: "11111111-1111-4111-8111-111111111111", os_sr_ta_nm: "Unapproved reference" },
+      { os_sr_taid: "invalid-guid", os_sr_ta_nm: "[DEV] Invalid reference" }
+    ] })
+  });
+  assert.match(restricted.get("availability-result").textContent, /No active TAs/);
+  const failed = await createUi({ references: async () => { throw new Error("SYNTHETIC_REFERENCE_ERROR"); } });
+  assert.match(failed.get("availability-result").textContent, /could not be loaded/);
+  await failed.submit();
+  assert.equal(failed.calls.creates.length, 0);
+  assert.equal(failed.get("availability-submit").disabled, true);
 });
 
 test("the panel creates and polls only its query without requesting mailbox addresses", async () => {
@@ -155,7 +161,15 @@ test("onsite adds only the Location lookup to the availability request", async (
 test("invalid local inputs stop before creating or polling a query", async () => {
   for (const [field, value] of [
     ["availability-start", "2099-01-05T09:00+07:00"],
-    ["availability-duration", "50"]
+    ["availability-start", "2099-02-30T09:00"],
+    ["availability-start", "2099-01-05T09:01"],
+    ["availability-start", "2000-01-05T09:00"],
+    ["availability-end", "2099-01-05T09:30"],
+    ["availability-end", "2099-01-05T09:00"],
+    ["availability-duration", "50"],
+    ["availability-duration", "495"],
+    ["availability-duration", "0"],
+    ["availability-duration", "15.5"]
   ]) {
     const ui = await createUi();
     ui.get(field).value = value;
@@ -226,10 +240,76 @@ test("available, pending, and expired states remain display-only", async () => {
   assert.equal(invalid.get("availability-result").textContent, "Availability result could not be verified.");
 });
 
+test("canonical slots must be UTC, chronological, aligned, in the submitted window and exact duration", async () => {
+  const slot = { startUtc: "2099-01-05T02:00:00Z", endUtc: "2099-01-05T03:00:00Z" };
+  for (const slots of [
+    [],
+    [null],
+    [slot, slot],
+    [{ ...slot, startUtc: "2099-01-05T02:00:00+00:00" }],
+    [{ ...slot, startUtc: "2099-02-30T02:00:00Z", endUtc: "2099-02-30T03:00:00Z" }],
+    [{ startUtc: "2099-01-05T01:00:00Z", endUtc: "2099-01-05T02:00:00Z" }],
+    [{ startUtc: "2099-01-05T10:00:00Z", endUtc: "2099-01-05T11:00:00Z" }],
+    [{ ...slot, endUtc: "2099-01-05T02:30:00Z" }],
+    [{ startUtc: "2099-01-05T02:01:00Z", endUtc: "2099-01-05T03:01:00Z" }],
+    Array(201).fill(slot)
+  ]) {
+    const ui = await createUi({
+      read: async () => row(100000001, { os_sr_avq_slts: JSON.stringify(slots) })
+    });
+    await ui.submit();
+    assert.equal(ui.get("availability-result").textContent, "Availability result could not be verified.");
+    assert.equal(ui.get("availability-result").classes.has("error"), true);
+    assert.equal(ui.get("availability-result").children.length, 0);
+  }
+});
+
+test("a refreshed result clears old error styling and stale slots when it expires", async () => {
+  let state = 0;
+  const ui = await createUi({
+    read: async () => ++state === 1
+      ? row(100000003, { os_sr_avq_err: "REFERENCE_CHANGED" })
+      : state === 2 ? row(100000001, {
+        os_sr_avq_slts: '[{"startUtc":"2099-01-05T02:00:00Z","endUtc":"2099-01-05T03:00:00Z"}]'
+      }) : row(100000001, { os_sr_avq_exp: "2000-01-01T00:00:00Z" })
+  });
+  await ui.submit();
+  assert.equal(ui.get("availability-result").classes.has("error"), true);
+  await ui.refresh();
+  assert.equal(ui.get("availability-result").classes.has("error"), false);
+  assert.equal(ui.get("availability-result").children[1].children.length, 1);
+  await ui.refresh();
+  assert.match(ui.get("availability-result").textContent, /expired/);
+  assert.equal(ui.get("availability-result").children.length, 0);
+  assert.equal(ui.calls.creates.length, 1);
+});
+
+test("unknown states and invalid expiry never display available slots", async () => {
+  for (const extra of [
+    { os_sr_avq_stat: 100000099 },
+    { os_sr_avq_stat: "100000001" },
+    { os_sr_avq_exp: null },
+    { os_sr_avq_exp: "invalid-date" },
+    { os_sr_avq_exp: "2099-02-30T02:00:00Z" },
+    { os_sr_avq_exp: "2099-01-05T02:00:00" }
+  ]) {
+    const ui = await createUi({
+      read: async () => row(100000001, {
+        os_sr_avq_slts: '[{"startUtc":"2099-01-05T02:00:00Z","endUtc":"2099-01-05T03:00:00Z"}]',
+        ...extra
+      })
+    });
+    await ui.submit();
+    assert.equal(ui.get("availability-result").children.length, 0);
+    assert.match(ui.get("availability-result").textContent, /unknown|expired/);
+  }
+});
+
 test("lost or missing create acknowledgments never cause an automatic replacement query", async () => {
   for (const create of [
     async () => { throw new Error("SYNTHETIC_CREATE_FAILURE"); },
-    async () => ({})
+    async () => ({}),
+    async () => ({ id: "invalid-guid" })
   ]) {
     const ui = await createUi({ create });
     await ui.submit();
@@ -244,16 +324,62 @@ test("lost or missing create acknowledgments never cause an automatic replacemen
   }
 });
 
-test("a failed query read is not automatically repeated or exposed", async () => {
+test("metadata failures stop before create and do not expose raw integration details", async () => {
+  for (const metadata of [
+    async () => { throw new Error("SYNTHETIC_METADATA_DETAIL"); },
+    async () => ({}),
+    async () => ({ EntitySetName: "invalid/collection" })
+  ]) {
+    const ui = await createUi({ metadata });
+    await ui.submit();
+    assert.equal(ui.calls.creates.length, 0);
+    assert.equal(ui.calls.reads.length, 0);
+    assert.equal(ui.get("availability-submit").disabled, false);
+    assert.doesNotMatch(ui.get("availability-result").textContent, /SYNTHETIC|collection/);
+  }
+});
+
+test("concurrent Refresh and submit cannot create duplicate reads or requests", async () => {
+  let resolveRead;
+  let refreshing = false;
   const ui = await createUi({
-    read: async () => { throw new Error("SYNTHETIC_READ_FAILURE"); }
+    read: async () => refreshing ? new Promise((resolve) => { resolveRead = resolve; })
+      : row(100000002, { os_sr_avq_rsn: "NO_COMMON_SLOT" })
+  });
+  await ui.submit();
+  refreshing = true;
+  const first = ui.refresh();
+  await waitFor(() => resolveRead);
+  await ui.refresh();
+  await ui.submit();
+  assert.equal(ui.calls.reads.length, 2);
+  assert.equal(ui.calls.creates.length, 1);
+  resolveRead(row(100000002, { os_sr_avq_rsn: "NO_COMMON_SLOT" }));
+  await first;
+  assert.equal(ui.get("availability-refresh").disabled, false);
+});
+
+test("a failed query read exposes read-only recovery, not raw errors or replacement queries", async () => {
+  let failing = true;
+  const ui = await createUi({
+    read: async () => {
+      if (failing) throw new Error("SYNTHETIC_READ_FAILURE");
+      return row(100000002, { os_sr_avq_rsn: "NO_COMMON_SLOT" });
+    }
   });
   await ui.submit();
   assert.equal(ui.calls.creates.length, 1);
   assert.equal(ui.calls.reads.length, 1);
   assert.equal(ui.calls.timers.length, 0);
   assert.equal(ui.get("availability-result").textContent,
-    "Availability query could not be started or read. Contact support if this continues.");
+    "Availability status could not be read. Use Refresh status to try again.");
+  assert.equal(ui.get("availability-refresh").hidden, false);
+  failing = false;
+  await ui.refresh();
+  assert.equal(ui.calls.creates.length, 1);
+  assert.equal(ui.calls.reads.length, 2);
+  assert.equal(ui.get("availability-result").classes.has("error"), false);
+  assert.match(ui.get("availability-result").textContent, /No common slots/);
 });
 
 test("refreshing an acknowledged Pending query is read-only", async () => {
@@ -277,55 +403,106 @@ test("refreshing an acknowledged Pending query is read-only", async () => {
   assert.equal(ui.get("availability-result").textContent, "No common slots were found in the requested window.");
 });
 
-test("an older in-flight poll cannot overwrite the newest query result", async () => {
+test("new query after bounded polling timeout invalidates an old queued callback", async () => {
+  let now = Date.now();
+  let complete = false;
+  const ui = await createUi({
+    clock: () => now,
+    read: async () => complete ? row(100000002, { os_sr_avq_rsn: "NO_COMMON_SLOT" }, now) : row(100000000)
+  });
+  await ui.submit();
+  const oldPoll = ui.calls.timers.shift();
+  now += 120000;
+  await oldPoll();
+  assert.equal(ui.get("availability-submit").disabled, false);
+  complete = true;
+  await ui.submit();
+  const before = ui.calls.reads.length;
+  await oldPoll();
+  assert.equal(ui.calls.reads.length, before);
+  assert.equal(ui.calls.creates.length, 2);
+  assert.equal(ui.get("availability-result").textContent, "No common slots were found in the requested window.");
+});
+
+test("reference paging and entity metadata are respected without reading mailbox fields", async () => {
+  const ui = await createUi({
+    references: async (table, query) => table === "os_sr_loc" ? { entities: [] }
+      : query === "synthetic-next-page" ? { entities: [{
+        os_sr_taid: "11111111-1111-4111-8111-111111111111", os_sr_ta_nm: "[DEV] Paged TA"
+      }] } : { entities: [], nextLink: "synthetic-next-page" },
+    metadata: async () => ({ EntitySetName: "os_sr_ta_directory" })
+  });
+  await ui.submit();
+  assert.equal(ui.calls.references.length, 3);
+  assert.equal(ui.calls.creates[0].payload["os_sr_avq_ta@odata.bind"],
+    `/os_sr_ta_directory(${ui.ids[0]})`);
+  assert.equal(ui.get("availability-ta").children[1].textContent, "[DEV] Paged TA");
+});
+
+test("duplicate submission is ignored while the query read is in flight", async () => {
   const responses = new Map();
   const ui = await createUi({
     read: (id) => new Promise((resolve) => responses.set(id, resolve))
   });
   const first = ui.submit();
   await waitFor(() => responses.has(ui.ids[0]));
-  const second = ui.submit();
-  await waitFor(() => responses.has(ui.ids[1]));
-  responses.get(ui.ids[1])(row(100000002, { os_sr_avq_rsn: "NO_COMMON_SLOT" }));
-  await second;
-  responses.get(ui.ids[0])(row(100000003, { os_sr_avq_err: "REFERENCE_CHANGED" }));
-  await first;
-  assert.equal(ui.get("availability-result").textContent, "No common slots were found in the requested window.");
-  assert.deepEqual(ui.calls.reads.map((call) => call.table), ["os_sr_avq", "os_sr_avq"]);
-});
-
-test("an older failed poll cannot replace the newest query result with an error", async () => {
-  const responses = new Map();
-  const ui = await createUi({
-    read: (id) => new Promise((resolve, reject) => responses.set(id, { resolve, reject }))
-  });
-  const first = ui.submit();
-  await waitFor(() => responses.has(ui.ids[0]));
-  const second = ui.submit();
-  await waitFor(() => responses.has(ui.ids[1]));
-  responses.get(ui.ids[1]).resolve(row(100000002, { os_sr_avq_rsn: "NO_COMMON_SLOT" }));
-  await second;
-  responses.get(ui.ids[0]).reject(new Error("SYNTHETIC_OLD_PROVIDER_ERROR"));
+  await ui.submit();
+  await ui.refresh();
+  assert.equal(ui.calls.creates.length, 1);
+  assert.equal(ui.calls.reads.length, 1);
+  assert.equal(ui.get("availability-submit").disabled, true);
+  responses.get(ui.ids[0])(row(100000002, { os_sr_avq_rsn: "NO_COMMON_SLOT" }));
   await first;
   assert.equal(ui.get("availability-result").textContent, "No common slots were found in the requested window.");
   assert.equal(ui.get("availability-submit").disabled, false);
 });
 
-test("an older create completion cannot switch polling away from the newest query", async () => {
+test("duplicate submission is ignored while Pending and a failed poll allows refresh", async () => {
+  let failing = false;
+  const ui = await createUi({
+    read: async () => {
+      if (failing) throw new Error("SYNTHETIC_POLL_FAILURE");
+      return row(100000000);
+    }
+  });
+  await ui.submit();
+  await ui.submit();
+  assert.equal(ui.calls.creates.length, 1);
+  failing = true;
+  await ui.calls.timers.shift()();
+  assert.equal(ui.calls.timers.length, 0);
+  assert.equal(ui.get("availability-refresh").hidden, false);
+  assert.equal(ui.get("availability-submit").disabled, false);
+  assert.doesNotMatch(ui.get("availability-result").textContent, /SYNTHETIC/);
+});
+
+test("duplicate submission is ignored during create and input snapshot cannot drift during metadata reads", async () => {
   const pending = new Map();
   const ui = await createUi({
-    create: (id) => new Promise((resolve) => pending.set(id, resolve))
+    create: (table, payload, id) => new Promise((resolve) => pending.set(id, resolve))
   });
   const first = ui.submit();
   await waitFor(() => pending.has(ui.ids[0]));
-  const second = ui.submit();
-  await waitFor(() => pending.has(ui.ids[1]));
-  pending.get(ui.ids[1])({ id: ui.ids[1] });
-  await second;
+  await ui.submit();
+  assert.equal(ui.calls.creates.length, 1);
   pending.get(ui.ids[0])({ id: ui.ids[0] });
   await first;
-  assert.deepEqual(ui.calls.reads.map((call) => call.id), [ui.ids[1]]);
+  assert.deepEqual(ui.calls.reads.map((call) => call.id), [ui.ids[0]]);
   assert.equal(ui.get("availability-result").textContent, "No common slots were found in the requested window.");
+
+  let metadataReady;
+  const snapshot = await createUi({
+    metadata: () => new Promise((resolve) => { metadataReady = resolve; })
+  });
+  const submission = snapshot.submit();
+  await waitFor(() => metadataReady);
+  snapshot.get("availability-ta").value = "";
+  snapshot.get("availability-mode").value = "100000001";
+  metadataReady({ EntitySetName: "os_sr_tas" });
+  await submission;
+  assert.equal(snapshot.calls.creates[0].payload.os_sr_avq_mod, 100000000);
+  assert.equal(snapshot.calls.creates[0].payload["os_sr_avq_ta@odata.bind"],
+    `/os_sr_tas(${snapshot.ids[0]})`);
 });
 
 async function waitFor(predicate) {

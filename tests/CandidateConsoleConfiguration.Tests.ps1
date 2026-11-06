@@ -9,6 +9,8 @@ $outputPath = Join-Path ([IO.Path]::GetTempPath()) "$tempName.js"
 $htmlOutputPath = Join-Path ([IO.Path]::GetTempPath()) "$tempName.html"
 $rejectedOutputPath = $null
 $rejectedHtmlPath = $null
+$availabilityOutputPath = Join-Path ([IO.Path]::GetTempPath()) "availability-$tempName.js"
+$availabilityHtmlPath = Join-Path ([IO.Path]::GetTempPath()) "availability-$tempName.html"
 $passed = 0
 
 function Assert-Test {
@@ -39,6 +41,8 @@ try {
         $configuration.syntheticDataOnly -eq $true -and
         $configuration.devDirectWriteFallbackEnabled -eq $true -and
         $configuration.diagnosticsMode -ceq 'OFF') 'Serialize only the requested environment policy'
+    Assert-Test (-not ($configuration.PSObject.Properties.Name -contains 'availabilityEnabled')) `
+        'Leave availability disabled and preserve default configuration serialization'
     Assert-Test ($generated -notmatch 'https://[^"]+\.crm\d+\.dynamics\.com' -and
         $outputPath -notlike "$((Split-Path -Parent $PSScriptRoot))*" -and
         $htmlOutputPath -notlike "$((Split-Path -Parent $PSScriptRoot))*") `
@@ -216,10 +220,57 @@ try {
         Assert-Test ($rejected -and -not (Test-Path -LiteralPath $rejectedOutputPath)) `
             "Reject release profile with $($case.Name)"
     }
+
+    & $generatorPath `
+        -Mode DEV `
+        -OrganizationUrl 'https://dev.example.invalid' `
+        -EnvironmentId '11111111-1111-4111-8111-111111111111' `
+        -OrganizationId '22222222-2222-4222-8222-222222222222' `
+        -OutputConfigurationPath $availabilityOutputPath `
+        -OutputHtmlPath $availabilityHtmlPath `
+        -AvailabilityEnabled | Out-Null
+    $availabilityText = [IO.File]::ReadAllText($availabilityOutputPath)
+    $availabilityMatch = [regex]::Match($availabilityText, '(?s)const configuration = (?<json>\{.*?\});')
+    $availabilityConfiguration = $availabilityMatch.Groups['json'].Value | ConvertFrom-Json
+    $availabilityHtml = [IO.File]::ReadAllText($availabilityHtmlPath)
+    $availabilityHash = (Get-FileHash -LiteralPath $availabilityOutputPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $availabilityScriptPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'solutions\CandidateConsole\WebResources\os_\bso\candidate-console-availability.js'
+    $availabilityScriptHash = (Get-FileHash -LiteralPath $availabilityScriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
+    Assert-Test ($availabilityMatch.Success -and $availabilityConfiguration.availabilityEnabled -eq $true -and
+        $availabilityConfiguration.syntheticDataOnly -eq $true -and $availabilityConfiguration.mode -ceq 'DEV') `
+        'Generate explicit synthetic-only DEV availability opt-in without changing the checked-in gate'
+    Assert-Test ($availabilityHtml.Contains("candidate-console-environment.js?v=$($availabilityHash.Substring(0, 12))") -and
+        $availabilityHtml.Contains("candidate-console-availability.js?v=$($availabilityScriptHash.Substring(0, 12))")) `
+        'Cache-bust enabled configuration and the actual availability script from their bytes'
+
+    foreach ($case in @(
+        @{ Name = 'TEST'; Options = @{ Mode = 'TEST' } },
+        @{ Name = 'PROD'; Options = @{ Mode = 'PROD' } },
+        @{ Name = 'UNCONFIGURED'; Options = @{ Mode = 'UNCONFIGURED'; CandidateCoreEnabled = $false } },
+        @{ Name = 'release profile'; Options = @{ ReleaseProfile = $true } },
+        @{ Name = 'Candidate Core disabled'; Options = @{ CandidateCoreEnabled = $false } },
+        @{ Name = 'non-synthetic data'; Options = @{ SyntheticDataOnly = $false } }
+    )) {
+        $arguments = @{
+            Mode = 'DEV'
+            OrganizationUrl = 'https://dev.example.invalid'
+            EnvironmentId = '11111111-1111-4111-8111-111111111111'
+            OrganizationId = '22222222-2222-4222-8222-222222222222'
+            OutputConfigurationPath = $rejectedOutputPath
+            OutputHtmlPath = $rejectedHtmlPath
+            AvailabilityEnabled = $true
+        }
+        foreach ($key in $case.Options.Keys) { $arguments[$key] = $case.Options[$key] }
+        $rejected = $false
+        try { & $generatorPath @arguments | Out-Null } catch { $rejected = $true }
+        Assert-Test ($rejected -and -not (Test-Path -LiteralPath $rejectedOutputPath) -and
+            -not (Test-Path -LiteralPath $rejectedHtmlPath)) "Reject availability enablement for $($case.Name)"
+    }
 } finally {
     foreach ($path in @($outputPath, $htmlOutputPath, $rejectedOutputPath, $rejectedHtmlPath,
         $releaseNeutralOutputPath, $releaseNeutralHtmlPath,
-        $releaseOutputPath, $releaseHtmlPath, $devReleaseOutputPath, $devReleaseHtmlPath)) {
+        $releaseOutputPath, $releaseHtmlPath, $devReleaseOutputPath, $devReleaseHtmlPath,
+        $availabilityOutputPath, $availabilityHtmlPath)) {
         if (-not [string]::IsNullOrWhiteSpace([string]$path) -and
             (Test-Path -LiteralPath $path)) {
             Remove-Item -LiteralPath $path

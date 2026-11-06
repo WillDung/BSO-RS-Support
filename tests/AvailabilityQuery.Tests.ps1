@@ -77,7 +77,9 @@ Assert-Test ($flow.provider.implementation -match 'not an invocable Power Automa
     $flow.provider.implementation -match 'separate solution-aware Power Automate Flow is deployed OFF') 'Offline adapter source is distinguished from the deployed OFF Flow.'
 Assert-Test ($flow.providerTimezoneFirstRuntimeGate.action -eq 'STOP' -and -not $flow.providerTimezoneFirstRuntimeGate.retry -and -not $flow.providerTimezoneFirstRuntimeGate.automaticConversion) 'First unsupported timezone stops without retry or conversion.'
 Assert-Test ($flow.providerTimezoneFirstRuntimeGate.capture -match 'field names, types and timezone' -and $flow.providerTimezoneFirstRuntimeGate.capture -match 'do not persist raw') 'Only sanitized synthetic shape evidence may be captured.'
-Assert-Test ($flow.retry.'429' -match 'Retry-After' -and $flow.retry.'429' -match 'two retries') '429 policy is bounded and Retry-After aware.'
+Assert-Test ($flow.retry.'429' -match 'no automatic retry' -and
+    $flow.retry.proposed429Requirement -match 'two retries' -and
+    $flow.retry.retryAfterDecision -eq 'PENDING_OWNER_TECHNICAL_LEAD') 'Retry-none implementation does not silently resolve the bounded Retry-After decision.'
 Assert-Test ($flow.retry.ambiguousTimeout -match 'No blind repeat' -and $flow.retry.unsupportedTimezoneOrShape -match 'do not retry') 'Timeout and unsupported-shape stop rules are explicit.'
 Assert-Test ($flow.safeErrors -contains 'REFERENCE_CHANGED') 'Flow recognizes the deterministic reference-drift failure.'
 Assert-Test ($flow.referenceDrift.terminalCoverage -join ',' -eq 'Available,NoSlots,Failed') 'Drift recheck covers every terminal result.'
@@ -107,6 +109,8 @@ Assert-Test ($role.integrationRole.assignTo -match '^Unassigned' -and $role.inte
 Assert-Test ($registration.packageId -eq 'os_sr_avqg_pkg' -and $registration.pluginType -eq 'os_sr_avqg.ProtectAvailabilityQuery') 'Guard package and plugin type are separate from Candidate Core.'
 Assert-Test (@($registration.steps | Where-Object { $_.message -notin @('Create', 'Update') -or $_.stageNumber -ne 20 -or $_.mode -ne 'Synchronous' }).Count -eq 0) 'Both guard registrations are synchronous PreOperation steps.'
 Assert-Test (@($registration.steps | Where-Object { $_.executionUser -ne 'Calling User' }).Count -eq 0) 'Guard steps run as Calling User.'
+Assert-Test (@($registration.steps | Where-Object { $_.message -eq 'Update' -and
+    @($_.filteringAttributes).Count -ne 0 }).Count -eq 0) 'All Updates reach the guard, including immutable inputs and ownership-only changes.'
 
 $plugin = Get-Content -LiteralPath $pluginPath -Raw
 $rules = Get-Content -LiteralPath $rulesPath -Raw
@@ -200,7 +204,8 @@ $flowReads = @($flowActions.Values | Where-Object { $_.type -eq 'OpenApiConnecti
 Assert-Test (($flowReads -join ',') -eq 'os_sr_avqs,os_sr_locs,os_sr_tas') 'Flow reads only the query, TA and Location.'
 $flowProvider = @($flowActions.Values | Where-Object { $_.type -eq 'OpenApiConnection' -and $_.inputs.host.operationId -eq 'FindMeetingTimes_V2' })[0]
 Assert-Test ($flowProvider.inputs.parameters['body/MinimumAttendeePercentage'] -eq '100' -and $flowProvider.inputs.parameters['body/IsOrganizerOptional'] -eq $true -and $flowProvider.inputs.parameters['body/ActivityDomain'] -eq 'Work' -and @($flowProvider.inputs.parameters.Keys | Where-Object { $_ -match '(?i)timezone|OptionalAttendees' }).Count -eq 0) 'Flow provider inputs match the accepted Outlook contract.'
-Assert-Test (@($flowActions.Values | Where-Object { $_.type -eq 'OpenApiConnection' -and $_.retryPolicy.type -ne 'none' }).Count -eq 0) 'Flow connector actions never retry automatically.'
+Assert-Test (@($flowActions.Values | Where-Object { $_.type -eq 'OpenApiConnection' -and
+    ($_.inputs.retryPolicy.type -ne 'none' -or $_.ContainsKey('retryPolicy')) }).Count -eq 0) 'Flow connector actions disable retries at the executable inputs location.'
 Assert-Test (@($flowActions.GetEnumerator() | Where-Object { $_.Value.type -eq 'OpenApiConnection' -and $_.Value.inputs.host.operationId -ne 'UpdateOnlyRecord' -and $_.Key -ne 'Read_query' -and -not $_.Value.runtimeConfiguration.secureData }).Count -eq 0) 'Reference reads and the Outlook call secure run-history inputs and outputs.'
 $sensitiveFlowActions = @(
     'Read_query', 'Read_ta', 'Set_ta_snapshot', 'Read_location', 'Set_location_snapshot',
@@ -210,7 +215,9 @@ $sensitiveFlowActions = @(
     'Check_slot_eligible', 'Append_slot', 'Compose_canonical_slots', 'Compose_proposed_result',
     'Set_result_slots', 'Evaluate', 'Map_failure', 'If_validated_snapshot', 'Reread_references',
     'Reread_ta', 'Compose_drift', 'Reread_location', 'Compose_location_drift',
-    'Compose_terminal', 'Write_terminal_result'
+    'Compose_terminal', 'Write_terminal_result', 'Set_location_changed', 'Check_pending',
+    'Validate_request_shape', 'Validate_ta_response', 'Validate_location_response',
+    'Validate_provider_response', 'Validate_UTC_timestamps'
 )
 Assert-Test (@($sensitiveFlowActions | Where-Object {
     -not $flowActions.ContainsKey($_) -or

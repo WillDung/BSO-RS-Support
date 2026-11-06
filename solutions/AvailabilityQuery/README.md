@@ -1,6 +1,6 @@
 # Availability Query source (offline)
 
-This is source and a reference contract for P0 Slice 2A in the existing `os_sr_bso_rs_support` Solution. The Outlook refactor is not in the live or frozen managed solution, registered, deployed, or runtime accepted. A concurrent [stop report](../../docs/P0_SLICE_2A_DEV_PROVISIONING_REPORT.md) describes partial provider-independent schema creation, unverified in this offline session. No tenant operation is authorized.
+This is source and a reference contract for P0 Slice 2A in the existing `os_sr_bso_rs_support` Solution. The completed offline vertical slice is not deployed or runtime accepted and does not change the frozen managed solution. The retained [stop report](../../docs/P0_SLICE_2A_DEV_PROVISIONING_REPORT.md) describes partial provider-independent provisioning, not freshly verified tenant state. This build performed no tenant operations.
 
 - [OutlookMeetingTimesAdapter.cs](OutlookMeetingTimesAdapter.cs) defines the `Find meeting times (V2)` request and validates the expected response shape before filtering suggestions.
 - [AvailabilityRules.cs](AvailabilityRules.cs) validates request and slot policy and defines canonical result JSON and safe error categories.
@@ -37,3 +37,25 @@ The renderer rejects missing, duplicate, unknown and credential settings, invali
 Strict UTC validation remains unchanged. If the first synthetic availability create sends explicit UTC (`...Z`) but the plug-in rejects **only** because the bound `DateTime.Kind` is not UTC: **STOP. Do not retry. Do not normalize automatically. Localize the actual Dataverse transport representation first.**
 
 The project has no Candidate Core project reference and Slice 2A must not call `os_sr_cact`. The external blocker remains `SLICE_2A_SYNTHETIC_MAILBOX_PREREQUISITE_MISSING`.
+
+## Connected Check Calendar build
+
+The existing Console submits request fields only. The Create guard establishes requester ownership and Pending; the existing Flow reads the request, validates settings and reference shapes, calls Outlook, filters slots, rechecks references, and submits only the six terminal-result fields. The Update guard validates the terminal result and immutable request/ownership fields. Its registration contract now covers **all Updates**, not just result-field updates. Available results also revalidate current references.
+
+The Flow retains the original 26-location privacy hardening and all 33 originally protected actions, and protects six additional sensitive actions: **39 actions plus trigger output**. Seven explicit connector retry policies now reside inside `inputs`; the current source makes no automatic retry. The earlier bounded Retry-After proposal remains an owner/Technical Lead decision, not an implemented or newly approved requirement.
+
+The Console validates selected references, dates, duration and canonical results; it shows Pending, slots, NoSlots and safe failures, and suppresses duplicate submissions while waiting. Refresh is a read, not a replacement request. No Candidate, Interview Schedule, event, Call Log or History mutation is introduced; manual scheduling remains unchanged.
+
+[Full-path tests](../../tests/CheckCalendar.Integration.test.cjs) execute actual Console source through the real compiled Create guard, the actual Flow action tree with local connector fixtures, the real Update guard and Console rendering. Online and Onsite slots, room-busy/empty results, throttling, drift and unsupported timezone are covered. This bounded WDL evaluator is not Microsoft runtime certification, Dataverse transport proof or effective privacy verification. See [test commands and limitations](../../tests/README.md#p0-slice-2a-offline-availability).
+
+## Minimal gated DEV delta
+
+Use the existing resources only; no new Flow, table, connection reference or Candidate Core change is needed:
+
+1. Build the existing guard package; update that package and establish its two synchronous PreOperation registrations using identical canonically rendered configuration. Approve explicit execution order first; the contract does not invent one. The Update registration must invoke the guard for every update.
+2. Conditionally update the **existing OFF** `os_sr_avchk` definition using a fresh exact ETag and the reviewed functional delta. Preserve identity, owner, OFF state, membership, bindings and unchanged source outside that delta; read back the complete definition and all required privacy settings. The historical 26-only preservation plan is not authorization for this functional delta.
+3. Within the existing six-resource Console inventory, only availability JavaScript plus privately generated environment configuration and HTML need changed content. The generator's explicit `-AvailabilityEnabled` opt-in is restricted to bound synthetic DEV with Candidate Core enabled and no release profile; it hashes both changed scripts into generated HTML. The default and checked-in configuration remain disabled. Generation does not authorize update or publication.
+
+**Blocked writes:** require fresh exact-target/caller evidence and scope authorization; approval of all seven effective settings and guard execution order; separate requester/writer identities; verified intended Outlook connection, consent and TA/room free-busy access; and scoped update/readback controls. The owner's intended authorized BSO session is not proof of the Dataverse result-writer identity. If requester and writer resolve to one principal, stop rather than weakening the guard.
+
+The unpublished-WebResource ETag race and publication exclusivity remain unresolved; do not overwrite or publish a draft around those gates. OFF Flow service preservation and activation/privacy approval remain separate gates. Only after these pass may the operator enable the feature and run one controlled request under an explicit stop/OFF-restoration plan. See the [existing runtime plan](../../docs/P0_SLICE_2A_BUSINESS_RUNTIME_CRITICAL_PATH.md#10-connected-build-and-first-runtime-handoff). No runtime smoke, deployment, registration or publication occurred in this build. `REAL_DATA_STILL_PROHIBITED`.

@@ -108,20 +108,21 @@ namespace os_sr_avqg
 
             EnsureOnlyAttributes(target, ResultFields, trace);
             var current = RetrieveReference(service, new EntityReference(Table, target.Id), Table, trace);
-            if (current.GetAttributeValue<OptionSetValue>("os_sr_avq_stat")?.Value != (int)QueryState.Pending)
+            if (RequiredChoice(current, "os_sr_avq_stat", trace) != (int)QueryState.Pending)
                 throw Reject(trace, "TERMINAL_STATE");
 
             var state = RequiredChoice(target, "os_sr_avq_stat", trace);
             if (!AvailabilityMutationPolicy.IsTerminalTransition(QueryState.Pending, (QueryState)state))
                 throw Reject(trace, "INVALID_RESULT_STATE");
 
-            var slots = target.GetAttributeValue<string>("os_sr_avq_slts");
-            var reason = target.GetAttributeValue<string>("os_sr_avq_rsn");
-            var error = target.GetAttributeValue<string>("os_sr_avq_err");
+            var slots = OptionalText(target, "os_sr_avq_slts", trace);
+            var reason = OptionalText(target, "os_sr_avq_rsn", trace);
+            var error = OptionalText(target, "os_sr_avq_err", trace);
             var queriedAt = RequiredUtc(target, "os_sr_avq_qat", trace);
             var expiresAt = RequiredUtc(target, "os_sr_avq_exp", trace);
             if (expiresAt <= queriedAt ||
-                expiresAt > queriedAt.AddMinutes(settings.ResultExpiryMinutes).AddSeconds(1))
+                expiresAt.Ticks - queriedAt.Ticks >
+                    (long)settings.ResultExpiryMinutes * TimeSpan.TicksPerMinute + TimeSpan.TicksPerSecond)
                 throw Reject(trace, "INVALID_EXPIRY");
 
             IReadOnlyList<AvailableSlot> parsedSlots;
@@ -139,6 +140,7 @@ namespace os_sr_avqg
             {
                 var query = ReadCurrentQuery(current, service, trace);
                 if (parsedSlots.Count == 0 || reason != null || error != null ||
+                    AvailabilityRules.ValidateReferences(query, settings) != null ||
                     !AreSlotsWithinQuery(parsedSlots, query, settings, queriedAt))
                     throw Reject(trace, "INVALID_RESULT");
             }
@@ -158,18 +160,19 @@ namespace os_sr_avqg
         private static AvailabilityQuery ReadCurrentQuery(Entity current,
             IOrganizationService service, ITracingService trace)
         {
-            var taReference = current.GetAttributeValue<EntityReference>("os_sr_avq_ta");
-            if (taReference == null) throw Reject(trace, "INVALID_TA");
+            var taReference = RequiredReference(current, "os_sr_avq_ta", TaTable, trace);
             var ta = RetrieveReference(service, taReference, TaTable, trace);
             Entity? location = null;
-            var locationReference = current.GetAttributeValue<EntityReference>("os_sr_avq_loc");
-            if (locationReference != null)
+            if (current.Contains("os_sr_avq_loc") && current["os_sr_avq_loc"] != null)
+            {
+                var locationReference = RequiredReference(current, "os_sr_avq_loc", LocationTable, trace);
                 location = RetrieveReference(service, locationReference, LocationTable, trace);
+            }
             return new AvailabilityQuery(
-                (InterviewMode)(current.GetAttributeValue<OptionSetValue>("os_sr_avq_mod")?.Value ?? -1),
-                current.GetAttributeValue<DateTime>("os_sr_avq_strt"),
-                current.GetAttributeValue<DateTime>("os_sr_avq_end"),
-                current.GetAttributeValue<int>("os_sr_avq_dur"),
+                (InterviewMode)RequiredChoice(current, "os_sr_avq_mod", trace),
+                RequiredUtc(current, "os_sr_avq_strt", trace),
+                RequiredUtc(current, "os_sr_avq_end", trace),
+                RequiredInteger(current, "os_sr_avq_dur", trace),
                 ta.GetAttributeValue<OptionSetValue>("statecode")?.Value == 0,
                 ta.GetAttributeValue<string>("os_sr_ta_eml"),
                 location == null ? (bool?)null :
@@ -180,7 +183,8 @@ namespace os_sr_avqg
         private static bool AreSlotsWithinQuery(IReadOnlyList<AvailableSlot> slots,
             AvailabilityQuery query, AvailabilitySettings settings, DateTime queriedAtUtc)
         {
-            if (query.StartUtc.Kind != DateTimeKind.Utc || query.EndUtc.Kind != DateTimeKind.Utc ||
+            if ((query.Mode != InterviewMode.Online && query.Mode != InterviewMode.Onsite) ||
+                query.StartUtc.Kind != DateTimeKind.Utc || query.EndUtc.Kind != DateTimeKind.Utc ||
                 query.EndUtc <= query.StartUtc ||
                 query.EndUtc - query.StartUtc > TimeSpan.FromDays(settings.MaximumHorizonDays) ||
                 query.StartUtc.Ticks % TimeSpan.TicksPerMinute != 0 ||
@@ -212,7 +216,19 @@ namespace os_sr_avqg
                         ? new ColumnSet("statecode", "os_sr_loc_rmeml")
                         : new ColumnSet("os_sr_avq_stat", "os_sr_avq_ta", "os_sr_avq_loc",
                             "os_sr_avq_mod", "os_sr_avq_strt", "os_sr_avq_end", "os_sr_avq_dur");
-                return service.Retrieve(expectedTable, reference.Id, columns);
+                var row = service.Retrieve(expectedTable, reference.Id, columns);
+                if (row == null || row.LogicalName != expectedTable || row.Id != reference.Id)
+                    throw Reject(trace, "REFERENCE_READ_FAILED");
+                if (expectedTable != Table)
+                {
+                    var emailColumn = expectedTable == TaTable ? "os_sr_ta_eml" : "os_sr_loc_rmeml";
+                    if ((row.Attributes.TryGetValue("statecode", out var state) &&
+                            state != null && !(state is OptionSetValue)) ||
+                        (row.Attributes.TryGetValue(emailColumn, out var email) &&
+                            email != null && !(email is string)))
+                        throw Reject(trace, "REFERENCE_READ_FAILED");
+                }
+                return row;
             }
             catch (FaultException<OrganizationServiceFault>)
             {
@@ -223,10 +239,17 @@ namespace os_sr_avqg
         private static EntityReference RequiredReference(Entity target, string name, string table,
             ITracingService trace)
         {
-            var value = target.GetAttributeValue<EntityReference>(name);
-            if (value == null || value.LogicalName != table || value.Id == Guid.Empty)
+            if (!target.Attributes.TryGetValue(name, out var raw) ||
+                !(raw is EntityReference value) || value.LogicalName != table || value.Id == Guid.Empty)
                 throw Reject(trace, "INVALID_REFERENCE");
             return value;
+        }
+
+        private static string? OptionalText(Entity target, string name, ITracingService trace)
+        {
+            if (!target.Attributes.TryGetValue(name, out var value) || value == null) return null;
+            if (!(value is string text)) throw Reject(trace, "INVALID_RESULT");
+            return text;
         }
 
         private static int RequiredChoice(Entity target, string name, ITracingService trace)

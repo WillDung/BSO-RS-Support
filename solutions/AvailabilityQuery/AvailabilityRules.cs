@@ -238,6 +238,25 @@ namespace os_sr_avqg
                 return "INVALID_REQUEST";
             if (query.Mode != InterviewMode.Online && query.Mode != InterviewMode.Onsite)
                 return "INVALID_REQUEST";
+            var referenceFailure = ValidateReferences(query, settings);
+            if (referenceFailure != null) return referenceFailure;
+            if (query.StartUtc.Kind != DateTimeKind.Utc || query.EndUtc.Kind != DateTimeKind.Utc ||
+                query.StartUtc <= nowUtc || query.EndUtc <= query.StartUtc ||
+                query.StartUtc.Minute % AvailabilitySettings.IntervalMinutes != 0 ||
+                query.StartUtc.Ticks % TimeSpan.TicksPerMinute != 0 ||
+                query.EndUtc.Minute % AvailabilitySettings.IntervalMinutes != 0 ||
+                query.EndUtc.Ticks % TimeSpan.TicksPerMinute != 0 ||
+                query.EndUtc > AddMinutesSaturating(nowUtc, Math.Min(settings.MaximumHorizonDays,
+                    AvailabilitySettings.HardMaximumHorizonDays) * 1440) ||
+                !settings.AllowedDurationsMinutes.Contains(query.DurationMinutes) ||
+                query.DurationMinutes % AvailabilitySettings.IntervalMinutes != 0 ||
+                query.EndUtc - query.StartUtc < TimeSpan.FromMinutes(query.DurationMinutes))
+                return "INVALID_REQUEST";
+            return null;
+        }
+
+        internal static string? ValidateReferences(AvailabilityQuery query, AvailabilitySettings settings)
+        {
             if (!query.TaActive) return "TA_INACTIVE";
             var taEmailError = ValidateEmail(query.TaEmail, settings, "TA_EMAIL");
             if (taEmailError != null) return taEmailError;
@@ -251,18 +270,6 @@ namespace os_sr_avqg
                         StringComparison.OrdinalIgnoreCase))
                     return "ROOM_EMAIL_INVALID";
             }
-            if (query.StartUtc.Kind != DateTimeKind.Utc || query.EndUtc.Kind != DateTimeKind.Utc ||
-                query.StartUtc <= nowUtc || query.EndUtc <= query.StartUtc ||
-                query.StartUtc.Minute % AvailabilitySettings.IntervalMinutes != 0 ||
-                query.StartUtc.Ticks % TimeSpan.TicksPerMinute != 0 ||
-                query.EndUtc.Minute % AvailabilitySettings.IntervalMinutes != 0 ||
-                query.EndUtc.Ticks % TimeSpan.TicksPerMinute != 0 ||
-                query.EndUtc > nowUtc.AddDays(Math.Min(settings.MaximumHorizonDays,
-                    AvailabilitySettings.HardMaximumHorizonDays)) ||
-                !settings.AllowedDurationsMinutes.Contains(query.DurationMinutes) ||
-                query.DurationMinutes % AvailabilitySettings.IntervalMinutes != 0 ||
-                query.EndUtc - query.StartUtc < TimeSpan.FromMinutes(query.DurationMinutes))
-                return "INVALID_REQUEST";
             return null;
         }
 

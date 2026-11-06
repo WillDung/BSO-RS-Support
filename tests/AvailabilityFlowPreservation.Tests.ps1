@@ -7,6 +7,9 @@ $flowPath = 'solutions\AvailabilityQuery\os_sr_avchk.clientdata.json'
 $baselineCommit = '7a64022e1891607b9d4c789d0f03e1c99640df88'
 $baselineBlob = '4ba6b0e35cdfaabc0fd9e44c62a438ea5cfc21cc'
 $baselineSha256 = 'F901BAAE0ABC5F2A2ECCF74BF59E76FE05189A6E13BF86A981D6D6E4DBEB8811'
+$hardenedCommit = 'b658d7502ef9664efa498e4d1a4b54c7242aa934'
+$hardenedBlob = '2efbcd4b17ff72bce4edc60ad295ef76b797e00f'
+$hardenedSha256 = '0E1A1DE9CFECE98440B1EC8B52DCD76648A25826A06BCF36FAFCEFBB39C701B0'
 $script:checks = 0
 
 function Assert-Test([bool]$Condition, [string]$Name) {
@@ -326,6 +329,7 @@ if ($null -eq $git) { throw 'Git is required to retrieve the pinned pre-hardenin
 $null = & $git.Source --no-lazy-fetch --no-optional-locks --no-replace-objects --version 2>$null
 if ($LASTEXITCODE -ne 0) { throw 'Git cannot enforce offline historical-object reads; no fallback is permitted.' }
 $baselineText = Get-PinnedHistoricalFlow $git.Source $baselineCommit $baselineBlob $baselineSha256
+$hardenedText = Get-PinnedHistoricalFlow $git.Source $hardenedCommit $hardenedBlob $hardenedSha256
 Assert-Rejected { Get-PinnedHistoricalFlow $git.Source ('0' * 40) $baselineBlob $baselineSha256 } 'Missing historical commit rejects' 'commit/tree is unavailable'
 Assert-Rejected { Get-PinnedHistoricalFlow $git.Source $baselineCommit ('0' * 40) $baselineSha256 } 'Unexpected historical blob rejects' 'path or blob does not match'
 Assert-Rejected { Get-PinnedHistoricalFlow $git.Source $baselineCommit $baselineBlob ('0' * 64) } 'Unexpected historical SHA-256 rejects' 'does not match the pinned SHA-256'
@@ -357,12 +361,12 @@ foreach ($pair in @(
 }
 
 $expectedNode = [System.Text.Json.Nodes.JsonNode]::Parse($baselineText)
-$currentNode = [System.Text.Json.Nodes.JsonNode]::Parse($currentText)
+$currentNode = [System.Text.Json.Nodes.JsonNode]::Parse($hardenedText)
 $beforeActions = Get-FlowActionIndex $expectedNode
 $currentActions = Get-FlowActionIndex $currentNode
-Assert-Test ($beforeActions.Count -eq 96 -and $currentActions.Count -eq 96) 'All 96 nested action identities remain present.'
+Assert-Test ($beforeActions.Count -eq 96 -and $currentActions.Count -eq 96) 'The historical privacy-only definition retains all 96 action identities.'
 Assert-Test (@($beforeActions.Keys | Where-Object { Test-HasSecureData $beforeActions[$_] }).Count -eq 13) 'Exactly 13 actions were already protected.'
-Assert-Test (@($currentActions.Keys | Where-Object { Test-HasSecureData $currentActions[$_] }).Count -eq 33) 'Exactly 33 actions are protected in current source.'
+Assert-Test (@($currentActions.Keys | Where-Object { Test-HasSecureData $currentActions[$_] }).Count -eq 33) 'Exactly 33 actions are protected in the pinned privacy-only source.'
 
 $triggerName = 'When_a_Pending_availability_query_is_added'
 $beforeTriggers = $expectedNode['properties']['definition']['triggers'].AsObject()
@@ -442,8 +446,38 @@ foreach ($pair in @(
 
 $expectedDocument = Read-StrictJson $expectedNode.ToJsonString()
 try {
+    Assert-ExpectedFlow $expectedDocument $hardenedText
+    Assert-Test $true 'The pinned privacy-only definition equals pre-hardening source plus exactly the 26 privacy changes.'
+
+    $buildNode = [System.Text.Json.Nodes.JsonNode]::Parse($currentText)
+    $buildActions = Get-FlowActionIndex $buildNode
+    Assert-Test ($buildActions.Count -eq 103) 'The functional build adds exactly seven validation actions.'
+    foreach ($name in @($changedNames) + @($retainedNames)) {
+        Assert-Test ($buildActions.ContainsKey($name) -and
+            $buildActions[$name]['type'].GetValue[string]() -ceq $currentActions[$name]['type'].GetValue[string]()) `
+            "The functional build retains original protected action $name and its type."
+        Assert-SecureData $buildActions[$name] '{"properties":["inputs","outputs"]}' $name
+    }
+    Assert-SecureData $buildNode['properties']['definition']['triggers'][$triggerName] `
+        '{"properties":["outputs"]}' $triggerName
+    foreach ($name in @('Check_pending', 'Validate_request_shape', 'Validate_ta_response',
+        'Validate_location_response', 'Validate_provider_response', 'Validate_UTC_timestamps')) {
+        Assert-SecureData $buildActions[$name] '{"properties":["inputs","outputs"]}' $name
+    }
+    Assert-Test (@($buildActions.Keys | Where-Object { Test-HasSecureData $buildActions[$_] }).Count -eq 39) `
+        'All 33 original and six additional sensitive actions remain protected.'
+    Assert-JsonTextsEqual $currentNode['properties']['connectionReferences'].ToJsonString() `
+        $buildNode['properties']['connectionReferences'].ToJsonString()
+    Assert-JsonTextsEqual $currentNode['properties']['definition']['triggers'].ToJsonString() `
+        $buildNode['properties']['definition']['triggers'].ToJsonString()
+    Assert-JsonTextsEqual $currentNode['properties']['definition']['parameters'].ToJsonString() `
+        $buildNode['properties']['definition']['parameters'].ToJsonString()
+    Assert-Test $true 'The functional build preserves complete reference mappings, trigger and parameter contracts.'
+
+    $expectedDocument.Dispose()
+    $expectedDocument = Read-StrictJson $currentText
     Assert-ExpectedFlow $expectedDocument $currentText
-    Assert-Test $true 'The complete current definition equals the historical definition plus exactly the 26 privacy changes.'
+    Assert-Test $true 'Functional-definition mutation canaries use the complete strictly parsed build baseline.'
 
     foreach ($name in @($changedNames) + @($retainedNames)) {
         $mutant = [System.Text.Json.Nodes.JsonNode]::Parse($currentText)
@@ -468,7 +502,7 @@ try {
         [System.Text.Json.Nodes.JsonValue]::Create("@sort(variables('v_slots'))")
     Assert-Rejected { Assert-ExpectedFlow $expectedDocument $mutant.ToJsonString() } 'Expression mutation rejects' 'JSON_MISMATCH'
     $mutant = [System.Text.Json.Nodes.JsonNode]::Parse($currentText)
-    (Get-FlowActionIndex $mutant)['Find_meeting_times']['retryPolicy']['type'] =
+    (Get-FlowActionIndex $mutant)['Find_meeting_times']['inputs']['retryPolicy']['type'] =
         [System.Text.Json.Nodes.JsonValue]::Create('fixed')
     Assert-Rejected { Assert-ExpectedFlow $expectedDocument $mutant.ToJsonString() } 'Connector retry-policy mutation rejects' 'JSON_MISMATCH'
     $mutant = [System.Text.Json.Nodes.JsonNode]::Parse($currentText)

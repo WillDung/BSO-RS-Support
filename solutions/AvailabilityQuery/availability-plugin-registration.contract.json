@@ -24,14 +24,8 @@
       "stageNumber": 20,
       "mode": "Synchronous",
       "executionUser": "Calling User",
-      "filteringAttributes": [
-        "os_sr_avq_stat",
-        "os_sr_avq_rsn",
-        "os_sr_avq_err",
-        "os_sr_avq_slts",
-        "os_sr_avq_qat",
-        "os_sr_avq_exp"
-      ],
+      "filteringAttributes": [],
+      "updateCoverage": "All updates: request-only and ownership changes must also reach the immutable-field guard.",
       "images": []
     }
   ],

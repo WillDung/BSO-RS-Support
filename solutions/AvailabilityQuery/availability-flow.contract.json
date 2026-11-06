@@ -121,10 +121,17 @@
       "Reread_location",
       "Compose_location_drift",
       "Compose_terminal",
-      "Write_terminal_result"
+      "Write_terminal_result",
+      "Set_location_changed",
+      "Check_pending",
+      "Validate_request_shape",
+      "Validate_ta_response",
+      "Validate_location_response",
+      "Validate_provider_response",
+      "Validate_UTC_timestamps"
     ],
     "platformEvidence": "Microsoft Power Automate guidance documents secure inputs and outputs as action settings but does not establish offline that every action type used here persists those settings through solution import and run history.",
-    "runtimeGate": "Before activation, use only authorized synthetic mailboxes and inspect sanitized run history for trigger output, SetVariable, Scope, If, Foreach, Query, Compose and connector action inputs/outputs. If any sensitive value is visible or a secureData setting is rejected or dropped, stop; do not activate and propose an architecture correction."
+    "runtimeGate": "Before activation, verify the actual OFF definition retains every required setting. Only after separately approved bounded synthetic activation, with a stop and OFF-restoration plan, inspect actual executed trigger, SetVariable, Scope, If, Foreach, Query, Compose, ParseJson and connector paths. Stop further requests on visible sensitive data or dropped settings. Unexecuted paths remain unverified; offline fixtures do not prove suppression."
   },
   "resultTransitions": [
     "Pending -> Available",
@@ -132,7 +139,9 @@
     "Pending -> Failed"
   ],
   "retry": {
-    "429": "Honor Retry-After with at most two retries for this idempotent read, and only while inside an overall request deadline.",
+    "429": "Current implementation: no automatic retry. inputs.retryPolicy type none maps 429 to PROVIDER_THROTTLED. This does not resolve the earlier bounded Retry-After proposal.",
+    "proposed429Requirement": "Honor Retry-After with at most two retries for this idempotent read, and only while inside an overall request deadline.",
+    "retryAfterDecision": "PENDING_OWNER_TECHNICAL_LEAD",
     "ambiguousTimeout": "No blind repeat. Complete the row as Failed with PROVIDER_TIMEOUT if no safe response is available.",
     "401_403_404": "Fail closed as PROVIDER_AUTH, PROVIDER_PERMISSION or MAILBOX_NOT_FOUND; no retry.",
     "unsupportedTimezoneOrShape": "Fail closed; stop the first synthetic live execution and do not retry or broaden conversion."
@@ -183,5 +192,15 @@
   "connectionReferences": [
     "os_sr_avchk_outlook_cr (Office 365 Outlook)",
     "os_sr_avchk_dataverse_cr (Microsoft Dataverse)"
-  ]
+  ],
+  "sourceValidation": {
+    "state": "OFFLINE_SOURCE_LOGIC_CORRECTED_RUNTIME_UNVERIFIED",
+    "pending": "Read_query must match the triggering row id and still be Pending; otherwise cancel without a write.",
+    "request": "Validate required GUID references, mode, integer duration and explicit-Z UTC timestamps before reference connectors; validate business-hour and provider JSON schemas with fail-closed error mapping.",
+    "provider": "Validate the entire Outlook V2 body including optional fields and reject unknown properties. For UTC suggestions accept ISO local-UTC dateTime with optional trailing Z and at most seven fractional digits; reject offsets instead of relabelling them.",
+    "attendees": "Absent or duplicate expected TA/room entries are not free. Never evaluate first() on an empty attendee array.",
+    "references": "Initial reference response ids must match the request lookups; final id/state/normalized-email re-read still overrides all provider results on drift.",
+    "retryPolicy": "inputs.retryPolicy type none is the executable WDL retry setting on every connector action, including terminal persistence; no root-level retryPolicy is relied upon.",
+    "validationBoundary": "Local WDL evaluation is not Power Automate or Outlook runtime acceptance. Historical privacy-only preservation is checked against its pinned Git source; the current functional delta has separate boundary, behavior and full-path fixture tests."
+  }
 }

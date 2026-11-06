@@ -2,25 +2,27 @@
 
 **Assessment date:** 2026-11-06
 
-**Classification:** `P0_SLICE_2A_STAGE_A_LIVE_PREFLIGHT_BLOCKED`
+**Classification:** `P0_SLICE_2A_STAGE_A_LIVE_PREFLIGHT_DRIFT_DETECTED`
 
-**Stop:** `STAGE_A_INCOMPLETE_CONSOLE_LAYER_READBACK`
+**Stop:** `STAGE_A_CONSOLE_ENVIRONMENT_CACHE_TOKEN_MISMATCH`
 
-**Additional finding:** `STAGE_A_CONSOLE_ENVIRONMENT_CACHE_TOKEN_MISMATCH`
+**Console-layer readback:** The previous `STAGE_A_INCOMPLETE_CONSOLE_LAYER_READBACK` gap is resolved for the six resources.
 
-**Scope:** Authorized DEV read-only reconciliation and local documentation only. Stage B was not started.
+**Scope:** Authorized DEV Console evidence and local documentation only. No repair, publication or Stage B was started. Normal application startup generated platform requests described below.
 
 ## Executive result
 
 The earlier full reconciliation verified the exact VN LMV IT target and unmanaged `os_sr_bso_rs_support` Solution before inspecting project resources. At that time the Flow was OFF and structurally matched the historical pre-hardening deployment, not the hardened local source. The observed Solution membership, role maps, connection bindings, disabled guards, published Console resources, value-less definitions and aggregate counts matched the accepted checkpoint.
 
-The subsequent Console-only continuation reconfirmed the exact target and independently re-read all six published resources. Their hashes still match the accepted published checkpoint. However, the published HTML's environment-script cache token matches the unconfigured source template, not the deployed environment configuration. The repository generator and refresh guard require the token to match the deployed configuration hash. This is a **generated-pair mismatch**, not evidence that the tenant changed since the accepted checkpoint; the matching historical HTML hash shows the mismatch was already present in those published bytes.
+The first Console-only continuation found that the published HTML's environment-script cache token matched the unconfigured source template rather than the deployed configuration. Its published hash matched the accepted checkpoint; the mismatch was already present in those published bytes.
 
-Stage A remains **blocked** because current/unpublished resource bytes and authenticated normal-application served bytes remain independently unread. This classification does not waive the generated-pair mismatch, which also requires a reviewed disposition. The published configuration and module are fail-closed, but the effective browser-served flag is not established. The guard package's server-side bytes were not independently hashed.
+The final Console continuation reconfirmed the exact organization and independently retrieved all six published and current/unpublished definitions. It also captured the six actual response bodies through an authenticated normal `srapp` entrypoint. For every resource, the current/unpublished and served hashes equal the current and historical published hashes. In that observed browser session, the environment configuration and availability module were loaded, `availabilityEnabled` was not present, and all eight availability controls were disabled.
 
-An earlier version of this report incorrectly concluded that tenant authentication was unavailable. Both workspace MCP servers and the existing PAC context did support the earlier tenant reads; that conclusion remains superseded. The separate integrated browser context available during this continuation was not authenticated to the target.
+The generated-pair mismatch remains a deviation from the repository's deployment rule, although **no stale configuration was observed in the captured browser session**. It is not accepted as a nonblocking exception: a separate correction or exception approval is required. The classification identifies that rule mismatch, not a newly observed change from the historical tenant checkpoint. The guard package's server-side bytes were not independently hashed.
 
-The full-inventory observation window was **2026-11-06 06:10:39-06:34:08 UTC**, with aggregate counts read during **06:24:53-06:25:20 UTC**. The Console-only continuation's reads ran approximately **06:52-07:01 UTC**. Sections 1-6 and 8 retain the earlier full-inventory evidence and were not re-read during the continuation. These are point-in-time observations, not a transactionally consistent tenant snapshot.
+An earlier version of this report incorrectly concluded that tenant authentication was unavailable; that conclusion remains superseded. The first Console-only continuation's separate browser context returned HTTP 401. The user subsequently shared an authenticated app session, verified independently with browser `WhoAmI`.
+
+The full-inventory observation window was **2026-11-06 06:10:39-06:34:08 UTC**, with aggregate counts read during **06:24:53-06:25:20 UTC**. The first Console-only continuation ran approximately **06:52-07:01 UTC**; the final Console continuation ran approximately **07:19-07:26 UTC**. Sections 1-6 and 8 retain the earlier full-inventory evidence and were not re-read during these continuations. These are point-in-time observations, not a transactionally consistent tenant snapshot.
 
 ## 1. Target and Solution
 
@@ -112,33 +114,65 @@ No Candidate Core operation was invoked. No `os_`-prefixed custom connector was 
 
 ## 7. Console and feature gate
 
-The continuation compared the six relevant [authored resources](../solutions/CandidateConsole/WebResources/os_/bso/) with a fresh published read. Authored hashes are over exact repository file bytes; published hashes are over base64-decoded WebResource content returned by `pac env fetch` with the exact environment specified. A separate Dataverse MCP metadata query returned exactly these six names with `componentstate = 0`; that query is not unpublished-content evidence.
+The final continuation reconfirmed the approved environment and organization IDs and organization unique name through the active PAC context, and matched the organization ID through Dataverse MCP and browser `WhoAmI`. The browser `WhoAmI` returned HTTP 200. No tenant identifiers or credentials are recorded here.
 
-| Exact resource name | Authored SHA-256 | Published SHA-256 | Current/unpublished | Authenticated normal-app served |
+Authored hashes are over exact [repository resource](../solutions/CandidateConsole/WebResources/os_/bso/) bytes. The historical published checkpoint was independently compared with a fresh authenticated Web API GET of the published WebResource collection. A separate same-origin authenticated GET invoked Microsoft's documented [`RetrieveUnpublishedMultiple`](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/reference/retrieveunpublishedmultiple?view=dataverse-latest) function bound to that collection:
+
+`GET /api/data/v9.2/webresourceset/Microsoft.Dynamics.CRM.RetrieveUnpublishedMultiple()?%24select=name,content,componentstate&%24filter=<URL-encoded six-name filter>`
+
+Both reads returned exactly six rows, no next page, and `componentstate = 0`; hashes are over decoded `content` bytes. The function returned the current content for every resource, so unpublished/current evidence is available even though its rows report the published component state.
+
+Served hashes are over actual browser response bodies observed in a separately opened tab navigating through the shared, authenticated `srapp` application entrypoint. The tab was closed after observation; resources were not manually fetched to substitute for application navigation.
+
+| Exact resource name | Authored SHA-256 | Historical / current published SHA-256 | Current/unpublished SHA-256 | Authenticated normal-app served SHA-256 |
 |---|---|---|---|---|
-| `os_/bso/candidate-console.html` | `b0d3cede68669fc4bc080100a3318d433cd116b159cee32f8d96f20bd086086e` | `b0d3cede68669fc4bc080100a3318d433cd116b159cee32f8d96f20bd086086e` | Not retrieved | Not retrieved |
-| `os_/bso/candidate-console-availability.js` | `97487ef0c2a6ece4185a2b1d17a76804d9b58535cbeaee3c27b0596fd4ae7921` | `97487ef0c2a6ece4185a2b1d17a76804d9b58535cbeaee3c27b0596fd4ae7921` | Not retrieved | Not retrieved |
-| `os_/bso/candidate-console-environment.js` | `39135f67e4c96959bc0cb983c3b986bdfed1966df34432713180fe11ac0d6c1f` | `58e03dc262b790b7431f34ca5554422fc86f0d62f6e8b6160805a6b2d906335c` | Not retrieved | Not retrieved |
-| `os_/bso/candidate-console.js` | `cb26a8d5a859e9a72b27e25ee8220a4ad5704d4473dd37af0ee7b69ec0d55e53` | `cb26a8d5a859e9a72b27e25ee8220a4ad5704d4473dd37af0ee7b69ec0d55e53` | Not retrieved | Not retrieved |
-| `os_/bso/candidate-console-policy.js` | `29cbcc97c11a39e9a0d3f0177a3582e2edf96d388796612bee1d3149724d6348` | `29cbcc97c11a39e9a0d3f0177a3582e2edf96d388796612bee1d3149724d6348` | Not retrieved | Not retrieved |
-| `os_/bso/candidate-console.css` | `6681994a0d57e46ed1b3f0be291556fba37be262f822c8b483d31d00f1130fde` | `6681994a0d57e46ed1b3f0be291556fba37be262f822c8b483d31d00f1130fde` | Not retrieved | Not retrieved |
+| `os_/bso/candidate-console.html` | `b0d3cede68669fc4bc080100a3318d433cd116b159cee32f8d96f20bd086086e` | `b0d3cede68669fc4bc080100a3318d433cd116b159cee32f8d96f20bd086086e` | `b0d3cede68669fc4bc080100a3318d433cd116b159cee32f8d96f20bd086086e` | `b0d3cede68669fc4bc080100a3318d433cd116b159cee32f8d96f20bd086086e` |
+| `os_/bso/candidate-console-availability.js` | `97487ef0c2a6ece4185a2b1d17a76804d9b58535cbeaee3c27b0596fd4ae7921` | `97487ef0c2a6ece4185a2b1d17a76804d9b58535cbeaee3c27b0596fd4ae7921` | `97487ef0c2a6ece4185a2b1d17a76804d9b58535cbeaee3c27b0596fd4ae7921` | `97487ef0c2a6ece4185a2b1d17a76804d9b58535cbeaee3c27b0596fd4ae7921` |
+| `os_/bso/candidate-console-environment.js` | `39135f67e4c96959bc0cb983c3b986bdfed1966df34432713180fe11ac0d6c1f` | `58e03dc262b790b7431f34ca5554422fc86f0d62f6e8b6160805a6b2d906335c` | `58e03dc262b790b7431f34ca5554422fc86f0d62f6e8b6160805a6b2d906335c` | `58e03dc262b790b7431f34ca5554422fc86f0d62f6e8b6160805a6b2d906335c` |
+| `os_/bso/candidate-console.js` | `cb26a8d5a859e9a72b27e25ee8220a4ad5704d4473dd37af0ee7b69ec0d55e53` | `cb26a8d5a859e9a72b27e25ee8220a4ad5704d4473dd37af0ee7b69ec0d55e53` | `cb26a8d5a859e9a72b27e25ee8220a4ad5704d4473dd37af0ee7b69ec0d55e53` | `cb26a8d5a859e9a72b27e25ee8220a4ad5704d4473dd37af0ee7b69ec0d55e53` |
+| `os_/bso/candidate-console-policy.js` | `29cbcc97c11a39e9a0d3f0177a3582e2edf96d388796612bee1d3149724d6348` | `29cbcc97c11a39e9a0d3f0177a3582e2edf96d388796612bee1d3149724d6348` | `29cbcc97c11a39e9a0d3f0177a3582e2edf96d388796612bee1d3149724d6348` | `29cbcc97c11a39e9a0d3f0177a3582e2edf96d388796612bee1d3149724d6348` |
+| `os_/bso/candidate-console.css` | `6681994a0d57e46ed1b3f0be291556fba37be262f822c8b483d31d00f1130fde` | `6681994a0d57e46ed1b3f0be291556fba37be262f822c8b483d31d00f1130fde` | `6681994a0d57e46ed1b3f0be291556fba37be262f822c8b483d31d00f1130fde` | `6681994a0d57e46ed1b3f0be291556fba37be262f822c8b483d31d00f1130fde` |
+
+### Authenticated application responses
+
+The complete observed resource URLs below are relative to the verified DEV origin, which is intentionally omitted. No query parameters were omitted. Each response was HTTP **200**, reported `fromServiceWorker = true` and `Cache-Control: public`, and had no `Age` or `ETag` header. The response-body hashes are in the table above.
+
+| Resource | Observed relative URL | Body bytes |
+|---|---|---:|
+| `candidate-console.html` | `/%7b639294916070000177%7d/webresources/os_/bso/candidate-console.html` | 18,928 |
+| `candidate-console-availability.js` | `/%7b639294916070000177%7d/webresources/os_/bso/candidate-console-availability.js?v=p0-slice-2a` | 13,512 |
+| `candidate-console-environment.js` | `/%7b639294916070000177%7d/webresources/os_/bso/candidate-console-environment.js?v=39135f67e4c9` | 570 |
+| `candidate-console.js` | `/%7b639294916070000177%7d/webresources/os_/bso/candidate-console.js?v=cb26a8d5a859` | 119,245 |
+| `candidate-console-policy.js` | `/%7b639294916070000177%7d/webresources/os_/bso/candidate-console-policy.js?v=29cbcc97c11a` | 3,182 |
+| `candidate-console.css` | `/%7b639294916070000177%7d/webresources/os_/bso/candidate-console.css` | 5,128 |
+
+The loaded Console frame exposed the configuration and availability module. `availabilityEnabled` was absent and therefore was not strictly `true`; all **8** availability form controls were disabled. This establishes `availabilityEnabled = false` for the observed browser session, not a claim about every user's cache.
 
 ### Deployment transformation and mismatch
 
-The published environment file intentionally differs from the repository's unconfigured template. Its configuration object has the generator's expected property set and exact approved DEV target binding; its script bytes match the [generator](../scripts/New-BsoRsCandidateConsoleEnvironmentConfig.ps1) template when rendered with the published object's JSON. The published object has no `availabilityEnabled` property. The published availability module requires that property to be strictly `true` both before loading references and before creating a query, so the **published definitions** are fail-closed. This is not a browser-runtime flag verification.
+The published environment file intentionally differs from the repository's unconfigured template. Its configuration object has the [generator](../scripts/New-BsoRsCandidateConsoleEnvironmentConfig.ps1)'s expected property set and the exact approved DEV binding. The published and served availability module requires `availabilityEnabled === true` both before loading references and before creating a query.
 
-The same generator and the [scoped refresh guard](../scripts/Deploy-BsoRsCandidateConsole.ps1) require a generated HTML copy whose environment-script version is the first 12 hex digits of the bound configuration's SHA-256. The published HTML instead has `v=39135f67e4c9`, matching the **authored unconfigured** environment template; the bound published configuration requires `v=58e03dc262b7`. Applying only the generator's prescribed token substitution to the authored HTML yields SHA-256 `699afe50dc3a1bb898ddb3cac301edc36b3bb7a861429dfad5e50b5158403e25`, not the observed `b0d3cede...`. The published HTML still matches the earlier accepted checkpoint, so this finding establishes a mismatch with the generated-pair rule, not a newly observed tenant change or proof of stale served content. No repair or publication was attempted.
+The generator and the [scoped refresh guard](../scripts/Deploy-BsoRsCandidateConsole.ps1) require the generated HTML's environment-script version to be the first 12 hex digits of the bound configuration's SHA-256. Reproducing the generator's configuration and HTML transformations **in memory**, without writing a target-specific configuration file, yielded:
 
-### Independent layers not established
+| Layer | Configuration SHA-256 | HTML SHA-256 | Environment-script token |
+|---|---|---|---|
+| Historical accepted published checkpoint | `58e03dc262b790b7431f34ca5554422fc86f0d62f6e8b6160805a6b2d906335c` | `b0d3cede68669fc4bc080100a3318d433cd116b159cee32f8d96f20bd086086e` | `39135f67e4c9` |
+| Current published | `58e03dc262b790b7431f34ca5554422fc86f0d62f6e8b6160805a6b2d906335c` | `b0d3cede68669fc4bc080100a3318d433cd116b159cee32f8d96f20bd086086e` | `39135f67e4c9` |
+| Current/unpublished | `58e03dc262b790b7431f34ca5554422fc86f0d62f6e8b6160805a6b2d906335c` | `b0d3cede68669fc4bc080100a3318d433cd116b159cee32f8d96f20bd086086e` | `39135f67e4c9` |
+| Authenticated app-served | `58e03dc262b790b7431f34ca5554422fc86f0d62f6e8b6160805a6b2d906335c` | `b0d3cede68669fc4bc080100a3318d433cd116b159cee32f8d96f20bd086086e` | `39135f67e4c9` |
+| Expected generated pair | `58e03dc262b790b7431f34ca5554422fc86f0d62f6e8b6160805a6b2d906335c` | `699afe50dc3a1bb898ddb3cac301edc36b3bb7a861429dfad5e50b5158403e25` | `58e03dc262b7` |
 
-- **Current/unpublished:** Microsoft documents [`RetrieveUnpublishedMultiple`](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/reference/retrieveunpublishedmultiple?view=dataverse-latest) as a read-only function bound to the WebResource collection. The available Dataverse MCP did not expose it as a public Custom API, and PAC FetchXML does not establish this layer. The documented local Dataverse CLI/Python authentication helper was absent; the existing Azure CLI context did not match the PAC user. An existing Azure PowerShell context did match PAC, but the identified repository deployment helper is write-capable and guarded by an older five-resource inventory; it was not run or modified. No independent unpublished hashes were produced. This is a caller/capability gap, not evidence that the server function is unavailable.
-- **Authenticated served bytes:** The integrated browser context exposed no existing target `srapp` page. A read-only navigation to the target `WhoAmI` endpoint returned HTTP 401; no sign-in was initiated. The published DEV configuration enables Candidate Core, and the Console's normal initialization loads the Candidate list. Opening `srapp` without a demonstrated way to prevent Candidate operations would therefore exceed this task's boundary. No normal-app HTML, JavaScript, CSS or configuration response bodies were captured. The earlier anonymous redirects and historical direct `/WebResources/` fetches are not accepted as authenticated normal-entrypoint evidence.
+**Disposition:** `CORRECTION_APPROVAL_REQUIRED`. The mismatch violates the generated-pair rule but does not show stale configuration in the observed session: the service-worker-served environment bytes equal the current published and unpublished bytes. Other browser sessions and future cache behavior are not established. No owner-approved exception or correction was supplied, and no repair or publication was attempted.
 
-Thus current/unpublished = published = authenticated served is **not established** for any of the six resources. No WebResource, app, sitemap, cache or service worker was modified.
+### Browser operations and privacy
+
+Three normal-entrypoint tabs were opened and closed without clicking business actions. Two instrumented loads each observed one permitted Candidate-list GET; no Candidate list content was copied into the evidence. The second load counted four non-GET requests to the Dataverse API and three other non-GET requests, with no direct `os_sr_cact` POST. A subsequent passive request audit observed three Dataverse POSTs to `msdyn_ReportToMonitoringHub`, `GetRecentItems` and `GetCopilotSettingsForEnvironment`. The earlier fourth Dataverse request was not identified, and the server-side effects or persistence of the platform requests were not established. Therefore this report does **not** claim that normal app startup had zero tenant-side telemetry or other effects. The task did not deliberately invoke Candidate business actions or dispatch resource, Flow, plugin, role, configuration or publication writes.
+
+The browser tool initially offloaded an accessibility snapshot of the shared page to a temporary file. That file was deleted unread; its contents were not inspected. Subsequent inspection used a blank controller page and recorded only resource hashes, sanitized URLs and aggregate request information. No cache was cleared, service worker changed, resource URL rewritten, or replacement JavaScript injected.
 
 ## 8. Aggregate row counts
 
-Only server-side counts were read; no Candidate field values or business rows were retrieved.
+During the earlier full-inventory count check, only server-side counts were read; no Candidate field values or business rows were retrieved by that check.
 
 | Table | Historical checkpoint | Fresh count |
 |---|---:|---:|
@@ -153,7 +187,9 @@ Counts were collected sequentially within the window above. Equal counts do not 
 
 ## 9. Offline checks and open decisions
 
-**Console-only continuation:** The synthetic configuration-generator suite passed **21** checks and the Candidate Console static suite passed **78** checks. The six authored hashes, captured published hashes and generated-pair transformation were cross-checked, and relative-link and `git diff --check` validation passed. These offline checks do not establish the missing live layers.
+**Final Console continuation:** The synthetic configuration-generator suite passed **21** checks and the Candidate Console static suite passed **78** checks. The exact expected DEV configuration and HTML hashes above were reproduced in memory from the canonical generator template and source HTML; no target-specific configuration file was written. The six hash rows, **140** relative documentation links, added-text tenant-identifier/credential patterns and `git diff --check` were verified. These offline checks do not prove other users' served caches.
+
+**First Console-only continuation:** The synthetic configuration-generator suite passed **21** checks and the Candidate Console static suite passed **78** checks. The six authored hashes, captured published hashes and generated-pair transformation were cross-checked, and relative-link and `git diff --check` validation passed. These offline checks did not, at that time, establish the missing live layers.
 
 The following checks belong to the earlier full-inventory assessment; they were not repeated as part of the Console-only continuation.
 
@@ -173,11 +209,25 @@ The Flow contract permits up to two 429 retries honoring `Retry-After`, while th
 
 ## 10. Decision and next gates
 
-Stage B is **not ready to start**. The generated HTML/configuration cache-token mismatch needs an explicitly reviewed disposition; this assessment does not authorize or perform a repair. Obtain independently authenticated current/unpublished hashes through a supported read-only caller, and capture actual responses through an authenticated normal `srapp` entrypoint only under a method that respects the no-Candidate-operations boundary. Do not substitute direct resource fetches. Recheck time-sensitive state before any later stage. Establish a supported, single-Flow authoring surface and its conditional concurrency behavior; the observed SDK RowVersion alone is not proof of an `If-Match`-protected update.
+Stage B is **not ready to start**. The cache-token mismatch requires separate correction or explicit exception approval; this assessment does not authorize either. A minimal correction proposal, if separately approved, is:
+
+1. Reconfirm target, Solution, feature gate and all six current/published hashes; stop on drift. Review the normal-app platform requests and agree an acceptable verification boundary.
+2. Generate the bound configuration/HTML pair outside the repository and verify the hashes above. Keep the existing configuration unchanged; use a reviewed six-resource-capable, one-shot procedure to update only the HTML to the expected generated bytes and publish only that WebResource. The existing refresh helper's older five-resource inventory is not evidence that it can be used unmodified.
+3. Independently reconcile all six current, published and authenticated normal-app served resources and the disabled availability gate. Do not retry an ambiguous write or publish, and do not activate the Flow or guards.
+
+This is a proposal, not an authorized change. Recheck time-sensitive state before any later stage. Establish a supported, single-Flow authoring surface and its conditional concurrency behavior; the observed SDK RowVersion alone is not proof of an `If-Match`-protected update.
 
 The missing synthetic mailbox prerequisite, value-less configuration, unapproved guard execution order, undeployed privacy hardening and runtime privacy-verification gates continue to prevent functional activation. The original classification `SLICE_2A_SYNTHETIC_MAILBOX_PREREQUISITE_MISSING` remains the historical prerequisite status; this assessment did not test mailbox availability. Stage B and all activation require separate authorization.
 
-The full assessment and this continuation each performed **zero tenant writes**, **zero write retries**, **zero publication calls**, **zero availability or Candidate operations**, and **zero Outlook/calendar/mailbox operations**. Some failed or repeated read-only probes were corrected without a write. No commit or push was performed by either assessment.
+The earlier full assessment and first continuation reported zero tenant writes and zero Candidate operations. The final continuation did not intentionally dispatch tenant-resource writes, write retries, publication, availability or Candidate business operations, or Outlook/calendar/mailbox operations; normal app startup's non-GET platform requests and their unverified effects are recorded in section 7. No commit or push was performed by any assessment.
+
+## 11. Offline drift disposition review
+
+The subsequent offline review recommends `CONSOLE_TOKEN_CORRECTION_RECOMMENDED` and `P0_SLICE_2A_STAGE_A_CORRECTION_REQUIRED`, while retaining the official classification above. The provisioning journal records that the historical HTML PATCH added only the Availability panel and its script reference; it did not substitute the target-generated environment cache token. The expected correction changes only `os_/bso/candidate-console.html` to the generated pair, with expected hash `699afe50dc3a1bb898ddb3cac301edc36b3bb7a861429dfad5e50b5158403e25`. This remains a proposal and requires separate approval.
+
+The browser finding remains `BROWSER_NON_GET_EFFECT_UNDETERMINED`: three Dataverse POST paths were later observed, but their request/response bodies and persistence were not established; a fourth Dataverse non-GET and three other non-GET requests remain unidentified. This uncertainty is not evidence of a Candidate business mutation and is not evidence of zero tenant effects. It does not independently block a separately controlled Flow-only update.
+
+Stage B is still **not ready**: no supported conditional single-Flow update method was demonstrated, the Console correction/exception has not been approved, and all time-sensitive topology facts require immediate read-only revalidation before any later authorized write. See the [Stage A drift disposition](P0_SLICE_2A_STAGE_A_DRIFT_DISPOSITION.md) for the cache analysis, contract recommendations, readiness checklist and validation outcomes. This disposition review made zero new tenant reads and zero intentional tenant writes.
 
 ## Sources
 

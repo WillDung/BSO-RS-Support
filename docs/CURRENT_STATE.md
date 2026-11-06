@@ -1,5 +1,23 @@
 # Current State
 
+## P0 Slice 2A capability proof (2026-11-06)
+
+**Identity gate resolved for these reads:** independently retained PAC execution evidence was traced to the accepted DEV Option A owner authorization, then freshly matched against the exact target, organization and caller. The earlier missing-pin limitation is superseded for this bounded investigation; no private identifiers or credentials were added to the repository.
+
+| Capability | Fresh evidence and remaining boundary | Decision |
+|---|---|---|
+| Console current-layer conditional update | `webresource.IsOptimisticConcurrencyEnabled=true`; ordinary and `RetrieveUnpublishedMultiple()` GETs returned the exact HTML with equal opaque ETags and the unchanged historical hash. No distinct pending draft was observed, so protection against a racing unpublished-only edit remains unproven. | `WEBRESOURCE_CONDITIONAL_UPDATE_UNPROVEN` for the required draft-layer guarantee; ordinary-record exact-ETag support is established. |
+| Publication exclusivity | Microsoft documents exact one-WebResource `PublishXml` scope, not an atomic edit-plus-publish lock. A designated-operator organizational freeze can provide operational control, but no actual freeze or other-publisher confirmations were obtained. | `PUBLICATION_EXCLUSIVITY_NOT_ESTABLISHED`; do not invent a platform lock or treat a proposed freeze as active. |
+| Workflow/clientdata concurrency | `workflow.IsOptimisticConcurrencyEnabled=true`; exact existing `os_sr_avchk` has a fresh opaque ETag. Applicable Microsoft conditional-update and solution-aware authoring contracts establish exact-ETag support without a trial write. | Concurrency sub-capability **SUPPORTED**; no wildcard precondition or mutation test used. |
+| Flow state/metadata preservation | The exact Flow is freshly OFF (`0/1`), with approved owner and one exact Solution membership. Complete clientdata normalization/privacy-setting retention, connection preservation and cross-time installation identity are not established by those reads. | Overall `WORKFLOW_CLIENTDATA_CONDITIONAL_UPDATE_UNPROVEN`; the complete OFF/privacy-preserving update is not technically verified. |
+| Synthetic runtime | A source-grounded matrix specifies exact outputs, mailbox/operator prerequisites, duplicate/Pending/ambiguous-write risks and safe fault-test limitations. All runtime scenarios remain unexecuted. | Not runtime-ready; synthetic mailbox, effective configuration, guard precedence, privacy and execution approvals remain external prerequisites. |
+
+See the [WebResource proof and publication controls](P0_SLICE_2A_WEBRESOURCE_CONCURRENCY_PROOF.md), [Workflow proof and non-executing specification](P0_SLICE_2A_WORKFLOW_CONCURRENCY_PROOF.md), and [business runtime acceptance matrix](P0_SLICE_2A_BUSINESS_RUNTIME_CRITICAL_PATH.md). The shortest remaining technical evidence requests concern WebResource unpublished-version preconditions and the proposed Flow delta's service-side normalization/preservation; organizational freeze confirmations and the IT synthetic-mailbox/known-window packet are separate handoffs.
+
+**Operation ledger:** eight explicit Dataverse GETs succeeded across the two capability workstreams, with zero application retries, redirects or mutation requests, plus two explicit-target PAC identity invocations and existing managed token acquisition whose internal traffic was not measured. No browser startup, Flow update/activation, publication, role/guard/configuration change, Candidate operation or Outlook call occurred. The business workstream passed 168 offline static checks and eight mocked Console tests; no source or tests changed. The previously documented release-source and frozen 191-versus-171 failures remain separate, unresolved release gates and were not rerun or bypassed.
+
+Neither Stage A1 nor Stage B is declared technically ready. Official Stage A remains `P0_SLICE_2A_STAGE_A_LIVE_PREFLIGHT_DRIFT_DETECTED`; `BROWSER_NON_GET_EFFECT_UNDETERMINED` and the last observed disabled availability gate are not superseded by these non-browser reads. No write-capable deployment path, new generic preparation report, release change, commit or push was created.
+
 ## P0 Slice 2A fast-track offline preparation (2026-11-06)
 
 **Classification:** `P0_SLICE_2A_FAST_TRACK_PREPARATION_BLOCKED`. The independent workstreams prepared the Console correction plan, assessed the conditional Flow-update method, and reviewed governance without changing tenant resources. The Console correction is not execution-ready: current/unpublished WebResource concurrency semantics and publication exclusion remain unproven. The supported version-conditional OFF Flow update is also unproven. Each later operation needs its own approved scope.

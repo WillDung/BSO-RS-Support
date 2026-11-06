@@ -8,6 +8,8 @@ Action-level secure inputs/outputs were added to each local Flow path that handl
 
 The Number `Float` parameter conversion, `sort()`/`union()` ordering and array `string()` serialization remain unchanged pending bounded synthetic runtime verification. Availability has not been run, and the synthetic mailbox prerequisite remains missing. See the [offline hardening and first-runtime matrix](P0_SLICE_2A_DEV_PROVISIONING_REPORT.md#offline-flow-hardening-and-pre-activation-verification-2026-11-06).
 
+The separate [pre-activation readiness report and controlled execution plan](P0_SLICE_2A_PRE_ACTIVATION_READINESS.md) is `P0_SLICE_2A_PRE_ACTIVATION_PLAN_BLOCKED`: the current live Flow bytes have not been freshly read, configuration values and synthetic mailboxes are missing, and guard execution order is unspecified. This planning status does not change the reported DEV or local source classifications.
+
 ## P0 Slice 2A runtime wiring deployed, feature off (2026-11-05)
 
 **Status:** `P0_SLICE_2A_RUNTIME_WIRING_DEPLOYED_FEATURE_OFF`. This covers DEV wiring only. Nothing has been executed, and there is no runtime, security or Production acceptance. Identity remains `DEV_FUNCTIONAL_IDENTITY_ELEVATED_NOT_SECURITY_ACCEPTANCE`.

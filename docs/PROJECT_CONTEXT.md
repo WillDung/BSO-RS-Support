@@ -1,5 +1,7 @@
 # Project Context
 
+**Approved single-BSO scope (2026-11-07):** exactly one intended BSO application user, the existing Candidate Core/Availability components and one authorized Outlook connector identity. No new BSO users, requester routing, teams or isolation architecture are required merely because offline tests use synthetic data. Existing authentication, privileges and implemented guard/Console controls remain unchanged; this decision grants no tenant write or runtime authorization. See [Product Decisions](PRODUCT_DECISIONS.md#single-bso-check-calendar-approved-2026-11-07) and [Current State](CURRENT_STATE.md) for the bounded configuration/deployment handoff.
+
 **Latest Slice 2A DEV result (2026-11-05):** `P0_SLICE_2A_RUNTIME_WIRING_DEPLOYED_FEATURE_OFF`. In DEV, the following are now deployed:
 - the `os_sr_avqg` guard, with zero steps;
 - two connection references bound to the approved DEV-owner connections;

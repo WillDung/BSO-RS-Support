@@ -10,7 +10,7 @@ These invariants govern design and implementation. See [Project Decisions](docs/
 
 ## Identity and roles
 
-- BSO is the primary interactive application user. TA is the assigned interviewer/directory contact, not automatically a separate interactive role or approval stage.
+- Exactly one intended BSO is the interactive application user, under the [2026-11-07 single-BSO decision](docs/PRODUCT_DECISIONS.md#single-bso-check-calendar-approved-2026-11-07). TA is the assigned interviewer/directory contact, not automatically a separate interactive role or approval stage. Check Calendar must not introduce multi-BSO routing or a new isolation architecture.
 - Additional interactive roles require an explicit product decision. Entra authentication, Dataverse authorization, and Microsoft 365 connector identity are separate boundaries.
 - Email and calendar actions use the intended, verified Microsoft 365 identity. A fixed Flow-owner connection must never silently impersonate the current BSO.
 

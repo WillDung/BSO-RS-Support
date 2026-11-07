@@ -1,6 +1,21 @@
 # Product Decisions and Open Items
 
-This log separates explicit product rules from choices requiring confirmation. Statuses reflect repository and acceptance evidence through 29 October 2026; a design proposal is not approval.
+This log separates explicit product rules from choices requiring confirmation. Dated entries identify the applicable decision and acceptance evidence; a design proposal is not approval.
+
+## Single-BSO Check Calendar (APPROVED, 2026-11-07)
+
+**Source:** the owner's "SIMPLIFY TO SINGLE-BSO CHECK CALENDAR" request.
+
+- Exactly **one intended BSO application user**. Reuse the existing authorized BSO identity, Candidate Core workflow, Availability Query table, `os_sr_avchk` Flow, Solution components and one authorized Outlook connector identity.
+- Do not add BSO users, requester routing, teams, tenant-wide permission management or a new isolation architecture to deliver Check Calendar. Offline synthetic fixtures do not establish a multi-user product requirement.
+- Dataverse privileges remain the server authorization boundary. Verify the existing BSO's permitted reads and the bounded DEV query scope; a `[DEV]` label is not permission. If an existing read path cannot demonstrate the required scope, identify only its smallest correction rather than silently broadening access.
+- The existing technical result-writer principal is **not a second BSO user**. Preserve the implemented requester/result-writer and caller/initiator checks. This decision does not authorize merging those principals, changing roles or substituting connector identities.
+- The owner-supplied TA and room endpoints are intended integration targets, not proof of reference mapping, mailbox permission or consent. Keep target-specific values outside tracked source. Verify the exact selected reference IDs and resolved addresses for the controlled request; do not introduce a tenant-wide target-management system by default.
+- Prepare the seven existing Availability settings with the previously proposed DEV test defaults. They remain a test configuration proposal, not approved Production policy or effective tenant values.
+- First runtime is **one controlled Onsite request**, with no booking or Candidate mutation, followed by verified Flow OFF and Console Availability disabled restoration. Keep existing fail-closed controls and privacy, concurrency and scoped write approvals.
+- No real Candidate access, Production go-live, new application/Flow, commit or push is authorized.
+
+Current preparation and actual missing configuration are recorded in [Current State](CURRENT_STATE.md) and the existing [runtime handoff](P0_SLICE_2A_BUSINESS_RUNTIME_CRITICAL_PATH.md#10-connected-build-and-first-runtime-handoff).
 
 ## Production readiness decisions still open (29 October 2026)
 

@@ -64,13 +64,37 @@ test("the checked-in environment template is disabled and unconfigured", () => {
   assert.equal(value.diagnosticsMode, "OFF");
 });
 
-test("a matching DEV configuration enables Candidate Core and only configured fallback", () => {
+test("a matching DEV configuration resolves without granting synthetic data access", () => {
   const result = createPolicy().resolve(configuration(), runtime());
 
   assert.equal(result.allowed, true);
   assert.equal(result.mode, "DEV");
   assert.equal(result.syntheticDataOnly, true);
   assert.equal(result.directWriteFallbackAvailable, true);
+});
+
+test("synthetic isolation is not granted by browser configuration", () => {
+  const policy = createPolicy();
+  assert.equal(policy.hasSyntheticIsolation(), false);
+  assert.equal(policy.hasSyntheticIsolation({
+    syntheticDataOnly: true,
+    syntheticIsolationVerified: true,
+    approvedReferences: ["11111111-1111-4111-8111-111111111111"]
+  }), false);
+});
+
+test("synthetic query helpers escape literal brackets and reject invalid attribute paths", () => {
+  const policy = createPolicy();
+  assert.equal(policy.syntheticCandidateFilter(),
+    "startswith(os_sr_cand_nm,'[[]SYNTHETIC-E2E]') and endswith(os_sr_cand_eml,'.invalid')");
+  assert.equal(policy.syntheticCandidateFilter("os_sr_call_cand"),
+    "startswith(os_sr_call_cand/os_sr_cand_nm,'[[]SYNTHETIC-E2E]') and " +
+    "endswith(os_sr_call_cand/os_sr_cand_eml,'.invalid')");
+  assert.equal(policy.syntheticReferenceFilter("os_sr_ta_nm", "os_sr_cand_ta"),
+    "startswith(os_sr_cand_ta/os_sr_ta_nm,'[[]DEV]')");
+  assert.throws(() => policy.syntheticReferenceFilter("os_sr_ta_nm or statecode eq 0"));
+  assert.throws(() => policy.syntheticCandidateFilter("os_sr_call_cand/extra"));
+  assert.equal(policy.hasSyntheticIsolation(), false);
 });
 
 test("TEST never enables the direct-write fallback", () => {

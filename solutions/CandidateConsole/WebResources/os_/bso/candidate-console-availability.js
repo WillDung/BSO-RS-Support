@@ -78,7 +78,8 @@
         organizationUrl: context.getClientUrl(),
         organizationId: context.organizationSettings.organizationId
       });
-      return resolved.allowed === true && resolved.mode === "DEV" && resolved.syntheticDataOnly === true;
+      return resolved.allowed === true && resolved.mode === "DEV" && resolved.syntheticDataOnly === true &&
+        typeof policy.hasSyntheticIsolation === "function" && policy.hasSyntheticIsolation() === true;
     } catch {
       return false;
     }
@@ -88,7 +89,8 @@
     ready = false;
     stopPolling();
     formControls().forEach((control) => { control.disabled = true; });
-    showResult("Availability checking is not configured for this environment or its identity could not be verified.", true);
+    showResult("Availability checking is not configured, its environment identity could not be verified, " +
+      "or approved synthetic data isolation is unavailable.", true);
   }
 
   function formControls() {
@@ -119,23 +121,31 @@
   }
 
   async function loadReferences(table, select) {
+    if (!availabilityAllowed()) throw new Error("SYNTHETIC_ISOLATION_REQUIRED");
     const api = getXrm().WebApi;
+    const policy = window.BsoRsCandidateConsolePolicy;
+    if (!policy || typeof policy.syntheticReferenceFilter !== "function") {
+      throw new Error("SYNTHETIC_QUERY_POLICY_UNAVAILABLE");
+    }
+    const filter = `statecode eq 0 and ${policy.syntheticReferenceFilter(table.name)}`;
     const query = `?$select=${[table.id, table.name].concat(select || []).join(",")}` +
-      `&$filter=statecode eq 0&$orderby=${table.name} asc`;
+      `&$filter=${encodeURIComponent(filter)}&$orderby=${table.name} asc`;
     const records = [];
     let response = await api.retrieveMultipleRecords(table.logicalName, query);
     records.push(...(response.entities || []));
     while (response.nextLink) {
+      if (!availabilityAllowed()) throw new Error("SYNTHETIC_ISOLATION_REQUIRED");
       response = await api.retrieveMultipleRecords(table.logicalName, response.nextLink);
       records.push(...(response.entities || []));
     }
     const config = window.BsoRsCandidateConsoleConfiguration || {};
-    const policy = window.BsoRsCandidateConsolePolicy;
     if (!policy || typeof policy.allowsReference !== "function" ||
-        typeof config.syntheticDataOnly !== "boolean") return [];
-    return records.filter((record) => typeof record[table.name] === "string" &&
+        typeof config.syntheticDataOnly !== "boolean") throw new Error("SYNTHETIC_QUERY_POLICY_UNAVAILABLE");
+    const invalid = records.some((record) => !(typeof record[table.name] === "string" &&
       typeof record[table.id] === "string" && GUID.test(record[table.id].replace(/[{}]/g, "")) &&
-      policy.allowsReference(record[table.name], config.syntheticDataOnly));
+      policy.allowsReference(record[table.name], config.syntheticDataOnly)));
+    if (invalid) throw new Error("SYNTHETIC_REFERENCE_RESPONSE_INVALID");
+    return records;
   }
 
   function fillSelect(select, records, emptyLabel) {

@@ -132,6 +132,7 @@
   let resultRetryBlockedCandidateId = null;
   let currentRows = [];
   let busy = false;
+  let syntheticQueryBlocked = false;
   let environmentPolicy = Object.freeze({ allowed: false, reason: "CONFIGURATION_MISSING" });
   const CORE_API_ACTIONS = new Set([
     "CreateCandidate", "UpdateCandidate", "RecordCall", "ProceedToScheduling",
@@ -164,6 +165,7 @@
     throw new Error("Model-driven app context is unavailable.");
   };
   const xrm = () => {
+    if (!isCandidateCoreEnabled()) throw new Error("CONSOLE_DATA_ACCESS_BLOCKED");
     if (window.parent && window.parent.Xrm && window.parent.Xrm.WebApi) return window.parent.Xrm;
     if (window.Xrm && window.Xrm.WebApi) return window.Xrm;
     throw new Error("Model-driven app data services are unavailable.");
@@ -193,7 +195,16 @@
   }
 
   function isCandidateCoreEnabled() {
-    return environmentPolicy.allowed === true;
+    if (environmentPolicy.allowed !== true) return false;
+    if (!environmentPolicy.syntheticDataOnly) return true;
+    if (syntheticQueryBlocked) return false;
+    const policy = window.BsoRsCandidateConsolePolicy;
+    try {
+      return Boolean(policy && typeof policy.hasSyntheticIsolation === "function" &&
+        policy.hasSyntheticIsolation() === true);
+    } catch {
+      return false;
+    }
   }
 
   function isDevConfiguration() {
@@ -201,7 +212,7 @@
   }
 
   function isDevFallbackEnabled() {
-    return environmentPolicy.directWriteFallbackAvailable === true &&
+    return isCandidateCoreEnabled() && environmentPolicy.directWriteFallbackAvailable === true &&
       $("dev-fallback-toggle").checked;
   }
 
@@ -209,13 +220,15 @@
     const supportedEnvironment = isCandidateCoreEnabled();
     const fallback = isDevFallbackEnabled();
     $("workflow-path-badge").textContent = !supportedEnvironment
-      ? environmentPolicy.reason === "BLOCK_UNRECOGNIZED_ENVIRONMENT"
-        ? "BLOCK_UNRECOGNIZED_ENVIRONMENT"
-        : "CONFIGURATION BLOCKED"
+      ? environmentPolicy.allowed === true && environmentPolicy.syntheticDataOnly
+        ? syntheticQueryBlocked ? "SYNTHETIC QUERY BLOCKED" : "SYNTHETIC DATA ACCESS BLOCKED"
+        : environmentPolicy.reason === "BLOCK_UNRECOGNIZED_ENVIRONMENT"
+          ? "BLOCK_UNRECOGNIZED_ENVIRONMENT"
+          : "CONFIGURATION BLOCKED"
       : fallback
       ? "DEV DIRECT-WRITE FALLBACK"
       : "CANDIDATE CORE PATH";
-    $("environment-mode-badge").textContent = supportedEnvironment
+    $("environment-mode-badge").textContent = environmentPolicy.allowed === true
       ? environmentPolicy.mode
       : "ENVIRONMENT CONFIGURATION REQUIRED";
     $("real-data-badge").textContent = supportedEnvironment && !environmentPolicy.syntheticDataOnly
@@ -223,11 +236,15 @@
       : "SYNTHETIC DATA ONLY";
     document.querySelectorAll("[data-workflow-label]").forEach((label) => {
       label.textContent = !supportedEnvironment
-        ? "Unavailable until environment configuration is valid"
+        ? environmentPolicy.allowed === true && environmentPolicy.syntheticDataOnly
+          ? "Unavailable until synthetic data isolation is established"
+          : "Unavailable until environment configuration is valid"
         : fallback ? "DEV direct-write fallback" : "Candidate Core / os_sr_cact";
     });
-    $("dev-fallback-control").hidden = environmentPolicy.directWriteFallbackAvailable !== true;
-    $("dev-fallback-toggle").disabled = busy || environmentPolicy.directWriteFallbackAvailable !== true;
+    $("dev-fallback-control").hidden = !supportedEnvironment ||
+      environmentPolicy.directWriteFallbackAvailable !== true;
+    $("dev-fallback-toggle").disabled = !supportedEnvironment || busy ||
+      environmentPolicy.directWriteFallbackAvailable !== true;
   }
 
   function currentUserId() {
@@ -302,9 +319,9 @@
   function setBusy(value) {
     busy = value;
     $("dev-fallback-toggle").disabled =
-      value || environmentPolicy.directWriteFallbackAvailable !== true;
+      value || !isCandidateCoreEnabled() || environmentPolicy.directWriteFallbackAvailable !== true;
     document.querySelectorAll("button[data-action]").forEach((button) => {
-      button.disabled = value ||
+      button.disabled = value || !isCandidateCoreEnabled() ||
         (button.id === "submit-call" &&
           (!selectedCandidate || !canRecordCall(selectedCandidate[TABLES.candidate.status]))) ||
         (button.id === "waiting-status-button" && button.hidden) ||
@@ -425,11 +442,12 @@
 
   async function resolveCreatedCandidate(correlationId, expectedName, expectedEmail) {
     const c = TABLES.candidate;
-    const rows = await retrieveAll(c.logicalName, `?$select=${[
-      c.id, c.number, c.name, c.email, c.phone, c.cvUrl, c.status, c.position, c.source,
-      c.assignedTa,
-      c.correlation, "createdon", "_ownerid_value"
-    ].join(",")}&$filter=${encodeURIComponent(`${c.correlation} eq '${correlationId}'`)}&$top=2`);
+    const correlation = String(correlationId).replace(/'/g, "''");
+    const filter = candidateReferenceScope(candidateScope(`${c.correlation} eq '${correlation}'`));
+    const rows = await retrieveAll(c.logicalName,
+      `?$select=${candidateColumns().concat(c.correlation).join(",")}` +
+      `&$filter=${encodeURIComponent(filter)}&$top=2`);
+    requireSyntheticCandidates(rows);
     const matches = rows.filter((candidate) =>
       candidate[c.correlation] === correlationId &&
       candidate[c.name] === expectedName &&
@@ -497,14 +515,160 @@
   }
 
   async function retrieveAll(tableLogicalName, query) {
-    const api = xrm().WebApi;
-    let response = await api.retrieveMultipleRecords(tableLogicalName, query);
-    const results = [...response.entities];
-    while (response.nextLink) {
-      response = await api.retrieveMultipleRecords(tableLogicalName, response.nextLink);
-      results.push(...response.entities);
+    try {
+      const api = xrm().WebApi;
+      let response = await api.retrieveMultipleRecords(tableLogicalName, query);
+      if (!isCandidateCoreEnabled()) throw new Error("CONSOLE_DATA_ACCESS_BLOCKED");
+      const results = [...response.entities];
+      while (response.nextLink) {
+        response = await api.retrieveMultipleRecords(tableLogicalName, response.nextLink);
+        if (!isCandidateCoreEnabled()) throw new Error("CONSOLE_DATA_ACCESS_BLOCKED");
+        results.push(...response.entities);
+      }
+      return results;
+    } catch (error) {
+      if (environmentPolicy.allowed === true && environmentPolicy.syntheticDataOnly) {
+        blockSyntheticQuery();
+      }
+      throw error;
     }
-    return results;
+  }
+
+  function blockSyntheticQuery() {
+    syntheticQueryBlocked = true;
+    updateWorkflowPathLabel();
+    $("create-button").disabled = true;
+    $("refresh-button").disabled = true;
+    document.querySelectorAll("button[data-action]").forEach((button) => { button.disabled = true; });
+    showNotice("Synthetic data could not be verified. Candidate Management is closed; contact support before retrying.", true);
+  }
+
+  function filterAttribute(value) {
+    if (typeof value !== "string" || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(value)) {
+      throw new Error("CONSOLE_QUERY_ATTRIBUTE_INVALID");
+    }
+    return value;
+  }
+
+  function candidateScope(filter = "", navigation = "") {
+    if (!environmentPolicy.syntheticDataOnly) return filter;
+    const policy = window.BsoRsCandidateConsolePolicy;
+    if (!policy || typeof policy.syntheticCandidateFilter !== "function") {
+      throw new Error("SYNTHETIC_QUERY_POLICY_UNAVAILABLE");
+    }
+    const markers = policy.syntheticCandidateFilter(navigation);
+    return filter ? `${filter} and ${markers}` : markers;
+  }
+
+  function referenceScope(filter, nameAttribute) {
+    if (!environmentPolicy.syntheticDataOnly) return filter;
+    const policy = window.BsoRsCandidateConsolePolicy;
+    if (!policy || typeof policy.syntheticReferenceFilter !== "function") {
+      throw new Error("SYNTHETIC_QUERY_POLICY_UNAVAILABLE");
+    }
+    const marker = policy.syntheticReferenceFilter(nameAttribute);
+    return filter ? `${filter} and ${marker}` : marker;
+  }
+
+  function candidateReferenceScope(filter) {
+    if (!environmentPolicy.syntheticDataOnly) return filter;
+    const policy = window.BsoRsCandidateConsolePolicy;
+    if (!policy || typeof policy.syntheticReferenceFilter !== "function") {
+      throw new Error("SYNTHETIC_QUERY_POLICY_UNAVAILABLE");
+    }
+    const c = TABLES.candidate;
+    const references = [
+      [c.position, c.positionNavigation, "os_sr_pos_nm"],
+      [c.source, c.sourceNavigation, "os_sr_csrc_nm"],
+      [c.assignedTa, c.assignedTaNavigation, "os_sr_ta_nm"]
+    ];
+    const linked = references.map(([lookup, navigation, name]) =>
+      `(${lookup} eq null or ${policy.syntheticReferenceFilter(name, navigation)})`);
+    return [filter, ...linked].filter(Boolean).join(" and ");
+  }
+
+  function candidateColumns() {
+    const c = TABLES.candidate;
+    const columns = [
+      c.id, c.number, c.name, c.email, c.phone, c.cvUrl, c.status, c.position, c.source,
+      c.assignedTa, "createdon"
+    ];
+    if (!environmentPolicy.syntheticDataOnly) columns.push("_ownerid_value");
+    return columns;
+  }
+
+  async function retrieveScopedSingle(tableName, select, filter) {
+    const rows = await retrieveAll(tableName,
+      `${select}&$filter=${encodeURIComponent(filter)}&$top=2`);
+    if (rows.length !== 1) {
+      blockSyntheticQuery();
+      throw new Error("CONSOLE_SCOPED_RECORD_NOT_AVAILABLE");
+    }
+    return rows[0];
+  }
+
+  async function retrieveCandidateRecord(candidateId, select) {
+    const c = TABLES.candidate;
+    if (!environmentPolicy.syntheticDataOnly) {
+      return select === undefined
+        ? xrm().WebApi.retrieveRecord(c.logicalName, candidateId)
+        : xrm().WebApi.retrieveRecord(c.logicalName, candidateId, select);
+    }
+    const filter = candidateReferenceScope(candidateScope(
+      `${filterAttribute(c.id)} eq ${normalizeGuid(candidateId)}`));
+    let columns = candidateColumns();
+    if (select !== undefined) {
+      if (!select.startsWith("?$select=") || select.includes("&")) {
+        throw new Error("CONSOLE_QUERY_SELECT_INVALID");
+      }
+      columns = select.slice("?$select=".length).split(",");
+      for (const marker of [c.name, c.email]) {
+        if (!columns.includes(marker)) columns.push(marker);
+      }
+    }
+    const candidate = await retrieveScopedSingle(c.logicalName, `?$select=${columns.join(",")}`, filter);
+    requireSyntheticCandidates([candidate]);
+    return candidate;
+  }
+
+  async function retrieveReferenceRecord(tableName, recordId, metadata, select, activeOnly) {
+    if (!environmentPolicy.syntheticDataOnly) {
+      return xrm().WebApi.retrieveRecord(tableName, recordId, select);
+    }
+    const idFilter = `${filterAttribute(metadata.PrimaryIdAttribute)} eq ${normalizeGuid(recordId)}`;
+    const filter = referenceScope(activeOnly ? `${idFilter} and statecode eq 0` : idFilter,
+      metadata.PrimaryNameAttribute);
+    return retrieveScopedSingle(tableName, select, filter);
+  }
+
+  async function retrieveInterviewRecord(recordId, candidateId, select, expectedReferences) {
+    const interview = TABLES.interview;
+    if (!environmentPolicy.syntheticDataOnly) {
+      return xrm().WebApi.retrieveRecord(interview.logicalName, recordId, select);
+    }
+    let filter = candidateScope(
+      `${filterAttribute(interview.id)} eq ${normalizeGuid(recordId)} and ` +
+      `${interview.candidate} eq ${normalizeGuid(candidateId)}`,
+      interview.candidateNavigation
+    );
+    if (expectedReferences) {
+      filter += ` and ${interview.ta} eq ${normalizeGuid(expectedReferences.ta)} and ` +
+        `${interview.location} eq ${normalizeGuid(expectedReferences.location)}`;
+    }
+    return retrieveScopedSingle(interview.logicalName, select, filter);
+  }
+
+  function relatedCandidateFilter(table, candidateId, extra = "") {
+    const id = environmentPolicy.syntheticDataOnly ? normalizeGuid(candidateId) : candidateId;
+    const filter = `${table.candidate} eq ${id}${extra ? ` and ${extra}` : ""}`;
+    return candidateScope(filter, table.candidateNavigation);
+  }
+
+  function requireSyntheticCandidates(rows) {
+    if (environmentPolicy.syntheticDataOnly && rows.some((row) => !isSyntheticCandidateMarkers(row))) {
+      blockSyntheticQuery();
+      throw new Error("SYNTHETIC_CANDIDATE_RESPONSE_INVALID");
+    }
   }
 
   function appendCell(row, value) {
@@ -594,19 +758,16 @@
 
   async function refreshCandidates() {
     const c = TABLES.candidate;
-    const select = `?$select=${[
-      c.id, c.number, c.name, c.email, c.phone, c.cvUrl, c.status, c.position, c.source,
-      c.assignedTa,
-      "createdon", "_ownerid_value"
-    ].join(",")}`;
+    const select = `?$select=${candidateColumns().join(",")}`;
     const syntheticFilter = environmentPolicy.syntheticDataOnly
-      ? `&$filter=${encodeURIComponent(`endswith(${c.email},'.invalid')`)}`
+      ? `&$filter=${encodeURIComponent(candidateReferenceScope(candidateScope()))}`
       : "";
-    const rows = (await retrieveAll(
+    const rows = await retrieveAll(
       c.logicalName,
       `${select}${syntheticFilter}&$orderby=createdon desc`
-    )).filter(isCandidateAllowedByDataMode);
-    renderCandidateRows(rows);
+    );
+    requireSyntheticCandidates(rows);
+    renderCandidateRows(rows.filter(isCandidateAllowedByDataMode));
   }
 
   function addDetailItem(container, label, value) {
@@ -651,11 +812,12 @@
     if (!id) return "";
     const entityMetadata = await xrm().Utility.getEntityMetadata(tableLogicalName);
     const primaryName = entityMetadata.PrimaryNameAttribute;
-    const record = await xrm().WebApi.retrieveRecord(
-      tableLogicalName,
-      id.replace(/[{}]/g, ""),
-      `?$select=${primaryName}`
-    );
+    const record = await retrieveReferenceRecord(tableLogicalName, id.replace(/[{}]/g, ""),
+      entityMetadata, `?$select=${primaryName}`, false);
+    if (environmentPolicy.syntheticDataOnly && !isReferenceAllowedByDataMode(record[primaryName])) {
+      blockSyntheticQuery();
+      throw new Error("SYNTHETIC_REFERENCE_RESPONSE_INVALID");
+    }
     return record[primaryName] || "";
   }
 
@@ -684,7 +846,8 @@
     const c = TABLES.call;
     const rows = await retrieveAll(c.logicalName,
       `?$select=${[c.id, c.outcome, c.contactedAt, c.notes, c.reference].join(",")}` +
-      `&$filter=${c.candidate} eq ${candidateId}&$orderby=${c.contactedAt} desc`);
+      `&$filter=${encodeURIComponent(relatedCandidateFilter(c, candidateId))}` +
+      `&$orderby=${c.contactedAt} desc`);
     const body = $("call-history-rows");
     body.replaceChildren();
     if (!rows.length) {
@@ -708,7 +871,8 @@
     const h = TABLES.history;
     const rows = await retrieveAll(h.logicalName,
       `?$select=${[h.id, h.previous, h.current, h.changedAt, h.reason, "createdon"].join(",")}` +
-      `&$filter=${h.candidate} eq ${candidateId}&$orderby=${h.changedAt} desc`);
+      `&$filter=${encodeURIComponent(relatedCandidateFilter(h, candidateId))}` +
+      `&$orderby=${h.changedAt} desc`);
     const body = $("status-history-rows");
     body.replaceChildren();
     if (!rows.length) {
@@ -733,7 +897,8 @@
     const interview = TABLES.interview;
     const rows = await retrieveAll(interview.logicalName,
       `?$select=${[interview.id, interview.round, interview.start, interview.end, interview.notes, interview.ta, interview.location, interview.result, interview.resultRecordedAt, interview.resultNotes, interview.status, interview.reason, interview.changedAt, "createdon"].join(",")}` +
-      `&$filter=${interview.candidate} eq ${candidateId} and ${interview.round} eq ${interview.round1}` +
+      `&$filter=${encodeURIComponent(relatedCandidateFilter(interview, candidateId,
+        `${interview.round} eq ${interview.round1}`))}` +
       `&$orderby=createdon desc`);
     const body = $("schedule-history-rows");
     body.replaceChildren();
@@ -857,7 +1022,8 @@
     hideNotice();
     try {
       const candidate = currentRows.find((row) => row[TABLES.candidate.id] === candidateId) ||
-        await xrm().WebApi.retrieveRecord(TABLES.candidate.logicalName, candidateId);
+        await retrieveCandidateRecord(candidateId);
+      if (!isCandidateAllowedByDataMode(candidate)) throw new Error("CONSOLE_CANDIDATE_NOT_AVAILABLE");
       selectedCandidate = candidate;
       selectedSchedule = null;
       proposedSchedule = null;
@@ -930,8 +1096,21 @@
     if (ids.length !== labels.length) throw new Error("REFERENCE_SELECTOR_CONFIGURATION_INVALID");
     const metadata = await xrm().Utility.getEntityMetadata(tableName);
     const primaryName = metadata.PrimaryNameAttribute;
+    const filter = referenceScope("statecode eq 0", primaryName);
     const rows = await retrieveAll(tableName,
-      `?$select=${metadata.PrimaryIdAttribute},${primaryName},statecode&$filter=statecode eq 0&$orderby=${primaryName} asc`);
+      `?$select=${metadata.PrimaryIdAttribute},${primaryName},statecode` +
+      `&$filter=${encodeURIComponent(filter)}&$orderby=${primaryName} asc`);
+    if (environmentPolicy.syntheticDataOnly && rows.some((row) => {
+      try {
+        normalizeGuid(row[metadata.PrimaryIdAttribute]);
+        return row.statecode !== 0 || !isReferenceAllowedByDataMode(row[primaryName]);
+      } catch {
+        return true;
+      }
+    })) {
+      blockSyntheticQuery();
+      throw new Error("SYNTHETIC_REFERENCE_RESPONSE_INVALID");
+    }
     const selects = ids.map((id) => $(id));
     selects.forEach((select, index) => {
       select.replaceChildren();
@@ -1012,14 +1191,13 @@
     if (!metadata.PrimaryIdAttribute || !metadata.PrimaryNameAttribute || !metadata.EntitySetName) {
       throw new Error("CANDIDATE_REFERENCE_METADATA_INVALID");
     }
-    const reference = await xrm().WebApi.retrieveRecord(
-      tableName,
-      id,
-      `?$select=${[metadata.PrimaryIdAttribute, metadata.PrimaryNameAttribute, "statecode"].join(",")}`
-    );
+    const reference = await retrieveReferenceRecord(tableName, id, metadata,
+      `?$select=${[metadata.PrimaryIdAttribute, metadata.PrimaryNameAttribute, "statecode"].join(",")}`,
+      true);
     if (reference.statecode !== 0 ||
         typeof reference[metadata.PrimaryNameAttribute] !== "string" ||
         !isReferenceAllowedByDataMode(reference[metadata.PrimaryNameAttribute])) {
+      if (environmentPolicy.syntheticDataOnly) blockSyntheticQuery();
       throw new Error("CANDIDATE_REFERENCE_NOT_AVAILABLE");
     }
     return { id, entitySetName: metadata.EntitySetName };
@@ -1034,7 +1212,8 @@
     const interview = TABLES.interview;
     return retrieveAll(interview.logicalName,
       `?$select=${[interview.id, interview.round, interview.start, interview.result, interview.status, interview.reason, interview.changedAt].join(",")}` +
-      `&$filter=${interview.candidate} eq ${candidateId} and ${interview.round} eq ${interview.round1}` +
+      `&$filter=${encodeURIComponent(relatedCandidateFilter(interview, candidateId,
+        `${interview.round} eq ${interview.round1}`))}` +
       `&$orderby=createdon desc`);
   }
 
@@ -1133,8 +1312,7 @@
     let candidateStatusUpdated = false;
     let historyCreated = false;
     try {
-      const current = await xrm().WebApi.retrieveRecord(
-        c.logicalName,
+      const current = await retrieveCandidateRecord(
         candidateId,
         `?$select=${[c.id, c.name, c.email, c.status].join(",")}`
       );
@@ -1169,9 +1347,9 @@
       await xrm().WebApi.updateRecord(interview.logicalName, scheduleId, payload);
 
       category = "INTERVIEW_RESULT_READBACK_FAILED";
-      const saved = await xrm().WebApi.retrieveRecord(
-        interview.logicalName,
+      const saved = await retrieveInterviewRecord(
         scheduleId,
+        candidateId,
         `?$select=${[interview.id, interview.candidate, interview.round, interview.result, interview.resultRecordedAt, interview.resultNotes].join(",")}`
       );
       const savedRecordedAt = Date.parse(saved[interview.resultRecordedAt]);
@@ -1194,8 +1372,7 @@
       resultReadbackConfirmed = true;
 
       category = "INTERVIEW_RESULT_CANDIDATE_STATUS_READ_FAILED";
-      const beforeStatusUpdate = await xrm().WebApi.retrieveRecord(
-        c.logicalName,
+      const beforeStatusUpdate = await retrieveCandidateRecord(
         candidateId,
         `?$select=${[c.id, c.name, c.email, c.status].join(",")}`
       );
@@ -1369,8 +1546,7 @@
     let statusUpdated = false;
     let historyCreated = false;
     try {
-      const current = await xrm().WebApi.retrieveRecord(
-        c.logicalName,
+      const current = await retrieveCandidateRecord(
         candidateId,
         `?$select=${[c.id, c.name, c.email, c.status].join(",")}`
       );
@@ -1429,10 +1605,11 @@
       if (!persistedScheduleId) throw new Error("DEV_DIRECT_WRITE_SCHEDULE_ID_MISSING");
 
       category = "SCHEDULE_READBACK_FAILED";
-      const saved = await xrm().WebApi.retrieveRecord(
-        interview.logicalName,
+      const saved = await retrieveInterviewRecord(
         persistedScheduleId,
-        `?$select=${[interview.id, interview.round, interview.result, interview.status, interview.changedAt, interview.candidate, interview.ta, interview.location, interview.start, interview.end, interview.notes].join(",")}`
+        candidateId,
+        `?$select=${[interview.id, interview.round, interview.result, interview.status, interview.changedAt, interview.candidate, interview.ta, interview.location, interview.start, interview.end, interview.notes].join(",")}`,
+        { ta: ta.id, location: location.id }
       );
       if (normalizeGuid(saved[interview.candidate]) !== candidateId ||
           normalizeGuid(saved[interview.ta]) !== ta.id ||
@@ -1448,8 +1625,7 @@
       scheduleReadbackConfirmed = true;
 
       category = "SCHEDULE_CANDIDATE_STATUS_UPDATE_FAILED";
-      const beforeStatusUpdate = await xrm().WebApi.retrieveRecord(
-        c.logicalName,
+      const beforeStatusUpdate = await retrieveCandidateRecord(
         candidateId,
         `?$select=${[c.id, c.name, c.email, c.status].join(",")}`
       );
@@ -1542,8 +1718,7 @@
     let candidateStatusUpdated = false;
     let historyCreated = false;
     try {
-      const current = await xrm().WebApi.retrieveRecord(
-        c.logicalName,
+      const current = await retrieveCandidateRecord(
         candidateId,
         `?$select=${[c.id, c.name, c.email, c.status].join(",")}`
       );
@@ -1578,9 +1753,9 @@
       });
 
       category = "RESCHEDULE_OLD_SCHEDULE_READBACK_FAILED";
-      const superseded = await xrm().WebApi.retrieveRecord(
-        interview.logicalName,
+      const superseded = await retrieveInterviewRecord(
         previousScheduleId,
+        candidateId,
         `?$select=${[interview.id, interview.candidate, interview.round, interview.result, interview.status, interview.reason, interview.changedAt].join(",")}`
       );
       if (normalizeGuid(superseded[interview.candidate]) !== candidateId ||
@@ -1615,10 +1790,11 @@
       if (!proposalId) throw new Error("DEV_DIRECT_WRITE_RESCHEDULE_PROPOSAL_ID_MISSING");
 
       category = "RESCHEDULE_PROPOSAL_READBACK_FAILED";
-      const proposal = await xrm().WebApi.retrieveRecord(
-        interview.logicalName,
+      const proposal = await retrieveInterviewRecord(
         proposalId,
-        `?$select=${[interview.id, interview.candidate, interview.round, interview.ta, interview.location, interview.result, interview.status, interview.reason, interview.changedAt, interview.start, interview.end].join(",")}`
+        candidateId,
+        `?$select=${[interview.id, interview.candidate, interview.round, interview.ta, interview.location, interview.result, interview.status, interview.reason, interview.changedAt, interview.start, interview.end].join(",")}`,
+        { ta: ta.id, location: location.id }
       );
       if (normalizeGuid(proposal[interview.candidate]) !== candidateId ||
           normalizeGuid(proposal[interview.ta]) !== ta.id ||
@@ -1635,8 +1811,7 @@
       proposalReadbackConfirmed = true;
 
       category = "RESCHEDULE_CANDIDATE_STATUS_UPDATE_FAILED";
-      const beforeStatusUpdate = await xrm().WebApi.retrieveRecord(
-        c.logicalName,
+      const beforeStatusUpdate = await retrieveCandidateRecord(
         candidateId,
         `?$select=${[c.id, c.name, c.email, c.status].join(",")}`
       );
@@ -1760,8 +1935,7 @@
     let candidateStatusUpdated = false;
     let historyCreated = false;
     try {
-      const current = await xrm().WebApi.retrieveRecord(
-        c.logicalName,
+      const current = await retrieveCandidateRecord(
         candidateId,
         `?$select=${[c.id, c.name, c.email, c.status].join(",")}`
       );
@@ -1795,9 +1969,9 @@
       });
 
       category = "CANCELLATION_SCHEDULE_READBACK_FAILED";
-      const cancelled = await xrm().WebApi.retrieveRecord(
-        interview.logicalName,
+      const cancelled = await retrieveInterviewRecord(
         scheduleId,
+        candidateId,
         `?$select=${[interview.id, interview.candidate, interview.round, interview.result, interview.status, interview.reason, interview.changedAt].join(",")}`
       );
       if (normalizeGuid(cancelled[interview.candidate]) !== candidateId ||
@@ -1811,8 +1985,7 @@
       scheduleReadbackConfirmed = true;
 
       category = "CANCELLATION_CANDIDATE_STATUS_UPDATE_FAILED";
-      const beforeStatusUpdate = await xrm().WebApi.retrieveRecord(
-        c.logicalName,
+      const beforeStatusUpdate = await retrieveCandidateRecord(
         candidateId,
         `?$select=${[c.id, c.name, c.email, c.status].join(",")}`
       );
@@ -2031,11 +2204,9 @@
       }
 
       category = "CANDIDATE_READBACK_FAILED";
-      const candidate = await xrm().WebApi.retrieveRecord(
-        c.logicalName,
+      const candidate = await retrieveCandidateRecord(
         candidateId,
-        `?$select=${[c.id, c.number, c.name, c.email, c.phone, c.cvUrl, c.status, c.position,
-          c.source, c.assignedTa, "createdon", "_ownerid_value"].join(",")}`
+        `?$select=${candidateColumns().join(",")}`
       );
       if (!isCandidateAllowedByDataMode(candidate) || candidate[c.status] !== STATUS.needCall ||
           !candidate[c.number]) {
@@ -2181,8 +2352,7 @@
     let coreInvoked = false;
     try {
       const attributes = Object.keys(baseline);
-      const latest = await xrm().WebApi.retrieveRecord(
-        c.logicalName,
+      const latest = await retrieveCandidateRecord(
         candidateId,
         `?$select=${attributes.join(",")}`
       );
@@ -2304,8 +2474,7 @@
     let statusUpdated = false;
     setBusy(true);
     try {
-      const current = await xrm().WebApi.retrieveRecord(
-        c.logicalName,
+      const current = await retrieveCandidateRecord(
         candidateId,
         `?$select=${[c.id, c.name, c.email, c.status].join(",")}`
       );
@@ -2427,8 +2596,7 @@
     let category = "CANDIDATE_READ_FAILED";
     let statusUpdated = false;
     try {
-      const current = await xrm().WebApi.retrieveRecord(
-        c.logicalName,
+      const current = await retrieveCandidateRecord(
         candidateId,
         `?$select=${[c.id, c.name, c.email, c.status].join(",")}`
       );
@@ -2554,9 +2722,11 @@
       document.querySelectorAll("button[data-action]").forEach((button) => {
         button.disabled = true;
       });
-      showNotice(environmentPolicy.reason === "BLOCK_UNRECOGNIZED_ENVIRONMENT"
-        ? "BLOCK_UNRECOGNIZED_ENVIRONMENT"
-        : "Candidate Management is blocked because environment configuration is missing or invalid.", true);
+      showNotice(environmentPolicy.allowed === true && environmentPolicy.syntheticDataOnly
+        ? "Candidate Management is blocked until server-side synthetic data isolation is established."
+        : environmentPolicy.reason === "BLOCK_UNRECOGNIZED_ENVIRONMENT"
+          ? "BLOCK_UNRECOGNIZED_ENVIRONMENT"
+          : "Candidate Management is blocked because environment configuration is missing or invalid.", true);
       return;
     }
     let loadStage = "the model-driven app context";
@@ -2587,6 +2757,7 @@
       }
       await refreshCandidates();
     } catch {
+      if (environmentPolicy.syntheticDataOnly) blockSyntheticQuery();
       showNotice(`Candidate Management could not load ${loadStage}. Confirm app access and try again.`, true);
       document.querySelectorAll("button[data-action]").forEach((button) => {
         button.disabled = true;

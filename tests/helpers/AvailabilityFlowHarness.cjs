@@ -280,6 +280,11 @@ class FlowFixture {
       case "concat": return args.map(text).join("");
       case "tolower": return text(a).toLowerCase();
       case "trim": return text(a).trim();
+      case "uricomponent":
+        try { return encodeURIComponent(text(a)); } catch (error) {
+          if (error instanceof URIError) return fail("Invalid WDL URI component");
+          throw error;
+        }
       case "split": return text(a).split(text(b));
       case "startswith": return text(a).startsWith(text(b));
       case "endswith": return text(a).endsWith(text(b));

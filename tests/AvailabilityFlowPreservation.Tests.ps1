@@ -57,6 +57,50 @@ function Read-StrictJson([string]$Json) {
     }
 }
 
+function Write-CanonicalJson(
+    [System.Text.Json.Utf8JsonWriter]$Writer,
+    [System.Text.Json.JsonElement]$Element
+) {
+    switch ($Element.ValueKind) {
+        Object {
+            $Writer.WriteStartObject()
+            $names = [string[]]@($Element.EnumerateObject() | ForEach-Object { $_.Name })
+            [Array]::Sort($names, [StringComparer]::Ordinal)
+            foreach ($name in $names) {
+                $Writer.WritePropertyName($name)
+                Write-CanonicalJson $Writer $Element.GetProperty($name)
+            }
+            $Writer.WriteEndObject()
+        }
+        Array {
+            $Writer.WriteStartArray()
+            foreach ($item in $Element.EnumerateArray()) { Write-CanonicalJson $Writer $item }
+            $Writer.WriteEndArray()
+        }
+        String { $Writer.WriteStringValue($Element.GetString()) }
+        Number { $Writer.WriteRawValue($Element.GetRawText(), $true) }
+        True { $Writer.WriteBooleanValue($true) }
+        False { $Writer.WriteBooleanValue($false) }
+        Null { $Writer.WriteNullValue() }
+        default { throw 'INVALID_JSON: unsupported canonical value' }
+    }
+}
+
+function Get-CanonicalJsonHash([string]$Json) {
+    $document = Read-StrictJson $Json
+    $stream = [System.IO.MemoryStream]::new()
+    $writer = [System.Text.Json.Utf8JsonWriter]::new($stream)
+    try {
+        Write-CanonicalJson $writer $document.RootElement
+        $writer.Flush()
+        return [Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($stream.ToArray()))
+    } finally {
+        $writer.Dispose()
+        $stream.Dispose()
+        $document.Dispose()
+    }
+}
+
 function Assert-JsonEqual(
     [System.Text.Json.JsonElement]$Expected,
     [System.Text.Json.JsonElement]$Actual,
@@ -338,6 +382,17 @@ $baselineDocument = Read-StrictJson $baselineText
 $baselineDocument.Dispose()
 $currentDocument = Read-StrictJson $currentText
 $currentDocument.Dispose()
+$sourceDigest = '1C7031A980B4C05132DA0EACFF97723AF5492D22226784F864299C04A3D12A02'
+Assert-Test ((Get-CanonicalJsonHash $currentText) -ceq $sourceDigest) `
+    'The complete functional source matches its independently pinned strict canonical digest.'
+Assert-Test ((Get-CanonicalJsonHash '{"b":[1,true],"a":"x"}') -ceq
+    (Get-CanonicalJsonHash '{"a":"\u0078","b":[1,true]}')) `
+    'Canonical hashing ignores object order and equivalent string escaping.'
+Assert-Test ((Get-CanonicalJsonHash '{"n":1}') -cne (Get-CanonicalJsonHash '{"n":1.0}')) `
+    'Canonical hashing preserves numeric lexemes.'
+$numericMutation = $currentText.Replace('"minimum": 15,', '"minimum": 15.0,')
+Assert-Test ($numericMutation -cne $currentText -and (Get-CanonicalJsonHash $numericMutation) -cne $sourceDigest) `
+    'A numeric normalization in a functional validator changes the pinned digest.'
 
 foreach ($duplicate in @(
     '{"key":1,"key":2}',
@@ -473,6 +528,37 @@ try {
     Assert-JsonTextsEqual $currentNode['properties']['definition']['parameters'].ToJsonString() `
         $buildNode['properties']['definition']['parameters'].ToJsonString()
     Assert-Test $true 'The functional build preserves complete reference mappings, trigger and parameter contracts.'
+
+    $providerSchema = $buildActions['Validate_provider_response']['inputs']['schema']['properties']
+    $suggestionSchema = $providerSchema['meetingTimeSuggestions']['items']['properties']
+    $attendeeSchema = $suggestionSchema['attendeeAvailability']['items']['properties']['attendee']['properties']
+    $providerPattern = $attendeeSchema['emailAddress']['properties']['address']['pattern'].GetValue[string]()
+    foreach ($case in @(
+        @{ Address = 'person@example.invalid'; Valid = $true },
+        @{ Address = '"valid:part"@example.invalid'; Valid = $true },
+        @{ Address = '""@example.invalid'; Valid = $true },
+        @{ Address = '"valid..part"@example.invalid'; Valid = $true },
+        @{ Address = '"valid\"part"@example.invalid'; Valid = $true },
+        @{ Address = 'valid@[192.0.2.1]'; Valid = $true },
+        @{ Address = 'valid@[a..b]'; Valid = $true },
+        @{ Address = 'bad:name@example.invalid'; Valid = $false },
+        @{ Address = 'bad[part]@example.invalid'; Valid = $false },
+        @{ Address = 'bad(comment)@example.invalid'; Valid = $false },
+        @{ Address = 'bad..name@example.invalid'; Valid = $false },
+        @{ Address = 'bad@example..invalid'; Valid = $false },
+        @{ Address = "bad$([char]1)name@example.invalid"; Valid = $false }
+    )) {
+        $referenceValid = $false
+        try {
+            $mailbox = [System.Net.Mail.MailAddress]::new($case.Address.Trim())
+            $referenceValid = [string]::Equals($mailbox.Address, $case.Address.Trim(),
+                [StringComparison]::OrdinalIgnoreCase) -and
+                @($mailbox.Address.ToCharArray() | Where-Object { $_ -eq '@' }).Count -eq 1
+        } catch [System.FormatException] {}
+        Assert-Test ($referenceValid -eq $case.Valid -and
+            [regex]::IsMatch($case.Address, $providerPattern) -eq $case.Valid) `
+            'The .NET pattern matches the reference parser for a selected synthetic mailbox.'
+    }
 
     $expectedDocument.Dispose()
     $expectedDocument = Read-StrictJson $currentText

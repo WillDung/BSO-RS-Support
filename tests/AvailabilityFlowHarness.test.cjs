@@ -19,6 +19,15 @@ test("fixture expressions preserve optional paths and select only the chosen if 
   assert.equal(result.outputs.Chosen, "chosen");
 });
 
+test("fixture URI encoding preserves literal percent escapes and encodes control characters", async () => {
+  const result = await run({
+    Encoded: compose("@uriComponent(parameters('text'))"),
+    Invalid: compose("@uriComponent(parameters('notText'))")
+  }, { parameters: { text: "literal%01\u0001\u007f", notText: 1 } });
+  assert.equal(result.outputs.Encoded, "literal%2501%01%7F");
+  assert.equal(result.statuses.Invalid, "Failed");
+});
+
 test("fixture and/or evaluate arguments and failed actions drive runAfter handling", async () => {
   const result = await run({
     Failed: compose("@and(false, equals(int('invalid'), 1))"),

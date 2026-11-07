@@ -45,6 +45,17 @@ function row(state, extra = {}, now = Date.now()) {
   };
 }
 
+function createSimulatedIsolatedPolicy(overrides = {}) {
+  const context = vm.createContext({ window: {}, URL });
+  vm.runInContext(policySource, context);
+  // Test-only stub; it does not establish a server authorization boundary.
+  return {
+    ...context.window.BsoRsCandidateConsolePolicy,
+    hasSyntheticIsolation: () => true,
+    ...overrides
+  };
+}
+
 async function createUi({ enabled = true, create, read, clock, values = {}, references,
   metadata, syntheticDataOnly = true, configuration = {}, runtime = {}, policy } = {}) {
   const elements = new Map();
@@ -152,4 +163,4 @@ async function createUi({ enabled = true, create, read, clock, values = {}, refe
   };
 }
 
-module.exports = { createUi, row };
+module.exports = { createSimulatedIsolatedPolicy, createUi, row };

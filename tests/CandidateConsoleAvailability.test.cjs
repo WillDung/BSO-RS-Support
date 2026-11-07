@@ -2,7 +2,103 @@
 
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { createUi, row } = require(".\\helpers\\AvailabilityConsoleHarness.cjs");
+const { createSimulatedIsolatedPolicy, createUi: createRawUi, row } =
+  require(".\\helpers\\AvailabilityConsoleHarness.cjs");
+const { createServer } = require(".\\CandidateConsoleServerFixture.cjs");
+const simulatedIsolatedPolicy = createSimulatedIsolatedPolicy();
+
+// These panel-unit tests simulate a future isolation prerequisite, not its authorization.
+function createUi(options = {}) {
+  return createRawUi({
+    ...options,
+    policy: Object.hasOwn(options, "policy") ? options.policy : simulatedIsolatedPolicy
+  });
+}
+
+test("the actual policy blocks synthetic availability before any row request", async () => {
+  const ui = await createRawUi({
+    configuration: { syntheticIsolationVerified: true, approvedReferences: ["untrusted"] }
+  });
+  await ui.submit();
+  await ui.refresh();
+  assert.equal(ui.calls.references.length, 0);
+  assert.equal(ui.calls.metadata.length, 0);
+  assert.equal(ui.calls.creates.length, 0);
+  assert.equal(ui.calls.reads.length, 0);
+  assert.equal(ui.get("availability-submit").disabled, true);
+});
+
+test("availability's emitted predicates and simulated server authorization exclude reference rows", async () => {
+  const taId = "11111111-1111-4111-8111-111111111111";
+  const roomId = "22222222-2222-4222-8222-222222222222";
+  const outsideId = "33333333-3333-4333-8333-333333333333";
+  const inactiveId = "44444444-4444-4444-8444-444444444444";
+  const unapprovedId = "55555555-5555-4555-8555-555555555555";
+  const fixtures = {};
+  for (const [table, approvedId] of [["os_sr_ta", taId], ["os_sr_loc", roomId]]) {
+    fixtures[table] = [
+      { [`${table}id`]: approvedId, [`${table}_nm`]: "[DEV] approved fixture", statecode: 0 },
+      { [`${table}id`]: outsideId, [`${table}_nm`]: "Outside marker", statecode: 0 },
+      { [`${table}id`]: inactiveId, [`${table}_nm`]: "[DEV] inactive fixture", statecode: 1 },
+      { [`${table}id`]: unapprovedId, [`${table}_nm`]: "[DEV] unapproved fixture", statecode: 0 }
+    ];
+  }
+  const server = createServer(fixtures, {
+    authorized: (table, record) => record[`${table}id`] !== unapprovedId
+  });
+  const ui = await createUi({
+    configuration: { approvedReferences: [unapprovedId] },
+    references: (table, query) => server.api.retrieveMultipleRecords(table, query)
+  });
+  for (const [table, approvedId] of [["os_sr_ta", taId], ["os_sr_loc", roomId]]) {
+    const response = server.responses.find((entry) => entry.table === table);
+    assert.deepEqual(response.entities.map((entity) => entity[`${table}id`]), [approvedId]);
+    assert.equal(new URLSearchParams(response.query.slice(1)).get("$filter"),
+      `statecode eq 0 and startswith(${table}_nm,'[[]DEV]')`);
+    assert.match(response.query, /%5B%5B%5DDEV%5D/);
+  }
+  assert.equal(ui.get("availability-submit").disabled, false);
+});
+
+test("availability does not retry failed filtered reference queries without the filter", async () => {
+  for (const status of [400, 429, "TIMEOUT"]) {
+    const server = createServer({}, {
+      fail: () => Object.assign(new Error("SYNTHETIC_REFERENCE_FAILURE"), { status })
+    });
+    const ui = await createUi({ references: (table, query) => server.api.retrieveMultipleRecords(table, query) });
+    await ui.submit();
+    assert.equal(server.requests.length, 2);
+    assert.ok(server.requests.every((request) =>
+      new URLSearchParams(request.query.slice(1)).get("$filter").includes("startswith(")));
+    assert.equal(ui.calls.creates.length, 0);
+    assert.doesNotMatch(ui.get("availability-result").textContent, /SYNTHETIC_REFERENCE_FAILURE/);
+  }
+});
+
+test("availability fails closed when the synthetic reference predicate is unavailable", async () => {
+  const ui = await createUi({
+    policy: createSimulatedIsolatedPolicy({ syntheticReferenceFilter: undefined })
+  });
+  await ui.submit();
+  assert.equal(ui.calls.references.length, 0);
+  assert.equal(ui.calls.creates.length, 0);
+  assert.equal(ui.get("availability-submit").disabled, true);
+});
+
+test("reference paging stops if the simulated isolation prerequisite ceases to hold", async () => {
+  let isolated = true;
+  const ui = await createUi({
+    policy: { ...simulatedIsolatedPolicy, hasSyntheticIsolation: () => isolated },
+    references: async () => {
+      isolated = false;
+      return { entities: [], nextLink: "https://synthetic-console.invalid/next-page" };
+    }
+  });
+  assert.equal(ui.calls.references.length, 1);
+  assert.equal(ui.get("availability-submit").disabled, true);
+  await ui.submit();
+  assert.equal(ui.calls.creates.length, 0);
+});
 
 test("disabled availability does not read or create anything", async () => {
   const ui = await createUi({ enabled: false });
@@ -118,7 +214,7 @@ test("empty, restricted and failed reference loads have explicit states and cann
       { os_sr_taid: "invalid-guid", os_sr_ta_nm: "[DEV] Invalid reference" }
     ] })
   });
-  assert.match(restricted.get("availability-result").textContent, /No active TAs/);
+  assert.match(restricted.get("availability-result").textContent, /could not be loaded/);
   const failed = await createUi({ references: async () => { throw new Error("SYNTHETIC_REFERENCE_ERROR"); } });
   assert.match(failed.get("availability-result").textContent, /could not be loaded/);
   await failed.submit();

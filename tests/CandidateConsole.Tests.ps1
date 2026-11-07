@@ -190,14 +190,19 @@ $scheduleStart = $script.IndexOf('async function createSchedule(event)')
 $scheduleEnd = $script.IndexOf('async function loadTableMetadata', $scheduleStart)
 $scheduleFlow = $script.Substring($scheduleStart, $scheduleEnd - $scheduleStart)
 $scheduleCreateIndex = $scheduleFlow.IndexOf('createRecord(interview.logicalName')
-$scheduleReadbackIndex = $scheduleFlow.IndexOf('retrieveRecord(', $scheduleCreateIndex)
-$candidateUpdateIndex = $scheduleFlow.IndexOf('updateRecord(c.logicalName', $scheduleReadbackIndex)
-$historyCreateIndex = $scheduleFlow.IndexOf('createRecord(history.logicalName', $candidateUpdateIndex)
+$scheduleReadbackIndex = $scheduleFlow.IndexOf('const saved = await retrieveInterviewRecord(', [Math]::Max(0, $scheduleCreateIndex))
+$candidateUpdateIndex = $scheduleFlow.IndexOf('updateRecord(c.logicalName', [Math]::Max(0, $scheduleReadbackIndex))
+$historyCreateIndex = $scheduleFlow.IndexOf('createRecord(history.logicalName', [Math]::Max(0, $candidateUpdateIndex))
 Assert-Test ($scheduleStart -ge 0 -and $scheduleEnd -gt $scheduleStart -and
     $scheduleCreateIndex -ge 0 -and $scheduleReadbackIndex -gt $scheduleCreateIndex -and
     $candidateUpdateIndex -gt $scheduleReadbackIndex -and
     $historyCreateIndex -gt $candidateUpdateIndex -and
     $scheduleFlow.Contains('[c.status]: STATUS.round1Scheduled')) 'Persist and read back schedule before Candidate status and Status History'
+Assert-Test ($script.Contains('async function retrieveInterviewRecord(recordId, candidateId, select, expectedReferences)') -and
+    $script.Contains('return xrm().WebApi.retrieveRecord(interview.logicalName, recordId, select);') -and
+    $script.Contains('return retrieveScopedSingle(interview.logicalName, select, filter);') -and
+    $script.Contains('async function retrieveCandidateRecord(candidateId, select)')) `
+    'Retain non-synthetic readback while routing synthetic schedule and Candidate readbacks through scoped queries'
 Assert-Test ($script.Contains('scheduleRetryBlockedCandidateId') -and
     $script.Contains('Round 1 schedule state changed or is ambiguous') -and
     $script.Contains('No compensation or retry was performed')) 'Block duplicate submissions and report nontransactional partial failures without compensation'
@@ -224,12 +229,12 @@ Assert-Test ($script.Contains('activeSchedules.length === 1') -and
 $resultStart = $script.IndexOf('async function recordInterviewResult(event)')
 $resultEnd = $script.IndexOf('async function createSchedule(event)', $resultStart)
 $resultFlow = $script.Substring($resultStart, $resultEnd - $resultStart)
-$candidateReadIndex = $resultFlow.IndexOf('const current = await xrm().WebApi.retrieveRecord')
-$scheduleVerifyIndex = $resultFlow.IndexOf('const schedules = await findRound1Schedules', $candidateReadIndex)
-$scheduleUpdateIndex = $resultFlow.IndexOf('updateRecord(interview.logicalName', $scheduleVerifyIndex)
-$resultReadbackIndex = $resultFlow.IndexOf('const saved = await xrm().WebApi.retrieveRecord', $scheduleUpdateIndex)
-$candidateUpdateIndex = $resultFlow.IndexOf('updateRecord(c.logicalName', $resultReadbackIndex)
-$resultHistoryIndex = $resultFlow.IndexOf('createRecord(history.logicalName', $candidateUpdateIndex)
+$candidateReadIndex = $resultFlow.IndexOf('const current = await retrieveCandidateRecord(')
+$scheduleVerifyIndex = $resultFlow.IndexOf('const schedules = await findRound1Schedules', [Math]::Max(0, $candidateReadIndex))
+$scheduleUpdateIndex = $resultFlow.IndexOf('updateRecord(interview.logicalName', [Math]::Max(0, $scheduleVerifyIndex))
+$resultReadbackIndex = $resultFlow.IndexOf('const saved = await retrieveInterviewRecord(', [Math]::Max(0, $scheduleUpdateIndex))
+$candidateUpdateIndex = $resultFlow.IndexOf('updateRecord(c.logicalName', [Math]::Max(0, $resultReadbackIndex))
+$resultHistoryIndex = $resultFlow.IndexOf('createRecord(history.logicalName', [Math]::Max(0, $candidateUpdateIndex))
 Assert-Test ($resultStart -ge 0 -and $resultEnd -gt $resultStart -and
     $candidateReadIndex -ge 0 -and $scheduleVerifyIndex -gt $candidateReadIndex -and
     $scheduleUpdateIndex -gt $scheduleVerifyIndex -and
@@ -259,11 +264,11 @@ $rescheduleStart = $script.IndexOf('async function rescheduleRound1()')
 $rescheduleEnd = $script.IndexOf('async function cancelRound1(event)', $rescheduleStart)
 $rescheduleFlow = $script.Substring($rescheduleStart, $rescheduleEnd - $rescheduleStart)
 $oldScheduleUpdateIndex = $rescheduleFlow.IndexOf('updateRecord(interview.logicalName')
-$oldScheduleReadbackIndex = $rescheduleFlow.IndexOf('const superseded = await xrm().WebApi.retrieveRecord', $oldScheduleUpdateIndex)
-$proposalCreateIndex = $rescheduleFlow.IndexOf('createRecord(interview.logicalName', $oldScheduleReadbackIndex)
-$proposalReadbackIndex = $rescheduleFlow.IndexOf('const proposal = await xrm().WebApi.retrieveRecord', $proposalCreateIndex)
-$rescheduleCandidateUpdateIndex = $rescheduleFlow.IndexOf('updateRecord(c.logicalName', $proposalReadbackIndex)
-$rescheduleHistoryIndex = $rescheduleFlow.IndexOf('createRecord(history.logicalName', $rescheduleCandidateUpdateIndex)
+$oldScheduleReadbackIndex = $rescheduleFlow.IndexOf('const superseded = await retrieveInterviewRecord(', [Math]::Max(0, $oldScheduleUpdateIndex))
+$proposalCreateIndex = $rescheduleFlow.IndexOf('createRecord(interview.logicalName', [Math]::Max(0, $oldScheduleReadbackIndex))
+$proposalReadbackIndex = $rescheduleFlow.IndexOf('const proposal = await retrieveInterviewRecord(', [Math]::Max(0, $proposalCreateIndex))
+$rescheduleCandidateUpdateIndex = $rescheduleFlow.IndexOf('updateRecord(c.logicalName', [Math]::Max(0, $proposalReadbackIndex))
+$rescheduleHistoryIndex = $rescheduleFlow.IndexOf('createRecord(history.logicalName', [Math]::Max(0, $rescheduleCandidateUpdateIndex))
 Assert-Test ($oldScheduleUpdateIndex -ge 0 -and
     $oldScheduleReadbackIndex -gt $oldScheduleUpdateIndex -and
     $proposalCreateIndex -gt $oldScheduleReadbackIndex -and
@@ -277,9 +282,9 @@ $cancelStart = $script.IndexOf('async function cancelRound1(event)')
 $cancelEnd = $script.IndexOf('async function loadTableMetadata', $cancelStart)
 $cancelFlow = $script.Substring($cancelStart, $cancelEnd - $cancelStart)
 $cancelUpdateIndex = $cancelFlow.IndexOf('updateRecord(interview.logicalName')
-$cancelReadbackIndex = $cancelFlow.IndexOf('const cancelled = await xrm().WebApi.retrieveRecord', $cancelUpdateIndex)
-$cancelCandidateUpdateIndex = $cancelFlow.IndexOf('updateRecord(c.logicalName', $cancelReadbackIndex)
-$cancelHistoryIndex = $cancelFlow.IndexOf('createRecord(history.logicalName', $cancelCandidateUpdateIndex)
+$cancelReadbackIndex = $cancelFlow.IndexOf('const cancelled = await retrieveInterviewRecord(', [Math]::Max(0, $cancelUpdateIndex))
+$cancelCandidateUpdateIndex = $cancelFlow.IndexOf('updateRecord(c.logicalName', [Math]::Max(0, $cancelReadbackIndex))
+$cancelHistoryIndex = $cancelFlow.IndexOf('createRecord(history.logicalName', [Math]::Max(0, $cancelCandidateUpdateIndex))
 Assert-Test ($cancelUpdateIndex -ge 0 -and $cancelReadbackIndex -gt $cancelUpdateIndex -and
     $cancelCandidateUpdateIndex -gt $cancelReadbackIndex -and
     $cancelHistoryIndex -gt $cancelCandidateUpdateIndex -and

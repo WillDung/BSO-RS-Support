@@ -73,10 +73,36 @@
     return syntheticDataOnly ? developmentReference : !developmentReference;
   }
 
+  function hasSyntheticIsolation() {
+    // No server-controlled, approved synthetic row scope is available yet.
+    return false;
+  }
+
+  function identifier(value) {
+    if (typeof value !== "string" || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(value)) {
+      throw new Error("CONSOLE_QUERY_ATTRIBUTE_INVALID");
+    }
+    return value;
+  }
+
+  // These predicates narrow queries; server authorization remains independently required.
+  function syntheticCandidateFilter(navigation = "") {
+    const path = navigation ? `${identifier(navigation)}/` : "";
+    return `startswith(${path}os_sr_cand_nm,'[[]SYNTHETIC-E2E]') and ` +
+      `endswith(${path}os_sr_cand_eml,'.invalid')`;
+  }
+
+  function syntheticReferenceFilter(nameAttribute, navigation = "") {
+    const path = navigation ? `${identifier(navigation)}/` : "";
+    return `startswith(${path}${identifier(nameAttribute)},'[[]DEV]')`;
+  }
+
   Object.defineProperty(global, "BsoRsCandidateConsolePolicy", {
     configurable: false,
     enumerable: false,
     writable: false,
-    value: Object.freeze({ allowsReference, resolve })
+    value: Object.freeze({
+      allowsReference, hasSyntheticIsolation, resolve, syntheticCandidateFilter, syntheticReferenceFilter
+    })
   });
 })(window);

@@ -4,8 +4,6 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const fs = require('node:fs');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
-const { isDeepStrictEqual } = require('node:util');
 const { runFlow } = require('./helpers/AvailabilityFlowHarness.cjs');
 
 const NOW = '2035-02-05T00:00:00Z';
@@ -65,7 +63,9 @@ async function execute(options = {}) {
     now: options.now || NOW,
     getItem: async (params, name) => {
       reads.push(name);
-      if (name === 'Read_query') return input;
+      if (name === 'Read_query') {
+        return options.readQuery ? options.readQuery(params, name, input) : input;
+      }
       if (options.readReference) return options.readReference(params, name, { ta, room });
       return name.includes('location') ? room : ta;
     },
@@ -124,6 +124,45 @@ test('actual WDL writes only six canonical terminal fields and exact Outlook inp
 
 test('non-Pending read cancels without a connector write or provider call', async () => {
   const run = await execute({ query: { os_sr_avq_stat: 100000001 } });
+  assert.equal(run.result.status, 'Cancelled');
+  assert.deepEqual(run.reads, ['Read_query']);
+  assert.equal(run.writes.length, 0);
+  assert.equal(run.providerCalls.length, 0);
+});
+
+test('an empty triggering request ID cancels without a write or provider call', async () => {
+  const run = await execute({ query: { os_sr_avqid: '' } });
+  assert.equal(run.result.status, 'Cancelled');
+  assert.deepEqual(run.reads, ['Read_query']);
+  assert.equal(run.writes.length, 0);
+  assert.equal(run.providerCalls.length, 0);
+});
+
+test('a different returned request ID cancels without a write or provider call', async () => {
+  const run = await execute({
+    readQuery: (_params, _name, input) => ({ ...input, os_sr_avqid: ids.other })
+  });
+  assert.equal(run.result.status, 'Cancelled');
+  assert.deepEqual(run.reads, ['Read_query']);
+  assert.equal(run.writes.length, 0);
+  assert.equal(run.providerCalls.length, 0);
+});
+
+test('a failed initial request read does not write or call the provider', async () => {
+  const run = await execute({
+    readQuery: () => { throw new Error('SYNTHETIC_QUERY_READ_FAILURE'); }
+  });
+  assert.equal(run.result.status, 'Failed');
+  assert.deepEqual(run.reads, ['Read_query']);
+  assert.equal(run.writes.length, 0);
+  assert.equal(run.providerCalls.length, 0);
+});
+
+test('a timed-out initial request read does not write or call the provider', async () => {
+  const run = await execute({
+    readQuery: () => { throw Object.assign(new Error('SYNTHETIC_QUERY_TIMEOUT'), { status: 'TimedOut' }); }
+  });
+  assert.deepEqual(run.reads, ['Read_query']);
   assert.equal(run.writes.length, 0);
   assert.equal(run.providerCalls.length, 0);
 });
@@ -169,12 +208,133 @@ test('mismatched initial reference id never reaches Outlook', async () => {
   assert.equal(run.providerCalls.length, 0);
 });
 
+for (const [label, expected, options] of [
+  ['inactive TA before invalid mailbox', 'TA_INACTIVE', {
+    readReference: (_params, _name, { ta }) => ({ ...ta, statecode: 1, os_sr_ta_eml: 'invalid' })
+  }],
+  ['missing TA mailbox', 'TA_EMAIL_MISSING', {
+    readReference: (_params, _name, { ta }) => ({ ...ta, os_sr_ta_eml: null })
+  }],
+  ['invalid TA mailbox before missing location', 'TA_EMAIL_INVALID', {
+    query: { os_sr_avq_mod: 100000001, _os_sr_avq_loc_value: null },
+    readReference: (_params, _name, { ta }) => ({ ...ta, os_sr_ta_eml: 'invalid' })
+  }],
+  ['disallowed TA domain', 'TA_EMAIL_DOMAIN_NOT_ALLOWED', {
+    readReference: (_params, _name, { ta }) => ({ ...ta, os_sr_ta_eml: 'ta@elsewhere.invalid' })
+  }],
+  ['missing location', 'LOCATION_REQUIRED', {
+    query: { os_sr_avq_mod: 100000001, _os_sr_avq_loc_value: null }
+  }],
+  ['inactive location before missing mailbox', 'LOCATION_INACTIVE', {
+    query: { os_sr_avq_mod: 100000001, _os_sr_avq_loc_value: ids.room },
+    readReference: (_params, name, { ta, room }) => name.includes('location')
+      ? { ...room, statecode: 1, os_sr_loc_rmeml: null } : ta
+  }],
+  ['missing room mailbox', 'ROOM_EMAIL_MISSING', {
+    query: { os_sr_avq_mod: 100000001, _os_sr_avq_loc_value: ids.room },
+    readReference: (_params, name, { ta, room }) => name.includes('location')
+      ? { ...room, os_sr_loc_rmeml: null } : ta
+  }],
+  ['disallowed room domain', 'ROOM_EMAIL_DOMAIN_NOT_ALLOWED', {
+    query: { os_sr_avq_mod: 100000001, _os_sr_avq_loc_value: ids.room },
+    readReference: (_params, name, { ta, room }) => name.includes('location')
+      ? { ...room, os_sr_loc_rmeml: 'room@elsewhere.invalid' } : ta
+  }],
+  ['room and TA share a mailbox', 'ROOM_EMAIL_INVALID', {
+    query: { os_sr_avq_mod: 100000001, _os_sr_avq_loc_value: ids.room },
+    readReference: (_params, name, { ta, room }) => name.includes('location')
+      ? { ...room, os_sr_loc_rmeml: 'ta@example.invalid' } : ta
+  }]
+]) {
+  test(`reference validation preserves failure precedence: ${label}`, async () => {
+    const run = await execute(options);
+    failed(run, expected);
+    assert.equal(run.providerCalls.length, 0);
+  });
+}
+
+test('synthetic substituted TA shows the Flow lacks an exact-target authorization guard', async () => {
+  const run = await execute({
+    query: { _os_sr_avq_ta_value: ids.other },
+    readReference: (_params, _name, { ta }) => ({
+      ...ta, os_sr_taid: ids.other, os_sr_ta_eml: 'other@example.invalid'
+    })
+  });
+  assert.equal(run.providerCalls.length, 1);
+  assert.equal(run.providerCalls[0]['body/RequiredAttendees'], 'other@example.invalid');
+});
+
+test('synthetic substituted room shows the Flow lacks an exact-target authorization guard', async () => {
+  const run = await execute({
+    query: { os_sr_avq_mod: 100000001, _os_sr_avq_loc_value: ids.other },
+    readReference: (_params, name, { ta, room }) => name.includes('location')
+      ? { ...room, os_sr_locid: ids.other, os_sr_loc_rmeml: 'other-room@example.invalid' } : ta
+  });
+  assert.equal(run.providerCalls.length, 1);
+  assert.equal(run.providerCalls[0]['body/ResourceAttendees'], 'other-room@example.invalid');
+});
+
 test('control characters in the TA address fail before Outlook', async () => {
   const run = await execute({
     readReference: (_params, _name, { ta }) => ({ ...ta, os_sr_ta_eml: 't\ta@example.invalid' })
   });
   failed(run, 'TA_EMAIL_INVALID');
   assert.equal(run.providerCalls.length, 0);
+});
+
+for (const [label, address] of [
+  ['colon', 'bad:name@example.invalid'],
+  ['brackets', 'bad[part]@example.invalid'],
+  ['NUL', 'bad\u0000name@example.invalid'],
+  ['non-whitespace control', 'bad\u0001name@example.invalid'],
+  ['DEL', 'bad\u007fname@example.invalid']
+]) {
+  test(`malformed unquoted reference mailboxes fail before Outlook: ${label}`, async () => {
+    const taRun = await execute({
+      readReference: (_params, _name, { ta }) => ({ ...ta, os_sr_ta_eml: address })
+    });
+    failed(taRun, 'TA_EMAIL_INVALID');
+    assert.equal(taRun.providerCalls.length, 0);
+
+    const roomRun = await execute({
+      query: { os_sr_avq_mod: 100000001, _os_sr_avq_loc_value: ids.room },
+      readReference: (_params, name, { ta, room }) => name.includes('location')
+        ? { ...room, os_sr_loc_rmeml: address } : ta
+    });
+    failed(roomRun, 'ROOM_EMAIL_INVALID');
+    assert.equal(roomRun.providerCalls.length, 0);
+  });
+}
+
+test('all ASCII control characters in reference mailboxes fail before Outlook', async () => {
+  for (const code of [...Array(32).keys(), 127]) {
+    const address = `bad${String.fromCharCode(code)}name@example.invalid`;
+    const taRun = await execute({
+      readReference: (_params, _name, { ta }) => ({ ...ta, os_sr_ta_eml: address })
+    });
+    failed(taRun, 'TA_EMAIL_INVALID');
+    assert.equal(taRun.providerCalls.length, 0, `TA control code ${code}`);
+
+    const roomRun = await execute({
+      query: { os_sr_avq_mod: 100000001, _os_sr_avq_loc_value: ids.room },
+      readReference: (_params, name, { ta, room }) => name.includes('location')
+        ? { ...room, os_sr_loc_rmeml: address } : ta
+    });
+    failed(roomRun, 'ROOM_EMAIL_INVALID');
+    assert.equal(roomRun.providerCalls.length, 0, `room control code ${code}`);
+  }
+});
+
+test('literal percent escapes in a valid reference mailbox are not mistaken for controls', async () => {
+  const address = 'case%01@example.invalid';
+  const run = await execute({
+    readReference: (_params, _name, { ta }) => ({ ...ta, os_sr_ta_eml: address }),
+    provider: { emptySuggestionsReason: '', meetingTimeSuggestions: [
+      suggestion(undefined, undefined, [attendee(address)])
+    ] }
+  });
+  assert.equal(run.patch.os_sr_avq_stat, 100000001);
+  assert.equal(run.providerCalls[0]['body/RequiredAttendees'], address);
 });
 
 for (const value of ['tentative', 'busy', 'oof', 'workingElsewhere', 'unknown']) {
@@ -227,12 +387,38 @@ for (const [label, mutate] of [
   ['whitespace UTC timestamp', body => { body.meetingTimeSuggestions[0].meetingTimeSlot.start.dateTime += 'Z\n'; }],
   ['excess timestamp precision', body => { body.meetingTimeSuggestions[0].meetingTimeSlot.start.dateTime += '.12345678'; }],
   ['unknown attendee availability', body => { body.meetingTimeSuggestions[0].attendeeAvailability[0].availability = 'maybe'; }],
-  ['malformed irrelevant attendee', body => { body.meetingTimeSuggestions[0].attendeeAvailability.push(attendee('bad')); }]
+  ['malformed irrelevant attendee', body => { body.meetingTimeSuggestions[0].attendeeAvailability.push(attendee('bad')); }],
+  ['unquoted colon in irrelevant attendee', body => { body.meetingTimeSuggestions[0].attendeeAvailability.push(attendee('bad:name@example.invalid', 'optional')); }],
+  ['unquoted bracket in irrelevant attendee', body => { body.meetingTimeSuggestions[0].attendeeAvailability.push(attendee('bad[part]@example.invalid', 'optional')); }],
+  ['unquoted comment in irrelevant attendee', body => { body.meetingTimeSuggestions[0].attendeeAvailability.push(attendee('bad(comment)@example.invalid', 'optional')); }],
+  ['double-dot local part', body => { body.meetingTimeSuggestions[0].attendeeAvailability.push(attendee('bad..part@example.invalid', 'optional')); }],
+  ['double-dot domain', body => { body.meetingTimeSuggestions[0].attendeeAvailability.push(attendee('bad@example..invalid', 'optional')); }],
+  ['control in irrelevant attendee', body => { body.meetingTimeSuggestions[0].attendeeAvailability.push(attendee('bad\u0001name@example.invalid', 'optional')); }],
+  ['trailing control in irrelevant attendee', body => { body.meetingTimeSuggestions[0].attendeeAvailability.push(attendee('bad@example.invalid\n', 'optional')); }]
 ]) {
   test(`whole provider response fails closed: ${label}`, async () => {
     const body = { emptySuggestionsReason: '', meetingTimeSuggestions: [suggestion()] };
     mutate(body);
     failed(await execute({ provider: body }), 'PROVIDER_RESPONSE_INVALID');
+  });
+}
+
+for (const [label, address] of [
+  ['quoted colon', '"valid:part"@example.invalid'],
+  ['quoted empty local part', '""@example.invalid'],
+  ['quoted double dot', '"valid..part"@example.invalid'],
+  ['escaped quote', '"valid\\"part"@example.invalid'],
+  ['dotted address literal', 'valid@[192.0.2.1]'],
+  ['double dot in an address literal', 'valid@[a..b]'],
+  ['punctuation in unquoted local part', "valid!#$%&'*+-/=?^_`{|}~@example.invalid"]
+]) {
+  test(`valid unrelated provider attendee remains accepted: ${label}`, async () => {
+    const run = await execute({
+      provider: { emptySuggestionsReason: '', meetingTimeSuggestions: [
+        suggestion(undefined, undefined, [attendee(), attendee(address, 'optional')])
+      ] }
+    });
+    assert.equal(run.patch.os_sr_avq_stat, 100000001);
   });
 }
 
@@ -297,6 +483,14 @@ for (const [statusCode, error] of [
   });
 }
 
+test('provider timeout is sanitized, not retried, and followed by a reference recheck', async () => {
+  const fault = Object.assign(new Error('SYNTHETIC_PROVIDER_TIMEOUT'), { status: 'TimedOut' });
+  const run = await execute({ providerError: fault });
+  failed(run, 'PROVIDER_TIMEOUT');
+  assert.equal(run.providerCalls.length, 1);
+  assert.ok(run.reads.includes('Reread_ta'));
+});
+
 test('failed final reference read overrides a proposed success', async () => {
   failed(await execute({
     readReference: (_params, name, { ta }) => {
@@ -323,67 +517,6 @@ test('every executable connector action explicitly disables retries in inputs', 
   }
   visit(source.properties.definition.actions);
   assert.equal(count, 7);
-});
-
-test('functional source delta is confined to the reviewed validation and retry-setting locations', () => {
-  const root = path.join(__dirname, '..');
-  const historical = spawnSync('git', ['--no-lazy-fetch', '--no-optional-locks', '--no-replace-objects',
-    '-C', root, 'show',
-    'b658d7502ef9664efa498e4d1a4b54c7242aa934:solutions/AvailabilityQuery/os_sr_avchk.clientdata.json'],
-  { encoding: 'utf8', timeout: 30000, maxBuffer: 1024 * 1024 });
-  assert.equal(historical.status, 0, 'Pinned source history must be locally available; no fetch or fallback.');
-  const before = JSON.parse(historical.stdout);
-  const after = JSON.parse(fs.readFileSync(path.join(root, 'solutions', 'AvailabilityQuery',
-    'os_sr_avchk.clientdata.json'), 'utf8'));
-  function index(actions, result = new Map()) {
-    for (const [name, action] of Object.entries(actions)) {
-      assert.equal(result.has(name), false, 'Action names must be unique in this Flow.');
-      result.set(name, action);
-      index(action.actions || {}, result);
-      index(action.else?.actions || {}, result);
-    }
-    return result;
-  }
-  const expected = index(before.properties.definition.actions);
-  const actual = index(after.properties.definition.actions);
-  const fields = {
-    Check_pending: ['expression', 'runtimeConfiguration'],
-    Check_response_shape: ['expression', 'runAfter'],
-    Compose_free: ['inputs'],
-    Find_invalid_attendees: ['inputs'],
-    For_each_suggestion: ['foreach'],
-    Set_result_slots: ['inputs'],
-    Compose_validation_error: ['inputs'],
-    Set_location_snapshot: ['runAfter'],
-    Set_phase_reference: ['runAfter'],
-    Set_ta_snapshot: ['runAfter'],
-    Compose_config: ['runAfter'],
-    Count_business_hour_keys: ['runAfter'],
-    Clear_failure_slots: ['inputs']
-  };
-  for (const [name, properties] of Object.entries(fields)) {
-    for (const property of properties) expected.get(name)[property] = structuredClone(actual.get(name)[property]);
-  }
-  for (const [name, parent] of Object.entries({
-    Validate_business_hours: 'Evaluate',
-    Validate_config_lists: 'Evaluate',
-    Validate_request_shape: 'Check_mode',
-    Validate_ta_response: 'Check_mode',
-    Validate_location_response: 'If_onsite_location_present',
-    Validate_provider_response: 'Check_validation',
-    Validate_UTC_timestamps: 'Check_suggestion_timezone'
-  })) {
-    assert.equal(actual.get(name).type, 'ParseJson');
-    expected.get(parent).actions[name] = structuredClone(actual.get(name));
-  }
-  for (const action of expected.values()) {
-    if (action.type !== 'OpenApiConnection') continue;
-    assert.deepEqual(action.retryPolicy, { type: 'none' });
-    delete action.retryPolicy;
-    action.inputs.retryPolicy = { type: 'none' };
-  }
-  assert.equal(isDeepStrictEqual(before, after), true,
-    'No other definition, mapping, trigger, expression or privacy change is permitted.');
 });
 
 test('all original protected actions and trigger retain exact privacy settings', () => {

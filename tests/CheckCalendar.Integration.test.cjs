@@ -1,10 +1,11 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const test = require("node:test");
-const { createUi } = require("./helpers/AvailabilityConsoleHarness.cjs");
+const { createSimulatedIsolatedPolicy, createUi } = require("./helpers/AvailabilityConsoleHarness.cjs");
 const { runFlow } = require("./helpers/AvailabilityFlowHarness.cjs");
 const { invokeGuard } = require("./helpers/AvailabilityGuardBridge.cjs");
 const { IDS, buildFixture, providerResult } = require("./helpers/CheckCalendarFixtures.cjs");
@@ -18,13 +19,31 @@ const TERMINAL_FIELDS = [
   "os_sr_avq_rsn", "os_sr_avq_slts", "os_sr_avq_stat"
 ];
 
+test("Console template cache tokens match the current executable scripts", () => {
+  const directory = path.join(__dirname, "..", "solutions", "CandidateConsole",
+    "WebResources", "os_", "bso");
+  const html = fs.readFileSync(path.join(directory, "candidate-console.html"), "utf8");
+  for (const script of [
+    "candidate-console-environment.js", "candidate-console-policy.js",
+    "candidate-console.js", "candidate-console-availability.js"
+  ]) {
+    const pattern = new RegExp(`src="${script.replace(/\./g, "\\.")}(?:\\?[^"]*)?"`, "g");
+    const matches = html.match(pattern) || [];
+    assert.equal(matches.length, 1, `${script} must have exactly one versioned reference`);
+    const hash = crypto.createHash("sha256").update(fs.readFileSync(path.join(directory, script)))
+      .digest("hex").slice(0, 12);
+    assert.equal(matches[0], `src="${script}?v=${hash}"`, `${script} cache token must match its source`);
+  }
+});
+
 async function exercise({ onsite = false, roomBusy = false, empty = false, fault,
-  drift = false, timezone, duplicate = false } = {}) {
+  drift = false, timezone, duplicate = false, referenceChangedBeforeProvider } = {}) {
   const fixture = buildFixture();
   const references = structuredClone(fixture.references);
   let persisted;
   let original;
   let providerAttempts = 0;
+  const providerInputs = [];
   const terminalWrites = [];
   const connectorCalls = [];
   const guard = (operation, payload) => invokeGuard({
@@ -32,6 +51,7 @@ async function exercise({ onsite = false, roomBusy = false, empty = false, fault
     settings: fixture.settings, caller: operation === "Create" ? "requester" : "writer"
   });
   const ui = await createUi({
+    policy: createSimulatedIsolatedPolicy(),
     clock: () => Date.parse(fixture.now),
     values: {
       "availability-mode": onsite ? "100000001" : "100000000",
@@ -66,6 +86,8 @@ async function exercise({ onsite = false, roomBusy = false, empty = false, fault
     await ui.submit();
     assert.equal(ui.calls.creates.length, 1, "Pending submissions must not create another request.");
   }
+  if (referenceChangedBeforeProvider === "ta") references.ta.email = "other-ta@example.invalid";
+  if (referenceChangedBeforeProvider === "location") references.location.roomEmail = "other-room@example.invalid";
 
   await runFlow({
     query: persisted,
@@ -93,9 +115,9 @@ async function exercise({ onsite = false, roomBusy = false, empty = false, fault
     },
     async outlook(parameters) {
       providerAttempts++;
-      assert.equal(parameters["body/RequiredAttendees"], fixture.references.ta.email);
+      assert.equal(parameters["body/RequiredAttendees"], references.ta.email);
       assert.equal(parameters["body/ResourceAttendees"],
-        onsite ? fixture.references.location.roomEmail : "");
+        onsite ? references.location.roomEmail : "");
       assert.equal(parameters["body/MeetingDuration"], 60);
       assert.equal(parameters["body/MinimumAttendeePercentage"], "100");
       assert.equal(parameters["body/IsOrganizerOptional"], true);
@@ -105,6 +127,10 @@ async function exercise({ onsite = false, roomBusy = false, empty = false, fault
         "body/Start", "body/End", "body/MaxCandidates", "body/MinimumAttendeePercentage",
         "body/IsOrganizerOptional", "body/ActivityDomain"
       ].sort());
+      providerInputs.push({
+        ta: parameters["body/RequiredAttendees"],
+        room: parameters["body/ResourceAttendees"]
+      });
       if (drift) references.ta.email = "changed@example.invalid";
       if (fault) {
         const error = new Error("SYNTHETIC_PROVIDER_BODY_NOT_FOR_PERSISTENCE");
@@ -146,7 +172,7 @@ async function exercise({ onsite = false, roomBusy = false, empty = false, fault
   assert.equal(ui.calls.creates.length, 1);
   assert.equal(connectorCalls.every((call) =>
     ["os_sr_avqs", "os_sr_tas", "os_sr_locs"].includes(call.entity)), true);
-  return { ui, terminal, fixture, connectorCalls };
+  return { ui, terminal, fixture, connectorCalls, providerInputs };
 }
 
 test("Console payload and existing Pending trigger agree with the schema", () => {
@@ -161,8 +187,18 @@ test("Console payload and existing Pending trigger agree with the schema", () =>
     ["Pending", "Available", "NoSlots", "Failed"]);
 });
 
+test("The actual policy blocks synthetic availability until isolation is established", async () => {
+  const ui = await createUi();
+  await ui.submit();
+  await ui.refresh();
+  assert.equal(ui.calls.references.length, 0);
+  assert.equal(ui.calls.creates.length, 0);
+  assert.equal(ui.calls.reads.length, 0);
+  assert.equal(ui.get("availability-submit").disabled, true);
+});
+
 for (const onsite of [false, true]) {
-  test(`${onsite ? "Onsite" : "Online"} Console -> real guard -> actual Flow -> real guard -> visible slots`,
+  test(`With simulated isolation: ${onsite ? "Onsite" : "Online"} Console -> real guard -> actual Flow -> real guard -> visible slots`,
     async () => {
       const result = await exercise({ onsite, duplicate: true });
       assert.equal(result.terminal.os_sr_avq_stat, 100000001);
@@ -177,8 +213,8 @@ for (const onsite of [false, true]) {
 }
 
 for (const scenario of [{ onsite: true, roomBusy: true }, { empty: true }]) {
-  test(scenario.roomBusy ? "A busy room is excluded from the complete path" :
-    "Empty Outlook suggestions produce safe NoSlots in Console", async () => {
+  test(scenario.roomBusy ? "With simulated isolation: a busy room is excluded from the complete path" :
+    "With simulated isolation: empty Outlook suggestions produce safe NoSlots in Console", async () => {
     const { terminal, ui } = await exercise(scenario);
     assert.equal(terminal.os_sr_avq_stat, 100000002);
     assert.equal(terminal.os_sr_avq_rsn, "NO_COMMON_SLOT");
@@ -194,7 +230,7 @@ for (const scenario of [
   { options: { timezone: "Pacific Standard Time" }, error: "PROVIDER_TIMEZONE_UNSUPPORTED",
     display: /timezone could not be verified/ }
 ]) {
-  test(`Complete path fails closed with ${scenario.error}`, async () => {
+  test(`With simulated isolation: complete path fails closed with ${scenario.error}`, async () => {
     const { terminal, ui } = await exercise(scenario.options);
     assert.equal(terminal.os_sr_avq_stat, 100000003);
     assert.equal(terminal.os_sr_avq_rsn, null);
@@ -205,8 +241,23 @@ for (const scenario of [
   });
 }
 
-test("An invalid Console window never reaches Dataverse or Outlook", async () => {
-  const ui = await createUi({ values: { "availability-start": "2099-01-05T09:00+07:00" } });
+for (const [reference, target, changedAddress] of [
+  ["ta", "ta", "other-ta@example.invalid"],
+  ["location", "room", "other-room@example.invalid"]
+]) {
+  test(`Characterization: same-ID ${reference} mailbox changed after Create reaches the local Outlook callback`,
+    async () => {
+      const { providerInputs } = await exercise({ onsite: true, referenceChangedBeforeProvider: reference });
+      assert.equal(providerInputs.length, 1);
+      assert.equal(providerInputs[0][target], changedAddress);
+    });
+}
+
+test("With simulated isolation: an invalid Console window never reaches Dataverse or Outlook", async () => {
+  const ui = await createUi({
+    policy: createSimulatedIsolatedPolicy(),
+    values: { "availability-start": "2099-01-05T09:00+07:00" }
+  });
   await ui.submit();
   assert.equal(ui.calls.creates.length, 0);
   assert.equal(ui.calls.reads.length, 0);

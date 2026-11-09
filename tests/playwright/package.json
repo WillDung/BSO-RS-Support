@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "test": "playwright test",
+    "test:lifecycle": "playwright test --config playwright.lifecycle.config.cjs",
     "install:browser": "playwright install chromium"
   },
   "devDependencies": {

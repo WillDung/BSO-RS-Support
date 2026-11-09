@@ -33,7 +33,7 @@ function loadApproval() {
       !["BSO_ONLY", "OWNER_APPROVED_ELEVATED_READ_ONLY"].includes(approval.identityScope || "BSO_ONLY")) {
     throw new Error("UAT_INVALID_OR_UNAUTHORIZED_LOCAL_APPROVAL");
   }
-  // This suite deliberately has no mutation implementation or opt-in switch.
+  // The read-only approval never authorizes the separate lifecycle suite.
   return Object.freeze({ ...approval, origin: url.origin, identityScope: approval.identityScope || "BSO_ONLY" });
 }
 

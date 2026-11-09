@@ -3,6 +3,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { createHash } = require("node:crypto");
 const { loadApproval, authDirectory, runDirectory } = require("./local-settings.cjs");
+const { verifyBrowserIdentity } = require("./browser-identity.cjs");
 
 test("Candidate Core owner browser UAT (read-only)", async () => {
   const approval = loadApproval();
@@ -74,43 +75,13 @@ test("Candidate Core owner browser UAT (read-only)", async () => {
     await step("Authenticate interactively and verify exact organization/BSO", async () => {
       // The app auto-reads Candidates. Verify identity on the app-list shell first.
       await page.goto(`${approval.origin}/main.aspx?pagetype=apps`, { waitUntil: "domcontentloaded" });
-      await page.waitForFunction(() => Boolean(window.Xrm?.Utility?.getGlobalContext()?.userSettings?.userId),
-        null, { timeout: 480_000 });
-      const identity = await page.evaluate(async ({ origin, organizationId, expectedUpn }) => {
-        const globalContext = window.Xrm.Utility.getGlobalContext();
-        const normalize = value => String(value || "").replace(/[{}]/g, "").toLowerCase();
-        const whoResponse = await fetch(`${origin}/api/data/v9.2/WhoAmI`, { credentials: "same-origin" });
-        if (!whoResponse.ok) return { error: "UAT_WHOAMI_FAILED" };
-        const who = await whoResponse.json();
-        const userResponse = await fetch(
-          `${origin}/api/data/v9.2/systemusers(${who.UserId})?$select=internalemailaddress,isdisabled,accessmode`,
-          { credentials: "same-origin" });
-        if (!userResponse.ok) return { error: "UAT_BSO_IDENTITY_READ_FAILED" };
-        const user = await userResponse.json();
-        const roles = globalContext.userSettings.roles.getAll().map(role => role.name);
-        return {
-          target: globalContext.getClientUrl().replace(/\/$/, "") === origin &&
-            normalize(who.OrganizationId) === normalize(organizationId),
-          account: normalize(who.UserId) === normalize(globalContext.userSettings.userId) &&
-            String(user.internalemailaddress || "").toLowerCase() === expectedUpn.toLowerCase() &&
-            user.isdisabled === false && user.accessmode === 0,
-          bsoRole: roles.includes("BSO-RS Support - BSO"),
-          elevated: roles.some(role => /^System (Administrator|Customizer)$/i.test(role))
-        };
-      }, approval);
-      if (identity.error) fail(identity.error);
+      const identity = await verifyBrowserIdentity(page, approval, 480_000);
       report.identityChecks = {
         organizationMatched: identity.target,
         accountMatched: identity.account,
         bsoRolePresent: identity.bsoRole,
         elevatedRolePresent: identity.elevated
       };
-      if (!identity.target) fail("UAT_ORGANIZATION_MISMATCH");
-      if (!identity.account) fail("UAT_BSO_IDENTITY_MISMATCH");
-      if (approval.identityScope === "BSO_ONLY") {
-        if (identity.elevated) fail("UAT_ELEVATED_IDENTITY_NOT_BSO_ACCEPTANCE");
-        if (!identity.bsoRole) fail("UAT_REQUIRED_BSO_ROLE_MISSING");
-      }
       report.authentication = "PASS";
     });
 

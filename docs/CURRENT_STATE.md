@@ -1,5 +1,13 @@
 # Current State
 
+## Newly authorized independent lifecycle attempt blocked before launch (2026-11-09)
+
+The owner authorized one additional, independent synthetic lifecycle attempt with the original marker and no retries. The existing [lifecycle support](../tests/playwright/lifecycle-support.cjs) accepts only the original authorization identifier; its descriptor has expired, its default reservation targets the existing journal and generates a different marker, and its prior continuation claim is already consumed. The [recovery state machine](../tests/playwright/zero-dispatch-recovery.cjs) provides no separate linked authorization and exclusive claim for this new attempt. Updating the old descriptor would also invalidate the existing recovery evidence chain.
+
+The requested new authorization audit and claim could not be established by the current state machine. In accordance with the owner's stop condition, no new claim, browser session, lifecycle invocation or tenant request was made. Both historical continuation files retain two snapshots with the original marker, no Candidate ID and zero recorded operation attempts; the original report records no acknowledged operations and no baseline read. The prior recovery evidence chain and all six protected journal/claim hashes verified unchanged. The focused consumed-claim non-reuse regression passed offline.
+
+**Classification: `BLOCKED_BEFORE_FIRST_MUTATION`.** A future attempt requires a separately reviewed, durable mechanism for this independent authorization that preserves and links the existing evidence, original marker and scope while enforcing a single claim. Authentication, current Console configuration, duplicate-marker absence and lifecycle readbacks were not checked in this stopped attempt; no runtime acceptance is claimed.
+
 ## Recovered one-shot run stopped on a scoped read (2026-11-09)
 
 **Classification: `BLOCKED_BEFORE_FIRST_MUTATION`; lifecycle: FAIL.** The owner requested one recovered invocation of the previously approved four-operation synthetic scope. The pinned PAC organization check and the browser's fresh exact account/organization check passed. The protected evidence hashes, original marker, zero-dispatch history, current bounded scope and unconsumed eligibility event were verified before launching exactly one headed test with one worker and zero retries.
@@ -16,7 +24,7 @@ Separately, the local [Console source](../solutions/CandidateConsole/WebResource
 
 An additional [offline recovery regression](../tests/playwright/zero-dispatch-recovery.test.cjs) models the two-snapshot, zero-dispatch stop and confirms that repeated consumption is rejected without changing the prior evidence or stopped continuation. The focused test passed. It does not create a new recovery transition, change the real claim, or authorize a further invocation.
 
-**Next step:** a further lifecycle invocation is blocked by the consumed claim and the owner's one-invocation/no-retry instruction. A separately authorized attempt would first require a verified durable recovery transition, an applicable approval descriptor and the existing zero-dispatch/identity gates. Do not reset or delete the claim.
+**Disposition at that checkpoint:** the recovered invocation and its one-use claim were consumed; do not reset or delete the claim. The owner's later independent authorization and its separate state-machine blocker are recorded above.
 
 ## Earlier consumed pre-dispatch attempt made recovery-eligible offline (2026-11-09)
 

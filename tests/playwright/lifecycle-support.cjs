@@ -2,7 +2,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 const { authDirectory, loadApproval } = require("./local-settings.cjs");
-const { consumeReleasedClaim } = require("./zero-dispatch-recovery.cjs");
+const { consumeReleasedClaim, consumeEligibleRecovery } = require("./zero-dispatch-recovery.cjs");
 
 const ACTIONS = Object.freeze([
   "CreateCandidate", "RecordCall", "ProceedToScheduling", "MarkRound1Scheduled"
@@ -46,6 +46,10 @@ function loadLifecycleApproval() {
 
 function reserveOneShot(approval) {
   const file = path.join(authDirectory, `${approval.lifecycleScope.authorizationId}.json`);
+  if (process.env.BSO_UAT_RESUME_ZERO_DISPATCH === "owner-authorized-eligible-continuation") {
+    return consumeEligibleRecovery(file, approval.lifecycleScope.authorizationId,
+      process.env.BSO_UAT_LIFECYCLE_APPROVAL_FILE);
+  }
   if (process.env.BSO_UAT_RESUME_ZERO_DISPATCH === "owner-authorized-released-claim") {
     return consumeReleasedClaim(file, approval.lifecycleScope.authorizationId);
   }

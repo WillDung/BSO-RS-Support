@@ -26,7 +26,7 @@ The later focused diagnostic identified that CRM XHR as `/AppWebServices/Metrics
 
 ### One-shot synthetic lifecycle preparation
 
-**Historical stop (2026-11-09):** the recovered invocation consumed its one-use claim and failed before the first business dispatch. The old state machine could not represent the owner's independent additional attempt. The subsequently authorized local implementation below supplies that missing mechanism without reusing the consumed claim; no new browser invocation has occurred. The historical recovery instructions are not an independent authorization input. See [Current State](../docs/CURRENT_STATE.md).
+**Historical stop (2026-11-09):** the recovered invocation consumed its one-use claim and failed before the first business dispatch. The old state machine could not represent the owner's independent additional attempt. The subsequently authorized local implementation below supplied that mechanism without reusing the consumed claim. One independent invocation then ran and consumed its own claim; it also stopped before dispatch. The historical recovery instructions are not an independent authorization input. See [Current State](../docs/CURRENT_STATE.md).
 
 ### Independent owner-authorized attempt: local support
 
@@ -42,9 +42,9 @@ Run focused offline checks only:
 node --test .\tests\playwright\independent-authorization.test.cjs .\tests\playwright\zero-dispatch-recovery.test.cjs
 ```
 
-The local record `owner-lifecycle-20261109-02.authorization.json` now exists in the protected, gitignored profile directory, with its claim **unconsumed**. Its local same-day safety deadline is recorded in that file. Expiry rejects execution; it never triggers renewal. No runtime gate was checked in this offline task.
+The local record `owner-lifecycle-20261109-02.authorization.json` exists in the protected, gitignored profile directory. Its claim was subsequently **consumed** by the single invocation recorded in [Current State](../docs/CURRENT_STATE.md#independent-lifecycle-stopped-before-first-mutation-2026-11-09). Do not rerun or reset that claim. Its local same-day safety deadline is recorded in the file; expiry never triggers renewal.
 
-**Future execution command, not executed or authorized to auto-run by this local-only task:** from the repository root, after a separate execution instruction and before the recorded deadline:
+**Historical command, executed once; do not rerun with the consumed authorization:** from the repository root:
 
 ```powershell
 $env:BSO_UAT_APPROVAL_FILE = (Resolve-Path .\tests\playwright\owner-approval.local.json).Path

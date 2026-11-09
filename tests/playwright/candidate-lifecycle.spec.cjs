@@ -6,7 +6,7 @@ const { authDirectory, runDirectory } = require("./local-settings.cjs");
 const { verifyBrowserIdentity } = require("./browser-identity.cjs");
 const { classifyRequest } = require("./request-classification.cjs");
 const {
-  ACTIONS, STATUSES, REFERENCE_SCHEMA, GUID, requireCondition, referenceQuery,
+  ACTIONS, STATUSES, REFERENCE_LABELS, REFERENCE_SCHEMA, GUID, requireCondition, referenceQuery,
   approvedReferenceId, constrainReferenceRequest, loadLifecycleApproval, reserveOneShot, readRows, scopedReadFailure,
   readEvidence, counts, validateEvidence
 } = require("./lifecycle-support.cjs");

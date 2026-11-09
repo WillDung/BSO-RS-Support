@@ -17,6 +17,14 @@ const logicalNames = Object.freeze({
 });
 const origin = "https://orgsynthetic.crm4.dynamics.com";
 
+test("lifecycle reference selectors import the shared approved labels", () => {
+  const source = fs.readFileSync(path.join(__dirname, "candidate-lifecycle.spec.cjs"), "utf8");
+  const imports = source.match(/const\s*{([^{}]+)}\s*=\s*require\("\.\/lifecycle-support\.cjs"\)/);
+  assert.ok(imports);
+  assert.match(imports[1], /\bREFERENCE_LABELS\b/);
+  assert.match(source, /hasText:\s*REFERENCE_LABELS\[key\]/);
+});
+
 for (const [key, logicalName] of Object.entries(logicalNames)) {
   test(`${key} query uses the exported reference schema and exact approved label`, () => {
     const schema = REFERENCE_SCHEMA[key];

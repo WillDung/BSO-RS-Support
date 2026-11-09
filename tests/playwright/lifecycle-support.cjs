@@ -1,6 +1,5 @@
 const fs = require("node:fs");
 const path = require("node:path");
-const { randomUUID } = require("node:crypto");
 const { authDirectory, loadApproval } = require("./local-settings.cjs");
 const { consumeReleasedClaim, consumeEligibleRecovery } = require("./zero-dispatch-recovery.cjs");
 
@@ -77,6 +76,18 @@ function constrainReferenceRequest(url) {
 
 function loadLifecycleApproval() {
   const base = loadApproval();
+  if (Object.hasOwn(process.env, "BSO_UAT_INDEPENDENT_AUTHORIZATION_FILE")) {
+    requireCondition(!process.env.BSO_UAT_RESUME_ZERO_DISPATCH,
+      "UAT_INDEPENDENT_AUTHORIZATION_CANNOT_USE_RECOVERY");
+    const { loadIndependentAuthorization, digest } = require("./independent-authorization.cjs");
+    const file = process.env.BSO_UAT_INDEPENDENT_AUTHORIZATION_FILE;
+    const target = { ...base, environmentId: process.env.BSO_UAT_ENVIRONMENT_ID };
+    const authorization = loadIndependentAuthorization(file, target);
+    return {
+      ...target, approved: true, lifecycleScope: authorization.scope,
+      independentAuthorizationFile: file, independentAuthorizationHash: digest(file)
+    };
+  }
   const file = process.env.BSO_UAT_LIFECYCLE_APPROVAL_FILE;
   if (!file) return { approved: false };
   requireCondition(path.isAbsolute(file), "UAT_ABSOLUTE_LIFECYCLE_APPROVAL_FILE_REQUIRED");
@@ -102,7 +113,17 @@ function loadLifecycleApproval() {
   return { ...base, approved: true, lifecycleScope: scope };
 }
 
-function reserveOneShot(approval) {
+function reserveOneShot(approval, configuration) {
+  if (approval.independentAuthorizationFile ||
+      Object.hasOwn(process.env, "BSO_UAT_INDEPENDENT_AUTHORIZATION_FILE")) {
+    requireCondition(!process.env.BSO_UAT_RESUME_ZERO_DISPATCH &&
+      approval.independentAuthorizationFile === process.env.BSO_UAT_INDEPENDENT_AUTHORIZATION_FILE,
+    "UAT_INDEPENDENT_AUTHORIZATION_CANNOT_USE_RECOVERY");
+    const { claimIndependentAuthorization, digest } = require("./independent-authorization.cjs");
+    requireCondition(digest(approval.independentAuthorizationFile) === approval.independentAuthorizationHash,
+      "UAT_INDEPENDENT_AUTHORIZATION_CHANGED");
+    return claimIndependentAuthorization(approval.independentAuthorizationFile, approval, configuration);
+  }
   const file = path.join(authDirectory, `${approval.lifecycleScope.authorizationId}.json`);
   if (process.env.BSO_UAT_RESUME_ZERO_DISPATCH === "owner-authorized-eligible-continuation") {
     return consumeEligibleRecovery(file, approval.lifecycleScope.authorizationId,
@@ -131,24 +152,7 @@ function reserveOneShot(approval) {
     fs.writeFileSync(file, JSON.stringify(record, null, 2));
     return { record, save: () => fs.writeFileSync(file, JSON.stringify(record, null, 2)) };
   }
-  const marker = randomUUID();
-  const record = {
-    authorizationId: approval.lifecycleScope.authorizationId,
-    marker,
-    candidateName: `[SYNTHETIC-E2E] Playwright ${marker}`,
-    candidateEmail: `pw-${marker}@example.invalid`,
-    candidateId: null,
-    attempts: [],
-    status: "RESERVED_NO_DISPATCH"
-  };
-  // Default mode never reuses a reserved authorization.
-  try {
-    fs.writeFileSync(file, JSON.stringify(record, null, 2), { flag: "wx", mode: 0o600 });
-  } catch (error) {
-    if (error.code === "EEXIST") throw new Error("UAT_AUTHORIZATION_ALREADY_RESERVED_NO_RERUN");
-    throw error;
-  }
-  return { record, save: () => fs.writeFileSync(file, JSON.stringify(record, null, 2)) };
+  throw new Error("UAT_EXPLICIT_AUTHORIZATION_MODE_REQUIRED_NO_MARKER_REGENERATION");
 }
 
 async function readRows(page, origin, table, columns, filter) {

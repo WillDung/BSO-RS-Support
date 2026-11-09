@@ -26,7 +26,38 @@ The later focused diagnostic identified that CRM XHR as `/AppWebServices/Metrics
 
 ### One-shot synthetic lifecycle preparation
 
-**Current stop (2026-11-09):** the recovered invocation consumed its one-use claim and failed before the first business dispatch. The owner has authorized one independent additional attempt, but the existing state machine cannot create its linked, exclusive claim while preserving the original marker and evidence; no new claim or invocation occurred. A focused offline regression verifies that the consumed continuation cannot be reused or modify prior evidence. The historical recovery instructions below do not provide a mechanism for the independent attempt. See [Current State](../docs/CURRENT_STATE.md).
+**Historical stop (2026-11-09):** the recovered invocation consumed its one-use claim and failed before the first business dispatch. The old state machine could not represent the owner's independent additional attempt. The subsequently authorized local implementation below supplies that missing mechanism without reusing the consumed claim; no new browser invocation has occurred. The historical recovery instructions are not an independent authorization input. See [Current State](../docs/CURRENT_STATE.md).
+
+### Independent owner-authorized attempt: local support
+
+[Independent authorization](playwright/independent-authorization.cjs) separates a new explicit owner decision from recovery or automatic retry. Each immutable authorization binds the exact account, application, organization, environment, ordered four-action scope, Answered outcome, references, one Candidate, one invocation, zero retries and an independent validity deadline. The original business marker/name/email come from verified zero-dispatch history, not a random replacement. No historical descriptor, journal, claim or report is changed.
+
+Local creation is explicit: `node .\tests\playwright\independent-authorization.cjs --create <absolute-request.local.json>`, with `BSO_UAT_APPROVAL_FILE` and `BSO_UAT_ENVIRONMENT_ID` set. The protected request contains the owner decision text/timestamp, exact new scope and expected historical path/hash manifest; it may identify a preceding independent authorization after a stopped zero-dispatch attempt. This command only creates a protected authorization and permanent predecessor successor-link. It never imports Playwright, launches a browser, consumes a claim or contacts a tenant. A separate attempt ID is assigned once; it is not a new business-operation identity.
+
+An exclusive-create, flushed successor slot prevents different authorization IDs from forking the same predecessor. The independent attempt journal is also exclusive-created and flushed before browser launch; its subsequent snapshots are append-only and hash-linked. A repeated/concurrent invocation, incomplete write, prior dispatch/acknowledgment/uncertainty, active predecessor, changed evidence, or target/scope mismatch is blocked. Interrupted creation remains reserved and requires explicit disposition; never delete or release a slot to retry. New authorizations require a new explicit owner decision, not test success or historical expiry editing.
+
+Run focused offline checks only:
+
+```powershell
+node --test .\tests\playwright\independent-authorization.test.cjs .\tests\playwright\zero-dispatch-recovery.test.cjs
+```
+
+The local record `owner-lifecycle-20261109-02.authorization.json` now exists in the protected, gitignored profile directory, with its claim **unconsumed**. Its local same-day safety deadline is recorded in that file. Expiry rejects execution; it never triggers renewal. No runtime gate was checked in this offline task.
+
+**Future execution command, not executed or authorized to auto-run by this local-only task:** from the repository root, after a separate execution instruction and before the recorded deadline:
+
+```powershell
+$env:BSO_UAT_APPROVAL_FILE = (Resolve-Path .\tests\playwright\owner-approval.local.json).Path
+$env:BSO_UAT_INDEPENDENT_AUTHORIZATION_FILE = (Resolve-Path .\tests\playwright\.auth\owner-lifecycle-20261109-02.authorization.json).Path
+$authorization = Get-Content -LiteralPath $env:BSO_UAT_INDEPENDENT_AUTHORIZATION_FILE -Raw | ConvertFrom-Json
+$env:BSO_UAT_ENVIRONMENT_ID = $authorization.scope.environmentId
+if (Test-Path Env:BSO_UAT_RESUME_ZERO_DISPATCH) { Remove-Item Env:BSO_UAT_RESUME_ZERO_DISPATCH }
+npm --prefix .\tests\playwright run test:lifecycle
+```
+
+The independent selector is mandatory for this authorization; missing/invalid input cannot fall back to default reservation or legacy recovery. No old `BSO_UAT_LIFECYCLE_APPROVAL_FILE` is used as the new permission. Existing runtime identity, synthetic baseline, Console configuration, exact four-operation guards and readback/reload assertions still apply. The test claims once, runs headed with one worker/zero retries, and stops without repair or replay after uncertainty.
+
+### Historical one-shot preparation and recovery
 
 The later owner-authorized consumed-attempt recovery supports `ATTEMPT_CONSUMED_PRE_DISPATCH -> RECOVERY_ELIGIBLE` without changing previous journals/claims. `establishConsumedRecovery` checks every historical consumed snapshot, original evidence hashes, failure report, unchanged authorization descriptor and absence of active lifecycle owners; it exclusively creates and flushes one eligibility event. Any historical dispatch/ambiguity, changed marker, acknowledgment, incomplete log or evidence drift refuses recovery. Existing business correlation IDs are never cleared; eligibility requires no dispatch attempts.
 
@@ -40,13 +71,13 @@ The later [shared request classifier](playwright/request-classification.cjs) use
 
 Run only focused interceptor regressions with `node --test .\tests\playwright\platform-support-request.test.cjs .\tests\playwright\request-classification.test.cjs`. These tests use synthetic requests without browser/tenant access. The classifier's approved-business flag is supplied only after the lifecycle runner's existing one-shot sequence/arm/payload/expiry checks; it is not an independent authorization. The consumed continuation is still unusable for another run; this classification-only change does not release or reset it.
 
-[Lifecycle test](playwright/candidate-lifecycle.spec.cjs) and its [separate configuration](playwright/playwright.lifecycle.config.cjs) prepare exactly one CreateCandidate -> RecordCall/Answered -> ProceedToScheduling -> future manual MarkRound1Scheduled. This is elevated **functional** acceptance only, never clean-BSO security acceptance. Owner mutation approval is **MISSING** as of this preparation; no lifecycle operation is authorized merely by the test's existence.
+[Lifecycle test](playwright/candidate-lifecycle.spec.cjs) and its [separate configuration](playwright/playwright.lifecycle.config.cjs) prepare exactly one CreateCandidate -> RecordCall/Answered -> ProceedToScheduling -> future manual MarkRound1Scheduled. This is elevated **functional** acceptance only, never clean-BSO security acceptance. Owner mutation approval was **MISSING** at the initial preparation checkpoint; no lifecycle operation is authorized merely by the test's existence. The historical descriptor below is now expired and cannot authorize the independent attempt.
 
 Run only `npm --prefix .\tests\playwright run test:lifecycle` with the existing absolute `BSO_UAT_APPROVAL_FILE` and a separate absolute `BSO_UAT_LIFECYCLE_APPROVAL_FILE` pointing to a gitignored local descriptor. With the latter absent or `ownerMutationApproval: false`, the single test writes a sanitized **MISSING / NOT RUN** report and skips before browser launch, baseline reads or business mutations. `--list` discovers only this test; the accepted read-only suite is not selected. No browser setup/install or offline SDK test is needed.
 
 Only after the owner explicitly approves the exact four-operation scope may the local lifecycle descriptor record `ownerMutationApproval: true`, a future owner-approved `expiresAt`, and `identityScope: "OWNER_APPROVED_ELEVATED_FUNCTIONAL_LIFECYCLE"`. It must also bind the same `appUrl`, `organizationId` and `expectedUpn` as the existing read-only descriptor, `authorizationId: "owner-lifecycle-20261109-01"`, `maximumCandidates: 1`, `noRetries: true`, and ordered `actions: ["CreateCandidate", "RecordCall", "ProceedToScheduling", "MarkRound1Scheduled"]`. The exact previously accepted `referenceLabels` are position `[DEV] Software Engineer`, source `[DEV] Internal Test Source`, TA `[DEV] Synthetic Interviewer` and location `[DEV] Test Location`. Resolve each to exactly one active caller-readable row or stop; no substitute/reference creation is permitted. These descriptor requirements document a pending gate, not evidence that consent or live references are current.
 
-The approved run reuses `.auth` and verifies exact organization/account via the shared browser identity helper, without restarting authentication analysis. It reserves a durable exclusive-create authorization journal before tenant access, generates one random synthetic marker and `.invalid` email, and reads only that marker's Candidate/child evidence for a zero baseline. Candidate-list and reference-collection browser requests are narrowed server-side to the intended marker and exact approved reference labels. Counts are observed reads, not invented from expected behavior. Runtime reference/read permissions, navigation filters and response shapes remain unverified until the authorized run.
+The original approved run reused `.auth`, verified exact organization/account and generated the initial synthetic marker and `.invalid` email. That default marker-generating reservation path has now been removed. The independent attempt must preserve the existing marker and read only its Candidate/child evidence for a zero baseline. Candidate-list and reference-collection browser requests are narrowed server-side to the intended marker and exact approved reference labels. Counts are observed reads, not invented from expected behavior. Runtime reference/read permissions, navigation filters and response shapes remain execution-time gates.
 
 The local runner uses explicit Position, Source, TA and Location entity-set/attribute mappings instead of guessing plurals or primary names. Its reference guard combines existing OData filters with the approved active label and blocks direct-record, FetchXML and other unsupported reference read shapes. It verifies returned labels exactly, but Dataverse collation may make query equality case-insensitive; independent server authorization is still required. Scoped-read failures retain only a collection name and HTTP status. Run `node --test .\tests\playwright\reference-scope.test.cjs .\tests\playwright\request-classification.test.cjs` for focused offline schema, reference-boundary and write-blocking checks; this does not launch a browser or consume a claim.
 

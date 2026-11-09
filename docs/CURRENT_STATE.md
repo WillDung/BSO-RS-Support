@@ -1,6 +1,16 @@
 # Current State
 
-## Newly authorized independent lifecycle attempt blocked before launch (2026-11-09)
+## Independent one-shot authorization implemented offline (2026-11-09)
+
+The owner explicitly authorized local runner changes and offline tests to remove the state-machine limitation below, not another browser invocation. The [independent authorization implementation](../tests/playwright/independent-authorization.cjs) creates one immutable, flushed authorization record per explicit owner decision, with a distinct attempt ID, exact scope/identity/environment binding, decision text, timestamps and hashed predecessor evidence. A permanent exclusive successor slot prevents concurrent authorizations from forking the same consumed attempt. Interrupted/partial reservations remain blocked; they are never released automatically.
+
+The [lifecycle loader](../tests/playwright/lifecycle-support.cjs) now accepts the separate independent-authorization input, rejects mixed legacy recovery flags and has no default marker-regeneration path. Exclusive claim creation consumes one invocation before Chromium could start. The new journal appends flushed, hash-linked snapshots, retaining the original Candidate marker and any dispatched logical operation identities. Prior dispatches, acknowledgments, ambiguous outcomes, changed evidence, active predecessors, repeated claims, scope/target drift and nonzero retry/repeat configurations fail closed. Explicit later decisions can link to stopped zero-dispatch independent attempts; neither test success nor an expired historical descriptor grants permission.
+
+**Offline result:** 43 focused independent-authorization and historical-recovery tests passed, including child-process claim contention and loader/reservation integration. The protected local authorization `owner-lifecycle-20261109-02` was created and linked to the consumed historical continuation; its attempt claim remains **UNCONSUMED**. Its conservative local safety deadline is the end of 2026-11-09 Vietnam time, not an extension of the expired historical authorization. All historical journal/claim/descriptor/report bytes remain unchanged.
+
+**Readiness is local runner readiness only.** No browser was launched, no tenant request or write was made, and no lifecycle was executed. Fresh identity, Console configuration, duplicate-marker absence and runtime evidence remain execution-time gates. The current task does not authorize automatically starting that execution. See the [supported future command](../tests/README.md#independent-owner-authorized-attempt-local-support).
+
+## Historical independent lifecycle attempt blocker before local implementation (2026-11-09)
 
 The owner authorized one additional, independent synthetic lifecycle attempt with the original marker and no retries. The existing [lifecycle support](../tests/playwright/lifecycle-support.cjs) accepts only the original authorization identifier; its descriptor has expired, its default reservation targets the existing journal and generates a different marker, and its prior continuation claim is already consumed. The [recovery state machine](../tests/playwright/zero-dispatch-recovery.cjs) provides no separate linked authorization and exclusive claim for this new attempt. Updating the old descriptor would also invalidate the existing recovery evidence chain.
 

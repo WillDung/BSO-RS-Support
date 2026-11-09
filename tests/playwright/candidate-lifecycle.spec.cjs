@@ -52,7 +52,11 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
     report.unexpectedBusinessOrProviderMutations === 0, routeFailure || "UAT_UNEXPECTED_MUTATION");
 
   try {
-    journal = reserveOneShot(approval);
+    journal = reserveOneShot(approval, {
+      workers: testInfo.config.workers, retries: testInfo.project.retries,
+      repeatEach: testInfo.project.repeatEach, retry: testInfo.retry,
+      repeatEachIndex: testInfo.repeatEachIndex
+    });
     const record = journal.record;
     context = await chromium.launchPersistentContext(authDirectory, {
       headless: false, viewport: { width: 1440, height: 1000 },

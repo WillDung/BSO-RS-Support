@@ -143,5 +143,6 @@ function consumeEligibleRecovery(file, authorizationId, scopePath) {
 }
 
 module.exports = {
-  releaseStaleClaim, consumeReleasedClaim, establishConsumedRecovery, consumeEligibleRecovery
+  releaseStaleClaim, consumeReleasedClaim, establishConsumedRecovery, consumeEligibleRecovery,
+  readConsumedPreDispatch
 };

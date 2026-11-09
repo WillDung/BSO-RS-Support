@@ -83,6 +83,21 @@ test("synthetic isolation is not granted by browser configuration", () => {
   }), false);
 });
 
+test("synthetic Create stays disabled before reads when server isolation is unavailable", () => {
+  const source = fs.readFileSync(path.join(webRoot, "candidate-console.js"), "utf8");
+  const coreGate = source.match(/function isCandidateCoreEnabled\(\) \{[\s\S]*?\n  \}/);
+  const initialization = source.match(/async function initialize\(\) \{([\s\S]*?)\n  \}/);
+  assert.ok(coreGate && initialization);
+  assert.match(coreGate[0], /environmentPolicy\.syntheticDataOnly[\s\S]*?policy\.hasSyntheticIsolation\(\) === true/);
+  const blockedBranch = initialization[1].match(/if \(!isCandidateCoreEnabled\(\)\) \{([\s\S]*?)\n    \}/);
+  assert.ok(blockedBranch);
+  assert.match(blockedBranch[1], /\$\("create-button"\)\.disabled = true/);
+  assert.match(blockedBranch[1], /server-side synthetic data isolation/);
+  assert.match(blockedBranch[1], /\breturn;/);
+  assert.ok(initialization[1].indexOf(blockedBranch[0]) <
+    initialization[1].indexOf('loadLookupOptions("os_sr_pos"'));
+});
+
 test("synthetic query helpers escape literal brackets and reject invalid attribute paths", () => {
   const policy = createPolicy();
   assert.equal(policy.syntheticCandidateFilter(),

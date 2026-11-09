@@ -104,6 +104,8 @@ test("Optional CRM support is kept separate from telemetry and ordinary reads", 
   }), "FORBIDDEN_BUSINESS_OR_PROVIDER_OPERATION");
   assert.equal(classify(`${origin}/api/data/v9.2/os_sr_cands`, { method: () => "GET" }),
     "READ_REQUEST_ALLOWED");
+  assert.equal(classify(`${origin}/api/data/v9.0/os_sr_tas`, { method: () => "GET" }),
+    "READ_REQUEST_ALLOWED");
   assert.equal(classify(`${origin}/main.aspx`, { method: () => "GET" }), "READ_REQUEST_ALLOWED");
   assert.equal(classify(`${origin}/api/data/v9.2/os_sr_cact`, { method: () => "POST" }),
     "FORBIDDEN_BUSINESS_OR_PROVIDER_OPERATION");

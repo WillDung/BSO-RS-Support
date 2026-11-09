@@ -58,7 +58,7 @@ function constrainReferenceRequest(url) {
       return "BLOCKED";
     }
     if (resource === schema.collection || resource === `${schema.collection}/`) {
-      if (version !== "v9.2" ||
+      if (!["v9.0", "v9.2"].includes(version) ||
           Array.from(url.searchParams.keys()).some(name => !REFERENCE_QUERY_OPTIONS.has(name))) {
         return "BLOCKED";
       }

@@ -50,16 +50,18 @@ for (const [key, logicalName] of Object.entries(logicalNames)) {
     }
   });
 
-  test(`${key} collection reads remain limited to the exact active approved reference`, () => {
+  test(`${key} collection reads on v9.0 and v9.2 remain limited to the exact active approved reference`, () => {
     const query = referenceQuery(key);
-    const url = new URL(`${origin}/api/data/v9.2/${query.collection}`);
-    url.searchParams.set("$filter", "statecode eq 1 or statecode eq 0");
-    assert.equal(constrainReferenceRequest(url), "SCOPED");
-    assert.equal(url.searchParams.get("$filter"),
-      `(statecode eq 1 or statecode eq 0) and (${query.filter})`);
-    const noFilter = new URL(`${origin}/api/data/v9.2/${query.collection.toUpperCase()}/`);
-    assert.equal(constrainReferenceRequest(noFilter), "SCOPED");
-    assert.equal(noFilter.searchParams.get("$filter"), query.filter);
+    for (const version of ["v9.0", "v9.2"]) {
+      const url = new URL(`${origin}/api/data/${version}/${query.collection}`);
+      url.searchParams.set("$filter", "statecode eq 1 or statecode eq 0");
+      assert.equal(constrainReferenceRequest(url), "SCOPED");
+      assert.equal(url.searchParams.get("$filter"),
+        `(statecode eq 1 or statecode eq 0) and (${query.filter})`);
+      const noFilter = new URL(`${origin}/api/data/${version}/${query.collection.toUpperCase()}/`);
+      assert.equal(constrainReferenceRequest(noFilter), "SCOPED");
+      assert.equal(noFilter.searchParams.get("$filter"), query.filter);
+    }
   });
 
   test(`${key} direct-record and unsupported queries cannot bypass the reference filter`, () => {
@@ -73,7 +75,9 @@ for (const [key, logicalName] of Object.entries(logicalNames)) {
       url.searchParams.set(option, "synthetic");
       assert.equal(constrainReferenceRequest(url), "BLOCKED");
     }
-    assert.equal(constrainReferenceRequest(new URL(`${origin}/api/data/v9.1/${collection}`)), "BLOCKED");
+    for (const version of ["v8.2", "v9.1", "v9.3"]) {
+      assert.equal(constrainReferenceRequest(new URL(`${origin}/api/data/${version}/${collection}`)), "BLOCKED");
+    }
   });
 }
 
@@ -86,6 +90,13 @@ test("unknown reference keys fail and unrelated collections are not rewritten", 
   assert.equal(url.searchParams.get("$filter"), "synthetic");
   assert.equal(constrainReferenceRequest(new URL(`${origin}/api/data/v9.2/os_sr_poss`)), "BLOCKED");
   assert.equal(constrainReferenceRequest(new URL(`${origin}/api/data/v9.2/%ZZ`)), "BLOCKED");
+});
+
+test("the read-only browser runner scopes approved reference reads and blocks unsafe variants", () => {
+  const source = fs.readFileSync(path.join(__dirname, "authentication-only.cjs"), "utf8");
+  assert.match(source, /const\s*{\s*constrainReferenceRequest\s*}\s*=\s*require\("\.\/lifecycle-support\.cjs"\)/);
+  assert.match(source, /const referenceScope = constrainReferenceRequest\(url\)/);
+  assert.match(source, /if \(referenceScope === "BLOCKED"\)[\s\S]*?route\.abort\("blockedbyclient"\)/);
 });
 
 test("scoped read failures expose only the collection and HTTP status", async () => {

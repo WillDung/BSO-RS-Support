@@ -6,6 +6,7 @@ const { chromium, expect } = require("@playwright/test");
 const { isAuthenticationRequest } = require("./authentication-request.cjs");
 const { classifyRequest } = require("./request-classification.cjs");
 const { verifyBrowserIdentity } = require("./browser-identity.cjs");
+const { constrainReferenceRequest } = require("./lifecycle-support.cjs");
 const { authDirectory, runDirectory, protectDirectory, loadApproval } = require("./local-settings.cjs");
 
 function checkPredicate() {
@@ -51,6 +52,7 @@ async function main() {
   }
   const journalPath = path.join(authDirectory, "owner-lifecycle-20261109-01.json");
   const independentAuthorizationPath = path.join(authDirectory, "owner-lifecycle-20261109-02.authorization.json");
+  const latestIndependentAuthorizationPath = path.join(authDirectory, "owner-lifecycle-20261109-03.authorization.json");
   const preservedPaths = [
     journalPath,
     `${journalPath}.login-recovery-claim`,
@@ -58,9 +60,20 @@ async function main() {
     `${journalPath}.recovery-eligible.json`,
     `${journalPath}.eligible-continuation.jsonl`,
     independentAuthorizationPath,
-    `${independentAuthorizationPath}.attempt.jsonl`
+    `${independentAuthorizationPath}.attempt.jsonl`,
+    latestIndependentAuthorizationPath,
+    `${latestIndependentAuthorizationPath}.attempt.jsonl`
   ];
-  const hash = file => createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+  const hash = file => {
+    try {
+      const stat = fs.lstatSync(file);
+      if (!stat.isFile() || stat.isSymbolicLink()) throw new Error("UAT_PROTECTED_EVIDENCE_PATH_INVALID");
+      return createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+    } catch (error) {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    }
+  };
   const before = preservedPaths.map(hash);
   const journal = JSON.parse(fs.readFileSync(journalPath, "utf8"));
   protectDirectory(authDirectory);
@@ -69,6 +82,8 @@ async function main() {
     authenticationOnly: "FAIL", correctedCrmCallback: "NOT VERIFIED",
     exactIdentityAndOrganization: "FAIL", candidateConsoleReadOnly: "FAIL",
     candidateCoreControlsVisible: "NOT VERIFIED",
+    syntheticIsolation: "NOT VERIFIED", createCandidateEnabled: "NOT VERIFIED",
+    createGateReason: null,
     businessMutationsDispatched: 0, lifecycleJournal: "ERROR",
     requestSafety: "NOT RUN",
     predicateChecksPassed: 12, callbackPostsAdmitted: 0, callbackResponseStatuses: [],
@@ -142,6 +157,14 @@ async function main() {
         url.searchParams.set("$filter", existing ? `(${existing}) and (${scope})` : scope);
         return route.continue({ url: url.href });
       }
+      if (api && request.method() === "GET") {
+        const referenceScope = constrainReferenceRequest(url);
+        if (referenceScope === "SCOPED") return route.continue({ url: url.href });
+        if (referenceScope === "BLOCKED") {
+          report.blockedRequests.push({ ...safeClass(request), classification: "UNKNOWN_REQUEST_BLOCKED" });
+          return route.abort("blockedbyclient");
+        }
+      }
       return route.continue();
     });
     console.log("Authentication-only Chromium open; complete Microsoft sign-in/MFA directly if prompted.");
@@ -175,8 +198,35 @@ async function main() {
     await expect(frame.locator("#candidate-search")).toBeVisible();
     await expect(frame.locator("#candidate-rows")).toBeVisible();
     await expect(frame.locator("#create-button")).toBeVisible();
-    await expect(frame.locator("#create-button")).toBeEnabled();
     report.candidateCoreControlsVisible = "PASS";
+    const gate = await frame.locator("body").evaluate(() => {
+      const policy = window.BsoRsCandidateConsolePolicy;
+      const button = document.getElementById("create-button");
+      const policyAvailable = Boolean(policy && typeof policy.hasSyntheticIsolation === "function");
+      const isolation = Boolean(policyAvailable && policy.hasSyntheticIsolation() === true);
+      const workflowPath = document.getElementById("workflow-path-badge")?.textContent;
+      const notice = document.getElementById("notice")?.textContent || "";
+      return {
+        policyAvailable,
+        isolation,
+        createEnabled: Boolean(button && !button.disabled),
+        knownIsolationBlock: workflowPath === "SYNTHETIC DATA ACCESS BLOCKED" &&
+          notice.includes("server-side synthetic data isolation")
+      };
+    });
+    report.syntheticIsolation = !gate.policyAvailable ? "NOT VERIFIED" : gate.isolation ? "VERIFIED" : "BLOCKED";
+    report.createCandidateEnabled = gate.createEnabled ? "YES" : "NO";
+    report.createGateReason = gate.createEnabled && (!gate.policyAvailable || !gate.isolation)
+      ? "CREATE_ENABLED_WITHOUT_VERIFIED_ISOLATION"
+      : !gate.policyAvailable ? "SYNTHETIC_ISOLATION_POLICY_UNAVAILABLE"
+        : !gate.createEnabled && gate.isolation ? "CREATE_DISABLED_DESPITE_ISOLATION"
+          : !gate.isolation && !gate.knownIsolationBlock ? "ISOLATION_GATE_REASON_UNVERIFIED"
+            : !gate.isolation ? "SERVER_SIDE_SYNTHETIC_ISOLATION_UNAVAILABLE" : null;
+    report.requestSafety = report.blockedRequests.length ? "FAIL" : "PASS";
+    if (!gate.policyAvailable || gate.createEnabled !== gate.isolation ||
+        (!gate.isolation && !gate.knownIsolationBlock)) {
+      throw new Error("UAT_CREATE_ISOLATION_GATE_UNVERIFIED");
+    }
     report.candidateConsoleReadOnly = "PASS";
     report.configuration = config;
     report.authenticationOnly = "PASS";

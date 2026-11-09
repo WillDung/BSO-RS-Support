@@ -8,9 +8,9 @@ function isOptionalMetricsRequest(request, url, organizationOrigin) {
 function isOptionalTelemetryRequest(request, url) {
   if (url.protocol !== "https:" || request.method() !== "POST" || request.isNavigationRequest()) return false;
   return (url.hostname === "browser.pipe.aria.microsoft.com" &&
-      url.pathname === "/Collector/3.0/" && request.resourceType() === "ping") ||
+      url.pathname === "/Collector/3.0/" && ["xhr", "fetch", "ping"].includes(request.resourceType())) ||
     (["browser.events.data.microsoft.com", "eu-mobile.events.data.microsoft.com"].includes(url.hostname) &&
-      url.pathname === "/OneCollector/1.0/" && request.resourceType() === "xhr");
+      url.pathname === "/OneCollector/1.0/" && ["xhr", "fetch", "ping"].includes(request.resourceType()));
 }
 
 module.exports = { isOptionalMetricsRequest, isOptionalTelemetryRequest };

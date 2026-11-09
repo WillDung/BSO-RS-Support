@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const { createHash } = require("node:crypto");
 const { chromium, expect } = require("@playwright/test");
 const { isAuthenticationRequest } = require("./authentication-request.cjs");
-const { isOptionalMetricsRequest, isOptionalTelemetryRequest } = require("./platform-support-request.cjs");
+const { classifyRequest } = require("./request-classification.cjs");
 const { verifyBrowserIdentity } = require("./browser-identity.cjs");
 const { authDirectory, runDirectory, protectDirectory, loadApproval } = require("./local-settings.cjs");
 
@@ -105,29 +105,20 @@ async function main() {
     await context.route("**/*", async route => {
       const request = route.request();
       const url = new URL(request.url());
-      const mutation = !["GET", "HEAD", "OPTIONS"].includes(request.method());
       const api = url.origin === approval.origin && /\/api\/data\//i.test(url.pathname);
-      if (isOptionalMetricsRequest(request, url, approval.origin)) {
+      const classification = classifyRequest(request, url, { origin: approval.origin, callbackOrigin: callback });
+      if (["OPTIONAL_SUPPORT_SUPPRESSED", "OPTIONAL_TELEMETRY_SUPPRESSED"].includes(classification)) {
         report.suppressedPlatformRequests++;
-        report.suppressedMetricsRequests++;
-        return route.abort("blockedbyclient");
-      }
-      const support = api && request.method() === "POST" &&
-        ["msdyn_ReportToMonitoringHub", "GetRecentItems", "GetCopilotSettingsForEnvironment"]
-          .includes(url.pathname.split("/").pop());
-      const telemetry = isOptionalTelemetryRequest(request, url);
-      if (support || telemetry) {
-        report.suppressedPlatformRequests++;
-        if (telemetry) report.optionalSuppressions.push({
-          classification: "SUPPRESSED_OPTIONAL", host: url.hostname, path: url.pathname,
+        if (url.pathname === "/AppWebServices/MetricsReportingService.asmx/Report") report.suppressedMetricsRequests++;
+        report.optionalSuppressions.push({
+          classification, host: url.hostname, path: url.pathname,
           method: request.method(), resourceType: request.resourceType()
         });
         return route.abort("blockedbyclient");
       }
-      const auth = isAuthenticationRequest(request, url, callback, approval.origin);
-      const provider = /(^|\.)(graph\.microsoft\.com|outlook\.office365\.com|outlook\.office\.com)$/i.test(url.hostname);
-      if (provider || (mutation && (!auth || api))) {
-        report.blockedRequests.push(safeClass(request));
+      const auth = classification === "AUTH_NAVIGATION";
+      if (["FORBIDDEN_BUSINESS_OR_PROVIDER_OPERATION", "UNKNOWN_REQUEST_BLOCKED"].includes(classification)) {
+        report.blockedRequests.push({ ...safeClass(request), classification });
         return route.abort("blockedbyclient");
       }
       if (auth && [callback, approval.origin].includes(url.origin) && request.method() === "POST") {

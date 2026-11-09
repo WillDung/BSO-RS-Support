@@ -4,8 +4,7 @@ const path = require("node:path");
 const { createHash } = require("node:crypto");
 const { authDirectory, runDirectory } = require("./local-settings.cjs");
 const { verifyBrowserIdentity } = require("./browser-identity.cjs");
-const { isAuthenticationRequest } = require("./authentication-request.cjs");
-const { isOptionalMetricsRequest, isOptionalTelemetryRequest } = require("./platform-support-request.cjs");
+const { classifyRequest } = require("./request-classification.cjs");
 const {
   ACTIONS, STATUSES, REFERENCE_LABELS, GUID, requireCondition, loadLifecycleApproval,
   reserveOneShot, readRows, readEvidence, counts, validateEvidence
@@ -25,6 +24,7 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
     deliberatelyCreatedEmailCalendarOrAvailability: 0,
     platformSupportRequestsSuppressed: 0,
     optionalSuppressions: [],
+    unknownRequestsBlocked: 0,
     blockedRequestKinds: [],
     dispatchedOperations: [],
     screenshotsAndTraces: "DISABLED"
@@ -62,14 +62,14 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
       const url = new URL(request.url());
       const mutation = !["GET", "HEAD", "OPTIONS"].includes(request.method());
       const api = url.origin === approval.origin && /\/api\/data\//i.test(url.pathname);
-      const operation = url.pathname.split("/").pop();
-      const platformSupport = api && request.method() === "POST" &&
-        ["msdyn_ReportToMonitoringHub", "GetRecentItems", "GetCopilotSettingsForEnvironment"].includes(operation);
-      const telemetry = isOptionalTelemetryRequest(request, url);
-      if (platformSupport || isOptionalMetricsRequest(request, url, approval.origin) || telemetry) {
+      const classificationOptions = {
+        origin: approval.origin, callbackOrigin: approval.lifecycleScope.authenticationCallbackOrigin
+      };
+      const classification = classifyRequest(request, url, classificationOptions);
+      if (["OPTIONAL_SUPPORT_SUPPRESSED", "OPTIONAL_TELEMETRY_SUPPRESSED"].includes(classification)) {
         report.platformSupportRequestsSuppressed++;
-        if (telemetry) report.optionalSuppressions.push({
-          classification: "SUPPRESSED_OPTIONAL", host: url.hostname, path: url.pathname,
+        report.optionalSuppressions.push({
+          classification, host: url.hostname, path: url.pathname,
           method: request.method(), resourceType: request.resourceType()
         });
         return route.abort("blockedbyclient");
@@ -93,6 +93,9 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
           }
           requireCondition(Object.keys(body).length === Object.keys(expected).length &&
             Object.keys(expected).every(key => body[key] === expected[key]), "UAT_OPERATION_PAYLOAD_MISMATCH");
+          requireCondition(classifyRequest(request, url, {
+            ...classificationOptions, approvedBusinessOperation: true
+          }) === "APPROVED_BUSINESS_OPERATION", "UAT_BUSINESS_REQUEST_SHAPE_MISMATCH");
           // Consume the arm before awaiting anything; a concurrent retry must not pass.
           armed = null;
           const previous = await readRows(page, approval.origin, "os_sr_oprcs", ["os_sr_oprcid"],
@@ -101,6 +104,7 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
           assertNoUnexpected();
           record.attempts.push({
             action: body.ActionType, correlation: body.CorrelationId.toLowerCase(),
+            classification: "APPROVED_BUSINESS_OPERATION",
             contactedAt: body.ContactedAt, outcome: "DISPATCH_RESERVED_OUTCOME_UNKNOWN"
           });
           record.status = "DISPATCH_RESERVED_OUTCOME_UNKNOWN";
@@ -110,17 +114,21 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
           armed = null;
           routeFailure = String(error.message).match(/\bUAT_[A-Z_]+\b/)?.[0] || "UAT_DISPATCH_GUARD_FAILED";
           report.unexpectedBusinessOrProviderMutations++;
+          report.blockedRequestKinds.push({
+            classification: "FORBIDDEN_BUSINESS_OR_PROVIDER_OPERATION",
+            method: request.method(), host: url.hostname, path: url.pathname,
+            resourceType: request.resourceType(), navigation: request.isNavigationRequest()
+          });
           return route.abort("blockedbyclient");
         }
       }
       // Outside Microsoft authentication, no other HTTP write or provider call is admitted.
-      const signIn = isAuthenticationRequest(request, url,
-        approval.lifecycleScope.authenticationCallbackOrigin, approval.origin);
-      const provider = /(^|\.)(graph\.microsoft\.com|outlook\.office365\.com|outlook\.office\.com)$/i.test(url.hostname);
-      if (provider || (mutation && !signIn)) {
-        routeFailure = "UAT_UNEXPECTED_BUSINESS_OR_PROVIDER_REQUEST";
-        report.unexpectedBusinessOrProviderMutations++;
-        const kind = { method: request.method(), host: url.hostname, path: url.pathname,
+      if (["FORBIDDEN_BUSINESS_OR_PROVIDER_OPERATION", "UNKNOWN_REQUEST_BLOCKED"].includes(classification)) {
+        const unknown = classification === "UNKNOWN_REQUEST_BLOCKED";
+        routeFailure = unknown ? "UAT_UNKNOWN_REQUEST_BLOCKED" : "UAT_UNEXPECTED_BUSINESS_OR_PROVIDER_REQUEST";
+        if (unknown) report.unknownRequestsBlocked++;
+        else report.unexpectedBusinessOrProviderMutations++;
+        const kind = { classification, method: request.method(), host: url.hostname, path: url.pathname,
           resourceType: request.resourceType(), navigation: request.isNavigationRequest() };
         if (!report.blockedRequestKinds.some(existing => JSON.stringify(existing) === JSON.stringify(kind))) {
           report.blockedRequestKinds.push(kind);

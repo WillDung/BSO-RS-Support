@@ -28,3 +28,8 @@ obj/
 # Local Power Platform tooling state; do not ignore exported/unpacked solution source
 .powerplatform/
 .pac/
+
+# Local headed browser UAT: credentials/profile and protected evidence
+tests/playwright/node_modules/
+tests/playwright/.auth/
+tests/playwright/results/

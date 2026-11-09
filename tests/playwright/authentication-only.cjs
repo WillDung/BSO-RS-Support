@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const { createHash } = require("node:crypto");
 const { chromium, expect } = require("@playwright/test");
 const { isAuthenticationRequest } = require("./authentication-request.cjs");
-const { isOptionalMetricsRequest } = require("./platform-support-request.cjs");
+const { isOptionalMetricsRequest, isOptionalTelemetryRequest } = require("./platform-support-request.cjs");
 const { verifyBrowserIdentity } = require("./browser-identity.cjs");
 const { authDirectory, runDirectory, protectDirectory, loadApproval } = require("./local-settings.cjs");
 
@@ -62,7 +62,7 @@ async function main() {
     businessMutationsDispatched: 0, lifecycleJournal: "ERROR",
     requestSafety: "NOT RUN",
     predicateChecksPassed: 12, callbackPostsAdmitted: 0, callbackResponseStatuses: [],
-    suppressedPlatformRequests: 0, suppressedMetricsRequests: 0,
+    suppressedPlatformRequests: 0, suppressedMetricsRequests: 0, optionalSuppressions: [],
     blockedRequests: [], failedRequestClasses: [],
     lifecycleInvoked: false, screenshotsAndTraces: "DISABLED",
     acceptanceScope: "ELEVATED_FUNCTIONAL_ONLY"
@@ -115,10 +115,13 @@ async function main() {
       const support = api && request.method() === "POST" &&
         ["msdyn_ReportToMonitoringHub", "GetRecentItems", "GetCopilotSettingsForEnvironment"]
           .includes(url.pathname.split("/").pop());
-      const telemetry = url.hostname === "eu-mobile.events.data.microsoft.com" &&
-        url.pathname === "/OneCollector/1.0/";
+      const telemetry = isOptionalTelemetryRequest(request, url);
       if (support || telemetry) {
         report.suppressedPlatformRequests++;
+        if (telemetry) report.optionalSuppressions.push({
+          classification: "SUPPRESSED_OPTIONAL", host: url.hostname, path: url.pathname,
+          method: request.method(), resourceType: request.resourceType()
+        });
         return route.abort("blockedbyclient");
       }
       const auth = isAuthenticationRequest(request, url, callback, approval.origin);

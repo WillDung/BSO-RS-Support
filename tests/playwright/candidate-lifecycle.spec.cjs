@@ -5,7 +5,7 @@ const { createHash } = require("node:crypto");
 const { authDirectory, runDirectory } = require("./local-settings.cjs");
 const { verifyBrowserIdentity } = require("./browser-identity.cjs");
 const { isAuthenticationRequest } = require("./authentication-request.cjs");
-const { isOptionalMetricsRequest } = require("./platform-support-request.cjs");
+const { isOptionalMetricsRequest, isOptionalTelemetryRequest } = require("./platform-support-request.cjs");
 const {
   ACTIONS, STATUSES, REFERENCE_LABELS, GUID, requireCondition, loadLifecycleApproval,
   reserveOneShot, readRows, readEvidence, counts, validateEvidence
@@ -24,6 +24,7 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
     unexpectedBusinessOrProviderMutations: 0,
     deliberatelyCreatedEmailCalendarOrAvailability: 0,
     platformSupportRequestsSuppressed: 0,
+    optionalSuppressions: [],
     blockedRequestKinds: [],
     dispatchedOperations: [],
     screenshotsAndTraces: "DISABLED"
@@ -64,8 +65,13 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
       const operation = url.pathname.split("/").pop();
       const platformSupport = api && request.method() === "POST" &&
         ["msdyn_ReportToMonitoringHub", "GetRecentItems", "GetCopilotSettingsForEnvironment"].includes(operation);
-      if (platformSupport || isOptionalMetricsRequest(request, url, approval.origin)) {
+      const telemetry = isOptionalTelemetryRequest(request, url);
+      if (platformSupport || isOptionalMetricsRequest(request, url, approval.origin) || telemetry) {
         report.platformSupportRequestsSuppressed++;
+        if (telemetry) report.optionalSuppressions.push({
+          classification: "SUPPRESSED_OPTIONAL", host: url.hostname, path: url.pathname,
+          method: request.method(), resourceType: request.resourceType()
+        });
         return route.abort("blockedbyclient");
       }
       if (api && mutation && url.pathname === "/api/data/v9.2/os_sr_cact") {
@@ -114,7 +120,8 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
       if (provider || (mutation && !signIn)) {
         routeFailure = "UAT_UNEXPECTED_BUSINESS_OR_PROVIDER_REQUEST";
         report.unexpectedBusinessOrProviderMutations++;
-        const kind = { method: request.method(), host: url.hostname, path: url.pathname };
+        const kind = { method: request.method(), host: url.hostname, path: url.pathname,
+          resourceType: request.resourceType(), navigation: request.isNavigationRequest() };
         if (!report.blockedRequestKinds.some(existing => JSON.stringify(existing) === JSON.stringify(kind))) {
           report.blockedRequestKinds.push(kind);
         }

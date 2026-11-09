@@ -4,6 +4,7 @@ const path = require("node:path");
 const { createHash } = require("node:crypto");
 const { authDirectory, runDirectory } = require("./local-settings.cjs");
 const { verifyBrowserIdentity } = require("./browser-identity.cjs");
+const { isAuthenticationRequest } = require("./authentication-request.cjs");
 const {
   ACTIONS, STATUSES, REFERENCE_LABELS, GUID, requireCondition, loadLifecycleApproval,
   reserveOneShot, readRows, readEvidence, counts, validateEvidence
@@ -22,6 +23,7 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
     unexpectedBusinessOrProviderMutations: 0,
     deliberatelyCreatedEmailCalendarOrAvailability: 0,
     platformSupportRequestsSuppressed: 0,
+    blockedRequestKinds: [],
     dispatchedOperations: [],
     screenshotsAndTraces: "DISABLED"
   };
@@ -105,11 +107,15 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
         }
       }
       // Outside Microsoft authentication, no other HTTP write or provider call is admitted.
-      const signIn = /(^|\.)(microsoftonline\.com|msauth\.net|msftauth\.net)$/i.test(url.hostname);
+      const signIn = isAuthenticationRequest(request, url, approval.lifecycleScope.authenticationCallbackOrigin);
       const provider = /(^|\.)(graph\.microsoft\.com|outlook\.office365\.com|outlook\.office\.com)$/i.test(url.hostname);
       if (provider || (mutation && !signIn)) {
         routeFailure = "UAT_UNEXPECTED_BUSINESS_OR_PROVIDER_REQUEST";
         report.unexpectedBusinessOrProviderMutations++;
+        const kind = { method: request.method(), host: url.hostname, path: url.pathname };
+        if (!report.blockedRequestKinds.some(existing => JSON.stringify(existing) === JSON.stringify(kind))) {
+          report.blockedRequestKinds.push(kind);
+        }
         return route.abort("blockedbyclient");
       }
       // Keep the normal Console list path, but constrain the server response to this one marker.
@@ -135,7 +141,7 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
     });
 
     await page.goto(`${approval.origin}/main.aspx?pagetype=apps`, { waitUntil: "domcontentloaded" });
-    const identity = await verifyBrowserIdentity(page, approval);
+    const identity = await verifyBrowserIdentity(page, approval, 480_000);
     requireCondition(identity.bsoRole && identity.elevated, "UAT_APPROVED_FUNCTIONAL_IDENTITY_MISMATCH");
     report.exactOrganizationAndAccount = "VERIFIED";
     assertNoUnexpected();

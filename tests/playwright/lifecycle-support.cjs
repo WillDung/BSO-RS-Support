@@ -23,6 +23,13 @@ function loadLifecycleApproval() {
   requireCondition(path.isAbsolute(file), "UAT_ABSOLUTE_LIFECYCLE_APPROVAL_FILE_REQUIRED");
   const scope = JSON.parse(fs.readFileSync(file, "utf8"));
   if (scope.ownerMutationApproval !== true) return { approved: false };
+  if (scope.authenticationCallbackOrigin) {
+    const callback = new URL(scope.authenticationCallbackOrigin);
+    requireCondition(callback.protocol === "https:" && !callback.username && !callback.password &&
+      callback.origin === scope.authenticationCallbackOrigin &&
+      /^[a-z0-9-]+\.crm[0-9]*\.dynamics\.com$/i.test(callback.hostname),
+    "UAT_INVALID_AUTHENTICATION_CALLBACK_ORIGIN");
+  }
   requireCondition(scope.authorizationId === "owner-lifecycle-20261109-01" &&
     scope.appUrl === base.appUrl && scope.organizationId === base.organizationId &&
     scope.expectedUpn?.toLowerCase() === base.expectedUpn.toLowerCase() &&
@@ -38,6 +45,26 @@ function loadLifecycleApproval() {
 
 function reserveOneShot(approval) {
   const file = path.join(authDirectory, `${approval.lifecycleScope.authorizationId}.json`);
+  if (process.env.BSO_UAT_RESUME_ZERO_DISPATCH === "owner-authorized-login-recovery") {
+    const record = JSON.parse(fs.readFileSync(file, "utf8"));
+    requireCondition(record.authorizationId === approval.lifecycleScope.authorizationId &&
+      record.status === "STOPPED_NO_RETRY_RECONCILE_ONLY" &&
+      Array.isArray(record.attempts) && record.attempts.length === 0 && record.candidateId === null &&
+      GUID.test(record.marker) &&
+      record.candidateName === `[SYNTHETIC-E2E] Playwright ${record.marker}` &&
+      record.candidateEmail === `pw-${record.marker}@example.invalid` &&
+      !record.loginRecovery, "UAT_RESUME_REQUIRES_UNCHANGED_ZERO_DISPATCH_JOURNAL");
+    // Keep the original marker/history; a separate exclusive claim prevents parallel resumption.
+    fs.writeFileSync(`${file}.login-recovery-claim`, "owner-authorized-login-recovery",
+      { flag: "wx", mode: 0o600 });
+    record.loginRecovery = {
+      authorizedAt: "2026-11-09T04:17:34.064Z",
+      priorStatus: record.status,
+      dispatchesAtResume: 0
+    };
+    fs.writeFileSync(file, JSON.stringify(record, null, 2));
+    return { record, save: () => fs.writeFileSync(file, JSON.stringify(record, null, 2)) };
+  }
   const marker = randomUUID();
   const record = {
     authorizationId: approval.lifecycleScope.authorizationId,
@@ -48,7 +75,7 @@ function reserveOneShot(approval) {
     attempts: [],
     status: "RESERVED_NO_DISPATCH"
   };
-  // Never reuse an authorization after any run, including an ambiguous failure.
+  // Default mode never reuses a reserved authorization.
   try {
     fs.writeFileSync(file, JSON.stringify(record, null, 2), { flag: "wx", mode: 0o600 });
   } catch (error) {

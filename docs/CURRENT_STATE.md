@@ -1,5 +1,17 @@
 # Current State
 
+## Independent lifecycle invocation 03 stopped before first mutation (2026-11-09)
+
+**Classification: `BLOCKED_BEFORE_FIRST_MUTATION`.** Following the owner's separate approval, a new immutable authorization (`owner-lifecycle-20261109-03`) was created and linked to the stopped, zero-dispatch 02 attempt. Its original synthetic marker and historical evidence hashes were verified unchanged. The new claim remains unconsumed.
+
+A fresh headed authentication-only check passed exact account/organization verification, `srapp` navigation, DEV synthetic configuration, Candidate Core controls, Calendar disabled, and request safety; business mutations: **0**.
+
+Exactly one headed Candidate lifecycle invocation ran with one worker and zero retries. Identity and organization verification passed, and the scoped pre-dispatch baseline was **0 Candidates / 0 Calls / 0 Schedules / 0 Status History / 0 Receipts**. During Console initialization, Playwright's `toBeEnabled` assertion for `#create-button` failed at line 240: the control was disabled. The failure occurred before the exclusive claim and before any business operation was armed or forwarded. Candidate creation, Answered Call, Proceed, and manual scheduling dispatches: **0**. Final readback and reload persistence were not run.
+
+The interceptor blocked 23 unknown requests; the first was CRM `POST /AppWebServices/MetadataService.asmx/GetResourceStrings`. It also blocked v9.0 reference collection GETs. Fifty-five optional support/telemetry requests were suppressed. These observations do not establish that a blocked request caused the disabled Create button; unknown request semantics remain unverified and blocked. The new authorization is valid but unclaimed; do not rerun this invocation or loosen request rules. Protected result: [lifecycle report](../tests/playwright/results/2026-11-09T14-59-45-503Z/lifecycle-report.json). The historical chain and predecessor claim remain unchanged.
+
+The checked-in [Console policy](../solutions/CandidateConsole/WebResources/os_/bso/candidate-console-policy.js#L76) reports no approved synthetic isolation, and [Candidate Core enablement](../solutions/CandidateConsole/WebResources/os_/bso/candidate-console.js#L197) requires it in synthetic mode. The Console's fail-closed query handler disables workflow controls after a query failure. This is consistent with the observed disabled button, but does not identify the exact runtime request or establish that the currently checked-in resource matches the served resource; the separate authentication-only run had passed its controls check. Do not bypass the synthetic isolation guard or broadly allow the blocked requests. Focused offline safety tests passed **76/76**; syntax and diff checks passed.
+
 ## Independent lifecycle stopped before first mutation (2026-11-09)
 
 The owner instructed one independent invocation. Immediately beforehand, the new authorization was unexpired and unconsumed; the original marker, zero-dispatch historical chain, approved account and exact DEV organization/environment were verified. A missing `REFERENCE_LABELS` import in the local [lifecycle test](../tests/playwright/candidate-lifecycle.spec.cjs) was corrected before the invocation; its focused reference tests and import regression passed offline.

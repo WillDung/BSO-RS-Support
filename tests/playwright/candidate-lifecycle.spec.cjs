@@ -40,6 +40,16 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
     JSON.stringify(report, null, 2));
   writeReport();
   test.skip(!approval.approved, "UAT_OWNER_LIFECYCLE_MUTATION_APPROVAL_MISSING");
+  let record = approval.independentAuthorizationRecord ? {
+    authorizationId: approval.independentAuthorizationRecord.scope.authorizationId,
+    attemptId: approval.independentAuthorizationRecord.attemptId,
+    marker: approval.independentAuthorizationRecord.marker,
+    candidateName: approval.independentAuthorizationRecord.candidateName,
+    candidateEmail: approval.independentAuthorizationRecord.candidateEmail,
+    candidateId: null,
+    attempts: [],
+    status: "RESERVED_NO_DISPATCH"
+  } : null;
   let context;
   let journal;
   let armed = null;
@@ -50,7 +60,7 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
   let references;
   let schedule;
   let evidence;
-  const save = () => { journal.save(); writeReport(); };
+  const save = () => { if (journal) journal.save(); writeReport(); };
   const assertNoUnexpected = () => requireCondition(!routeFailure &&
     report.forbiddenRequestsBlocked === 0, routeFailure || "UAT_UNEXPECTED_MUTATION");
   const countClassification = classification => {
@@ -68,13 +78,15 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
     requireCondition(testInfo.config.workers === 1 && testInfo.project.retries === 0 &&
       testInfo.project.repeatEach === 1 && testInfo.retry === 0 && testInfo.repeatEachIndex === 0,
     "UAT_ONE_SHOT_RUNNER_CONFIGURATION_REQUIRED");
-    phase = "one-shot-claim-acquisition";
-    journal = reserveOneShot(approval, {
-      workers: testInfo.config.workers, retries: testInfo.project.retries,
-      repeatEach: testInfo.project.repeatEach, retry: testInfo.retry,
-      repeatEachIndex: testInfo.repeatEachIndex
-    });
-    const record = journal.record;
+    if (!record) {
+      phase = "one-shot-claim-acquisition";
+      journal = reserveOneShot(approval, {
+        workers: testInfo.config.workers, retries: testInfo.project.retries,
+        repeatEach: testInfo.project.repeatEach, retry: testInfo.retry,
+        repeatEachIndex: testInfo.repeatEachIndex
+      });
+      record = journal.record;
+    }
     phase = "browser-initialization";
     context = await chromium.launchPersistentContext(authDirectory, {
       headless: false, viewport: { width: 1440, height: 1000 },
@@ -290,6 +302,20 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
     ]) {
       await expect(frame.locator(`#${id} option`).filter({ hasText: REFERENCE_LABELS[key] })).toHaveCount(1);
       await frame.locator(`#${id}`).selectOption(references[key]);
+    }
+    if (!journal) {
+      phase = "one-shot-claim-acquisition";
+      journal = reserveOneShot(approval, {
+        workers: testInfo.config.workers, retries: testInfo.project.retries,
+        repeatEach: testInfo.project.repeatEach, retry: testInfo.retry,
+        repeatEachIndex: testInfo.repeatEachIndex
+      });
+      requireCondition(record.marker === journal.record.marker &&
+        record.candidateName === journal.record.candidateName &&
+        record.candidateEmail === journal.record.candidateEmail &&
+        record.attemptId === journal.record.attemptId,
+      "UAT_CLAIM_IDENTITY_MISMATCH");
+      record = journal.record;
     }
     await invokeOnce("CreateCandidate", {
       CandidateName: record.candidateName, CandidateEmail: record.candidateEmail,

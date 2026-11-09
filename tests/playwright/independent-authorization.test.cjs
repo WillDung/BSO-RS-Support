@@ -321,6 +321,45 @@ test("Runner loader and reservation use the new authorization, never the expired
   for (const item of f.evidence) assert.equal(digest(item.path), item.sha256);
 });
 
+test("A previously claimed independent authorization is rejected by the loader", t => {
+  const f = fixture(t);
+  f.create();
+  f.claim();
+  const approvalPath = path.join(path.dirname(f.file), "read-only.json");
+  write(approvalPath, {
+    ...f.base, candidateNumber: "CAND-123456", syntheticReadScopeApproved: true,
+    syntheticLifecycleAuthorized: false, identityScope: "OWNER_APPROVED_ELEVATED_READ_ONLY"
+  });
+  const source = `
+    const {loadLifecycleApproval}=require(${JSON.stringify(require.resolve("./lifecycle-support.cjs"))});
+    try { loadLifecycleApproval(); process.exitCode=2; }
+    catch (error) {
+      if (error.message !== "UAT_INDEPENDENT_AUTHORIZATION_ALREADY_CLAIMED") process.exitCode=3;
+    }`;
+  const child = spawnSync(process.execPath, ["-e", source], {
+    encoding: "utf8", env: {
+      ...process.env, BSO_UAT_APPROVAL_FILE: approvalPath,
+      BSO_UAT_INDEPENDENT_AUTHORIZATION_FILE: f.file,
+      BSO_UAT_ENVIRONMENT_ID: f.base.environmentId,
+      BSO_UAT_RESUME_ZERO_DISPATCH: ""
+    }
+  });
+  assert.equal(child.status, 0, child.stderr);
+  assert.equal(events(`${f.file}.attempt.jsonl`).length, 1);
+  for (const item of f.evidence) assert.equal(digest(item.path), item.sha256);
+});
+
+test("Independent lifecycle claim is deferred until all read-only and form gates pass", () => {
+  const source = fs.readFileSync(path.join(__dirname, "candidate-lifecycle.spec.cjs"), "utf8");
+  const baseline = source.indexOf("report.baselineCounts = counts(evidence);");
+  const consoleGate = source.indexOf('await expect(frame.locator("#availability-submit")).toBeDisabled();');
+  const referenceSelection = source.indexOf("await frame.locator(`#${id}`).selectOption(references[key]);");
+  const claim = source.indexOf("journal = reserveOneShot(approval", referenceSelection);
+  const create = source.indexOf('await invokeOnce("CreateCandidate"', claim);
+  assert.ok(baseline >= 0 && consoleGate > baseline);
+  assert.ok(referenceSelection > consoleGate && claim > referenceSelection && create > claim);
+});
+
 test("Four ordered synthetic dispatch/acknowledgment pairs and persistence snapshots can be appended", t => {
   const f = fixture(t);
   f.create();

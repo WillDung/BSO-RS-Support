@@ -34,7 +34,7 @@ The later focused diagnostic identified that CRM XHR as `/AppWebServices/Metrics
 
 Local creation is explicit: `node .\tests\playwright\independent-authorization.cjs --create <absolute-request.local.json>`, with `BSO_UAT_APPROVAL_FILE` and `BSO_UAT_ENVIRONMENT_ID` set. The protected request contains the owner decision text/timestamp, exact new scope and expected historical path/hash manifest; it may identify a preceding independent authorization after a stopped zero-dispatch attempt. This command only creates a protected authorization and permanent predecessor successor-link. It never imports Playwright, launches a browser, consumes a claim or contacts a tenant. A separate attempt ID is assigned once; it is not a new business-operation identity.
 
-An exclusive-create, flushed successor slot prevents different authorization IDs from forking the same predecessor. The independent attempt journal is also exclusive-created and flushed before browser launch; its subsequent snapshots are append-only and hash-linked. A repeated/concurrent invocation, incomplete write, prior dispatch/acknowledgment/uncertainty, active predecessor, changed evidence, or target/scope mismatch is blocked. Interrupted creation remains reserved and requires explicit disposition; never delete or release a slot to retry. New authorizations require a new explicit owner decision, not test success or historical expiry editing.
+An exclusive-create, flushed successor slot prevents different authorization IDs from forking the same predecessor. The lifecycle runner performs its identity, reference, zero-baseline, Console-configuration, and form-readiness checks before exclusive-creating and flushing the attempt journal immediately before the first business action. Its subsequent snapshots are append-only and hash-linked. A repeated/concurrent invocation, incomplete write, prior dispatch/acknowledgment/uncertainty, active predecessor, changed evidence, or target/scope mismatch is blocked. A failed preflight therefore does not consume the independent claim; a claim acquired at the first-action boundary remains consumed after any later failure. Interrupted authorization/claim creation remains reserved and requires explicit disposition; never delete or release a slot to retry. New authorizations require a new explicit owner decision, not test success or historical expiry editing.
 
 Run focused offline checks only:
 
@@ -43,6 +43,8 @@ node --test .\tests\playwright\independent-authorization.test.cjs .\tests\playwr
 ```
 
 The local record `owner-lifecycle-20261109-02.authorization.json` exists in the protected, gitignored profile directory. Its claim was subsequently **consumed** by the single invocation recorded in [Current State](../docs/CURRENT_STATE.md#independent-lifecycle-stopped-before-first-mutation-2026-11-09). Do not rerun or reset that claim. Its local same-day safety deadline is recorded in the file; expiry never triggers renewal.
+
+After a separate owner approval, `owner-lifecycle-20261109-03` was created as a successor to 02. One headed, zero-retry invocation stopped during Console initialization because the Create Candidate control was disabled; it stopped before claim acquisition and all business dispatches. The new claim remains unconsumed, but that invocation has already ended and must not be automatically repeated. The first blocked request and sanitized assertion are retained in the protected [result](playwright/results/2026-11-09T14-59-45-503Z/lifecycle-report.json). The checked-in Console policy is fail-closed when approved synthetic isolation is absent, but the exact runtime request or served-resource state causing this assertion remains unverified. See [Current State](../docs/CURRENT_STATE.md#independent-lifecycle-invocation-03-stopped-before-first-mutation-2026-11-09).
 
 **Historical command, executed once; do not rerun with the consumed authorization:** from the repository root:
 
@@ -55,7 +57,7 @@ if (Test-Path Env:BSO_UAT_RESUME_ZERO_DISPATCH) { Remove-Item Env:BSO_UAT_RESUME
 npm --prefix .\tests\playwright run test:lifecycle
 ```
 
-The independent selector is mandatory for this authorization; missing/invalid input cannot fall back to default reservation or legacy recovery. No old `BSO_UAT_LIFECYCLE_APPROVAL_FILE` is used as the new permission. Existing runtime identity, synthetic baseline, Console configuration, exact four-operation guards and readback/reload assertions still apply. The test claims once, runs headed with one worker/zero retries, and stops without repair or replay after uncertainty.
+The independent selector is mandatory for this authorization; missing/invalid input cannot fall back to default reservation or legacy recovery. No old `BSO_UAT_LIFECYCLE_APPROVAL_FILE` is used as the new permission. Existing runtime identity, synthetic baseline, Console configuration, exact four-operation guards and readback/reload assertions still apply. The test runs headed with one worker/zero retries, claims once only after the read-only gates and form preparation pass, and stops without repair or replay after uncertainty.
 
 ### Historical one-shot preparation and recovery
 

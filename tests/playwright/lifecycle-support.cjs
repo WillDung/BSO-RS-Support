@@ -81,11 +81,14 @@ function loadLifecycleApproval() {
       "UAT_INDEPENDENT_AUTHORIZATION_CANNOT_USE_RECOVERY");
     const { loadIndependentAuthorization, digest } = require("./independent-authorization.cjs");
     const file = process.env.BSO_UAT_INDEPENDENT_AUTHORIZATION_FILE;
+    requireCondition(!fs.existsSync(`${file}.attempt.jsonl`),
+      "UAT_INDEPENDENT_AUTHORIZATION_ALREADY_CLAIMED");
     const target = { ...base, environmentId: process.env.BSO_UAT_ENVIRONMENT_ID };
     const authorization = loadIndependentAuthorization(file, target);
     return {
       ...target, approved: true, lifecycleScope: authorization.scope,
-      independentAuthorizationFile: file, independentAuthorizationHash: digest(file)
+      independentAuthorizationFile: file, independentAuthorizationHash: digest(file),
+      independentAuthorizationRecord: authorization
     };
   }
   const file = process.env.BSO_UAT_LIFECYCLE_APPROVAL_FILE;

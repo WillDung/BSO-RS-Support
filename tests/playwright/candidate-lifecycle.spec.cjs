@@ -5,6 +5,7 @@ const { createHash } = require("node:crypto");
 const { authDirectory, runDirectory } = require("./local-settings.cjs");
 const { verifyBrowserIdentity } = require("./browser-identity.cjs");
 const { isAuthenticationRequest } = require("./authentication-request.cjs");
+const { isOptionalMetricsRequest } = require("./platform-support-request.cjs");
 const {
   ACTIONS, STATUSES, REFERENCE_LABELS, GUID, requireCondition, loadLifecycleApproval,
   reserveOneShot, readRows, readEvidence, counts, validateEvidence
@@ -63,7 +64,7 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
       const operation = url.pathname.split("/").pop();
       const platformSupport = api && request.method() === "POST" &&
         ["msdyn_ReportToMonitoringHub", "GetRecentItems", "GetCopilotSettingsForEnvironment"].includes(operation);
-      if (platformSupport) {
+      if (platformSupport || isOptionalMetricsRequest(request, url, approval.origin)) {
         report.platformSupportRequestsSuppressed++;
         return route.abort("blockedbyclient");
       }
@@ -107,7 +108,8 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
         }
       }
       // Outside Microsoft authentication, no other HTTP write or provider call is admitted.
-      const signIn = isAuthenticationRequest(request, url, approval.lifecycleScope.authenticationCallbackOrigin);
+      const signIn = isAuthenticationRequest(request, url,
+        approval.lifecycleScope.authenticationCallbackOrigin, approval.origin);
       const provider = /(^|\.)(graph\.microsoft\.com|outlook\.office365\.com|outlook\.office\.com)$/i.test(url.hostname);
       if (provider || (mutation && !signIn)) {
         routeFailure = "UAT_UNEXPECTED_BUSINESS_OR_PROVIDER_REQUEST";

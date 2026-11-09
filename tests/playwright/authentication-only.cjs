@@ -7,6 +7,8 @@ const { isAuthenticationRequest } = require("./authentication-request.cjs");
 const { classifyRequest } = require("./request-classification.cjs");
 const { verifyBrowserIdentity } = require("./browser-identity.cjs");
 const { constrainReferenceRequest } = require("./lifecycle-support.cjs");
+const { createResourceEvidence, safeConsoleUrl, identifyConsoleResource } =
+  require("./served-console-resources.cjs");
 const { authDirectory, runDirectory, protectDirectory, loadApproval } = require("./local-settings.cjs");
 
 function checkPredicate() {
@@ -90,9 +92,14 @@ async function main() {
     suppressedPlatformRequests: 0, suppressedMetricsRequests: 0, optionalSuppressions: [],
     blockedRequests: [], failedRequestClasses: [],
     lifecycleInvoked: false, screenshotsAndTraces: "DISABLED",
-    acceptanceScope: "ELEVATED_FUNCTIONAL_ONLY"
+    acceptanceScope: "ELEVATED_FUNCTIONAL_ONLY",
+    servedConsole: {
+      iframeUrl: null, scriptElementOrder: [], resources: [], failedLoads: [], pageErrors: [], runtime: null
+    }
   };
   const callbackRequests = new WeakSet();
+  const consoleResourceCaptures = [];
+  let resourceSequence = 0;
   let phase = "APP_INITIALIZATION";
   let context;
   try {
@@ -101,6 +108,12 @@ async function main() {
       acceptDownloads: false, serviceWorkers: "block"
     });
     const page = context.pages()[0] || await context.newPage();
+    page.on("pageerror", error => {
+      const name = ["Error", "TypeError", "ReferenceError", "SyntaxError"].includes(error.name)
+        ? error.name : "SCRIPT_ERROR";
+      const message = /^[A-Z][A-Z0-9_]{2,100}$/.test(error.message || "") ? error.message : "REDACTED";
+      report.servedConsole.pageErrors.push({ name, message });
+    });
     const safeClass = request => {
       const url = new URL(request.url());
       const authHost = /(^|\.)(microsoftonline\.com|microsoft\.com|msauth\.net|msftauth\.net)$/i.test(url.hostname);
@@ -117,8 +130,48 @@ async function main() {
     };
     context.on("response", response => {
       if (callbackRequests.has(response.request())) report.callbackResponseStatuses.push(response.status());
+      const requestUrl = response.url();
+      if (!identifyConsoleResource(requestUrl, approval.origin)) return;
+      const sequence = ++resourceSequence;
+      consoleResourceCaptures.push((async () => {
+        let body;
+        try {
+          body = await response.body();
+        } catch {
+          report.servedConsole.failedLoads.push({
+            sequence, url: safeConsoleUrl(requestUrl, approval.origin), status: response.status(),
+            failure: "RESOURCE_BODY_UNAVAILABLE"
+          });
+          return;
+        }
+        try {
+          const evidence = createResourceEvidence({
+            rawUrl: requestUrl, expectedOrigin: approval.origin, status: response.status(),
+            headers: response.headers(), body, sequence, fromServiceWorker: response.fromServiceWorker()
+          });
+          if (evidence) report.servedConsole.resources.push(evidence);
+          else report.servedConsole.failedLoads.push({
+            sequence, url: safeConsoleUrl(requestUrl, approval.origin), status: response.status(),
+            failure: "RESOURCE_IDENTITY_MISMATCH"
+          });
+        } catch {
+          report.servedConsole.failedLoads.push({
+            sequence, url: safeConsoleUrl(requestUrl, approval.origin), status: response.status(),
+            failure: "RESOURCE_EVIDENCE_CAPTURE_FAILED"
+          });
+          process.exitCode = 1;
+        }
+      })());
     });
     context.on("requestfailed", request => {
+      const consoleResource = safeConsoleUrl(request.url(), approval.origin);
+      if (consoleResource) {
+        const error = request.failure()?.errorText || "UNKNOWN";
+        report.servedConsole.failedLoads.push({
+          sequence: ++resourceSequence, url: consoleResource,
+          failure: /^net::ERR_[A-Z_]+$/.test(error) ? error : "RESOURCE_REQUEST_FAILED"
+        });
+      }
       if (callbackRequests.has(request) ||
           /(^|\.)(microsoftonline\.com|msauth\.net|msftauth\.net)$/.test(new URL(request.url()).hostname) ||
           new URL(request.url()).hostname === "login.microsoft.com") {
@@ -181,6 +234,11 @@ async function main() {
     const frame = page.frameLocator('iframe[src*="candidate-console.html"]');
     await expect(frame.getByRole("heading", { name: "Candidate Management", exact: true }))
       .toBeVisible({ timeout: 60_000 });
+    const iframeUrl = await page.locator('iframe[src*="candidate-console.html"]').evaluate(element => element.src);
+    report.servedConsole.iframeUrl = safeConsoleUrl(iframeUrl, approval.origin);
+    report.servedConsole.scriptElementOrder = (await frame.locator("script[src]").evaluateAll(elements =>
+      elements.map(element => element.src)))
+      .map(url => safeConsoleUrl(url, approval.origin)).filter(Boolean);
     await expect.poll(() => frame.locator("body").evaluate(() =>
       Boolean(window.BsoRsCandidateConsoleConfiguration)), { timeout: 30_000 }).toBe(true);
     const config = await frame.locator("body").evaluate(() => {
@@ -216,6 +274,11 @@ async function main() {
     });
     report.syntheticIsolation = !gate.policyAvailable ? "NOT VERIFIED" : gate.isolation ? "VERIFIED" : "BLOCKED";
     report.createCandidateEnabled = gate.createEnabled ? "YES" : "NO";
+    report.servedConsole.runtime = {
+      policyAvailable: gate.policyAvailable, syntheticIsolation: report.syntheticIsolation,
+      createCandidateEnabled: report.createCandidateEnabled,
+      checkCalendarDisabled: await frame.locator("#availability-submit").isDisabled()
+    };
     report.createGateReason = gate.createEnabled && (!gate.policyAvailable || !gate.isolation)
       ? "CREATE_ENABLED_WITHOUT_VERIFIED_ISOLATION"
       : !gate.policyAvailable ? "SYNTHETIC_ISOLATION_POLICY_UNAVAILABLE"
@@ -241,6 +304,9 @@ async function main() {
     report.failure = String(error.message || "").match(/\bUAT_[A-Z_]+\b/)?.[0] || "UAT_AUTHENTICATION_ONLY_FAILED";
     process.exitCode = 1;
   } finally {
+    await Promise.all(consoleResourceCaptures);
+    report.servedConsole.resources.sort((left, right) => left.sequence - right.sequence);
+    report.servedConsole.failedLoads.sort((left, right) => left.sequence - right.sequence);
     if (context) await context.close();
     report.lifecycleJournal = preservedPaths.every((file, index) => hash(file) === before[index])
       ? "PRESERVED" : "ERROR";

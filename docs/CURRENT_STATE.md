@@ -10,6 +10,8 @@ Exactly one headed invocation ran with one worker and zero retries. Browser acco
 
 The original historical evidence, independent authorization and predecessor link hashes remained unchanged. The protected result is `tests/playwright/results/2026-11-09T14-18-41-219Z`. No lifecycle retry, compensation, Outlook/email action, Check Calendar action, configuration/security/Flow/publication change, real-data action, commit or push occurred. The consumed independent claim must not be reset or reused.
 
+Subsequent offline-only runner hardening corrected classification of non-mutating provider GETs and the exact documented optional shell support POSTs at API v9.0; unknown `GetResourceStrings` remains blocked because its behavior is not verified locally. New failure reports retain sanitized assertion/phase/location, first-blocked-request and final-category evidence while preserving the original failure across cleanup. The historical report and consumed claim were not rewritten, and no browser or tenant request was made for this repair.
+
 ## Independent one-shot authorization implemented offline (2026-11-09)
 
 The owner explicitly authorized local runner changes and offline tests to remove the state-machine limitation below, not another browser invocation. The [independent authorization implementation](../tests/playwright/independent-authorization.cjs) creates one immutable, flushed authorization record per explicit owner decision, with a distinct attempt ID, exact scope/identity/environment binding, decision text, timestamps and hashed predecessor evidence. A permanent exclusive successor slot prevents concurrent authorizations from forking the same consumed attempt. Interrupted/partial reservations remain blocked; they are never released automatically.

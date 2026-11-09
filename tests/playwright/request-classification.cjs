@@ -5,10 +5,13 @@ function classifyRequest(request, url, { origin, callbackOrigin, approvedBusines
   const write = !["GET", "HEAD", "OPTIONS"].includes(request.method());
   const api = url.origin === origin && /^\/api\/data\//i.test(url.pathname);
   const provider = /(^|\.)(graph\.microsoft\.com|outlook\.office365\.com|outlook\.office\.com)$/i.test(url.hostname);
-  if (provider) return "FORBIDDEN_BUSINESS_OR_PROVIDER_OPERATION";
+  if (provider) {
+    return write ? "FORBIDDEN_BUSINESS_OR_PROVIDER_OPERATION" : "UNKNOWN_REQUEST_BLOCKED";
+  }
   if (isOptionalTelemetryRequest(request, url)) return "OPTIONAL_TELEMETRY_SUPPRESSED";
   const support = api && request.method() === "POST" && !url.search &&
-    /^\/api\/data\/v9\.2\/(msdyn_ReportToMonitoringHub|GetRecentItems|GetCopilotSettingsForEnvironment)$/.test(url.pathname);
+    ["xhr", "fetch"].includes(request.resourceType()) && !request.isNavigationRequest() &&
+    /^\/api\/data\/v9\.(?:0|2)\/(msdyn_ReportToMonitoringHub|GetRecentItems|GetCopilotSettingsForEnvironment)$/.test(url.pathname);
   if (support || isOptionalMetricsRequest(request, url, origin)) return "OPTIONAL_SUPPORT_SUPPRESSED";
   if (api && write) {
     return approvedBusinessOperation && request.method() === "POST" &&

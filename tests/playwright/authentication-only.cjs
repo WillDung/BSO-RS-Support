@@ -50,7 +50,16 @@ async function main() {
     throw new Error("UAT_INVALID_AUTHENTICATION_CALLBACK_ORIGIN");
   }
   const journalPath = path.join(authDirectory, "owner-lifecycle-20261109-01.json");
-  const preservedPaths = [journalPath, `${journalPath}.login-recovery-claim`];
+  const independentAuthorizationPath = path.join(authDirectory, "owner-lifecycle-20261109-02.authorization.json");
+  const preservedPaths = [
+    journalPath,
+    `${journalPath}.login-recovery-claim`,
+    `${journalPath}.continuation.jsonl`,
+    `${journalPath}.recovery-eligible.json`,
+    `${journalPath}.eligible-continuation.jsonl`,
+    independentAuthorizationPath,
+    `${independentAuthorizationPath}.attempt.jsonl`
+  ];
   const hash = file => createHash("sha256").update(fs.readFileSync(file)).digest("hex");
   const before = preservedPaths.map(hash);
   const journal = JSON.parse(fs.readFileSync(journalPath, "utf8"));
@@ -59,6 +68,7 @@ async function main() {
   const report = {
     authenticationOnly: "FAIL", correctedCrmCallback: "NOT VERIFIED",
     exactIdentityAndOrganization: "FAIL", candidateConsoleReadOnly: "FAIL",
+    candidateCoreControlsVisible: "NOT VERIFIED",
     businessMutationsDispatched: 0, lifecycleJournal: "ERROR",
     requestSafety: "NOT RUN",
     predicateChecksPassed: 12, callbackPostsAdmitted: 0, callbackResponseStatuses: [],
@@ -162,6 +172,11 @@ async function main() {
       throw new Error("UAT_APP_ENTRYPOINT_MISMATCH");
     }
     await expect(frame.locator("#availability-submit")).toBeDisabled();
+    await expect(frame.locator("#candidate-search")).toBeVisible();
+    await expect(frame.locator("#candidate-rows")).toBeVisible();
+    await expect(frame.locator("#create-button")).toBeVisible();
+    await expect(frame.locator("#create-button")).toBeEnabled();
+    report.candidateCoreControlsVisible = "PASS";
     report.candidateConsoleReadOnly = "PASS";
     report.configuration = config;
     report.authenticationOnly = "PASS";

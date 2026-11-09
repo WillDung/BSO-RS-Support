@@ -90,8 +90,32 @@ test("Optional CRM support is kept separate from telemetry and ordinary reads", 
   assert.equal(classify(`${origin}/AppWebServices/MetricsReportingService.asmx/Report`),
     "OPTIONAL_SUPPORT_SUPPRESSED");
   assert.equal(classify(`${origin}/api/data/v9.2/GetRecentItems`), "OPTIONAL_SUPPORT_SUPPRESSED");
+  for (const version of ["v9.0", "v9.2"]) {
+    for (const operation of ["msdyn_ReportToMonitoringHub", "GetRecentItems", "GetCopilotSettingsForEnvironment"]) {
+      assert.equal(classify(`${origin}/api/data/${version}/${operation}`, {
+        resourceType: () => "fetch"
+      }), "OPTIONAL_SUPPORT_SUPPRESSED");
+    }
+  }
   assert.equal(classify(`${origin}/api/data/v9.2/GetRecentItems/extra`),
     "FORBIDDEN_BUSINESS_OR_PROVIDER_OPERATION");
+  assert.equal(classify(`${origin}/api/data/v9.0/GetRecentItems`, {
+    resourceType: () => "document", isNavigationRequest: () => true
+  }), "FORBIDDEN_BUSINESS_OR_PROVIDER_OPERATION");
   assert.equal(classify(`${origin}/api/data/v9.2/os_sr_cands`, { method: () => "GET" }),
     "READ_REQUEST_ALLOWED");
+  assert.equal(classify(`${origin}/main.aspx`, { method: () => "GET" }), "READ_REQUEST_ALLOWED");
+  assert.equal(classify(`${origin}/api/data/v9.2/os_sr_cact`, { method: () => "POST" }),
+    "FORBIDDEN_BUSINESS_OR_PROVIDER_OPERATION");
+  assert.equal(classify(`${origin}/api/data/v9.2/UnknownAction`, { method: () => "POST" }),
+    "FORBIDDEN_BUSINESS_OR_PROVIDER_OPERATION");
+  assert.equal(classify(`${origin}/AppWebServices/MetadataService.asmx/GetResourceStrings`, {
+    resourceType: () => "xhr"
+  }), "UNKNOWN_REQUEST_BLOCKED");
+  assert.equal(classify("https://graph.microsoft.com/v1.0/me/photos/120x120/$value", {
+    method: () => "GET"
+  }), "UNKNOWN_REQUEST_BLOCKED");
+  assert.equal(classify("https://graph.microsoft.com/v1.0/me/events", {
+    method: () => "POST"
+  }), "FORBIDDEN_BUSINESS_OR_PROVIDER_OPERATION");
 });

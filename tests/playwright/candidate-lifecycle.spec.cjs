@@ -6,6 +6,9 @@ const { authDirectory, runDirectory } = require("./local-settings.cjs");
 const { verifyBrowserIdentity } = require("./browser-identity.cjs");
 const { classifyRequest } = require("./request-classification.cjs");
 const {
+  captureFailure, refreshFailureEvidence, sanitizeBlockedRequest
+} = require("./lifecycle-failure.cjs");
+const {
   ACTIONS, STATUSES, REFERENCE_LABELS, REFERENCE_SCHEMA, GUID, requireCondition, referenceQuery,
   approvedReferenceId, constrainReferenceRequest, loadLifecycleApproval, reserveOneShot, readRows, scopedReadFailure,
   readEvidence, counts, validateEvidence
@@ -22,12 +25,14 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
     baselineCounts: null,
     counts: null,
     reloadPersistence: "NOT RUN",
-    unexpectedBusinessOrProviderMutations: 0,
+    forbiddenRequestsBlocked: 0,
     deliberatelyCreatedEmailCalendarOrAvailability: 0,
     platformSupportRequestsSuppressed: 0,
     optionalSuppressions: [],
     unknownRequestsBlocked: 0,
     blockedRequestKinds: [],
+    firstRelevantBlockedRequest: null,
+    requestCategoryCounts: {},
     dispatchedOperations: [],
     screenshotsAndTraces: "DISABLED"
   };
@@ -35,29 +40,42 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
     JSON.stringify(report, null, 2));
   writeReport();
   test.skip(!approval.approved, "UAT_OWNER_LIFECYCLE_MUTATION_APPROVAL_MISSING");
-  requireCondition(testInfo.config.workers === 1 && testInfo.project.retries === 0 &&
-    testInfo.project.repeatEach === 1 && testInfo.retry === 0 && testInfo.repeatEachIndex === 0,
-  "UAT_ONE_SHOT_RUNNER_CONFIGURATION_REQUIRED");
-
   let context;
   let journal;
   let armed = null;
   let routeFailure = null;
+  let phase = "runner-configuration";
+  const failureState = {};
   let page;
   let references;
   let schedule;
   let evidence;
   const save = () => { journal.save(); writeReport(); };
   const assertNoUnexpected = () => requireCondition(!routeFailure &&
-    report.unexpectedBusinessOrProviderMutations === 0, routeFailure || "UAT_UNEXPECTED_MUTATION");
+    report.forbiddenRequestsBlocked === 0, routeFailure || "UAT_UNEXPECTED_MUTATION");
+  const countClassification = classification => {
+    report.requestCategoryCounts[classification] = (report.requestCategoryCounts[classification] || 0) + 1;
+  };
+  const recordBlockedRequest = kind => {
+    const safeKind = sanitizeBlockedRequest(kind);
+    report.firstRelevantBlockedRequest ??= safeKind;
+    if (!report.blockedRequestKinds.some(existing => JSON.stringify(existing) === JSON.stringify(safeKind))) {
+      report.blockedRequestKinds.push(safeKind);
+    }
+  };
 
   try {
+    requireCondition(testInfo.config.workers === 1 && testInfo.project.retries === 0 &&
+      testInfo.project.repeatEach === 1 && testInfo.retry === 0 && testInfo.repeatEachIndex === 0,
+    "UAT_ONE_SHOT_RUNNER_CONFIGURATION_REQUIRED");
+    phase = "one-shot-claim-acquisition";
     journal = reserveOneShot(approval, {
       workers: testInfo.config.workers, retries: testInfo.project.retries,
       repeatEach: testInfo.project.repeatEach, retry: testInfo.retry,
       repeatEachIndex: testInfo.repeatEachIndex
     });
     const record = journal.record;
+    phase = "browser-initialization";
     context = await chromium.launchPersistentContext(authDirectory, {
       headless: false, viewport: { width: 1440, height: 1000 },
       timezoneId: "Asia/Ho_Chi_Minh", acceptDownloads: false, serviceWorkers: "block"
@@ -72,6 +90,7 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
         origin: approval.origin, callbackOrigin: approval.lifecycleScope.authenticationCallbackOrigin
       };
       const classification = classifyRequest(request, url, classificationOptions);
+      countClassification(classification);
       if (["OPTIONAL_SUPPORT_SUPPRESSED", "OPTIONAL_TELEMETRY_SUPPRESSED"].includes(classification)) {
         report.platformSupportRequestsSuppressed++;
         report.optionalSuppressions.push({
@@ -102,6 +121,8 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
           requireCondition(classifyRequest(request, url, {
             ...classificationOptions, approvedBusinessOperation: true
           }) === "APPROVED_BUSINESS_OPERATION", "UAT_BUSINESS_REQUEST_SHAPE_MISMATCH");
+          report.requestCategoryCounts.FORBIDDEN_BUSINESS_OR_PROVIDER_OPERATION--;
+          countClassification("APPROVED_BUSINESS_OPERATION");
           // Consume the arm before awaiting anything; a concurrent retry must not pass.
           armed = null;
           const previous = await readRows(page, approval.origin, "os_sr_oprcs", ["os_sr_oprcid"],
@@ -119,8 +140,8 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
         } catch (error) {
           armed = null;
           routeFailure = String(error.message).match(/\bUAT_[A-Z_]+\b/)?.[0] || "UAT_DISPATCH_GUARD_FAILED";
-          report.unexpectedBusinessOrProviderMutations++;
-          report.blockedRequestKinds.push({
+          report.forbiddenRequestsBlocked++;
+          recordBlockedRequest({
             classification: "FORBIDDEN_BUSINESS_OR_PROVIDER_OPERATION",
             method: request.method(), host: url.hostname, path: url.pathname,
             resourceType: request.resourceType(), navigation: request.isNavigationRequest()
@@ -133,12 +154,10 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
         const unknown = classification === "UNKNOWN_REQUEST_BLOCKED";
         routeFailure = unknown ? "UAT_UNKNOWN_REQUEST_BLOCKED" : "UAT_UNEXPECTED_BUSINESS_OR_PROVIDER_REQUEST";
         if (unknown) report.unknownRequestsBlocked++;
-        else report.unexpectedBusinessOrProviderMutations++;
+        else report.forbiddenRequestsBlocked++;
         const kind = { classification, method: request.method(), host: url.hostname, path: url.pathname,
           resourceType: request.resourceType(), navigation: request.isNavigationRequest() };
-        if (!report.blockedRequestKinds.some(existing => JSON.stringify(existing) === JSON.stringify(kind))) {
-          report.blockedRequestKinds.push(kind);
-        }
+        recordBlockedRequest(kind);
         return route.abort("blockedbyclient");
       }
       // Keep the normal Console list path, but constrain the server response to this one marker.
@@ -155,10 +174,12 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
         }
         if (referenceScope === "BLOCKED") {
           routeFailure = "UAT_UNSCOPED_REFERENCE_READ_BLOCKED";
+          report.requestCategoryCounts.READ_REQUEST_ALLOWED--;
+          countClassification("UNKNOWN_REQUEST_BLOCKED");
           report.unknownRequestsBlocked++;
-          report.blockedRequestKinds.push({
+          recordBlockedRequest({
             classification: "UNKNOWN_REQUEST_BLOCKED", method: request.method(),
-            host: url.hostname, resourceType: request.resourceType(),
+            host: url.hostname, path: url.pathname, resourceType: request.resourceType(),
             navigation: request.isNavigationRequest()
           });
           return route.abort("blockedbyclient");
@@ -167,12 +188,14 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
       return route.continue();
     });
 
+    phase = "identity-verification";
     await page.goto(`${approval.origin}/main.aspx?pagetype=apps`, { waitUntil: "domcontentloaded" });
     const identity = await verifyBrowserIdentity(page, approval, 480_000);
     requireCondition(identity.bsoRole && identity.elevated, "UAT_APPROVED_FUNCTIONAL_IDENTITY_MISMATCH");
     report.exactOrganizationAndAccount = "VERIFIED";
     assertNoUnexpected();
 
+    phase = "approved-reference-readback";
     references = {};
     for (const key of Object.keys(REFERENCE_SCHEMA)) {
       const query = referenceQuery(key);
@@ -180,14 +203,17 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
       references[key] = approvedReferenceId(key, rows);
     }
 
+    phase = "synthetic-baseline-readback";
     evidence = await readEvidence(page, approval.origin, record);
     report.baselineCounts = counts(evidence);
     requireCondition(Object.values(report.baselineCounts).every(count => count === 0), "UAT_NONEMPTY_SYNTHETIC_BASELINE");
     save();
 
+    phase = "candidate-console-navigation";
     await page.goto(approval.appUrl, { waitUntil: "domcontentloaded" });
     await page.getByRole("treeitem", { name: "Candidate Management", exact: true }).click();
     const frame = page.frameLocator('iframe[src*="candidate-console.html"]');
+    phase = "candidate-console-initialization";
     await expect(frame.getByRole("heading", { name: "Candidate Management", exact: true })).toBeVisible();
     await expect.poll(() => frame.locator("body").evaluate(() =>
       Boolean(window.BsoRsCandidateConsoleConfiguration))).toBe(true);
@@ -208,6 +234,7 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
     const cv = `https://careers.example.invalid/cv/playwright-${record.marker}`;
 
     const invokeOnce = async (action, inputs, click) => {
+      phase = `${action}-dispatch-and-readback`;
       assertNoUnexpected();
       requireCondition(!armed && record.attempts.length === ACTIONS.indexOf(action), "UAT_OPERATION_NOT_NEXT");
       armed = { action, inputs };
@@ -292,6 +319,7 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
       LocationId: references.location, StartAt: schedule.start, EndAt: schedule.end
     }, () => frame.getByRole("button", { name: "Save Schedule", exact: true }).click());
 
+    phase = "reload-persistence-readback";
     const fingerprint = value => createHash("sha256").update(JSON.stringify(Object.fromEntries(
       Object.entries(value).map(([name, rows]) => [name,
         rows.map(row => Object.fromEntries(Object.entries(row).sort(([a], [b]) => a.localeCompare(b))))
@@ -324,15 +352,39 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
     armed = null;
     report.lifecycle = "FAIL";
     report.scopedReadFailure = scopedReadFailure(error);
-    report.failure = String(error.message || "").match(/\bUAT_[A-Z_]+\b/)?.[0] || "UAT_LIFECYCLE_ASSERTION_FAILED";
+    const primaryError = captureFailure(failureState, error, phase, report);
     if (journal) {
       journal.record.status = "STOPPED_NO_RETRY_RECONCILE_ONLY";
-      journal.save();
+      try {
+        journal.save();
+      } catch (cleanupError) {
+        captureFailure(failureState, cleanupError, "journal-stop-save", report);
+      }
     }
-    throw new Error(report.failure);
+    try {
+      writeReport();
+    } catch (cleanupError) {
+      captureFailure(failureState, cleanupError, "failure-report-write", report);
+      console.error("UAT_FAILURE_REPORT_WRITE_FAILED");
+    }
+    throw primaryError;
   } finally {
     armed = null;
-    if (context) await context.close();
-    writeReport();
+    if (context) {
+      try {
+        await context.close();
+      } catch (cleanupError) {
+        captureFailure(failureState, cleanupError, "browser-context-close", report);
+        console.error("UAT_BROWSER_CLEANUP_FAILED");
+      }
+    }
+    refreshFailureEvidence(report);
+    try {
+      writeReport();
+    } catch (cleanupError) {
+      captureFailure(failureState, cleanupError, "final-report-write", report);
+      console.error("UAT_FINAL_REPORT_WRITE_FAILED");
+    }
+    if (failureState.primaryError) throw failureState.primaryError;
   }
 });

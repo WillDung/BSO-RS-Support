@@ -24,6 +24,12 @@ const id = "11111111-1111-4111-8111-111111111111";
 const orgId = "22222222-2222-4222-8222-222222222222";
 const orgUrl = "https://synthetic-console.invalid";
 const guid = (digit) => `${digit.repeat(8)}-${digit.repeat(4)}-4${digit.repeat(3)}-8${digit.repeat(3)}-${digit.repeat(12)}`;
+const referenceNames = Object.freeze({
+  os_sr_pos: "os_sr_pos_ttl",
+  os_sr_csrc: "os_sr_csrc_nm",
+  os_sr_ta: "os_sr_ta_nm",
+  os_sr_loc: "os_sr_loc_nm"
+});
 
 class Element {
   constructor() {
@@ -79,7 +85,9 @@ async function createConsole({ mode = "DEV", syntheticDataOnly = true, fixtures 
           organizationSettings: { organizationId: orgId }
         }),
         getEntityMetadata: async (name) => ({
-          PrimaryIdAttribute: `${name}id`, PrimaryNameAttribute: `${name}_nm`, EntitySetName: `${name}s`
+          PrimaryIdAttribute: `${name}id`,
+          PrimaryNameAttribute: referenceNames[name] || `${name}_nm`,
+          EntitySetName: name === "os_sr_pos" ? "os_sr_poses" : `${name}s`
         })
       }
     }
@@ -139,11 +147,12 @@ function scopedFixtures() {
     ]
   };
   for (const table of ["os_sr_pos", "os_sr_csrc", "os_sr_ta", "os_sr_loc"]) {
+    const name = referenceNames[table];
     fixtures[table] = [
-      { [`${table}id`]: guid("6"), [`${table}_nm`]: "[DEV] approved fixture", statecode: 0 },
-      { [`${table}id`]: guid("7"), [`${table}_nm`]: "Outside marker", statecode: 0 },
-      { [`${table}id`]: guid("8"), [`${table}_nm`]: "[DEV] inactive fixture", statecode: 1 },
-      { [`${table}id`]: guid("9"), [`${table}_nm`]: "[DEV] unapproved fixture", statecode: 0 }
+      { [`${table}id`]: guid("6"), [name]: "[DEV] approved fixture", statecode: 0 },
+      { [`${table}id`]: guid("7"), [name]: "Outside marker", statecode: 0 },
+      { [`${table}id`]: guid("8"), [name]: "[DEV] inactive fixture", statecode: 1 },
+      { [`${table}id`]: guid("9"), [name]: "[DEV] unapproved fixture", statecode: 0 }
     ];
   }
   for (const row of fixtures.os_sr_cand) {
@@ -202,7 +211,8 @@ test("simulated server scope plus emitted Candidate and reference predicates exc
   const candidateFilter = new URLSearchParams(candidateResponse.query.slice(1)).get("$filter");
   assert.match(candidateFilter,
     /^startswith\(os_sr_cand_nm,'\[\[\]SYNTHETIC-E2E\]'\) and endswith\(os_sr_cand_eml,'.invalid'\)/);
-  assert.match(candidateFilter, /_os_sr_cand_pos_value eq null or startswith\(os_sr_cand_pos\/os_sr_pos_nm/);
+  assert.match(candidateFilter, /_os_sr_cand_pos_value eq null or startswith\(os_sr_cand_pos\/os_sr_pos_ttl/);
+  assert.doesNotMatch(candidateFilter, /os_sr_pos_nm/);
   assert.match(candidateFilter, /_os_sr_cand_csrc_value eq null or startswith\(os_sr_cand_csrc\/os_sr_csrc_nm/);
   assert.match(candidateFilter, /_os_sr_cand_ta_value eq null or startswith\(os_sr_cand_ta\/os_sr_ta_nm/);
   const candidateSelect = new URLSearchParams(candidateResponse.query.slice(1)).get("$select");
@@ -214,9 +224,12 @@ test("simulated server scope plus emitted Candidate and reference predicates exc
     const response = lastResponse(ui.server, table);
     assert.deepEqual(response.entities.map((row) => row[`${table}id`]), [guid("6")]);
     const filter = new URLSearchParams(response.query.slice(1)).get("$filter");
-    assert.equal(filter, `statecode eq 0 and startswith(${table}_nm,'[[]DEV]')`);
+    assert.equal(filter, `statecode eq 0 and startswith(${referenceNames[table]},'[[]DEV]')`);
     assert.ok(response.entities.every((row) => row[`${table}id`] !== guid("9")));
   }
+  const position = await ui.methods.getActiveReference("os_sr_pos", guid("6"));
+  assert.equal(position.id, guid("6"));
+  assert.equal(position.entitySetName, "os_sr_poses");
   assert.equal(await ui.methods.openCandidate(id), true);
   assert.equal(ui.server.requests.some((request) => request.operation === "retrieveRecord"), false);
 
@@ -252,7 +265,7 @@ test("simulated server scope plus emitted Candidate and reference predicates exc
     if (item.active) {
       const filter = new URLSearchParams(response.query.slice(1)).get("$filter");
       assert.equal(filter, `${item.table}id eq ${item.recordId} and statecode eq 0 and ` +
-        `startswith(${item.table}_nm,'[[]DEV]')`);
+        `startswith(${referenceNames[item.table]},'[[]DEV]')`);
     }
   }
   const detail = await createConsole({
@@ -511,8 +524,8 @@ for (const mode of ["DEV", "TEST"]) {
 }
 
 test("non-synthetic Candidate Core still loads, and inactive references are excluded by the emitted query", async () => {
-  const active = { os_sr_posid: id, os_sr_pos_nm: "Synthetic position A", statecode: 0 };
-  const inactive = { os_sr_posid: orgId, os_sr_pos_nm: "Synthetic position B", statecode: 1 };
+  const active = { os_sr_posid: id, os_sr_pos_ttl: "Synthetic position A", statecode: 0 };
+  const inactive = { os_sr_posid: orgId, os_sr_pos_ttl: "Synthetic position B", statecode: 1 };
   const candidate = {
     os_sr_candid: id, os_sr_cand_cnum: "SYN-001", os_sr_cand_nm: "Synthetic candidate",
     os_sr_cand_eml: "sample@example.invalid", os_sr_cand_stat: 100010000

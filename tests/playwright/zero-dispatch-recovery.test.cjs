@@ -137,6 +137,31 @@ test("Consumed pre-dispatch attempt gains one eligible continuation without chan
   assert.throws(() => consumeEligibleRecovery(f.file, f.record.authorizationId, f.scopePath));
 });
 
+test("A consumed eligible continuation cannot be reused after a zero-dispatch scoped-read stop", t => {
+  const f = consumedFixture(t);
+  f.establish();
+  const priorPaths = [...f.paths, `${f.file}.recovery-eligible.json`];
+  const priorHashes = priorPaths.map(digest);
+  const journal = consumeEligibleRecovery(f.file, f.record.authorizationId, f.scopePath);
+  journal.record.status = "STOPPED_NO_RETRY_RECONCILE_ONLY";
+  journal.save();
+  const continuationPath = `${f.file}.eligible-continuation.jsonl`;
+  const snapshots = fs.readFileSync(continuationPath, "utf8").trim().split("\n").map(JSON.parse);
+  assert.equal(snapshots.length, 2);
+  for (const snapshot of snapshots) {
+    assert.equal(snapshot.marker, f.record.marker);
+    assert.deepEqual(snapshot.attempts, []);
+    assert.equal(snapshot.candidateId, null);
+    assert.equal(snapshot.status, "STOPPED_NO_RETRY_RECONCILE_ONLY");
+  }
+  const stoppedHash = digest(continuationPath);
+  assert.throws(() => consumeEligibleRecovery(f.file, f.record.authorizationId, f.scopePath),
+    error => error.code === "EEXIST");
+  assert.throws(() => f.establish(), /UAT_ZERO_DISPATCH_RECOVERY_REFUSED/);
+  assert.equal(digest(continuationPath), stoppedHash);
+  assert.deepEqual(priorPaths.map(digest), priorHashes);
+});
+
 for (const outcome of ["APPLIED", "DISPATCH_RESERVED_OUTCOME_UNKNOWN"]) {
   test(`Consumed recovery rejects a historical ${outcome} dispatch even if last snapshot omits it`, t => {
     const f = consumedFixture(t);

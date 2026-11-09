@@ -14,8 +14,66 @@ const REFERENCE_LABELS = Object.freeze({
   ta: "[DEV] Synthetic Interviewer",
   location: "[DEV] Test Location"
 });
+const REFERENCE_SCHEMA = Object.freeze({
+  position: Object.freeze({ collection: "os_sr_poses", id: "os_sr_posid", name: "os_sr_pos_ttl" }),
+  source: Object.freeze({ collection: "os_sr_csrcs", id: "os_sr_csrcid", name: "os_sr_csrc_nm" }),
+  ta: Object.freeze({ collection: "os_sr_tas", id: "os_sr_taid", name: "os_sr_ta_nm" }),
+  location: Object.freeze({ collection: "os_sr_locs", id: "os_sr_locid", name: "os_sr_loc_nm" })
+});
+const REFERENCE_QUERY_OPTIONS = new Set(["$select", "$filter", "$orderby", "$top", "$count", "$skip", "$skiptoken"]);
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const requireCondition = (condition, code) => { if (!condition) throw new Error(code); };
+
+function referenceQuery(key) {
+  requireCondition(Object.hasOwn(REFERENCE_SCHEMA, key), "UAT_REFERENCE_TYPE_NOT_APPROVED");
+  const { collection, id, name } = REFERENCE_SCHEMA[key];
+  const label = REFERENCE_LABELS[key];
+  const escapedLabel = label.replace(/'/g, "''");
+  return {
+    collection, id, name, label, columns: [id, name, "statecode"],
+    filter: `${name} eq '${escapedLabel}' and statecode eq 0`
+  };
+}
+
+function approvedReferenceId(key, rows) {
+  const { id, name, label } = referenceQuery(key);
+  const row = Array.isArray(rows) && rows.length === 1 ? rows[0] : null;
+  requireCondition(row && GUID.test(row[id]) && row[name] === label && row.statecode === 0,
+    "UAT_APPROVED_REFERENCE_NOT_UNIQUE_ACTIVE");
+  return row[id];
+}
+
+function constrainReferenceRequest(url) {
+  let pathname;
+  try {
+    pathname = decodeURIComponent(url.pathname).toLowerCase();
+  } catch {
+    return "BLOCKED";
+  }
+  const apiPath = pathname.match(/^\/api\/data\/(v[0-9]+\.[0-9]+)\/(.+)$/);
+  if (!apiPath) return "NOT_REFERENCE";
+  const [, version, resource] = apiPath;
+  for (const [key, schema] of Object.entries(REFERENCE_SCHEMA)) {
+    if (key === "position" &&
+        (resource === "os_sr_poss" || resource.startsWith("os_sr_poss(") || resource.startsWith("os_sr_poss/"))) {
+      return "BLOCKED";
+    }
+    if (resource === schema.collection || resource === `${schema.collection}/`) {
+      if (version !== "v9.2" ||
+          Array.from(url.searchParams.keys()).some(name => !REFERENCE_QUERY_OPTIONS.has(name))) {
+        return "BLOCKED";
+      }
+      const scope = referenceQuery(key).filter;
+      const existing = url.searchParams.get("$filter");
+      url.searchParams.set("$filter", existing ? `(${existing}) and (${scope})` : scope);
+      return "SCOPED";
+    }
+    if (resource.startsWith(`${schema.collection}(`) || resource.startsWith(`${schema.collection}/`)) {
+      return "BLOCKED";
+    }
+  }
+  return "NOT_REFERENCE";
+}
 
 function loadLifecycleApproval() {
   const base = loadApproval();
@@ -94,18 +152,24 @@ function reserveOneShot(approval) {
 }
 
 async function readRows(page, origin, table, columns, filter) {
+  requireCondition(typeof table === "string" && /^[a-z0-9_]+$/.test(table), "UAT_SCOPED_READ_TABLE_INVALID");
   return page.evaluate(async ({ origin, table, columns, filter }) => {
     const query = new URLSearchParams({
       "$select": columns.join(","), "$filter": filter, "$count": "true", "$top": "6"
     });
     const response = await fetch(`${origin}/api/data/v9.2/${table}?${query}`,
       { credentials: "same-origin", headers: { Accept: "application/json" } });
-    if (!response.ok) throw new Error("UAT_SCOPED_READ_FAILED");
+    if (!response.ok) throw new Error(`UAT_SCOPED_READ_FAILED:${table}:${response.status}`);
     const json = await response.json();
     if (!Array.isArray(json.value) || json["@odata.nextLink"] ||
         json["@odata.count"] !== json.value.length) throw new Error("UAT_SCOPED_READ_INCOMPLETE");
     return json.value;
   }, { origin, table, columns, filter });
+}
+
+function scopedReadFailure(error) {
+  const match = String(error?.message || "").match(/\bUAT_SCOPED_READ_FAILED:([a-z0-9_]+):([1-5][0-9]{2})\b/);
+  return match ? { collection: match[1], httpStatus: Number(match[2]) } : null;
 }
 
 const TABLES = Object.freeze([
@@ -199,6 +263,7 @@ function validateEvidence(evidence, record, completed, userId, references, sched
 }
 
 module.exports = {
-  ACTIONS, STATUSES, REFERENCE_LABELS, GUID, requireCondition, loadLifecycleApproval,
-  reserveOneShot, readRows, readEvidence, counts, validateEvidence
+  ACTIONS, STATUSES, REFERENCE_LABELS, REFERENCE_SCHEMA, GUID, requireCondition, referenceQuery,
+  approvedReferenceId, constrainReferenceRequest, loadLifecycleApproval, reserveOneShot, readRows, scopedReadFailure,
+  readEvidence, counts, validateEvidence
 };

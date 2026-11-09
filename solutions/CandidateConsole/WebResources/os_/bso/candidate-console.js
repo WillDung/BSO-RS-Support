@@ -578,7 +578,7 @@
     }
     const c = TABLES.candidate;
     const references = [
-      [c.position, c.positionNavigation, "os_sr_pos_nm"],
+      [c.position, c.positionNavigation, "os_sr_pos_ttl"],
       [c.source, c.sourceNavigation, "os_sr_csrc_nm"],
       [c.assignedTa, c.assignedTaNavigation, "os_sr_ta_nm"]
     ];

@@ -6,8 +6,9 @@ const { authDirectory, runDirectory } = require("./local-settings.cjs");
 const { verifyBrowserIdentity } = require("./browser-identity.cjs");
 const { classifyRequest } = require("./request-classification.cjs");
 const {
-  ACTIONS, STATUSES, REFERENCE_LABELS, GUID, requireCondition, loadLifecycleApproval,
-  reserveOneShot, readRows, readEvidence, counts, validateEvidence
+  ACTIONS, STATUSES, REFERENCE_SCHEMA, GUID, requireCondition, referenceQuery,
+  approvedReferenceId, constrainReferenceRequest, loadLifecycleApproval, reserveOneShot, readRows, scopedReadFailure,
+  readEvidence, counts, validateEvidence
 } = require("./lifecycle-support.cjs");
 
 test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) => {
@@ -17,6 +18,7 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
     ownerMutationApproval: approval.approved ? "PRESENT" : "MISSING",
     lifecycle: "NOT RUN",
     acceptanceScope: "ELEVATED_FUNCTIONAL_ONLY_NOT_CLEAN_BSO_SECURITY",
+    scopedReadFailure: null,
     baselineCounts: null,
     counts: null,
     reloadPersistence: "NOT RUN",
@@ -143,15 +145,19 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
         return route.continue({ url: url.href });
       }
       if (api && request.method() === "GET") {
-        const reference = [
-          ["os_sr_pos", "position"], ["os_sr_csrc", "source"], ["os_sr_ta", "ta"], ["os_sr_loc", "location"]
-        ].find(([stem]) => url.pathname === `/api/data/v9.2/${stem}s`);
-        if (reference) {
-          const [stem, key] = reference;
-          const scope = `${stem}_nm eq '${REFERENCE_LABELS[key]}' and statecode eq 0`;
-          const existing = url.searchParams.get("$filter");
-          url.searchParams.set("$filter", existing ? `(${existing}) and (${scope})` : scope);
+        const referenceScope = constrainReferenceRequest(url);
+        if (referenceScope === "SCOPED") {
           return route.continue({ url: url.href });
+        }
+        if (referenceScope === "BLOCKED") {
+          routeFailure = "UAT_UNSCOPED_REFERENCE_READ_BLOCKED";
+          report.unknownRequestsBlocked++;
+          report.blockedRequestKinds.push({
+            classification: "UNKNOWN_REQUEST_BLOCKED", method: request.method(),
+            host: url.hostname, resourceType: request.resourceType(),
+            navigation: request.isNavigationRequest()
+          });
+          return route.abort("blockedbyclient");
         }
       }
       return route.continue();
@@ -164,13 +170,10 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
     assertNoUnexpected();
 
     references = {};
-    for (const [key, stem] of [
-      ["position", "os_sr_pos"], ["source", "os_sr_csrc"], ["ta", "os_sr_ta"], ["location", "os_sr_loc"]
-    ]) {
-      const rows = await readRows(page, approval.origin, `${stem}s`, [`${stem}id`, `${stem}_nm`, "statecode"],
-        `${stem}_nm eq '${REFERENCE_LABELS[key]}' and statecode eq 0`);
-      requireCondition(rows.length === 1 && GUID.test(rows[0][`${stem}id`]), "UAT_APPROVED_REFERENCE_NOT_UNIQUE_ACTIVE");
-      references[key] = rows[0][`${stem}id`];
+    for (const key of Object.keys(REFERENCE_SCHEMA)) {
+      const query = referenceQuery(key);
+      const rows = await readRows(page, approval.origin, query.collection, query.columns, query.filter);
+      references[key] = approvedReferenceId(key, rows);
     }
 
     evidence = await readEvidence(page, approval.origin, record);
@@ -316,6 +319,7 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
   } catch (error) {
     armed = null;
     report.lifecycle = "FAIL";
+    report.scopedReadFailure = scopedReadFailure(error);
     report.failure = String(error.message || "").match(/\bUAT_[A-Z_]+\b/)?.[0] || "UAT_LIFECYCLE_ASSERTION_FAILED";
     if (journal) {
       journal.record.status = "STOPPED_NO_RETRY_RECONCILE_ONLY";

@@ -6,6 +6,7 @@ using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
+using Microsoft.Xrm.Sdk.Metadata;
 using os_sr_cact;
 
 internal static partial class Program
@@ -64,9 +65,67 @@ internal static partial class Program
         host.ChangeTrackingEnabled = true;
         Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_CHANGE_TRACKING_NOT_DISABLED");
         host.ChangeTrackingEnabled = false;
+        host.OwnerReadMissing = true;
+        Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_OWNER_REFERENCE_READ_REQUIRED");
+        host.OwnerReadMissing = false;
+        host.ReceiptReadGranted = true;
+        Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_RECEIPT_READ_REJECTED");
+        host.ReceiptReadGranted = false;
+        host.MissingPrivilegeMetadata = true;
+        Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_PRIVILEGE_METADATA_MISSING");
+        host.MissingPrivilegeMetadata = false;
+        foreach (var name in new[] { "prvCreateos_sr_cand", "prvWriteRole", "prvReadContact",
+            "prvWriteEnvironmentVariableValue", "prvNewUnknownPrivilege" })
+        {
+            host.ExtraPrivilegeName = name;
+            Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_CALLER_PRIVILEGES_REJECTED");
+        }
+        host.ExtraPrivilegeName = null;
         host.BypassPrivilege = true;
         Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_CALLER_PRIVILEGES_REJECTED");
         host.BypassPrivilege = false;
+        host.AddRedundantPostStep();
+        Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_GUARD_COVERAGE_REDUNDANT");
+        host.Steps.RemoveAt(host.Steps.Count - 1);
+        Check(host.Steps.Count == 32, "All 27 per-table read steps are consolidated into three required global read steps");
+        foreach (var globalRead in host.Steps.Where(row =>
+            row.GetAttributeValue<AliasedValue>("handler.typename")?.Value as string ==
+                typeof(SyntheticIsolationReadGuard).FullName).ToArray())
+        {
+            host.Steps.Remove(globalRead);
+            Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_GUARD_COVERAGE_MISSING");
+            host.Steps.Add(globalRead);
+        }
+        foreach (var message in new[] { "Upsert", "SetState", "SetStateDynamicEntity", "Assign", "Merge",
+            "CreateMultiple", "UpdateMultiple", "UpsertMultiple", "DeleteMultiple" })
+        {
+            host.AddSupportedMessage(message, true);
+            Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_GUARD_COVERAGE_MISSING");
+            host.AddSupportedGuard(message);
+            host.Invoke(SyntheticIsolation.VerifyAction);
+            Check((string)host.Output["ResultCode"] == "SyntheticIsolationVerified", "Supported extra message coverage: " + message);
+            host.Steps.RemoveAt(host.Steps.Count - 1);
+            host.SupportedRows.Clear();
+            host.AddSupportedMessage(message, false);
+            Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_UNGUARDABLE_MESSAGE");
+            host.SupportedRows.Clear();
+        }
+
+        var unrelated = new IsolationHost { CallerId = Guid.NewGuid() };
+        unrelated.Direct("Create", new Entity("os_sr_cand", Guid.NewGuid()));
+        unrelated.Direct("Update", new Entity("os_sr_ta", Guid.NewGuid()));
+        unrelated.Direct("Associate", new Entity("os_sr_cand", Guid.NewGuid()));
+        var unrelatedJoin = new QueryExpression("account");
+        unrelatedJoin.AddLink("os_sr_cand", "accountid", "os_sr_candid");
+        unrelated.ReadProbe(unrelatedJoin);
+        unrelated.ReadProbe(new QueryExpression("os_sr_cand"),
+            new Entity("os_sr_cand", Guid.NewGuid()) { ["os_sr_cand_nm"] = "Unrelated synthetic fixture" });
+        unrelated.OrdinaryCreate();
+        Check((string)unrelated.Output["ResultCode"] == "Applied" && unrelated.Writes == 2,
+            "Other DEV callers retain ordinary API/CRUD/reference/association/read behavior");
+        var metadataOnly = new IsolationHost { MissingConfiguration = true };
+        metadataOnly.ReadProbe(new QueryExpression("systemuser"), new Entity("systemuser", Guid.NewGuid()));
+        Check(metadataOnly.ProfileLoads == 0, "Unrelated metadata/system reads do not depend on profile availability");
 
         var candidate = new Entity("os_sr_cand", Scope)
         {
@@ -122,6 +181,13 @@ internal static partial class Program
         Reject(() => host.ReadProbe(new FetchExpression(
             "<fetch><entity name='account'><link-entity name='OS_SR_CAND' from='os_sr_candid' to='accountid'/></entity></fetch>")),
             "SYNTHETIC_CROSS_ROOT_QUERY_REJECTED");
+        Reject(() => host.ReadProbe(new FetchExpression(
+            "<fetch xmlns='urn:fixture'><entity name='account'><link-entity name='os_sr_cand'/></entity></fetch>")),
+            "SYNTHETIC_CROSS_ROOT_QUERY_REJECTED");
+        Reject(() => host.ReadProbe(new QueryExpression("os_sr_cand"),
+            new Entity("os_sr_cand", Scope) { ["os_sr_cand_nm"] = "Outside synthetic scope" }),
+            "SYNTHETIC_PROFILE_REJECTED");
+        Reject(() => host.ReadProbe(new QueryByAttribute("os_sr_cand")), "SYNTHETIC_QUERY_REJECTED");
         Reject(() => host.ReadProbe(new QueryExpression("account"), new Entity("account", Guid.NewGuid())
         {
             ["regardingobjectid"] = new EntityReference("os_sr_cand", Guid.NewGuid())
@@ -203,6 +269,8 @@ internal static partial class Program
             "The shared mutation matrix preserves the accepted scoped interview-result action");
         Check(!typeof(ApplyCandidateAction).Assembly.GetReferencedAssemblies().Any(name => name.Name == "System.Memory"),
             "Boundary does not introduce unsupported sandbox System.Memory dependency");
+        Check(host.MaxDepth <= 5 && host.SystemReadGuardCalls > 0 && host.ControlReadGuardCalls > 0,
+            "SYSTEM nested Retrieve/query and metadata reads are bounded without a recursive Retrieve loop");
         Console.WriteLine("Synthetic isolation fixture assertions passed: " + (passed - before));
     }
 
@@ -232,9 +300,16 @@ internal static partial class Program
         public readonly Dictionary<Guid, Entity> Rows = new Dictionary<Guid, Entity>();
         public readonly Dictionary<string, Entity> ReferenceRows = new Dictionary<string, Entity>();
         public readonly List<Entity> Steps = new List<Entity>();
+        public readonly List<Entity> SupportedRows = new List<Entity>();
         private readonly Stack<IPluginExecutionContext> stack = new Stack<IPluginExecutionContext>();
         private readonly Guid dangerousPrivilege = Guid.NewGuid();
+        private readonly Dictionary<string, Guid> readPrivileges = SyntheticIsolation.Tables
+            .ToDictionary(table => table, table => Guid.NewGuid());
         public bool MissingConfiguration, TdsEnabled, SearchEnabled, ChangeTrackingEnabled, BypassPrivilege;
+        public bool OwnerReadMissing, ReceiptReadGranted, MissingPrivilegeMetadata;
+        public string? ExtraPrivilegeName;
+        public Guid CallerId = Actor;
+        public int MaxDepth, SystemReadGuardCalls, ControlReadGuardCalls, ProfileLoads;
         public int Writes;
         public IOrganizationService Service { get; }
         private IPluginExecutionContext Current => stack.Peek();
@@ -244,9 +319,8 @@ internal static partial class Program
             Service = Proxy<IOrganizationService>(ServiceCall);
             foreach (var table in SyntheticIsolation.Tables)
             {
-                foreach (var message in new[] { "Create", "Update", "Delete", "Retrieve", "RetrieveMultiple" })
-                    AddStep(table, message, message == "Retrieve" ? 40 : 20);
-                AddStep(table, "RetrieveMultiple", 40);
+                foreach (var message in new[] { "Create", "Update", "Delete" })
+                    AddStep(table, message, 20);
             }
             AddStep(null, "Associate", 20);
             AddStep(null, "Disassociate", 20);
@@ -262,6 +336,14 @@ internal static partial class Program
                     ["statecode"] = new OptionSetValue(0)
                 };
         }
+        public void AddRedundantPostStep() => AddStep("os_sr_cand", "RetrieveMultiple", 40);
+        public void AddSupportedGuard(string message) => AddStep("os_sr_cand", message, 20);
+        public void AddSupportedMessage(string message, bool guardable) => SupportedRows.Add(
+            new Entity("sdkmessagefilter", Guid.NewGuid()) {
+                ["primaryobjecttypecode"] = "os_sr_cand",
+                ["iscustomprocessingstepallowed"] = guardable,
+                ["message.name"] = new AliasedValue("sdkmessage", "name", message)
+            });
         private void AddStep(string? table, string message, int stage, bool readGuard = false)
         {
             var step = new Entity("sdkmessageprocessingstep", Guid.NewGuid())
@@ -316,9 +398,17 @@ internal static partial class Program
             Output.Clear();
             var values = Context(Input, new ParameterCollection(), Output);
             values["OrganizationId"] = DevOrganization;
+            values["UserId"] = CallerId; values["InitiatingUserId"] = CallerId;
             stack.Push(Execution(values));
             try { new ApplyCandidateAction().Execute(this); }
             finally { stack.Pop(); }
+        }
+        public void OrdinaryCreate()
+        {
+            Input.Clear();
+            Input["ActionType"] = "CreateCandidate"; Input["CorrelationId"] = Guid.NewGuid();
+            Input["CandidateName"] = "Unrelated synthetic fixture"; Input["CandidateEmail"] = "unrelated@example.invalid";
+            InvokeAgain();
         }
         public void Direct(string message, Entity target)
         {
@@ -327,6 +417,7 @@ internal static partial class Program
                 ["Target"] = message == "Associate" || message == "Disassociate" ? (object)target.ToEntityReference() : target
             }, new ParameterCollection(), new ParameterCollection());
             values["OrganizationId"] = DevOrganization; values["MessageName"] = message;
+            values["UserId"] = CallerId; values["InitiatingUserId"] = CallerId;
             values["PrimaryEntityName"] = target.LogicalName; values["Stage"] = 20;
             stack.Push(Execution(values));
             try { new SyntheticIsolationGuard().Execute(this); }
@@ -341,6 +432,7 @@ internal static partial class Program
             };
             var values = Context(input, new ParameterCollection(), output);
             values["OrganizationId"] = DevOrganization; values["MessageName"] = "RetrieveMultiple";
+            values["UserId"] = CallerId; values["InitiatingUserId"] = CallerId;
             foreach (var stage in new[] { 20, 40 })
             {
                 values["Stage"] = stage;
@@ -359,13 +451,22 @@ internal static partial class Program
         }
         private void Guard(string message, string table, ParameterCollection input, ParameterCollection output, int stage)
         {
-            if (!SyntheticIsolation.Tables.Contains(table)) return;
+            if (!SyntheticIsolation.Tables.Contains(table) && !(message == "RetrieveMultiple" && stage == 40)) return;
             var values = Context(input, new ParameterCollection(), output);
             values["OrganizationId"] = DevOrganization; values["MessageName"] = message;
             values["PrimaryEntityName"] = table; values["Stage"] = stage;
             values["Depth"] = Current.Depth + 1; values["ParentContext"] = Current;
+            values["UserId"] = Guid.Empty; values["InitiatingUserId"] = Current.InitiatingUserId;
+            MaxDepth = Math.Max(MaxDepth, (int)values["Depth"]!);
+            if ((int)values["Depth"]! > 8) throw new Exception("Fixture detects recursive guard calls");
+            if (message == "Retrieve" || message == "RetrieveMultiple") SystemReadGuardCalls++;
+            if (!SyntheticIsolation.Tables.Contains(table)) ControlReadGuardCalls++;
             stack.Push(Execution(values));
-            try { new SyntheticIsolationGuard().Execute(this); }
+            try
+            {
+                if (message == "Retrieve" || message == "RetrieveMultiple") new SyntheticIsolationReadGuard().Execute(this);
+                else new SyntheticIsolationGuard().Execute(this);
+            }
             finally { stack.Pop(); }
         }
         private object? ServiceCall(IMethodCallMessage call)
@@ -384,15 +485,25 @@ internal static partial class Program
             {
                 var query = (QueryExpression)call.Args[0];
                 if (query.EntityName == "environmentvariabledefinition")
-                    return Collection(MissingConfiguration ? Array.Empty<Entity>() : new[] {
-                        new Entity(query.EntityName, Reference) { ["statecode"] = new OptionSetValue(0) } });
+                {
+                    ProfileLoads++;
+                    return ReadResult(query.EntityName, Collection(MissingConfiguration ? Array.Empty<Entity>() : new[] {
+                        new Entity(query.EntityName, Reference) { ["statecode"] = new OptionSetValue(0) } }));
+                }
                 if (query.EntityName == "environmentvariablevalue")
-                    return Collection(new[] { new Entity(query.EntityName, Reference)
-                        { ["value"] = IsolationXml, ["statecode"] = new OptionSetValue(0) } });
-                if (query.EntityName == "sdkmessageprocessingstep") return Collection(Steps);
-                if (query.EntityName == "sdkmessagefilter") return new EntityCollection();
+                    return ReadResult(query.EntityName, Collection(new[] { new Entity(query.EntityName, Reference)
+                        { ["value"] = IsolationXml, ["statecode"] = new OptionSetValue(0) } }));
+                if (query.EntityName == "sdkmessageprocessingstep") return ReadResult(query.EntityName, Collection(Steps));
+                if (query.EntityName == "sdkmessagefilter") return ReadResult(query.EntityName, Collection(SupportedRows));
                 if (query.EntityName == "privilege")
-                    return Collection(new[] { new Entity("privilege", dangerousPrivilege) { ["name"] = "prvBypassCustomPlugins" } });
+                {
+                    var names = EffectiveReadPrivileges().Select(pair =>
+                        new Entity("privilege", pair.Value) { ["name"] = "prvRead" + pair.Key }).ToList();
+                    if (BypassPrivilege || ExtraPrivilegeName != null)
+                        names.Add(new Entity("privilege", dangerousPrivilege) {
+                            ["name"] = ExtraPrivilegeName ?? "prvBypassCustomPlugins" });
+                    return ReadResult(query.EntityName, Collection(names));
+                }
                 if (stack.Count > 0) Guard("RetrieveMultiple", query.EntityName,
                     new ParameterCollection { ["Query"] = query }, new ParameterCollection(), 20);
                 var candidates = ReferenceRows.TryGetValue(query.EntityName, out var row) ?
@@ -405,7 +516,10 @@ internal static partial class Program
             if (call.MethodName == "Create")
             {
                 var row = Clone((Entity)call.Args[0]);
-                if (row.Id == Guid.Empty) row.Id = Guid.NewGuid();
+                Check(row.Id != Guid.Empty, "Create target ID is explicit before the platform Create pipeline");
+                if (row.LogicalName == "os_sr_cand")
+                    Check(row.GetAttributeValue<EntityReference>("ownerid")?.Id == CallerId,
+                        "Candidate owner is explicit and preserves the initiating BSO");
                 Guard("Create", row.LogicalName, new ParameterCollection { ["Target"] = row }, new ParameterCollection(), 20);
                 if (row.LogicalName == "os_sr_cand") row["os_sr_cand_cnum"] = "CAND-SYNTHETIC";
                 row.RowVersion = "1";
@@ -414,17 +528,27 @@ internal static partial class Program
             }
             if (call.MethodName == "Execute")
             {
-                if (call.Args[0] is RetrieveEntityRequest)
+                if (call.Args[0] is RetrieveEntityRequest metadataRequest)
+                {
+                    var metadata = new EntityMetadata { ChangeTrackingEnabled = ChangeTrackingEnabled };
+                    var privilege = (SecurityPrivilegeMetadata)Activator.CreateInstance(typeof(SecurityPrivilegeMetadata), true)!;
+                    var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+                    typeof(SecurityPrivilegeMetadata).GetField("_privilegeId", flags)!.SetValue(privilege, readPrivileges[metadataRequest.LogicalName]);
+                    typeof(SecurityPrivilegeMetadata).GetField("_privilegeType", flags)!.SetValue(privilege, PrivilegeType.Read);
+                    typeof(EntityMetadata).GetProperty("Privileges")!.SetValue(metadata,
+                        MissingPrivilegeMetadata ? Array.Empty<SecurityPrivilegeMetadata>() : new[] { privilege });
                     return new RetrieveEntityResponse
                     {
-                        Results = new ParameterCollection { ["EntityMetadata"] =
-                            new Microsoft.Xrm.Sdk.Metadata.EntityMetadata { ChangeTrackingEnabled = ChangeTrackingEnabled } }
+                        Results = new ParameterCollection { ["EntityMetadata"] = metadata }
                     };
+                }
                 if (call.Args[0] is RetrieveUserPrivilegesRequest)
                     return new RetrieveUserPrivilegesResponse
                     {
-                        Results = new ParameterCollection { ["RolePrivileges"] = BypassPrivilege ?
-                            new[] { new RolePrivilege { PrivilegeId = dangerousPrivilege } } : Array.Empty<RolePrivilege>() }
+                        Results = new ParameterCollection { ["RolePrivileges"] =
+                            EffectiveReadPrivileges().Select(pair => new RolePrivilege { PrivilegeId = pair.Value })
+                            .Concat(BypassPrivilege || ExtraPrivilegeName != null ?
+                                new[] { new RolePrivilege { PrivilegeId = dangerousPrivilege } } : Array.Empty<RolePrivilege>()).ToArray() }
                     };
                 if (call.Args[0] is RetrievePrincipalAccessRequest)
                     return new RetrievePrincipalAccessResponse
@@ -441,6 +565,15 @@ internal static partial class Program
                 }
             }
             throw new Exception("Unexpected isolation fixture operation " + call.MethodName);
+        }
+        private IEnumerable<KeyValuePair<string, Guid>> EffectiveReadPrivileges() =>
+            readPrivileges.Where(pair => (pair.Key != "os_sr_oprc" || ReceiptReadGranted) &&
+                (pair.Key != "os_sr_cand" || !OwnerReadMissing));
+        private EntityCollection ReadResult(string table, EntityCollection rows)
+        {
+            if (stack.Count > 0) Guard("RetrieveMultiple", table, new ParameterCollection(),
+                new ParameterCollection { ["BusinessEntityCollection"] = rows }, 40);
+            return rows;
         }
         private static EntityCollection Collection(IEnumerable<Entity> rows) =>
             new EntityCollection(rows.ToList());

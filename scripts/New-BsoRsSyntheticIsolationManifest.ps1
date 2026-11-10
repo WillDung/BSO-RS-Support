@@ -72,9 +72,9 @@ $tables = @('os_sr_cand', 'os_sr_call', 'os_sr_csh', 'os_sr_intv', 'os_sr_oprc',
     'os_sr_pos', 'os_sr_csrc', 'os_sr_ta', 'os_sr_loc')
 $steps = @(
     foreach ($table in $tables) {
-        foreach ($message in @('Create', 'Update', 'Delete', 'Retrieve', 'RetrieveMultiple', 'RetrieveMultiplePost')) {
+        foreach ($message in @('Create', 'Update', 'Delete')) {
             [ordered]@{ handler = 'os_sr_cact.SyntheticIsolationGuard'; table = $table; message = $message
-                stage = $(if ($message -in @('Retrieve', 'RetrieveMultiplePost')) { 40 } else { 20 }); mode = 0; filteringAttributes = ''; runAs = 'CALLING_USER' }
+                stage = 20; mode = 0; filteringAttributes = ''; runAs = 'CALLING_USER' }
         }
     }
     foreach ($message in @('Associate', 'Disassociate')) {
@@ -86,18 +86,21 @@ $steps = @(
             stage = $pair[1]; mode = 0; filteringAttributes = ''; runAs = 'CALLING_USER' }
     }
 )
-foreach ($step in $steps) { if ($step.message -ceq 'RetrieveMultiplePost') { $step.message = 'RetrieveMultiple' } }
 $manifest = [ordered]@{
-    schemaVersion = 1; release = 'candidate-core-synthetic-isolation-1.0.1-offline'
+    schemaVersion = 2; release = 'candidate-core-synthetic-isolation-1.0.1-32-step-offline'
     implementation = 'IMPLEMENTED_OFFLINE_NOT_DEPLOYED'; deploymentReady = $false
+    deploymentManifestStatus = 'BLOCKED_PENDING_LIVE_SUPPORTED_MESSAGE_AND_CALLER_CONTROL_EVIDENCE'
     target = $console.target
     package = [ordered]@{ path = [IO.Path]::GetFullPath($PackagePath)
         sha256 = (Get-FileHash -LiteralPath $PackagePath -Algorithm SHA256).Hash.ToLowerInvariant()
         assemblySha256 = $assemblyHash
+        expectedPackageVersion = '1.0.1'; expectedAssemblyVersion = '1.0.1.2'
+        requiredBuildProperties = @('Version=1.0.1', 'AssemblyVersion=1.0.1.2', 'FileVersion=1.0.1.2')
         provenance = 'LOCAL_BUILD_REQUIRES_REVIEW_AGAINST_SOURCE_HASHES' }
     sources = $sources; webResources = $webResources
     checkedInWebResourceChanges = @('candidate-console.html', 'candidate-console-policy.js',
         'candidate-console.js', 'candidate-console-availability.js')
+    webResourceDeltaFromPriorReviewedIsolationSource = @()
     environmentResource = 'BOUND_DEV_GENERATED_CONFIGURATION_NOT_THE_DISABLED_SOURCE_TEMPLATE'
     css = 'UNCHANGED_EXCLUDED'
     serverComponents = [ordered]@{
@@ -106,9 +109,16 @@ $manifest = [ordered]@{
             'read-only ActionType VerifySyntheticIsolation')
         newPluginTypes = @('os_sr_cact.SyntheticIsolationGuard', 'os_sr_cact.SyntheticIsolationReadGuard')
         requiredBaseSteps = $steps
+        requiredBaseStepCount = $steps.Count
+        totalRequiredStepCount = $null
+        removedFromPriorProposal = 'All 27 per-table read steps: global RetrieveMultiple stage 20 scopes roots, global RetrieveMultiple stage 40 validates rows, global Retrieve stage 40 validates projections through scoped queries. Existing same-version redundant registrations reject verification.'
+        callerScope = 'Configured actor only. Other callers retain ordinary API/table/reference/association/query behavior when the mandatory profile is present and valid. Missing/invalid profile remains fail-closed for relevant operations.'
         additionalSupportedMessageSteps = @('Upsert', 'SetState', 'SetStateDynamicEntity', 'Assign', 'Merge',
             'CreateMultiple', 'UpdateMultiple', 'UpsertMultiple', 'DeleteMultiple')
         supportedMessageRule = 'Discover sdkmessagefilter per table; every supported write message requires an unfiltered synchronous stage-20 guard. Any unguardable message blocks verification.'
+        supportedMessageInventory = 'NOT_CAPTURED_IN_THIS_OFFLINE_PASS; total cannot be asserted from SDK fixture metadata'
+        restrictedCaller = 'Read on four BSO-owned business tables and four references; no Receipt privilege. Every effective direct/team privilege ID must resolve to fixed read-only app/metadata/business allowlist; unknown, control-write, bypass, audit and native mutation privileges reject.'
+        nativeOnlyAlternative = 'BLOCKED: zero business Read conflicts with preserved BSO ownership (known TargetPrincipalLacksReadPrivilege receipt precedent); retaining Read leaves TDS/search/change-tracking channels outside query guards. No ownership exception or organization changes approved.'
         configuration = [ordered]@{ proposedSchemaName = 'os_sr_siso'; type = 'String'
             definition = 'One active environmentvariabledefinition, no default value'
             currentValue = 'Exactly one active environmentvariablevalue; administrator-controlled XML'
@@ -124,7 +134,7 @@ $manifest = [ordered]@{
         'Confirm DEV identity, supported registrations, restricted caller, TDS/search disabled and all nine tables change-tracking disabled. STOP for missing controls; do not change organization settings or roles implicitly.',
         'Establish a real edit/import/publish change window, with all owner srapp tabs closed during server/guard/profile installation and resource refresh; capture recoverable package/API/step/config/resource rollback evidence and conditional version checks.',
         'Install the reviewed package into the existing package identity; preserve the rollback assembly. Add the optional request/response metadata without changing API execution privilege.',
-        'Register/verify all supported table and global guard steps with this package version. Do not reactivate historical ProtectCandidateCore steps.',
+        'Register/verify exactly 32 base steps plus the live-discovered supported-message delta. Do not register the superseded 27 per-table read steps or reactivate historical ProtectCandidateCore steps.',
         'Install the separately approved single active server profile with exact protected bindings, original marker and explicit expiry. No client setting authorizes this profile.',
         'Invoke only VerifySyntheticIsolation and reconcile server readback. Any failure blocks Console activation.',
         'Conditionally update exactly the five approved revised Console resources; scope PublishXml to those IDs only, within the confirmed window; no retries of uncertain outcomes.',
@@ -135,7 +145,7 @@ $manifest = [ordered]@{
         'REVISED_FIVE_WEBRESOURCE_BYTES_AND_SCOPED_PUBLICATION', 'FRESH_LIFECYCLE_AUTHORIZATION_ONLY_AFTER_READ_ONLY_ACCEPTANCE')
     readOnlyAcceptance = @('Exact DEV organization/environment/account and solution membership',
         'Correct API contract, package-backed handler identities/versions, complete active guard coverage and supported-message inventory',
-        'Restricted caller cannot bypass plug-ins, impersonate, read audit history or modify server controls; TDS/search/change tracking are disabled',
+        'All effective caller/team privilege IDs resolve to the fixed allowlist; BSO-owner/reference Read present and Receipt Read absent; TDS/search/change tracking disabled. Elevated historical owner and existing role name alone are insufficient.',
         'One active server profile, exact original marker and approved active references, unexpired scope; verifier performs zero storage writes',
         'Five effective served hashes equal the manifest; correct policy initializes before all business reads',
         'Missing/denied/expired proof disables Create; genuine proof may enable Create; Check Calendar remains disabled',

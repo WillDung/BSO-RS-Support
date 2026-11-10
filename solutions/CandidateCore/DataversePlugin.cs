@@ -44,10 +44,19 @@ namespace os_sr_cact
                     if (context.OrganizationId != DevCandidateSlice.DevelopmentOrganizationId)
                         throw new OperationError("SYNTHETIC_ORGANIZATION_REJECTED");
                     var controlService = factory.CreateOrganizationService(null);
-                    isolation = SyntheticIsolation.Load(controlService, context);
-                    SyntheticIsolation.RequireGuardCoverage(controlService);
-                    SyntheticIsolation.RequireRestrictedCaller(controlService, context);
-                    if (Equals(context.InputParameters["ActionType"], SyntheticIsolation.VerifyAction))
+                    var explicitIsolation =
+                        context.InputParameters.TryGetValue("SyntheticScopeId", out var scope) &&
+                            scope != null && !Equals(scope, Guid.Empty) ||
+                        context.InputParameters.TryGetValue("ActionType", out var isolationAction) &&
+                            Equals(isolationAction, SyntheticIsolation.VerifyAction);
+                    isolation = explicitIsolation ? SyntheticIsolation.Load(controlService, context) :
+                        SyntheticIsolation.LoadForGuard(controlService, context);
+                    if (isolation != null)
+                    {
+                        SyntheticIsolation.RequireGuardCoverage(controlService);
+                        SyntheticIsolation.RequireRestrictedCaller(controlService, context);
+                    }
+                    if (isolation != null && Equals(context.InputParameters["ActionType"], SyntheticIsolation.VerifyAction))
                     {
                         if (context.InputParameters.Any(parameter => parameter.Key != "ActionType" &&
                             parameter.Value != null && !Equals(parameter.Value, Guid.Empty) &&

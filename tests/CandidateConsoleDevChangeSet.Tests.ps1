@@ -84,8 +84,15 @@ try {
     & $deltaScript @deltaArgs | Out-Null
     $delta = Get-Content -LiteralPath $deltaPath -Raw | ConvertFrom-Json
     Assert-Test (-not $delta.deploymentReady -and -not $delta.serverComponents.configuration.configurationPrepared -and
-        $delta.serverComponents.requiredBaseSteps.Count -eq 59 -and $delta.webResources.Count -eq 5) `
-        'Delta lists all 59 base guards and five resources without granting activation'
+        $delta.serverComponents.requiredBaseSteps.Count -eq 32 -and $delta.webResources.Count -eq 5 -and
+        $null -eq $delta.serverComponents.totalRequiredStepCount -and
+        $delta.deploymentManifestStatus -like 'BLOCKED*') `
+        'Delta pins 32 base guards and explicitly blocks an invented live total or activation'
+    Assert-Test (@($delta.serverComponents.requiredBaseSteps | Where-Object {
+        $_.table -and $_.message -in @('Retrieve', 'RetrieveMultiple')
+    }).Count -eq 0 -and @($delta.serverComponents.requiredBaseSteps | Where-Object {
+        -not $_.table -and $_.message -ceq 'RetrieveMultiple' -and $_.stage -eq 40
+    }).Count -eq 1) 'Consolidate all 27 per-table read registrations into required global read guards'
     Assert-Test ($delta.package.sha256 -ceq (Get-FileHash -LiteralPath $packagePath).Hash.ToLowerInvariant() -and
         $delta.sources.Count -eq 7 -and $delta.approvalBoundaries.Count -eq 5) `
         'Delta pins server/API sources and package bytes with separate approval boundaries'

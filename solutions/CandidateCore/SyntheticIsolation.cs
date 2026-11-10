@@ -86,13 +86,32 @@ namespace os_sr_cact
 
         public static SyntheticIsolation Load(IOrganizationService service, IPluginExecutionContext context)
         {
+            var policy = ReadProfile(service);
+            policy.ValidateContext(context.OrganizationId, context.InitiatingUserId, DateTime.UtcNow);
+            return policy;
+        }
+
+        public static SyntheticIsolation? LoadForGuard(IOrganizationService service, IPluginExecutionContext context)
+        {
+            var policy = ReadProfile(service);
+            if (context.OrganizationId != DevCandidateSlice.DevelopmentOrganizationId ||
+                context.OrganizationId != policy.OrganizationId)
+                throw new OperationError("SYNTHETIC_ORGANIZATION_REJECTED");
+            if (context.InitiatingUserId != policy.ActorId) return null;
+            policy.ValidateContext(context.OrganizationId, context.InitiatingUserId, DateTime.UtcNow);
+            return policy;
+        }
+
+        private static SyntheticIsolation ReadProfile(IOrganizationService service)
+        {
             var definitions = new QueryExpression("environmentvariabledefinition")
             {
                 ColumnSet = new ColumnSet("statecode"), TopCount = 2
             };
             definitions.Criteria.AddCondition("schemaname", ConditionOperator.Equal, ConfigurationName);
-            var definitionRows = service.RetrieveMultiple(definitions).Entities;
-            if (definitionRows.Count != 1 ||
+            var definitionResult = service.RetrieveMultiple(definitions);
+            var definitionRows = definitionResult.Entities;
+            if (definitionResult.MoreRecords || definitionRows.Count != 1 ||
                 definitionRows[0].GetAttributeValue<OptionSetValue>("statecode")?.Value != 0)
                 throw new OperationError("SYNTHETIC_CONFIGURATION_MISSING");
             var values = new QueryExpression("environmentvariablevalue")
@@ -100,12 +119,11 @@ namespace os_sr_cact
                 ColumnSet = new ColumnSet("value", "statecode"), TopCount = 2
             };
             values.Criteria.AddCondition("environmentvariabledefinitionid", ConditionOperator.Equal, definitionRows[0].Id);
-            var rows = service.RetrieveMultiple(values).Entities;
-            if (rows.Count != 1 || rows[0].GetAttributeValue<OptionSetValue>("statecode")?.Value != 0)
+            var valueResult = service.RetrieveMultiple(values);
+            var rows = valueResult.Entities;
+            if (valueResult.MoreRecords || rows.Count != 1 || rows[0].GetAttributeValue<OptionSetValue>("statecode")?.Value != 0)
                 throw new OperationError("SYNTHETIC_CONFIGURATION_MISSING");
-            var policy = Parse(rows[0].GetAttributeValue<string>("value"));
-            policy.ValidateContext(context.OrganizationId, context.InitiatingUserId, DateTime.UtcNow);
-            return policy;
+            return Parse(rows[0].GetAttributeValue<string>("value"));
         }
 
         public void ValidateContext(Guid organization, Guid actor, DateTime now)
@@ -336,35 +354,46 @@ namespace os_sr_cact
                 throw new OperationError("SYNTHETIC_TDS_NOT_DISABLED");
             if (!organization.Contains("enablerelevancesearch") || organization.GetAttributeValue<bool>("enablerelevancesearch"))
                 throw new OperationError("SYNTHETIC_SEARCH_NOT_DISABLED");
+            var privileges = (RetrieveUserPrivilegesResponse)service.Execute(
+                new RetrieveUserPrivilegesRequest { UserId = context.InitiatingUserId });
+            var granted = new HashSet<Guid>(privileges.RolePrivileges.Select(privilege => privilege.PrivilegeId));
             foreach (var table in Tables)
             {
                 var metadata = (RetrieveEntityResponse)service.Execute(new RetrieveEntityRequest
                 {
-                    LogicalName = table, EntityFilters = Microsoft.Xrm.Sdk.Metadata.EntityFilters.Entity,
+                    LogicalName = table, EntityFilters = Microsoft.Xrm.Sdk.Metadata.EntityFilters.Entity |
+                        Microsoft.Xrm.Sdk.Metadata.EntityFilters.Privileges,
                     RetrieveAsIfPublished = false
                 });
                 if (metadata.EntityMetadata.ChangeTrackingEnabled != false)
                     throw new OperationError("SYNTHETIC_CHANGE_TRACKING_NOT_DISABLED");
+                var read = metadata.EntityMetadata.Privileges?
+                    .Where(privilege => privilege.PrivilegeType == Microsoft.Xrm.Sdk.Metadata.PrivilegeType.Read).ToArray();
+                if (read == null || read.Length != 1)
+                    throw new OperationError("SYNTHETIC_PRIVILEGE_METADATA_MISSING");
+                if (table != "os_sr_oprc" && !granted.Contains(read[0].PrivilegeId))
+                    throw new OperationError("SYNTHETIC_OWNER_REFERENCE_READ_REQUIRED");
+                if (table == "os_sr_oprc" && granted.Contains(read[0].PrivilegeId))
+                    throw new OperationError("SYNTHETIC_RECEIPT_READ_REJECTED");
             }
-            var privileges = (RetrieveUserPrivilegesResponse)service.Execute(
-                new RetrieveUserPrivilegesRequest { UserId = context.InitiatingUserId });
-            var granted = new HashSet<Guid>(privileges.RolePrivileges.Select(privilege => privilege.PrivilegeId));
-            var query = new QueryExpression("privilege") { ColumnSet = new ColumnSet("name") };
-            query.Criteria.AddCondition("name", ConditionOperator.In, new object[]
+            if (granted.Count == 0 || granted.Count > 500) throw new OperationError("SYNTHETIC_CALLER_PRIVILEGES_REJECTED");
+            var query = new QueryExpression("privilege") { ColumnSet = new ColumnSet("name"), TopCount = 501 };
+            query.Criteria.AddCondition("privilegeid", ConditionOperator.In, granted.Cast<object>().ToArray());
+            var allowed = new HashSet<string>(new[]
             {
-                "prvBypassCustomPlugins", "prvBypassCustomBusinessLogic", "prvActOnBehalfOfAnotherUser",
-                "prvCreateEnvironmentVariableDefinition", "prvWriteEnvironmentVariableDefinition", "prvDeleteEnvironmentVariableDefinition",
-                "prvCreateEnvironmentVariableValue", "prvWriteEnvironmentVariableValue", "prvDeleteEnvironmentVariableValue",
-                "prvCreateSdkMessageProcessingStep", "prvWriteSdkMessageProcessingStep", "prvDeleteSdkMessageProcessingStep",
-                "prvCreatePluginAssembly", "prvWritePluginAssembly", "prvDeletePluginAssembly",
-                "prvCreatePluginType", "prvWritePluginType", "prvDeletePluginType",
-                "prvCreateCustomAPI", "prvWriteCustomAPI", "prvDeleteCustomAPI",
-                "prvCreatePluginPackage", "prvWritePluginPackage", "prvDeletePluginPackage",
-                "prvReadAuditSummary", "prvReadRecordAuditHistory", "prvReadAttributeAuditHistory"
-            });
-            var dangerous = service.RetrieveMultiple(query);
-            if (dangerous.MoreRecords || dangerous.Entities.Count == 0 ||
-                dangerous.Entities.Any(privilege => granted.Contains(privilege.Id)))
+                "prvReados_sr_cand", "prvReados_sr_call", "prvReados_sr_csh", "prvReados_sr_intv",
+                "prvReados_sr_pos", "prvReados_sr_csrc", "prvReados_sr_ta", "prvReados_sr_loc",
+                "prvReadAppModule", "prvReadAppModuleRoles", "prvReadEntity", "prvReadAttribute",
+                "prvReadRelationship", "prvReadWebResource", "prvReadCustomization", "prvReadSystemForm",
+                "prvReadSavedQuery", "prvReadSavedQueryVisualizations", "prvReadOptionSet",
+                "prvReadCustomControl", "prvReadCustomControlDefaultConfig", "prvReadCustomControlResource",
+                "prvReadEntityKey", "prvReadEntityMap", "prvReadAttributeMap", "prvReadUser",
+                "prvReadTeam", "prvReadRole", "prvReadBusinessUnit", "prvReadOrganization", "prvReadUserSettings"
+            }, StringComparer.Ordinal);
+            var effective = service.RetrieveMultiple(query);
+            if (effective.MoreRecords || effective.Entities.Count != granted.Count ||
+                !granted.SetEquals(effective.Entities.Select(privilege => privilege.Id)) ||
+                effective.Entities.Any(privilege => !allowed.Contains(privilege.GetAttributeValue<string>("name"))))
                 throw new OperationError("SYNTHETIC_CALLER_PRIVILEGES_REJECTED");
         }
 
@@ -409,6 +438,11 @@ namespace os_sr_cact
             var registered = service.RetrieveMultiple(steps);
             if (registered.MoreRecords) throw new OperationError("SYNTHETIC_COVERAGE_INCOMPLETE");
             var registrations = registered.Entities;
+            if (registrations.Any(row =>
+                row.GetAttributeValue<AliasedValue>("handler.typename")?.Value as string == typeof(SyntheticIsolationGuard).FullName &&
+                (row.GetAttributeValue<AliasedValue>("message.name")?.Value as string == "RetrieveMultiple" ||
+                 row.GetAttributeValue<AliasedValue>("message.name")?.Value as string == "Retrieve")))
+                throw new OperationError("SYNTHETIC_GUARD_COVERAGE_REDUNDANT");
             var support = new QueryExpression("sdkmessagefilter")
             {
                 ColumnSet = new ColumnSet("primaryobjecttypecode", "iscustomprocessingstepallowed")
@@ -421,9 +455,8 @@ namespace os_sr_cact
             if (supported.MoreRecords) throw new OperationError("SYNTHETIC_COVERAGE_INCOMPLETE");
             foreach (var table in Tables)
             {
-                foreach (var required in new[] { "Create", "Update", "Delete", "Retrieve", "RetrieveMultiple" })
-                    RequireStep(registrations, table, required, required == "Retrieve" ? 40 : 20);
-                RequireStep(registrations, table, "RetrieveMultiple", 40);
+                foreach (var required in new[] { "Create", "Update", "Delete" })
+                    RequireStep(registrations, table, required, 20);
                 foreach (var row in supported.Entities.Where(row =>
                     row.GetAttributeValue<string>("primaryobjecttypecode") == table))
                 {
@@ -470,23 +503,43 @@ namespace os_sr_cact
                 if (context.MessageName == "RetrieveMultiple" && context.Stage == 20)
                 {
                     var query = context.InputParameters["Query"];
+                    if (query is QueryExpression protectedQuery && SyntheticIsolation.IsProtectedTable(protectedQuery.EntityName))
+                    {
+                        PolicyForCaller(serviceProvider, context)?.ScopeQuery(protectedQuery);
+                        return;
+                    }
                     if (query is QueryExpression expression && !SyntheticIsolation.IsProtectedTable(expression.EntityName) &&
                         HasProtectedLink(expression.LinkEntities))
-                        throw new OperationError("SYNTHETIC_CROSS_ROOT_QUERY_REJECTED");
+                    {
+                        if (PolicyForCaller(serviceProvider, context) != null)
+                            throw new OperationError("SYNTHETIC_CROSS_ROOT_QUERY_REJECTED");
+                        return;
+                    }
                     if (query is FetchExpression fetch)
                     {
                         using (var reader = XmlReader.Create(new StringReader(fetch.Query),
                             new XmlReaderSettings { DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null }))
                         {
                             var xml = XElement.Load(reader);
-                            if (xml.Name != "fetch" || xml.Descendants().Any(element => element.Name.NamespaceName.Length != 0))
-                                throw new OperationError("SYNTHETIC_QUERY_REJECTED");
-                            var root = (string?)xml.Element("entity")?.Attribute("name");
-                            if (!SyntheticIsolation.IsProtectedTable(root) && xml.Descendants("link-entity")
+                            var root = (string?)xml.Elements().FirstOrDefault(element => element.Name.LocalName == "entity")?.Attribute("name");
+                            if (SyntheticIsolation.IsProtectedTable(root))
+                            {
+                                PolicyForCaller(serviceProvider, context)?.ScopeQuery(fetch);
+                                return;
+                            }
+                            if (!SyntheticIsolation.IsProtectedTable(root) && xml.Descendants()
+                                .Where(element => element.Name.LocalName == "link-entity")
                                 .Any(link => SyntheticIsolation.IsProtectedTable((string?)link.Attribute("name"))))
-                                throw new OperationError("SYNTHETIC_CROSS_ROOT_QUERY_REJECTED");
+                            {
+                                if (PolicyForCaller(serviceProvider, context) != null)
+                                    throw new OperationError("SYNTHETIC_CROSS_ROOT_QUERY_REJECTED");
+                                return;
+                            }
                         }
                     }
+                    if (!(query is QueryExpression) && !(query is FetchExpression) &&
+                        PolicyForCaller(serviceProvider, context) != null)
+                        throw new OperationError("SYNTHETIC_QUERY_REJECTED");
                     return;
                 }
                 if (context.Stage != 40) throw new OperationError("SYNTHETIC_CONTEXT_REJECTED");
@@ -498,16 +551,49 @@ namespace os_sr_cact
                     context.OutputParameters.TryGetValue("BusinessEntityCollection", out var collection) && collection is EntityCollection result)
                     rows = result.Entities;
                 else throw new OperationError("SYNTHETIC_ROW_REJECTED");
-                foreach (var row in rows.Where(row => !SyntheticIsolation.IsProtectedTable(row.LogicalName)))
+                SyntheticIsolation? policy = null;
+                var loaded = false;
+                foreach (var row in rows)
                 {
-                    if (ContainsProtectedExpansion(row))
+                    var protectedRow = SyntheticIsolation.IsProtectedTable(row.LogicalName);
+                    var relevant = protectedRow || ContainsProtectedExpansion(row);
+                    if (!relevant) continue;
+                    if (!loaded)
+                    {
+                        policy = PolicyForCaller(serviceProvider, context);
+                        loaded = true;
+                        if (policy == null) return;
+                    }
+                    if (protectedRow && context.MessageName == "Retrieve")
+                    {
+                        var factory = (IOrganizationServiceFactory)serviceProvider.GetService(typeof(IOrganizationServiceFactory));
+                        var system = factory.CreateOrganizationService(null);
+                        var query = new QueryExpression(row.LogicalName) { ColumnSet = new ColumnSet(false), TopCount = 2 };
+                        query.Criteria.AddCondition(row.LogicalName + "id", ConditionOperator.Equal, row.Id);
+                        policy!.ScopeQuery(query);
+                        var full = system.RetrieveMultiple(query).Entities;
+                        if (full.Count != 1) throw new OperationError("SYNTHETIC_ROW_REJECTED");
+                        policy.ValidateRow(full[0]);
+                        if (row.RelatedEntities.Count != 0)
+                            throw new OperationError("SYNTHETIC_EXPANSION_REJECTED");
+                    }
+                    else if (protectedRow) policy!.ValidateRow(row);
+                    else
                         throw new OperationError("SYNTHETIC_EXPANSION_REJECTED");
                 }
             }
             catch (OperationError error)
             {
+                var trace = (ITracingService)serviceProvider.GetService(typeof(ITracingService));
+                trace.Trace("os_sr_siso rejected code={0}", error.Message);
                 throw new InvalidPluginExecutionException(error.Message);
             }
+        }
+
+        private static SyntheticIsolation? PolicyForCaller(IServiceProvider provider, IPluginExecutionContext context)
+        {
+            var factory = (IOrganizationServiceFactory)provider.GetService(typeof(IOrganizationServiceFactory));
+            return SyntheticIsolation.LoadForGuard(factory.CreateOrganizationService(null), context);
         }
 
         private static bool HasProtectedLink(IEnumerable<LinkEntity> links) =>
@@ -543,41 +629,17 @@ namespace os_sr_cact
                         context.InputParameters["RelatedEntities"] as EntityReferenceCollection : null;
                     if (target != null && SyntheticIsolation.IsProtectedTable(target.LogicalName) ||
                         related != null && related.Any(row => SyntheticIsolation.IsProtectedTable(row.LogicalName)))
-                        throw new OperationError("SYNTHETIC_DIRECT_WRITE_REJECTED");
+                    {
+                        var associationFactory = (IOrganizationServiceFactory)serviceProvider.GetService(typeof(IOrganizationServiceFactory));
+                        if (SyntheticIsolation.LoadForGuard(associationFactory.CreateOrganizationService(null), context) != null)
+                            throw new OperationError("SYNTHETIC_DIRECT_WRITE_REJECTED");
+                    }
                     return;
                 }
                 var factory = (IOrganizationServiceFactory)serviceProvider.GetService(typeof(IOrganizationServiceFactory));
                 var system = factory.CreateOrganizationService(null);
-                var policy = SyntheticIsolation.Load(system, context);
-                if (context.MessageName == "RetrieveMultiple" && context.Stage == 20)
-                {
-                    policy.ScopeQuery(context.InputParameters["Query"] as QueryBase ??
-                        throw new OperationError("SYNTHETIC_QUERY_REJECTED"));
-                    return;
-                }
-                if (context.MessageName == "RetrieveMultiple" && context.Stage == 40)
-                {
-                    if (!(context.OutputParameters["BusinessEntityCollection"] is EntityCollection result))
-                        throw new OperationError("SYNTHETIC_ROW_REJECTED");
-                    foreach (var row in result.Entities) policy.ValidateRow(row);
-                    return;
-                }
-                if (context.MessageName == "Retrieve" && context.Stage == 40)
-                {
-                    var row = context.OutputParameters.Contains("BusinessEntity") ?
-                        context.OutputParameters["BusinessEntity"] as Entity : null;
-                    if (row == null) throw new OperationError("SYNTHETIC_ROW_REJECTED");
-                    // Retrieve projections cannot prove identity/parentage; use a scoped query, not recursion.
-                    var query = new QueryExpression(row.LogicalName) { ColumnSet = new ColumnSet(false), TopCount = 2 };
-                    query.Criteria.AddCondition(row.LogicalName + "id", ConditionOperator.Equal, row.Id);
-                    policy.ScopeQuery(query);
-                    var full = system.RetrieveMultiple(query).Entities;
-                    if (full.Count != 1) throw new OperationError("SYNTHETIC_ROW_REJECTED");
-                    policy.ValidateRow(full[0]);
-                    if (row.RelatedEntities.Count != 0)
-                        throw new OperationError("SYNTHETIC_EXPANSION_REJECTED");
-                    return;
-                }
+                var policy = SyntheticIsolation.LoadForGuard(system, context);
+                if (policy == null) return;
                 if (context.Stage != 20 || !context.IsInTransaction ||
                     !(context.MessageName == "Create" || context.MessageName == "Update"))
                     throw new OperationError("SYNTHETIC_DIRECT_WRITE_REJECTED");

@@ -51,13 +51,11 @@ namespace os_sr_cact
                             Equals(isolationAction, SyntheticIsolation.VerifyAction);
                     isolation = explicitIsolation ? SyntheticIsolation.Load(controlService, context) :
                         SyntheticIsolation.LoadForGuard(controlService, context);
-                    if (isolation != null)
-                    {
-                        SyntheticIsolation.RequireGuardCoverage(controlService);
-                        SyntheticIsolation.RequireRestrictedCaller(controlService, context);
-                    }
                     if (isolation != null && Equals(context.InputParameters["ActionType"], SyntheticIsolation.VerifyAction))
                     {
+                        // API scope enforcement alone must never attest isolation of other Dataverse channels.
+                        SyntheticIsolation.RequireGuardCoverage(controlService);
+                        SyntheticIsolation.RequireRestrictedCaller(controlService, context);
                         if (context.InputParameters.Any(parameter => parameter.Key != "ActionType" &&
                             parameter.Value != null && !Equals(parameter.Value, Guid.Empty) &&
                             !Equals(parameter.Value, "") && !Equals(parameter.Value, 0)))
@@ -537,6 +535,7 @@ namespace os_sr_cact
             if (rows.Count == 0) return null;
             if (rows.Count != 1) throw new OperationError("RECEIPT_INTEGRITY_FAILURE");
             var row = rows[0];
+            isolation?.ValidateRow(row);
             var candidate = row.GetAttributeValue<EntityReference>("os_sr_oprc_cand");
             if (candidate == null ||
                 !row.Contains("os_sr_oprc_newstat") || string.IsNullOrEmpty(row.GetAttributeValue<string>("os_sr_oprc_hash")))
@@ -566,8 +565,11 @@ namespace os_sr_cact
         {
             SetCreateCandidateStage("CANDIDATE_READBACK");
             EnsureCallerReadAccess(new EntityReference("os_sr_cand", id));
+            var columns = new ColumnSet("os_sr_cand_stat", "versionnumber");
+            if (isolation != null) columns.AddColumns(isolation.VerificationColumns("os_sr_cand"));
             var row = ExecuteAtStage("CC_READ_CANDIDATE",
-                () => systemService.Retrieve("os_sr_cand", id, new ColumnSet("os_sr_cand_stat", "versionnumber")));
+                () => systemService.Retrieve("os_sr_cand", id, columns));
+            isolation?.ValidateRow(row);
             if (!row.Contains("os_sr_cand_stat")) throw new OperationError("CANDIDATE_INTEGRITY_FAILURE");
             int status = row.GetAttributeValue<OptionSetValue>("os_sr_cand_stat").Value;
             if (status < ActionRequest.NeedCall || status > ActionRequest.Failed) throw new OperationError("INVALID_CANDIDATE_STATUS");
@@ -767,6 +769,7 @@ namespace os_sr_cact
             if (identities.Count > 1) throw new OperationError(ambiguityCode);
             var row = ExecuteAtStage("CC_READ_INTERVIEW_SCHEDULE",
                 () => systemService.Retrieve("os_sr_intv", identities[0].Id, ScheduleColumns()));
+            isolation?.ValidateRow(row);
             var result = row.GetAttributeValue<OptionSetValue>("os_sr_intv_res")?.Value;
             var status = row.GetAttributeValue<OptionSetValue>("os_sr_intv_stat")?.Value;
             var candidate = row.GetAttributeValue<EntityReference>("os_sr_intv_cand");
@@ -878,6 +881,7 @@ namespace os_sr_cact
             EnsureCallerReadAccess(new EntityReference("os_sr_intv", id));
             var row = ExecuteAtStage("CC_VERIFY_INTERVIEW_SCHEDULE",
                 () => systemService.Retrieve("os_sr_intv", id, ScheduleColumns()));
+            isolation?.ValidateRow(row);
             if (row.Id != id || row.GetAttributeValue<EntityReference>("os_sr_intv_cand")?.Id != candidateId ||
                 row.GetAttributeValue<OptionSetValue>("os_sr_intv_rnd")?.Value != ActionRequest.Round1 ||
                 row.GetAttributeValue<OptionSetValue>("os_sr_intv_stat")?.Value != expectedStatus)

@@ -25,6 +25,7 @@ internal static partial class Program
     private static void TestSyntheticIsolation()
     {
         var before = passed;
+        TestSyntheticApiScope();
         var policy = SyntheticIsolation.Parse(IsolationXml);
         policy.ValidateContext(DevOrganization, Actor, DateTime.UtcNow);
         Check(policy.ScopeId == Scope && policy.CandidateEmail.EndsWith(".invalid"), "Server derives exact marker identity");
@@ -274,6 +275,110 @@ internal static partial class Program
         Console.WriteLine("Synthetic isolation fixture assertions passed: " + (passed - before));
     }
 
+    private static void TestSyntheticApiScope()
+    {
+        var host = new IsolationHost
+        {
+            GuardsInstalled = false, TdsEnabled = true, SearchEnabled = true, BypassPrivilege = true
+        };
+        host.Steps.Clear();
+        Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_GUARD_COVERAGE_MISSING");
+        Check(host.Writes == 0, "API-only enforcement never issues a full isolation proof");
+        host.MissingConfiguration = true;
+        RejectContains(() => host.Create(), "SYNTHETIC_CONFIGURATION_MISSING");
+        host.MissingConfiguration = false;
+        host.Input["CandidateName"] = "[SYNTHETIC-E2E] forged";
+        RejectContains(() => host.InvokeAgain(), "SYNTHETIC_PROFILE_REJECTED");
+        host.Input["CandidateName"] = SyntheticIsolation.Parse(IsolationXml).CandidateName;
+        host.Input.Remove("SyntheticScopeId");
+        RejectContains(() => host.InvokeAgain(), "SYNTHETIC_SCOPE_REQUIRED");
+        host.Input["SyntheticScopeId"] = Scope;
+        host.CallerId = Guid.NewGuid();
+        RejectContains(() => host.InvokeAgain(), "SYNTHETIC_ACTOR_REJECTED");
+        host.CallerId = Actor;
+        host.OrganizationId = Organization;
+        RejectContains(() => host.InvokeAgain(), "SYNTHETIC_ORGANIZATION_REJECTED");
+        host.OrganizationId = DevOrganization;
+        host.ReferenceRows["os_sr_ta"]["statecode"] = new OptionSetValue(1);
+        RejectContains(() => host.InvokeAgain(), "SYNTHETIC_REFERENCE_REJECTED");
+        host.ReferenceRows["os_sr_ta"]["statecode"] = new OptionSetValue(0);
+        Check(host.Writes == 0, "Invalid API scope, identity and references reject without installed guards");
+        host.Create();
+        var writes = host.Writes;
+        host.InvokeAgain();
+        Check(host.Writes == writes && (string)host.Output["ResultCode"] == "DuplicateReplay",
+            "API-only Create retains receipt idempotency");
+        var receipt = host.Rows.Values.Single(row => row.LogicalName == "os_sr_oprc");
+        receipt["os_sr_oprc_cand"] = new EntityReference("os_sr_cand", Candidate);
+        RejectContains(() => host.InvokeAgain(), "SYNTHETIC_CANDIDATE_REJECTED");
+        receipt["os_sr_oprc_cand"] = new EntityReference("os_sr_cand", Scope);
+        host.Call();
+        writes = host.Writes;
+        host.Input["CandidateId"] = Candidate;
+        Reject(() => host.InvokeAgain(), "SYNTHETIC_CANDIDATE_REJECTED");
+        host.Input["CandidateId"] = Scope;
+        var candidate = host.Rows[Scope];
+        var profile = SyntheticIsolation.Parse(IsolationXml);
+        candidate["os_sr_cand_nm"] = "Outside approved marker";
+        Reject(() => host.InvokeAgain(), "SYNTHETIC_PROFILE_REJECTED");
+        candidate["os_sr_cand_nm"] = profile.CandidateName;
+        candidate["os_sr_cand_eml"] = "outside@example.invalid";
+        Reject(() => host.InvokeAgain(), "SYNTHETIC_PROFILE_REJECTED");
+        candidate["os_sr_cand_eml"] = profile.CandidateEmail;
+        candidate["ownerid"] = new EntityReference("systemuser", Candidate);
+        Reject(() => host.InvokeAgain(), "SYNTHETIC_PROFILE_REJECTED");
+        candidate["ownerid"] = new EntityReference("team", Actor);
+        Reject(() => host.InvokeAgain(), "SYNTHETIC_PROFILE_REJECTED");
+        candidate["ownerid"] = new EntityReference("systemuser", Actor);
+        host.BeforeCandidateStateRead = row => row["os_sr_cand_nm"] = "Changed after caller validation";
+        Reject(() => host.Invoke("ProceedToScheduling", ActionRequest.Answered), "SYNTHETIC_PROFILE_REJECTED");
+        host.BeforeCandidateStateRead = null;
+        candidate["os_sr_cand_nm"] = profile.CandidateName;
+        Check(host.Writes == writes, "Stored identity is revalidated with the row version before any mutation");
+        Reject(() => host.Invoke("ProceedToScheduling", ActionRequest.NeedCall), "STALE_EXPECTED_STATUS");
+        host.Invoke("ProceedToScheduling", ActionRequest.Answered);
+        host.Input["ActionType"] = "MarkRound1Scheduled";
+        host.Input["CorrelationId"] = Guid.NewGuid();
+        host.Input["ExpectedStatus"] = ActionRequest.Waiting;
+        host.Input["InterviewerId"] = Candidate;
+        host.Input["LocationId"] = Reference;
+        host.Input["StartAt"] = DateTime.UtcNow.AddDays(1);
+        host.Input["EndAt"] = DateTime.UtcNow.AddDays(1).AddHours(1);
+        Reject(() => host.InvokeAgain(), "SYNTHETIC_REFERENCE_REJECTED");
+        host.Input["InterviewerId"] = Reference;
+        var scheduleId = Guid.NewGuid();
+        host.Rows[scheduleId] = new Entity("os_sr_intv", scheduleId)
+        {
+            ["os_sr_intv_cand"] = new EntityReference("os_sr_cand", Scope),
+            ["os_sr_intv_rnd"] = new OptionSetValue(ActionRequest.Round1),
+            ["os_sr_intv_stat"] = new OptionSetValue(ActionRequest.ScheduleProposed),
+            ["os_sr_intv_ta"] = new EntityReference("os_sr_ta", Candidate),
+            ["os_sr_intv_loc"] = new EntityReference("os_sr_loc", Reference)
+        };
+        writes = host.Writes;
+        Reject(() => host.InvokeAgain(), "SYNTHETIC_REFERENCE_REJECTED");
+        Check(host.Writes == writes, "Stored out-of-scope schedule rejects before any update without read guards");
+        host.Rows.Remove(scheduleId);
+        host.InvokeAgain();
+        writes = host.Writes;
+        host.InvokeAgain();
+        Check(host.Writes == writes && (string)host.Output["ResultCode"] == "DuplicateReplay" &&
+            host.Rows[Scope].GetAttributeValue<OptionSetValue>("os_sr_cand_stat")?.Value == ActionRequest.Scheduled,
+            "All four API operations complete offline with no guard registrations or channel setting changes");
+        Check(host.Rows.Values.Where(row => row.LogicalName != "os_sr_cand").All(row =>
+            row.GetAttributeValue<EntityReference>(row.LogicalName + "_cand")?.Id == Scope),
+            "API-only Call, History, Schedule and Receipt rows remain bound to the same Candidate");
+        Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_GUARD_COVERAGE_MISSING");
+        host.Service.Create(new Entity("os_sr_cand", Candidate)
+        {
+            ["ownerid"] = new EntityReference("systemuser", Actor),
+            ["os_sr_cand_nm"] = "Outside approved marker",
+            ["os_sr_cand_eml"] = "outside@example.invalid"
+        });
+        Check(host.Rows.ContainsKey(Candidate),
+            "Modeled elevated native writes are outside API-only enforcement; full isolation is not certified");
+    }
+
     private static void RejectPolicy(Action action, string code)
     {
         try { action(); throw new Exception("Expected " + code); }
@@ -307,6 +412,9 @@ internal static partial class Program
             .ToDictionary(table => table, table => Guid.NewGuid());
         public bool MissingConfiguration, TdsEnabled, SearchEnabled, ChangeTrackingEnabled, BypassPrivilege;
         public bool OwnerReadMissing, ReceiptReadGranted, MissingPrivilegeMetadata;
+        public bool GuardsInstalled = true;
+        public Guid OrganizationId = DevOrganization;
+        public Action<Entity>? BeforeCandidateStateRead;
         public string? ExtraPrivilegeName;
         public Guid CallerId = Actor;
         public int MaxDepth, SystemReadGuardCalls, ControlReadGuardCalls, ProfileLoads;
@@ -397,7 +505,7 @@ internal static partial class Program
         {
             Output.Clear();
             var values = Context(Input, new ParameterCollection(), Output);
-            values["OrganizationId"] = DevOrganization;
+            values["OrganizationId"] = OrganizationId;
             values["UserId"] = CallerId; values["InitiatingUserId"] = CallerId;
             stack.Push(Execution(values));
             try { new ApplyCandidateAction().Execute(this); }
@@ -451,6 +559,7 @@ internal static partial class Program
         }
         private void Guard(string message, string table, ParameterCollection input, ParameterCollection output, int stage)
         {
+            if (!GuardsInstalled) return;
             if (!SyntheticIsolation.Tables.Contains(table) && !(message == "RetrieveMultiple" && stage == 40)) return;
             var values = Context(input, new ParameterCollection(), output);
             values["OrganizationId"] = DevOrganization; values["MessageName"] = message;
@@ -476,6 +585,8 @@ internal static partial class Program
                 var table = (string)call.Args[0];
                 if (table == "organization") return new Entity(table, DevOrganization)
                     { ["enabletdsendpoint"] = TdsEnabled, ["enablerelevancesearch"] = SearchEnabled };
+                if (table == "os_sr_cand" && ((ColumnSet)call.Args[2]).Columns.Contains("os_sr_cand_stat"))
+                    BeforeCandidateStateRead?.Invoke(Rows[(Guid)call.Args[1]]);
                 var row = ReferenceRows.TryGetValue(table, out var reference) ? Clone(reference) : Clone(Rows[(Guid)call.Args[1]]);
                 if (stack.Count > 0) Guard("Retrieve", table, new ParameterCollection(),
                     new ParameterCollection { ["BusinessEntity"] = row }, 40);

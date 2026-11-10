@@ -185,6 +185,7 @@ namespace os_sr_cact
             {
                 if (row.Id != ScopeId || row.GetAttributeValue<string>("os_sr_cand_nm") != CandidateName ||
                     row.GetAttributeValue<string>("os_sr_cand_eml") != CandidateEmail ||
+                    row.GetAttributeValue<EntityReference>("ownerid")?.LogicalName != "systemuser" ||
                     row.GetAttributeValue<EntityReference>("ownerid")?.Id != ActorId)
                     throw new OperationError("SYNTHETIC_PROFILE_REJECTED");
                 foreach (var pair in new[] { ("os_sr_cand_pos", "os_sr_pos"), ("os_sr_cand_csrc", "os_sr_csrc"),

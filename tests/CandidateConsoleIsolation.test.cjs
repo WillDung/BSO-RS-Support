@@ -54,11 +54,17 @@ class Element {
 }
 
 async function createConsole({ mode = "DEV", syntheticDataOnly = true, fixtures = {},
-  configuration = {}, serverOptions = {}, simulatedIsolation = false, verifier } = {}) {
+  configuration = {}, serverOptions = {}, simulatedIsolation = false, verifier,
+  missingPolicy = false, beforeInitialize } = {}) {
   const server = createServer(fixtures, serverOptions);
   const elements = new Map();
   const element = (name) => {
-    if (!elements.has(name)) elements.set(name, new Element());
+    if (!elements.has(name)) {
+      const value = new Element();
+      value.id = name;
+      if (name === "create-button") value.disabled = true;
+      elements.set(name, value);
+    }
     return elements.get(name);
   };
   const actionButton = new Element();
@@ -68,7 +74,7 @@ async function createConsole({ mode = "DEV", syntheticDataOnly = true, fixtures 
     getElementById: element,
     createElement: () => new Element(),
     querySelectorAll: (selector) => selector === "button[data-action]"
-      ? [actionButton] : selector === "[data-workflow-label]" ? [workflowLabel] : [],
+      ? [actionButton, element("create-button")] : selector === "[data-workflow-label]" ? [workflowLabel] : [],
     addEventListener(name, handler) { this.listeners[name] = handler; }
   };
   const window = {
@@ -103,11 +109,55 @@ async function createConsole({ mode = "DEV", syntheticDataOnly = true, fixtures 
     }
   });
   if (simulatedIsolation) window.BsoRsCandidateConsolePolicy = createSimulatedIsolatedPolicy();
-  else vm.runInContext(policySource, context);
+  else if (!missingPolicy) vm.runInContext(policySource, context);
   vm.runInContext(consoleSource, context);
+  if (beforeInitialize) beforeInitialize({ element, server });
   await document.listeners.DOMContentLoaded();
   return { server, element, actionButton, workflowLabel, fetchCalls, methods: window.__testConsole };
 }
+
+test("Create is disabled in HTML even when scripts never load", () => {
+  const html = fs.readFileSync(path.join(root, "candidate-console.html"), "utf8");
+  assert.match(html, /<button\b(?=[^>]*\bid="create-button")(?=[^>]*\bdisabled(?:\s|>))[^>]*>/);
+});
+
+test("Create stays disabled while server verification is pending", async () => {
+  let element;
+  const ui = await createConsole({
+    beforeInitialize: (context) => { element = context.element; },
+    verifier: async () => {
+      assert.equal(element("create-button").disabled, true);
+      return { ok: false };
+    }
+  });
+  assert.equal(ui.element("create-button").disabled, true);
+  assert.deepEqual(ui.server.requests, []);
+});
+
+test("missing policy leaves Create disabled and performs no data access", async () => {
+  const ui = await createConsole({ missingPolicy: true });
+  assert.equal(ui.element("create-button").disabled, true);
+  assert.deepEqual(ui.server.requests, []);
+  assert.deepEqual(ui.fetchCalls, []);
+});
+
+test("a successful API operation response is not a server isolation proof", async () => {
+  const ui = await createConsole({
+    verifier: async () => ({ ok: true, json: async () => ({ ResultCode: "Applied" }) })
+  });
+  assert.equal(ui.element("create-button").disabled, true);
+  assert.deepEqual(ui.server.requests, []);
+  assert.deepEqual(ui.fetchCalls, []);
+});
+
+test("initialization failure cannot re-enable Create after a simulated valid proof", async () => {
+  const ui = await createConsole({
+    simulatedIsolation: true,
+    serverOptions: { fail: () => new Error("SYNTHETIC_FIXTURE_READ_FAILED") }
+  });
+  assert.equal(ui.element("create-button").disabled, true);
+  assert.deepEqual(ui.fetchCalls, []);
+});
 
 test("real Console policy consumes a verifier before references/list reads and scopes subsequent writes", async () => {
   let verified = false;

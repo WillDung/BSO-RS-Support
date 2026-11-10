@@ -2734,6 +2734,7 @@
   }
 
   async function initialize() {
+    $("create-button").disabled = true;
     bindEvents();
     environmentPolicy = resolveEnvironmentPolicy();
     updateWorkflowPathLabel();
@@ -2788,6 +2789,7 @@
         addOption(statusFilter, value, label);
       }
       await refreshCandidates();
+      setBusy(false);
     } catch {
       if (environmentPolicy.syntheticDataOnly) blockSyntheticQuery();
       showNotice(`Candidate Management could not load ${loadStage}. Confirm app access and try again.`, true);

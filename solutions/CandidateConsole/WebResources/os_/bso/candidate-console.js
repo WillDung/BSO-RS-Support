@@ -133,6 +133,7 @@
   let currentRows = [];
   let busy = false;
   let syntheticQueryBlocked = false;
+  let isolationExpiryTimer;
   let environmentPolicy = Object.freeze({ allowed: false, reason: "CONFIGURATION_MISSING" });
   const CORE_API_ACTIONS = new Set([
     "CreateCandidate", "UpdateCandidate", "RecordCall", "ProceedToScheduling",
@@ -524,6 +525,7 @@
 
   async function retrieveAll(tableLogicalName, query) {
     try {
+      if (!isCandidateCoreEnabled()) throw new Error("CONSOLE_DATA_ACCESS_BLOCKED");
       const api = xrm().WebApi;
       let response = await api.retrieveMultipleRecords(tableLogicalName, query);
       if (!isCandidateCoreEnabled()) throw new Error("CONSOLE_DATA_ACCESS_BLOCKED");
@@ -2726,11 +2728,22 @@
     if (!policy || typeof policy.verifySyntheticIsolation !== "function") {
       throw new Error("SYNTHETIC_VERIFIER_UNAVAILABLE");
     }
-    return policy.verifySyntheticIsolation(window.BsoRsCandidateConsoleConfiguration, {
-      organizationUrl: context.getClientUrl(),
-      organizationId: context.organizationSettings.organizationId,
-      actorId: context.userSettings && context.userSettings.userId
-    });
+    try {
+      const proof = await policy.verifySyntheticIsolation(window.BsoRsCandidateConsoleConfiguration, {
+        organizationUrl: context.getClientUrl(),
+        organizationId: context.organizationSettings.organizationId,
+        actorId: context.userSettings && context.userSettings.userId
+      });
+      if (Number.isFinite(Date.parse(proof.validUntil))) {
+        window.clearTimeout(isolationExpiryTimer);
+        isolationExpiryTimer = window.setTimeout(blockSyntheticQuery,
+          Math.max(0, Date.parse(proof.validUntil) - Date.now()) + 1);
+      }
+      return proof;
+    } catch (error) {
+      blockSyntheticQuery();
+      throw error;
+    }
   }
 
   async function initialize() {

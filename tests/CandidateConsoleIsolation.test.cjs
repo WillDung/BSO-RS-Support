@@ -77,7 +77,10 @@ async function createConsole({ mode = "DEV", syntheticDataOnly = true, fixtures 
       ? [actionButton, element("create-button")] : selector === "[data-workflow-label]" ? [workflowLabel] : [],
     addEventListener(name, handler) { this.listeners[name] = handler; }
   };
+  let expiryCallback;
   const window = {
+    setTimeout: (callback) => { expiryCallback = callback; return 1; },
+    clearTimeout() {},
     BsoRsCandidateConsoleConfiguration: {
       mode, syntheticDataOnly, environmentId: id, organizationId: orgId, organizationUrl: orgUrl,
       candidateCoreEnabled: true, devDirectWriteFallbackEnabled: true, diagnosticsMode: "OFF",
@@ -113,7 +116,8 @@ async function createConsole({ mode = "DEV", syntheticDataOnly = true, fixtures 
   vm.runInContext(consoleSource, context);
   if (beforeInitialize) beforeInitialize({ element, server });
   await document.listeners.DOMContentLoaded();
-  return { server, element, actionButton, workflowLabel, fetchCalls, methods: window.__testConsole };
+  return { server, element, actionButton, workflowLabel, fetchCalls, methods: window.__testConsole,
+    expireProof: () => expiryCallback() };
 }
 
 test("Create is disabled in HTML even when scripts never load", () => {
@@ -161,14 +165,17 @@ test("initialization failure cannot re-enable Create after a simulated valid pro
 
 test("real Console policy consumes a verifier before references/list reads and scopes subsequent writes", async () => {
   let verified = false;
+  let deny = false;
   const ui = await createConsole({
     verifier: async (_url, request) => {
       assert.deepEqual(JSON.parse(request.body), { ActionType: "VerifySyntheticIsolation" });
+      if (deny) return { ok: false };
       verified = true;
       return {
         ok: true, json: async () => ({
           ResultCode: "SyntheticIsolationVerified", IsolationContract: JSON.stringify({
-            version: 1, organizationId: orgId, environmentId: id, actorId: guid("3"),
+            version: 2, boundary: "ScopedCandidateCoreApi", nativeWritesDenied: true,
+            readback: "CallerOwnedScope", organizationId: orgId, environmentId: id, actorId: guid("3"),
             scopeId: guid("4"), candidateId: guid("4"), positionId: guid("5"), sourceId: guid("6"),
             taId: guid("7"), locationId: guid("8"), validUntil: new Date(Date.now() + 60000).toISOString(),
             calendarEnabled: false
@@ -184,6 +191,17 @@ test("real Console policy consumes a verifier before references/list reads and s
   const mutation = JSON.parse(ui.fetchCalls.at(-1)[1].body);
   assert.equal(mutation.SyntheticScopeId, guid("4"));
   assert.equal(mutation.CorrelationId, guid("9"));
+  ui.expireProof();
+  assert.equal(ui.element("create-button").disabled, true);
+  const reads = ui.server.requests.length;
+  await assert.rejects(ui.methods.refreshCandidates(), /CONSOLE_DATA_ACCESS_BLOCKED/);
+  assert.equal(ui.server.requests.length, reads);
+  const dispatches = ui.fetchCalls.length;
+  deny = true;
+  await assert.rejects(ui.methods.invokeCandidateCore("RecordCall", { CandidateId: guid("4") }, guid("9")),
+    /SYNTHETIC_VERIFIER_UNAVAILABLE/);
+  assert.equal(ui.fetchCalls.length, dispatches);
+  assert.equal(ui.element("create-button").disabled, true);
 });
 
 test("verifier denial closes actual Console initialization without business queries or dispatch", async () => {

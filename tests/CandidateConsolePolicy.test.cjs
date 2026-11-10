@@ -85,7 +85,8 @@ test("synthetic isolation is not granted by browser configuration", () => {
 
 function verifierFixture(overrides = {}) {
   return {
-    version: 1, organizationId: runtime().organizationId, environmentId: configuration().environmentId,
+    version: 2, boundary: "ScopedCandidateCoreApi", nativeWritesDenied: true, readback: "CallerOwnedScope",
+    organizationId: runtime().organizationId, environmentId: configuration().environmentId,
     actorId: "33333333-3333-4333-8333-333333333333",
     scopeId: "44444444-4444-4444-8444-444444444444",
     candidateId: "44444444-4444-4444-8444-444444444444",
@@ -111,6 +112,8 @@ test("the actual policy enables synthetic scope only after a same-origin server 
   assert.equal(policy.hasSyntheticIsolation(), true);
   assert.equal(policy.getSyntheticScope().scopeId, proof.scopeId);
   assert.equal(policy.getSyntheticScope().calendarEnabled, false);
+  assert.match(policy.syntheticCandidateFilter(), new RegExp(`os_sr_candid eq ${proof.candidateId}`));
+  assert.match(policy.syntheticReferenceFilter("os_sr_ta_nm"), new RegExp(`os_sr_taid eq ${proof.taId}`));
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, "/api/data/v9.2/os_sr_cact");
   assert.deepEqual(JSON.parse(calls[0].request.body), { ActionType: "VerifySyntheticIsolation" });
@@ -124,7 +127,11 @@ for (const [label, invalid] of Object.entries({
   "missing TA": { taId: null }, "unapproved reference response": { locationId: "forged" },
   "expired response": { validUntil: new Date(0).toISOString() },
   "unbounded response": { validUntil: new Date(Date.now() + 600000).toISOString() },
-  "Calendar enabled": { calendarEnabled: true }
+  "Calendar enabled": { calendarEnabled: true },
+  "old full-isolation contract": { version: 1 },
+  "wrong boundary": { boundary: "Unrestricted" },
+  "native writes allowed": { nativeWritesDenied: false },
+  "unbounded readback": { readback: "AllCandidates" }
 })) {
   test(`server proof fails closed: ${label}`, async () => {
     const policy = createPolicy(async () => ({ ok: true, json: async () => ({

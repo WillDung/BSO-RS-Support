@@ -1,5 +1,11 @@
 # Security Model
 
+## Scoped Candidate Core API proof (2026-11-10; offline, not deployed)
+
+The owner's bounded UAT request is implemented as the existing API's read-only `VerifySyntheticIsolation` operation with an explicit **v2 `ScopedCandidateCoreApi`** contract. This supersedes the unconditional-false/whole-channel verifier descriptions below for the new source only. The server verifies exact configured actor/organization/scope/identity and active reference IDs, team-effective native-write/bypass/control privileges, package-backed API metadata and scoped caller readback. The same eligibility checks run before scoped writes. Missing/expired/denied proof closes the Console; Check Calendar stays disabled. See the [server contract](../solutions/CandidateCore/README.md#synthetic-dev-boundary-offline-implementation-not-deployed).
+
+This is not synthetic-only visibility across native Dataverse/Search/TDS, administrator isolation, real-data authorization or a new lifecycle grant. Existing Basic Read supports new BSO-owned Candidate/child readback; existing elevated-owned fixtures require separately approved record-specific Read sharing only if inspection is needed. No Global Candidate Read, native business write privilege, new plug-in step or organization-wide setting change is proposed. Deployment approval/coordination and a valid separate one-shot lifecycle authorization remain required; no tenant writes or historical journal changes accompany this implementation.
+
 ## Approved single-BSO Check Calendar scope (2026-11-07)
 
 **Owner-approved requirement:** exactly one intended interactive BSO application user and one authorized Outlook connector identity. No additional BSO users, per-BSO connector routing, teams, new isolation infrastructure or tenant-wide security management are prerequisites for this slice. Authentication, existing Dataverse privileges and effective row access remain mandatory; approval of one user does not authorize real Candidate reads. Future multi-BSO access/routing designs below are proposals outside this critical path.

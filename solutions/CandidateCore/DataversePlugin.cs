@@ -53,20 +53,19 @@ namespace os_sr_cact
                         SyntheticIsolation.LoadForGuard(controlService, context);
                     if (isolation != null && Equals(context.InputParameters["ActionType"], SyntheticIsolation.VerifyAction))
                     {
-                        // API scope enforcement alone must never attest isolation of other Dataverse channels.
-                        SyntheticIsolation.RequireGuardCoverage(controlService);
-                        SyntheticIsolation.RequireRestrictedCaller(controlService, context);
                         if (context.InputParameters.Any(parameter => parameter.Key != "ActionType" &&
                             parameter.Value != null && !Equals(parameter.Value, Guid.Empty) &&
                             !Equals(parameter.Value, "") && !Equals(parameter.Value, 0)))
                             throw new OperationError("SYNTHETIC_VERIFIER_INPUT_REJECTED");
-                        isolation.ValidateReferences(callerService);
+                        isolation.VerifyApiScope(controlService, callerService, context);
                         context.OutputParameters["ResultCode"] = "SyntheticIsolationVerified";
                         context.OutputParameters["IsolationContract"] = isolation.Contract();
                         return;
                     }
                 }
                 var request = CandidateActionInputAdapter.Create(context.InitiatingUserId, context.InputParameters, DateTime.UtcNow);
+                if (isolation != null)
+                    isolation.VerifyApiScope(factory.CreateOrganizationService(null), callerService, context);
                 isolation?.ValidateRequest(request, callerService);
                 action = request.Action;
                 if (action == "CreateCandidate") createCandidateStage = "REFERENCE_VALIDATION";

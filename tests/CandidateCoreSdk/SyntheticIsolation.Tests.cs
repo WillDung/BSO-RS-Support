@@ -25,6 +25,7 @@ internal static partial class Program
     private static void TestSyntheticIsolation()
     {
         var before = passed;
+        TestScopedServerProof();
         TestSyntheticApiScope();
         var policy = SyntheticIsolation.Parse(IsolationXml);
         policy.ValidateContext(DevOrganization, Actor, DateTime.UtcNow);
@@ -42,7 +43,7 @@ internal static partial class Program
         Check((string)unscopedDefault.Output["ResultCode"] == "Applied",
             "New optional Guid transport default preserves the ordinary unscoped API");
 
-        var host = new IsolationHost();
+        var host = new IsolationHost { LegacyGuardVerification = true };
         host.Invoke(SyntheticIsolation.VerifyAction);
         Check((string)host.Output["ResultCode"] == "SyntheticIsolationVerified" &&
             ((string)host.Output["IsolationContract"]).Contains("\"calendarEnabled\":false") && host.Writes == 0,
@@ -279,7 +280,7 @@ internal static partial class Program
     {
         var host = new IsolationHost
         {
-            GuardsInstalled = false, TdsEnabled = true, SearchEnabled = true, BypassPrivilege = true
+            GuardsInstalled = false, TdsEnabled = true, SearchEnabled = true, LegacyGuardVerification = true
         };
         host.Steps.Clear();
         Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_GUARD_COVERAGE_MISSING");
@@ -379,6 +380,77 @@ internal static partial class Program
             "Modeled elevated native writes are outside API-only enforcement; full isolation is not certified");
     }
 
+    private static void TestScopedServerProof()
+    {
+        var host = new IsolationHost
+        { GuardsInstalled = false, TdsEnabled = true, SearchEnabled = true, IncludeCreateReferences = true };
+        host.Steps.Clear();
+        host.Invoke(SyntheticIsolation.VerifyAction);
+        Check(host.Writes == 0 && ((string)host.Output["IsolationContract"]).Contains(
+            "\"boundary\":\"ScopedCandidateCoreApi\""), "Read-only scoped proof needs no guards or global channel changes");
+        foreach (var name in new[] { "prvCreateos_sr_cand", "prvWriteos_sr_call", "prvDeleteos_sr_intv",
+            "prvAssignos_sr_cand", "prvShareos_sr_cand", "prvBypassCustomPlugins", "prvBypassCustomBusinessLogic",
+            "prvActOnBehalfOfAnotherUser", "prvWriteEnvironmentVariableValue", "prvWritePluginAssembly",
+            "prvWriteRole", "prvWriteTeam", "prvImportCustomization", "prvWriteWorkflow", "prvWriteWebResource" })
+        {
+            host.ExtraPrivilegeName = name;
+            Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_CALLER_PRIVILEGES_REJECTED");
+            RejectContains(() => host.Create(), "SYNTHETIC_CALLER_PRIVILEGES_REJECTED");
+        }
+        host.ExtraPrivilegeName = "prvWriteUserSettings";
+        host.Invoke(SyntheticIsolation.VerifyAction);
+        Check(host.Writes == 0, "Unrelated user-setting privileges are not business writes or verifier failures");
+        host.ExtraPrivilegeName = null;
+        host.OwnerReadMissing = true;
+        Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_CALLER_PRIVILEGES_REJECTED");
+        host.OwnerReadMissing = false;
+        host.ApiContractInvalid = true;
+        Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_API_CONTRACT_REJECTED");
+        host.ApiContractInvalid = false;
+        host.MissingProofOutput = true;
+        Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_API_CONTRACT_REJECTED");
+        host.MissingProofOutput = false;
+        host.MissingScopeInput = true;
+        Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_API_CONTRACT_REJECTED");
+        host.MissingScopeInput = false;
+        host.TeamPrivilegeName = "prvBypassCustomPlugins";
+        Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_CALLER_PRIVILEGES_REJECTED");
+        host.TeamPrivilegeName = null;
+        host.GlobalBusinessRead = true;
+        Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_CALLER_PRIVILEGES_REJECTED");
+        host.GlobalBusinessRead = false;
+        host.InactiveCaller = true;
+        Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_CALLER_INELIGIBLE");
+        host.InactiveCaller = false;
+        host.ProfileOverride = IsolationXml.Replace("expiresUtc=\"", "expiresUtc=\"2000-01-01T00:00:00Z\" unused=\"");
+        Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_CONFIGURATION_INVALID");
+        var expiredProfile = System.Xml.Linq.XElement.Parse(IsolationXml);
+        expiredProfile.SetAttributeValue("expiresUtc", "2000-01-01T00:00:00Z");
+        host.ProfileOverride = expiredProfile.ToString();
+        Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_SCOPE_EXPIRED");
+        host.ProfileOverride = null;
+        RejectPolicy(() => host.CallerService.Create(new Entity("os_sr_cand", Scope)), "NATIVE_WRITE_DENIED");
+        host.Create();
+        host.DenyReadback = true;
+        Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_READBACK_DENIED");
+        host.DenyReadback = false;
+        host.Invoke(SyntheticIsolation.VerifyAction);
+        host.ProfileOverride = expiredProfile.ToString();
+        Reject(() => host.Invoke("ProceedToScheduling", ActionRequest.NeedCall), "SYNTHETIC_SCOPE_EXPIRED");
+        host.ProfileOverride = null;
+        host.Call();
+        host.Invoke("ProceedToScheduling", ActionRequest.Answered);
+        host.Invoke("MarkRound1Scheduled", ActionRequest.Waiting);
+        host.Invoke(SyntheticIsolation.VerifyAction);
+        Check(host.Rows[Scope].GetAttributeValue<OptionSetValue>("os_sr_cand_stat")?.Value == ActionRequest.Scheduled &&
+            host.Rows.Values.Count(row => row.LogicalName == "os_sr_call") == 1 &&
+            host.Rows.Values.Count(row => row.LogicalName == "os_sr_intv") == 1 &&
+            host.Rows.Values.Count(row => row.LogicalName == "os_sr_oprc") == 4 &&
+            host.Rows.Values.Count(row => row.LogicalName == "os_sr_csh") == 3,
+            "Restricted caller completes four API operations with History, receipts and scoped readback");
+        Check(host.EffectivePrivilegeRequests > 4, "Team-effective privilege message is rechecked on every API write and proof");
+    }
+
     private static void RejectPolicy(Action action, string code)
     {
         try { action(); throw new Exception("Expected " + code); }
@@ -410,8 +482,15 @@ internal static partial class Program
         private readonly Guid dangerousPrivilege = Guid.NewGuid();
         private readonly Dictionary<string, Guid> readPrivileges = SyntheticIsolation.Tables
             .ToDictionary(table => table, table => Guid.NewGuid());
+        private readonly Dictionary<string, Guid> scopedPrivilegeCatalog = new Dictionary<string, Guid>();
         public bool MissingConfiguration, TdsEnabled, SearchEnabled, ChangeTrackingEnabled, BypassPrivilege;
         public bool OwnerReadMissing, ReceiptReadGranted, MissingPrivilegeMetadata;
+        public bool LegacyGuardVerification, ApiContractInvalid, DenyReadback;
+        public bool MissingProofOutput, MissingScopeInput, InactiveCaller, GlobalBusinessRead, IncludeCreateReferences;
+        public string? TeamPrivilegeName;
+        public string? ProfileOverride;
+        public int EffectivePrivilegeRequests;
+        private readonly Guid apiId = Guid.NewGuid(), typeId = Guid.NewGuid(), assemblyId = Guid.NewGuid();
         public bool GuardsInstalled = true;
         public Guid OrganizationId = DevOrganization;
         public Action<Entity>? BeforeCandidateStateRead;
@@ -420,11 +499,13 @@ internal static partial class Program
         public int MaxDepth, SystemReadGuardCalls, ControlReadGuardCalls, ProfileLoads;
         public int Writes;
         public IOrganizationService Service { get; }
+        public IOrganizationService CallerService { get; }
         private IPluginExecutionContext Current => stack.Peek();
 
         public IsolationHost()
         {
-            Service = Proxy<IOrganizationService>(ServiceCall);
+            Service = Proxy<IOrganizationService>(call => ServiceCall(call));
+            CallerService = Proxy<IOrganizationService>(call => ServiceCall(call, true));
             foreach (var table in SyntheticIsolation.Tables)
             {
                 foreach (var message in new[] { "Create", "Update", "Delete" })
@@ -471,6 +552,12 @@ internal static partial class Program
             var profile = SyntheticIsolation.Parse(IsolationXml);
             Input["CandidateName"] = profile.CandidateName;
             Input["CandidateEmail"] = profile.CandidateEmail;
+            if (IncludeCreateReferences)
+            {
+                Input["PositionId"] = Reference;
+                Input["CandidateSourceId"] = Reference;
+                Input["AssignedTaId"] = Reference;
+            }
             Invoke("CreateCandidate");
         }
         public void Call()
@@ -508,7 +595,24 @@ internal static partial class Program
             values["OrganizationId"] = OrganizationId;
             values["UserId"] = CallerId; values["InitiatingUserId"] = CallerId;
             stack.Push(Execution(values));
-            try { new ApplyCandidateAction().Execute(this); }
+            try
+            {
+                if (LegacyGuardVerification && Equals(Input["ActionType"], SyntheticIsolation.VerifyAction))
+                {
+                    // Retain stopped full-guard helper regressions without routing the new API proof through them.
+                    try
+                    {
+                        var profile = SyntheticIsolation.Load(Service, Current);
+                        SyntheticIsolation.RequireGuardCoverage(Service);
+                        SyntheticIsolation.RequireRestrictedCaller(Service, Current);
+                        profile.ValidateReferences(Service);
+                        Output["ResultCode"] = "SyntheticIsolationVerified";
+                        Output["IsolationContract"] = profile.Contract();
+                    }
+                    catch (OperationError error) { throw new InvalidPluginExecutionException(error.Message); }
+                }
+                else new ApplyCandidateAction().Execute(this);
+            }
             finally { stack.Pop(); }
         }
         public void OrdinaryCreate()
@@ -554,7 +658,7 @@ internal static partial class Program
             if (type == typeof(IPluginExecutionContext)) return Current;
             if (type == typeof(ITracingService)) return Proxy<ITracingService>(call => null);
             if (type == typeof(IOrganizationServiceFactory))
-                return Proxy<IOrganizationServiceFactory>(call => Service);
+                return Proxy<IOrganizationServiceFactory>(call => call.Args[0] == null ? Service : CallerService);
             throw new Exception("Unexpected isolation service " + type.Name);
         }
         private void Guard(string message, string table, ParameterCollection input, ParameterCollection output, int stage)
@@ -578,11 +682,23 @@ internal static partial class Program
             }
             finally { stack.Pop(); }
         }
-        private object? ServiceCall(IMethodCallMessage call)
+        private object? ServiceCall(IMethodCallMessage call, bool asCaller = false)
         {
             if (call.MethodName == "Retrieve")
             {
                 var table = (string)call.Args[0];
+                if (table == "systemuser") return new Entity(table, Actor)
+                    { ["isdisabled"] = InactiveCaller, ["islicensed"] = true, ["accessmode"] = new OptionSetValue(0) };
+                if (table == "plugintype") return new Entity(table, typeId)
+                    { ["typename"] = typeof(ApplyCandidateAction).FullName,
+                        ["pluginassemblyid"] = new EntityReference("pluginassembly", assemblyId) };
+                if (table == "pluginassembly") return new Entity(table, assemblyId)
+                    { ["name"] = typeof(ApplyCandidateAction).Assembly.GetName().Name,
+                        ["version"] = typeof(ApplyCandidateAction).Assembly.GetName().Version.ToString(),
+                        ["isolationmode"] = new OptionSetValue(2), ["sourcetype"] = new OptionSetValue(4),
+                        ["packageid"] = new EntityReference("pluginpackage", Reference) };
+                if (DenyReadback && asCaller && table == "os_sr_cand")
+                    throw new OperationError("SYNTHETIC_READBACK_DENIED");
                 if (table == "organization") return new Entity(table, DevOrganization)
                     { ["enabletdsendpoint"] = TdsEnabled, ["enablerelevancesearch"] = SearchEnabled };
                 if (table == "os_sr_cand" && ((ColumnSet)call.Args[2]).Columns.Contains("os_sr_cand_stat"))
@@ -603,11 +719,36 @@ internal static partial class Program
                 }
                 if (query.EntityName == "environmentvariablevalue")
                     return ReadResult(query.EntityName, Collection(new[] { new Entity(query.EntityName, Reference)
-                        { ["value"] = IsolationXml, ["statecode"] = new OptionSetValue(0) } }));
+                        { ["value"] = ProfileOverride ?? IsolationXml, ["statecode"] = new OptionSetValue(0) } }));
+                if (query.EntityName == "customapi")
+                    return Collection(new[] { new Entity("customapi", apiId)
+                    {
+                        ["plugintypeid"] = new EntityReference("plugintype", typeId),
+                        ["executeprivilegename"] = ApiContractInvalid ? "prvWriteos_sr_cand" : "prvReados_sr_cand",
+                        ["isprivate"] = true, ["isfunction"] = false,
+                        ["allowedcustomprocessingsteptype"] = new OptionSetValue(0)
+                    } });
+                if (query.EntityName == "customapirequestparameter" || query.EntityName == "customapiresponseproperty")
+                {
+                    if (query.EntityName == "customapirequestparameter" ? MissingScopeInput : MissingProofOutput)
+                        return Collection(Array.Empty<Entity>());
+                    return Collection(new[] { new Entity(query.EntityName, Reference)
+                    { ["type"] = new OptionSetValue(query.EntityName == "customapirequestparameter" ? 12 : 10),
+                        ["isoptional"] = true } });
+                }
                 if (query.EntityName == "sdkmessageprocessingstep") return ReadResult(query.EntityName, Collection(Steps));
                 if (query.EntityName == "sdkmessagefilter") return ReadResult(query.EntityName, Collection(SupportedRows));
                 if (query.EntityName == "privilege")
                 {
+                    if (query.Criteria.Conditions.Any(condition => condition.AttributeName == "name"))
+                    {
+                        var requested = query.Criteria.Conditions.Single().Values.Cast<string>();
+                        foreach (var name in requested)
+                            if (!scopedPrivilegeCatalog.ContainsKey(name))
+                                scopedPrivilegeCatalog[name] = Guid.NewGuid();
+                        return Collection(scopedPrivilegeCatalog.Select(pair =>
+                            new Entity("privilege", pair.Value) { ["name"] = pair.Key }));
+                    }
                     var names = EffectiveReadPrivileges().Select(pair =>
                         new Entity("privilege", pair.Value) { ["name"] = "prvRead" + pair.Key }).ToList();
                     if (BypassPrivilege || ExtraPrivilegeName != null)
@@ -627,6 +768,8 @@ internal static partial class Program
             if (call.MethodName == "Create")
             {
                 var row = Clone((Entity)call.Args[0]);
+                if (asCaller && SyntheticIsolation.IsProtectedTable(row.LogicalName))
+                    throw new OperationError("NATIVE_WRITE_DENIED");
                 Check(row.Id != Guid.Empty, "Create target ID is explicit before the platform Create pipeline");
                 if (row.LogicalName == "os_sr_cand")
                     Check(row.GetAttributeValue<EntityReference>("ownerid")?.Id == CallerId,
@@ -639,6 +782,20 @@ internal static partial class Program
             }
             if (call.MethodName == "Execute")
             {
+                if (call.Args[0] is RetrieveUserSetOfPrivilegesByNamesRequest effectiveRequest)
+                {
+                    EffectivePrivilegeRequests++;
+                    Check(effectiveRequest.UserId == Actor, "Effective privilege request binds configured actor");
+                    var names = EffectiveReadPrivileges().Select(pair => "prvRead" + pair.Key).ToList();
+                    if (BypassPrivilege) names.Add("prvBypassCustomPlugins");
+                    if (ExtraPrivilegeName != null) names.Add(ExtraPrivilegeName);
+                    if (TeamPrivilegeName != null) names.Add(TeamPrivilegeName);
+                    return new RetrieveUserSetOfPrivilegesByNamesResponse
+                    { Results = new ParameterCollection { ["RolePrivileges"] = names
+                        .Where(name => effectiveRequest.PrivilegeNames.Contains(name))
+                        .Select(name => new RolePrivilege { PrivilegeId = scopedPrivilegeCatalog[name],
+                            Depth = GlobalBusinessRead ? PrivilegeDepth.Global : PrivilegeDepth.Basic }).ToArray() } };
+                }
                 if (call.Args[0] is RetrieveEntityRequest metadataRequest)
                 {
                     var metadata = new EntityMetadata { ChangeTrackingEnabled = ChangeTrackingEnabled };

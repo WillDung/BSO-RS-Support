@@ -103,7 +103,8 @@
     const proof = JSON.parse(result.IsolationContract);
     const guids = ["organizationId", "environmentId", "actorId", "scopeId", "candidateId",
       "positionId", "sourceId", "taId", "locationId"];
-    if (!proof || proof.version !== 1 || proof.calendarEnabled !== false ||
+    if (!proof || proof.version !== 2 || proof.boundary !== "ScopedCandidateCoreApi" ||
+        proof.nativeWritesDenied !== true || proof.readback !== "CallerOwnedScope" || proof.calendarEnabled !== false ||
         guids.some((name) => !normalizeGuid(proof[name])) ||
         normalizeGuid(proof.organizationId) !== normalizeGuid(runtime.organizationId) ||
         normalizeGuid(proof.environmentId) !== normalizeGuid(configuration.environmentId) ||
@@ -128,13 +129,22 @@
   // These predicates narrow queries; server authorization remains independently required.
   function syntheticCandidateFilter(navigation = "") {
     const path = navigation ? `${identifier(navigation)}/` : "";
-    return `startswith(${path}os_sr_cand_nm,'[[]SYNTHETIC-E2E]') and ` +
+    const scope = getSyntheticScope();
+    const exact = scope ? `${path}os_sr_candid eq ${normalizeGuid(scope.candidateId)} and ` : "";
+    return exact + `startswith(${path}os_sr_cand_nm,'[[]SYNTHETIC-E2E]') and ` +
       `endswith(${path}os_sr_cand_eml,'.invalid')`;
   }
 
   function syntheticReferenceFilter(nameAttribute, navigation = "") {
     const path = navigation ? `${identifier(navigation)}/` : "";
-    return `startswith(${path}${identifier(nameAttribute)},'[[]DEV]')`;
+    const binding = {
+      os_sr_pos_ttl: ["os_sr_posid", "positionId"], os_sr_csrc_nm: ["os_sr_csrcid", "sourceId"],
+      os_sr_ta_nm: ["os_sr_taid", "taId"], os_sr_loc_nm: ["os_sr_locid", "locationId"]
+    }[nameAttribute];
+    const scope = getSyntheticScope();
+    if (scope && !binding) throw new Error("CONSOLE_QUERY_ATTRIBUTE_INVALID");
+    const exact = scope ? `${path}${binding[0]} eq ${normalizeGuid(scope[binding[1]])} and ` : "";
+    return exact + `startswith(${path}${identifier(nameAttribute)},'[[]DEV]')`;
   }
 
   Object.defineProperty(global, "BsoRsCandidateConsolePolicy", {

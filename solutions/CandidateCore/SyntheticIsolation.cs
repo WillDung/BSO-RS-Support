@@ -166,6 +166,126 @@ namespace os_sr_cact
                 ValidateRow(service.Retrieve(reference.Key, reference.Value, new ColumnSet(VerificationColumns(reference.Key))));
         }
 
+        public void VerifyApiScope(IOrganizationService control, IOrganizationService caller, IPluginExecutionContext context)
+        {
+            ValidateContext(context.OrganizationId, context.InitiatingUserId, DateTime.UtcNow);
+            var user = control.Retrieve("systemuser", ActorId, new ColumnSet("isdisabled", "islicensed", "accessmode"));
+            if (!user.Contains("isdisabled") || user.GetAttributeValue<bool>("isdisabled") ||
+                !user.GetAttributeValue<bool>("islicensed") || user.GetAttributeValue<OptionSetValue>("accessmode")?.Value != 0)
+                throw new OperationError("SYNTHETIC_CALLER_INELIGIBLE");
+            RequireApiCallerPrivileges(control);
+            RequireApiContract(control);
+            ValidateReferences(caller);
+            foreach (var table in new[] { "os_sr_cand", "os_sr_call", "os_sr_csh", "os_sr_intv" })
+            {
+                var query = new QueryExpression(table)
+                {
+                    ColumnSet = new ColumnSet(VerificationColumns(table)), TopCount = 101
+                };
+                query.Criteria.AddCondition(table == "os_sr_cand" ? "os_sr_candid" : CandidateColumn(table),
+                    ConditionOperator.Equal, ScopeId);
+                var rows = control.RetrieveMultiple(query);
+                if (rows.MoreRecords || rows.Entities.Count > 100)
+                    throw new OperationError("SYNTHETIC_READBACK_LIMIT");
+                foreach (var row in rows.Entities)
+                {
+                    ValidateRow(row);
+                    ValidateRow(caller.Retrieve(table, row.Id, new ColumnSet(VerificationColumns(table))));
+                }
+            }
+        }
+
+        private void RequireApiCallerPrivileges(IOrganizationService service)
+        {
+            var required = new HashSet<string>(Tables.Where(table => table != "os_sr_oprc")
+                .Select(table => "prvRead" + table), StringComparer.Ordinal);
+            var denied = new HashSet<string>(StringComparer.Ordinal)
+            {
+                "prvBypassCustomPlugins", "prvBypassCustomBusinessLogic", "prvActOnBehalfOfAnotherUser",
+                "prvImportCustomization", "prvPublishCustomization", "prvReados_sr_oprc"
+            };
+            foreach (var table in Tables.Concat(new[] { "Role", "Team", "User", "SystemUser", "BusinessUnit",
+                "EnvironmentVariableDefinition", "EnvironmentVariableValue", "PluginPackage", "PluginAssembly",
+                "PluginType", "SdkMessageProcessingStep", "CustomAPI", "CustomAPIRequestParameter",
+                "CustomAPIResponseProperty", "Privilege", "Organization", "Workflow", "WebResource",
+                "SdkMessage", "SdkMessageProcessingStepImage", "Solution" }))
+                foreach (var verb in new[] { "Create", "Write", "Delete", "Assign", "Share" })
+                    denied.Add("prv" + verb + table);
+            var query = new QueryExpression("privilege") { ColumnSet = new ColumnSet("name"), TopCount = 501 };
+            query.Criteria.AddCondition("name", ConditionOperator.In, required.Concat(denied).Cast<object>().ToArray());
+            var catalog = service.RetrieveMultiple(query);
+            if (catalog.MoreRecords || catalog.Entities.Count > 500 ||
+                catalog.Entities.Any(row => row.Id == Guid.Empty || string.IsNullOrEmpty(row.GetAttributeValue<string>("name"))))
+                throw new OperationError("SYNTHETIC_PRIVILEGE_METADATA_MISSING");
+            var names = catalog.Entities.ToDictionary(row => row.Id, row => row.GetAttributeValue<string>("name"));
+            if (!required.IsSubsetOf(names.Values) ||
+                !new[] { "prvBypassCustomPlugins", "prvBypassCustomBusinessLogic", "prvActOnBehalfOfAnotherUser" }
+                    .All(name => names.Values.Contains(name)))
+                throw new OperationError("SYNTHETIC_PRIVILEGE_METADATA_MISSING");
+            // This message includes team-derived grants; direct-role enumeration is not sufficient.
+            var response = (RetrieveUserSetOfPrivilegesByNamesResponse)service.Execute(
+                new RetrieveUserSetOfPrivilegesByNamesRequest
+                { UserId = ActorId, PrivilegeNames = names.Values.ToArray() });
+            if (response.RolePrivileges == null ||
+                response.RolePrivileges.Any(privilege => !names.ContainsKey(privilege.PrivilegeId) ||
+                    new[] { "prvReados_sr_cand", "prvReados_sr_call", "prvReados_sr_csh", "prvReados_sr_intv" }
+                        .Contains(names[privilege.PrivilegeId]) && privilege.Depth != PrivilegeDepth.Basic))
+                throw new OperationError("SYNTHETIC_CALLER_PRIVILEGES_REJECTED");
+            var effective = new HashSet<string>(response.RolePrivileges.Select(privilege => names[privilege.PrivilegeId]),
+                StringComparer.Ordinal);
+            if (!required.IsSubsetOf(effective) || effective.Overlaps(denied))
+                throw new OperationError("SYNTHETIC_CALLER_PRIVILEGES_REJECTED");
+        }
+
+        private static void RequireApiContract(IOrganizationService service)
+        {
+            var query = new QueryExpression("customapi")
+            {
+                ColumnSet = new ColumnSet("plugintypeid", "executeprivilegename", "isprivate", "isfunction",
+                    "allowedcustomprocessingsteptype"), TopCount = 2
+            };
+            query.Criteria.AddCondition("uniquename", ConditionOperator.Equal, "os_sr_cact");
+            var result = service.RetrieveMultiple(query);
+            if (result.MoreRecords || result.Entities.Count != 1)
+                throw new OperationError("SYNTHETIC_API_CONTRACT_REJECTED");
+            var api = result.Entities[0];
+            var handler = api.GetAttributeValue<EntityReference>("plugintypeid");
+            if (handler == null || api.GetAttributeValue<string>("executeprivilegename") != "prvReados_sr_cand" ||
+                !api.GetAttributeValue<bool>("isprivate") || !api.Contains("isfunction") ||
+                api.GetAttributeValue<bool>("isfunction") ||
+                api.GetAttributeValue<OptionSetValue>("allowedcustomprocessingsteptype")?.Value != 0)
+                throw new OperationError("SYNTHETIC_API_CONTRACT_REJECTED");
+            var type = service.Retrieve("plugintype", handler.Id, new ColumnSet("typename", "pluginassemblyid"));
+            var assemblyId = type.GetAttributeValue<EntityReference>("pluginassemblyid");
+            if (type.GetAttributeValue<string>("typename") != typeof(ApplyCandidateAction).FullName || assemblyId == null)
+                throw new OperationError("SYNTHETIC_API_CONTRACT_REJECTED");
+            var assembly = service.Retrieve("pluginassembly", assemblyId.Id,
+                new ColumnSet("name", "version", "isolationmode", "sourcetype", "packageid"));
+            var executing = typeof(ApplyCandidateAction).Assembly.GetName();
+            if (assembly.GetAttributeValue<string>("name") != executing.Name ||
+                assembly.GetAttributeValue<string>("version") != executing.Version.ToString() ||
+                assembly.GetAttributeValue<OptionSetValue>("isolationmode")?.Value != 2 ||
+                assembly.GetAttributeValue<OptionSetValue>("sourcetype")?.Value != 4 ||
+                assembly.GetAttributeValue<EntityReference>("packageid") == null)
+                throw new OperationError("SYNTHETIC_API_CONTRACT_REJECTED");
+            foreach (var metadata in new[] {
+                (Table: "customapirequestparameter", Name: "SyntheticScopeId", Type: 12),
+                (Table: "customapiresponseproperty", Name: "IsolationContract", Type: 10) })
+            {
+                var parameter = new QueryExpression(metadata.Table)
+                { ColumnSet = new ColumnSet("type", "isoptional"), TopCount = 2 };
+                if (metadata.Table != "customapirequestparameter")
+                    parameter.ColumnSet = new ColumnSet("type");
+                parameter.Criteria.AddCondition("customapiid", ConditionOperator.Equal, api.Id);
+                parameter.Criteria.AddCondition("uniquename", ConditionOperator.Equal, metadata.Name);
+                var rows = service.RetrieveMultiple(parameter);
+                if (rows.MoreRecords || rows.Entities.Count != 1 ||
+                    rows.Entities[0].GetAttributeValue<OptionSetValue>("type")?.Value != metadata.Type ||
+                    metadata.Table == "customapirequestparameter" && !rows.Entities[0].GetAttributeValue<bool>("isoptional"))
+                    throw new OperationError("SYNTHETIC_API_CONTRACT_REJECTED");
+            }
+        }
+
         public void ValidateRow(Entity row)
         {
             if (!Tables.Contains(row.LogicalName) || row.Id == Guid.Empty ||
@@ -402,7 +522,8 @@ namespace os_sr_cact
         {
             var until = ExpiresUtc < DateTime.UtcNow.AddMinutes(2) ? ExpiresUtc : DateTime.UtcNow.AddMinutes(2);
             return string.Format(CultureInfo.InvariantCulture,
-                "{{\"version\":1,\"organizationId\":\"{0:D}\",\"environmentId\":\"{1:D}\"," +
+                "{{\"version\":2,\"boundary\":\"ScopedCandidateCoreApi\",\"nativeWritesDenied\":true," +
+                "\"readback\":\"CallerOwnedScope\",\"organizationId\":\"{0:D}\",\"environmentId\":\"{1:D}\"," +
                 "\"actorId\":\"{2:D}\",\"scopeId\":\"{3:D}\",\"candidateId\":\"{3:D}\"," +
                 "\"positionId\":\"{4:D}\",\"sourceId\":\"{5:D}\",\"taId\":\"{6:D}\"," +
                 "\"locationId\":\"{7:D}\",\"validUntil\":\"{8:yyyy-MM-ddTHH:mm:ssZ}\",\"calendarEnabled\":false}}",

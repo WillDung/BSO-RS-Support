@@ -20,6 +20,7 @@
   <ItemGroup>
     <Compile Include="..\CandidateCore\DataversePlugin.cs" Link="DataversePlugin.cs" />
     <Compile Include="..\CandidateCore\Operation.cs" Link="Operation.cs" />
+    <Compile Include="..\CandidateCore\SyntheticIsolation.cs" Link="SyntheticIsolation.cs" />
     <PackageReference Include="Microsoft.CrmSdk.CoreAssemblies" Version="9.0.2.60" PrivateAssets="All" />
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="All" />
     <PackageReference Include="Microsoft.PowerApps.MSBuild.Plugin" Version="1.52.1" PrivateAssets="All" />

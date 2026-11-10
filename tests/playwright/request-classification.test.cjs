@@ -14,6 +14,25 @@ const request = (overrides = {}) => ({
 const classify = (url, overrides = {}, settings = options) =>
   classifyRequest(request(overrides), new URL(url), settings);
 
+test("only the exact no-input synthetic verifier is read-only; business dispatch remains forbidden", () => {
+  const url = `${origin}/api/data/v9.2/os_sr_cact`;
+  const verifier = { ActionType: "VerifySyntheticIsolation" };
+  assert.equal(classify(url, { postData: () => JSON.stringify(verifier) }), "READ_ONLY_VERIFIER_ALLOWED");
+  for (const body of [
+    { ...verifier, CandidateId: "11111111-1111-4111-8111-111111111111" },
+    { ...verifier, CorrelationId: "11111111-1111-4111-8111-111111111111" },
+    { ...verifier, SyntheticScopeId: "11111111-1111-4111-8111-111111111111" },
+    { ActionType: "CreateCandidate" }, {}, null
+  ]) {
+    assert.equal(classify(url, { postData: () => JSON.stringify(body) }),
+      "FORBIDDEN_BUSINESS_OR_PROVIDER_OPERATION");
+  }
+  assert.equal(classify(`${url}?extra=1`, { postData: () => JSON.stringify(verifier) }),
+    "FORBIDDEN_BUSINESS_OR_PROVIDER_OPERATION");
+  assert.equal(classify(url, { method: () => "PATCH", postData: () => JSON.stringify(verifier) }),
+    "FORBIDDEN_BUSINESS_OR_PROVIDER_OPERATION");
+});
+
 test("Recorded collector destination is suppressed across documented transports; missing metadata stays unknown", () => {
   // Historical blocked events retained only POST and this destination, not their transport or initiator.
   const url = "https://eu-mobile.events.data.microsoft.com/OneCollector/1.0/";

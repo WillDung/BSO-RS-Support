@@ -79,7 +79,9 @@
         organizationId: context.organizationSettings.organizationId
       });
       return resolved.allowed === true && resolved.mode === "DEV" && resolved.syntheticDataOnly === true &&
-        typeof policy.hasSyntheticIsolation === "function" && policy.hasSyntheticIsolation() === true;
+        typeof policy.hasSyntheticIsolation === "function" && policy.hasSyntheticIsolation() === true &&
+        typeof policy.getSyntheticScope === "function" &&
+        policy.getSyntheticScope()?.calendarEnabled === true;
     } catch {
       return false;
     }

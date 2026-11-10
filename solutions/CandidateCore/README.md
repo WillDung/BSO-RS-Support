@@ -2,6 +2,34 @@
 
 Source for Candidate Core plug-in code used by the legacy signed `os_sr_cact` assembly and the unsigned package-backed `os_sr_cact` assembly, version `1.0.0.0`. This is authored .NET plug-in source, **not an exported/unpacked Solution**. The supported target is .NET Framework 4.6.2 with `Microsoft.CrmSdk.CoreAssemblies` pinned to 9.0.2.60; the SDK assembly is supplied by the Dataverse sandbox. No runtime dependency is merged/uploaded with the package assembly.
 
+## Synthetic DEV boundary (offline implementation; not deployed)
+
+[SyntheticIsolation.cs](SyntheticIsolation.cs) adds a server-controlled, single-Candidate scope to the existing `ApplyCandidateAction` handler. The approved DEV organization is the existing server pin, not a browser value. In that organization, **every** business action requires the optional API `SyntheticScopeId` parameter to match the server profile. Outside that organization, an explicitly scoped request/verifier is rejected; ordinary unscoped Candidate Core requests retain their existing contract, including absent/null/empty optional-GUID defaults and historical receipt fingerprints. The legacy `os_sr_devcs` entrypoint is rejected, so it cannot bypass scope or receipts.
+
+The proposed environment-variable schema name is `os_sr_siso` (synthetic isolation; separate deployment approval required). Load requires one active definition and exactly one active current value; defaults, duplicate values, missing configuration, wrong organization/caller and expiry fail closed. The administrator-controlled value is XML with exactly these attributes:
+
+```xml
+<syntheticIsolation organizationId="REQUIRED_APPROVED_DEV_ORGANIZATION"
+  environmentId="REQUIRED_APPROVED_DEV_ENVIRONMENT" actorId="REQUIRED_APPROVED_CALLER"
+  scopeId="REQUIRED_ORIGINAL_SYNTHETIC_MARKER_GUID" expiresUtc="REQUIRED_UTC_EXPIRY"
+  positionId="REQUIRED_APPROVED_POSITION" sourceId="REQUIRED_APPROVED_SOURCE"
+  taId="REQUIRED_APPROVED_TA" locationId="REQUIRED_APPROVED_LOCATION" />
+```
+
+This example is deliberately invalid and is not a tenant configuration or authorization. Actual bindings must remain in protected deployment inputs. The server reserves Candidate ID equal to the **original approved marker GUID**, derives the exact `[SYNTHETIC-E2E] Playwright <scopeId>` name and `pw-<scopeId>@example.invalid` email, retains the initiating BSO as owner and checks exact active approved references by ID **and** label. This is a new-ID reservation for the narrow synthetic path, not a migration or change to normal Candidate creation. Check for an existing conflicting ID before activation; never replace the original marker/correlations or historical journals.
+
+`SyntheticIsolationGuard` requires API ancestry, initiating identity, explicit scope, same-Candidate IDs and validated stored/merged identity before allowing Candidate/Call/History/Schedule/Receipt Create/Update. Direct CRUD, bulk/upsert/state/assign/merge/delete and project associations are denied. Reference writes are denied during this guarded synthetic-only DEV scope; do not silently apply these registrations to Production or represent them as general TA/Location administration. Historical `ProtectCandidateCore` registrations remain inactive.
+
+Read guards scope QueryExpression and FetchXML at the server, ANDing rather than broadening existing filters and bounding related rows through a Candidate identity join. Verification columns are added to root projections; synchronous post-read validation checks exact ordinal identity and approved references before returning a response. Aggregate/unknown queries and unsupported joins fail closed. `SyntheticIsolationReadGuard` additionally denies foreign-root joins/expansions and out-of-scope lookup annotations that would otherwise avoid per-table steps.
+
+The read-only `ActionType=VerifySyntheticIsolation` branch of **the same existing API** returns `ResultCode=SyntheticIsolationVerified` and JSON in the new `IsolationContract` string output. It does not create receipts or business rows. Proof binds organization, environment, actor, scope, reserved Candidate ID and reference IDs; its maximum two-minute lifetime is bounded by the profile expiry, and `calendarEnabled` is always false. Before proof or business execution, the server verifies active, unfiltered, synchronous caller-context guards from the executing package version, and checks supported mutation messages for guardability. Missing/global/disabled/duplicate/version-mismatched coverage fails closed.
+
+Because TDS, Dataverse Search and change tracking do not share these query guards, verification additionally requires TDS and search disabled and change tracking explicitly disabled on all nine guarded tables. The pilot principal must not have plugin-bypass, impersonation, server-control modification or audit-history read privileges. These controls are **dependencies, not changes made by this work**; failure blocks activation. No new role framework or role grant is implemented. An elevated account is not proof of isolation.
+
+The Console performs the real verifier call before its first business read, repeats verification before a business dispatch and sends `SyntheticScopeId` without changing the existing correlation. Missing/unavailable/expired/mismatched proof keeps Create closed; Calendar remains closed even if its browser feature flag is set. Accepted workflow, SYSTEM storage, caller read checks, row-version concurrency, History and Receipt semantics remain in the existing engine.
+
+Use [the manifest generator](../../scripts/New-BsoRsSyntheticIsolationManifest.ps1) with a newly built reviewed package and [newly prepared Console manifest](../../scripts/New-BsoRsCandidateConsoleDevChangeSet.ps1). It records exact hashes, 59 base steps plus every additional supported write-message step, dependency/order, separate write approvals and read-only acceptance. It is not a provisioning/export script. Actual supported registrations and organization controls must be reconciled in DEV before approval; an unguardable message blocks verification. See [ALM](../../docs/ALM_DEPLOYMENT.md#synthetic-dev-server-delta-offline-only).
+
 ## Masked lookup Guid.Empty clear correction (offline; 2026-11-05)
 
 The owner Console Assigned TA clear sent `ProfileFieldMask=AssignedTaId` with the lookup omitted and returned HTTP 400 / `0x80040265`. An exact 21-input SDK regression with Dataverse's materialized `AssignedTaId=Guid.Empty` default reproduced `INVALID_GUID_PARAMETER:AssignedTaId` from the shared request parser. The live internal error category is not proven.

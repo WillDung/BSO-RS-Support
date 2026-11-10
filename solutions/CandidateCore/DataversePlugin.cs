@@ -24,8 +24,7 @@ namespace os_sr_cact
             {
                 if (context.MessageName == DevCandidateSlice.MessageName)
                 {
-                    DevCandidateSlice.Execute(serviceProvider, context, trace);
-                    return;
+                    throw new OperationError("DEV_SLICE_SUPERSEDED_SYNTHETIC_BOUNDARY");
                 }
                 if (context.MessageName != "os_sr_cact" || context.Stage != 30 || context.Mode != 0 ||
                     !context.IsInTransaction || context.UserId != context.InitiatingUserId || context.Depth != 1)
@@ -35,13 +34,39 @@ namespace os_sr_cact
                     action = inputAction;
                 var factory = (IOrganizationServiceFactory)serviceProvider.GetService(typeof(IOrganizationServiceFactory));
                 var callerService = factory.CreateOrganizationService(context.InitiatingUserId);
+                SyntheticIsolation? isolation = null;
+                if (context.OrganizationId == DevCandidateSlice.DevelopmentOrganizationId ||
+                    context.InputParameters.TryGetValue("SyntheticScopeId", out var requestedScope) &&
+                        requestedScope != null && !Equals(requestedScope, Guid.Empty) ||
+                    context.InputParameters.TryGetValue("ActionType", out var verifierAction) &&
+                        Equals(verifierAction, SyntheticIsolation.VerifyAction))
+                {
+                    if (context.OrganizationId != DevCandidateSlice.DevelopmentOrganizationId)
+                        throw new OperationError("SYNTHETIC_ORGANIZATION_REJECTED");
+                    var controlService = factory.CreateOrganizationService(null);
+                    isolation = SyntheticIsolation.Load(controlService, context);
+                    SyntheticIsolation.RequireGuardCoverage(controlService);
+                    SyntheticIsolation.RequireRestrictedCaller(controlService, context);
+                    if (Equals(context.InputParameters["ActionType"], SyntheticIsolation.VerifyAction))
+                    {
+                        if (context.InputParameters.Any(parameter => parameter.Key != "ActionType" &&
+                            parameter.Value != null && !Equals(parameter.Value, Guid.Empty) &&
+                            !Equals(parameter.Value, "") && !Equals(parameter.Value, 0)))
+                            throw new OperationError("SYNTHETIC_VERIFIER_INPUT_REJECTED");
+                        isolation.ValidateReferences(callerService);
+                        context.OutputParameters["ResultCode"] = "SyntheticIsolationVerified";
+                        context.OutputParameters["IsolationContract"] = isolation.Contract();
+                        return;
+                    }
+                }
                 var request = CandidateActionInputAdapter.Create(context.InitiatingUserId, context.InputParameters, DateTime.UtcNow);
+                isolation?.ValidateRequest(request, callerService);
                 action = request.Action;
                 if (action == "CreateCandidate") createCandidateStage = "REFERENCE_VALIDATION";
                 ValidateCallerReferences(callerService, request, trace);
                 var systemService = factory.CreateOrganizationService(null);
                 var store = new DataverseStore(systemService, context, trace, request.Action,
-                    stage => createCandidateStage = stage);
+                    stage => createCandidateStage = stage, isolation);
                 var result = CandidateOperation.Execute(request, store);
                 if (action == "CreateCandidate") createCandidateStage = "RESPONSE";
                 context.OutputParameters["ResultCode"] = result.Replay ? "DuplicateReplay" : "Applied";
@@ -169,7 +194,7 @@ namespace os_sr_cact
     internal static class DevCandidateSlice
     {
         public const string MessageName = "os_sr_devcs";
-        private static readonly Guid DevelopmentOrganizationId = new Guid("0706072c-54ea-f011-872b-000d3ab60060");
+        internal static readonly Guid DevelopmentOrganizationId = new Guid("0706072c-54ea-f011-872b-000d3ab60060");
         private const int NeedCallCandidate = 100010000;
         private const int CandidateAnswered = 100010001;
         private const int WaitingManualScheduling = 100010002;
@@ -450,6 +475,7 @@ namespace os_sr_cact
                 {
                     if (name == "ActionType" || name == "CorrelationId") continue;
                     if (!parameters.TryGetValue(name, out var value)) continue;
+                    if (name == "SyntheticScopeId" && (value == null || Equals(value, Guid.Empty))) continue;
                     input[name] = value;
                 }
             }
@@ -465,19 +491,21 @@ namespace os_sr_cact
         private readonly ITracingService trace;
         private readonly string action;
         private readonly Action<string> stageChanged;
+        private readonly SyntheticIsolation? isolation;
 
         public DataverseStore(
             IOrganizationService systemService,
             IPluginExecutionContext context,
             ITracingService trace,
             string action,
-            Action<string> stageChanged)
+            Action<string> stageChanged, SyntheticIsolation? isolation = null)
         {
             this.systemService = systemService;
             this.context = context;
             this.trace = trace;
             this.action = action;
             this.stageChanged = stageChanged;
+            this.isolation = isolation;
         }
 
         public void RequireTransaction()
@@ -632,6 +660,7 @@ namespace os_sr_cact
             SetCreateCandidateStage("CANDIDATE_CREATE");
             EnsureAllowedMutation(request.Action, "CANDIDATE_CREATE");
             var row = new Entity("os_sr_cand");
+            if (isolation != null) row.Id = isolation.ScopeId;
             SetProfile(row, request);
             row["os_sr_cand_stat"] = new OptionSetValue(ActionRequest.NeedCall);
             row["os_sr_cand_corid"] = request.Correlation.ToString("D");

@@ -58,7 +58,7 @@ namespace os_sr_cact
 
         private static readonly string[] DeclaredInputNames =
         {
-            "ActionType", "CorrelationId", "CandidateId", "ExpectedStatus", "CandidateName",
+            "ActionType", "CorrelationId", "SyntheticScopeId", "CandidateId", "ExpectedStatus", "CandidateName",
             "CandidateEmail", "CandidatePhone", "CandidateCvUrl", "PositionId", "CandidateSourceId",
             "AssignedTaId", "ProfileFieldMask", "CallOutcome", "ContactedAt", "Notes", "Reason",
             "InterviewerId", "LocationId", "StartAt", "EndAt", "ResultNotes"
@@ -80,7 +80,7 @@ namespace os_sr_cact
 
         public static IEnumerable<string> ApplicableInputNames(string action)
         {
-            var common = new[] { "ActionType", "CorrelationId" };
+            var common = new[] { "ActionType", "CorrelationId", "SyntheticScopeId" };
             if (action == "CreateCandidate")
                 return common.Concat(new[] { "CandidateName", "CandidateEmail", "CandidatePhone",
                     "CandidateCvUrl", "PositionId", "CandidateSourceId", "AssignedTaId" });

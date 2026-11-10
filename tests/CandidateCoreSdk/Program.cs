@@ -11,7 +11,7 @@ using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
 using os_sr_cact;
 
-internal static class Program
+internal static partial class Program
 {
     private static int passed;
     private static readonly Guid Actor = Guid.Parse("00000000-0000-0000-0000-000000000001");
@@ -174,11 +174,12 @@ internal static class Program
 
     private static void Main()
     {
+        TestSyntheticIsolation();
         var devCreate = new Host(-1, createCandidate: true);
         ConfigureDevHost(devCreate);
         devCreate.Input["CandidateName"] = "Synthetic Candidate";
         Reject(() => new ApplyCandidateAction().Execute(devCreate),
-            "DEV_SLICE_INPUT_REJECTED:SYNTHETIC_PROFILE");
+            "DEV_SLICE_SUPERSEDED_SYNTHETIC_BOUNDARY");
         Check(devCreate.ServiceOperations.Count == 0 && devCreate.CreatedCandidates == 0,
             "DEV slice rejects non-prefixed candidate before any Dataverse operation");
 
@@ -187,14 +188,14 @@ internal static class Program
         devEmail.Input["CandidateName"] = "[SYNTHETIC-E2E] Reserved email rejection";
         devEmail.Input["CandidateEmail"] = "synthetic@example.com";
         Reject(() => new ApplyCandidateAction().Execute(devEmail),
-            "DEV_SLICE_INPUT_REJECTED:SYNTHETIC_PROFILE");
+            "DEV_SLICE_SUPERSEDED_SYNTHETIC_BOUNDARY");
         Check(devEmail.ServiceOperations.Count == 0 && devEmail.CreatedCandidates == 0,
             "DEV slice rejects non-reserved email before any Dataverse operation");
 
         var devEnvironment = new Host(-1, createCandidate: true);
         ConfigureDevHost(devEnvironment);
         devEnvironment.MainValues["OrganizationId"] = Organization;
-        Reject(() => new ApplyCandidateAction().Execute(devEnvironment), "DEV_SLICE_ENVIRONMENT_REJECTED");
+        Reject(() => new ApplyCandidateAction().Execute(devEnvironment), "DEV_SLICE_SUPERSEDED_SYNTHETIC_BOUNDARY");
         Check(devEnvironment.ServiceOperations.Count == 0,
             "DEV slice rejects a non-target organization before any Dataverse operation");
 
@@ -203,46 +204,18 @@ internal static class Program
         devWorkflow.Input["CandidateName"] = "[SYNTHETIC-E2E] SDK visible workflow";
         devWorkflow.Input["CandidateEmail"] = "sdk-workflow@example.invalid";
         devWorkflow.Input["CandidatePhone"] = "555-0100";
-        new ApplyCandidateAction().Execute(devWorkflow);
-        Check((string)devWorkflow.Output["ResultCode"] == "Applied" &&
-            (string)devWorkflow.Output["CandidateId"] == Candidate.ToString("D"),
-            "DEV slice returns the created candidate reference");
-        Check(devWorkflow.CreatedCandidates == 1 && devWorkflow.Calls == 0 &&
-            devWorkflow.Histories == 0 && devWorkflow.Receipt == null &&
-            !devWorkflow.ServiceOperations.Any(operation => operation.Contains("oprc")),
-            "DEV candidate create writes no call, history, or receipt");
-        Check(devWorkflow.CreatedCandidate!.GetAttributeValue<string>("os_sr_cand_nm") ==
-                "[SYNTHETIC-E2E] SDK visible workflow" &&
-            devWorkflow.CreatedCandidate.GetAttributeValue<OptionSetValue>("os_sr_cand_stat")?.Value == 100010000 &&
-            devWorkflow.CreatedCandidate.GetAttributeValue<string>("os_sr_cand_cnum") == "CAND-00000001" &&
-            devWorkflow.CreatedCandidate.GetAttributeValue<EntityReference>("ownerid")?.Id == Actor,
-            "DEV candidate create sets the synthetic profile, initial status, generated number, and caller owner");
+        Reject(() => new ApplyCandidateAction().Execute(devWorkflow),
+            "DEV_SLICE_SUPERSEDED_SYNTHETIC_BOUNDARY");
+        Check(devWorkflow.ServiceOperations.Count == 0, "Legacy Create cannot bypass scoped API and receipts");
 
         SetDevRecordCall(devWorkflow, Candidate, 100010000, 100010001);
-        new ApplyCandidateAction().Execute(devWorkflow);
-        Check(devWorkflow.Calls == 1 && devWorkflow.Updates == 0 && devWorkflow.Histories == 0 &&
-            devWorkflow.Status == 100010000 && devWorkflow.Receipt == null,
-            "DEV No Answer creates a call without changing status or creating a receipt");
-        var noAnswer = devWorkflow.CreatedCall!;
-        Check(noAnswer.GetAttributeValue<OptionSetValue>("os_sr_call_out")?.Value == 100010001 &&
-            noAnswer.GetAttributeValue<EntityReference>("os_sr_call_cand")?.Id == Candidate &&
-            noAnswer.GetAttributeValue<DateTime>("os_sr_call_ctat") != default(DateTime) &&
-            noAnswer.GetAttributeValue<EntityReference>("os_sr_call_ctby")?.Id == Actor,
-            "DEV No Answer call uses the current Choice and required related fields");
+        Reject(() => new ApplyCandidateAction().Execute(devWorkflow),
+            "DEV_SLICE_SUPERSEDED_SYNTHETIC_BOUNDARY");
 
         SetDevRecordCall(devWorkflow, Candidate, 100010000, 100010000);
-        new ApplyCandidateAction().Execute(devWorkflow);
-        Check(devWorkflow.Calls == 2 && devWorkflow.Updates == 1 &&
-            devWorkflow.Histories == 1 && devWorkflow.Status == 100010001 &&
-            devWorkflow.Receipt == null &&
-            !devWorkflow.ServiceOperations.Any(operation => operation.Contains("oprc")),
-            "DEV Answered creates a second call, updates Candidate, creates history, and never uses Receipts");
-        Check(devWorkflow.CreatedHistory!.GetAttributeValue<OptionSetValue>("os_sr_csh_prevstat")?.Value == 100010000 &&
-            devWorkflow.CreatedHistory.GetAttributeValue<OptionSetValue>("os_sr_csh_newstat")?.Value == 100010001 &&
-            devWorkflow.CreatedHistory.GetAttributeValue<string>("os_sr_csh_cact") == "RecordCall",
-            "DEV Answered history captures the status transition");
-        Check(!devWorkflow.ServiceFactorySelections.Contains(null),
-            "DEV-only direct-write slice cannot obtain the Candidate Core SYSTEM service");
+        Reject(() => new ApplyCandidateAction().Execute(devWorkflow),
+            "DEV_SLICE_SUPERSEDED_SYNTHETIC_BOUNDARY");
+        Check(devWorkflow.ServiceOperations.Count == 0, "Legacy call cannot bypass scoped API");
 
         var devCreateFault = new Host(-1, createCandidate: true);
         ConfigureDevHost(devCreateFault);
@@ -250,7 +223,7 @@ internal static class Program
         devCreateFault.Input["CandidateEmail"] = "stage-fault@example.invalid";
         devCreateFault.FaultOnCreateTable = "os_sr_cand";
         Reject(() => new ApplyCandidateAction().Execute(devCreateFault),
-            "DEV_SLICE_CANDIDATE_CREATE_FAILED:0x80040220");
+            "DEV_SLICE_SUPERSEDED_SYNTHETIC_BOUNDARY");
         Check(!devCreateFault.TraceMessages.Any(message => message.Contains("SENSITIVE_SENTINEL")),
             "DEV stage diagnostics do not expose service exception payloads");
 

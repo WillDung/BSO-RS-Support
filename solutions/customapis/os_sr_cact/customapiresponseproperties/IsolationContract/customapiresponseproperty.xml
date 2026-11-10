@@ -1,0 +1,8 @@
+<customapiresponseproperty uniquename="IsolationContract">
+  <displayname default="IsolationContract">
+    <label description="IsolationContract" languagecode="1033" />
+  </displayname>
+  <iscustomizable>1</iscustomizable>
+  <name>os_sr_cact.IsolationContract</name>
+  <type>10</type>
+</customapiresponseproperty>

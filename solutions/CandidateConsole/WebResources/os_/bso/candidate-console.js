@@ -139,7 +139,7 @@
     "MarkRound1Scheduled", "RecordPass", "RecordFail", "RequestReschedule", "CancelRound1"
   ]);
   const CORE_API_PARAMETER_NAMES = new Set([
-    "ActionType", "CandidateId", "ExpectedStatus", "CorrelationId", "CandidateName",
+    "ActionType", "SyntheticScopeId", "CandidateId", "ExpectedStatus", "CorrelationId", "CandidateName",
     "CandidateEmail", "CandidatePhone", "CandidateCvUrl", "PositionId", "CandidateSourceId",
     "AssignedTaId", "ProfileFieldMask", "Reason",
     "CallOutcome", "ContactedAt", "Notes", "InterviewerId", "LocationId", "StartAt",
@@ -388,9 +388,17 @@
   }
 
   async function invokeCandidateCore(action, values = {}, correlationId = newCorrelationId()) {
+    if (environmentPolicy.allowed === true && environmentPolicy.syntheticDataOnly) {
+      await verifyServerIsolation();
+    }
     if (!isCandidateCoreEnabled()) throw new Error("CANDIDATE_CORE_ENVIRONMENT_REJECTED");
     if (!CORE_API_ACTIONS.has(action)) throw new Error("CANDIDATE_CORE_ACTION_INVALID");
     const request = { ...values, ActionType: action, CorrelationId: correlationId };
+    if (environmentPolicy.syntheticDataOnly) {
+      const scope = window.BsoRsCandidateConsolePolicy.getSyntheticScope();
+      if (!scope) throw new Error("SYNTHETIC_VERIFIER_UNAVAILABLE");
+      request.SyntheticScopeId = scope.scopeId;
+    }
     const parameterNames = Object.keys(request);
     if (parameterNames.some((name) =>
       !CORE_API_PARAMETER_NAMES.has(name))) {
@@ -2712,10 +2720,34 @@
     $("cancel-round1-button").addEventListener("click", showCancellationPanel);
   }
 
+  async function verifyServerIsolation() {
+    const context = globalContext();
+    const policy = window.BsoRsCandidateConsolePolicy;
+    if (!policy || typeof policy.verifySyntheticIsolation !== "function") {
+      throw new Error("SYNTHETIC_VERIFIER_UNAVAILABLE");
+    }
+    return policy.verifySyntheticIsolation(window.BsoRsCandidateConsoleConfiguration, {
+      organizationUrl: context.getClientUrl(),
+      organizationId: context.organizationSettings.organizationId,
+      actorId: context.userSettings && context.userSettings.userId
+    });
+  }
+
   async function initialize() {
     bindEvents();
     environmentPolicy = resolveEnvironmentPolicy();
     updateWorkflowPathLabel();
+    if (environmentPolicy.allowed === true && environmentPolicy.syntheticDataOnly) {
+      try {
+        await verifyServerIsolation();
+      } catch {
+        $("create-button").disabled = true;
+        $("refresh-button").disabled = true;
+        document.querySelectorAll("button[data-action]").forEach((button) => { button.disabled = true; });
+        showNotice("Candidate Management is blocked until server-side synthetic data isolation is established: the verifier is unavailable or rejected this scope.", true);
+        return;
+      }
+    }
     if (!isCandidateCoreEnabled()) {
       $("create-button").disabled = true;
       $("refresh-button").disabled = true;

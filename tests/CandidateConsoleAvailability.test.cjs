@@ -19,6 +19,7 @@ test("the actual policy blocks synthetic availability before any row request", a
   const ui = await createRawUi({
     configuration: { syntheticIsolationVerified: true, approvedReferences: ["untrusted"] }
   });
+
   await ui.submit();
   await ui.refresh();
   assert.equal(ui.calls.references.length, 0);
@@ -26,6 +27,17 @@ test("the actual policy blocks synthetic availability before any row request", a
   assert.equal(ui.calls.creates.length, 0);
   assert.equal(ui.calls.reads.length, 0);
   assert.equal(ui.get("availability-submit").disabled, true);
+});
+
+test("Candidate Core isolation proof cannot authorize Calendar, even with its browser flag enabled", async () => {
+  const ui = await createRawUi({
+    policy: createSimulatedIsolatedPolicy({ getSyntheticScope: () => ({ calendarEnabled: false }) }),
+    configuration: { availabilityEnabled: true }
+  });
+  await ui.submit();
+  assert.equal(ui.get("availability-submit").disabled, true);
+  assert.equal(ui.calls.creates.length, 0);
+  assert.equal(ui.calls.references.length, 0);
 });
 
 test("availability's emitted predicates and simulated server authorization exclude reference rows", async () => {

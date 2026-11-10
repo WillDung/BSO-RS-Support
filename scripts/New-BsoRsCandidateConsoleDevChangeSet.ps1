@@ -93,13 +93,13 @@ $manifest = [ordered]@{
     resources = $resources
     baselineSnapshotSha256 = (Get-FileHash -LiteralPath $BaselineSnapshotPath -Algorithm SHA256).Hash.ToLowerInvariant()
     scopeApprovalRequired = $true
-    syntheticIsolation = 'BLOCKED_NO_IMPLEMENTED_VERIFIER'
+    syntheticIsolation = 'IMPLEMENTED_OFFLINE_REQUIRES_SERVER_DEPLOYMENT_AND_VERIFICATION'
     publicationConcurrency = 'REQUIRES_CONFIRMED_CHANGE_WINDOW_AND_FRESH_CONDITIONAL_WRITES'
     baselineTargetBinding = 'MUST_REVALIDATE_LIVE'
     deploymentReady = $false
     requiredSequence = @(
         'Verify exact target/account, Solution membership and five resource IDs against this manifest.',
-        'Approve revised configuration/HTML hashes and establish actual server-enforced synthetic isolation; do not override the false policy result.',
+        'Approve revised hashes and separate server delta; install and verify the server-controlled profile and complete guard coverage before Console activation.',
         'Confirm a resource-specific edit/import/publish freeze covering applicable makers and automated publishers through final verification.',
         'Refresh current/published contents, exact ETags and permissions; stop on drift, missing evidence or conflicting activity.',
         'Capture fresh protected published/current rollback bytes and read back every hash.',

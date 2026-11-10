@@ -24,8 +24,8 @@ const policySource = fs.readFileSync(
   "utf8"
 );
 
-function createPolicy() {
-  const context = vm.createContext({ window: {}, URL });
+function createPolicy(fetch) {
+  const context = vm.createContext({ window: { fetch }, URL });
   vm.runInContext(policySource, context);
   return context.window.BsoRsCandidateConsolePolicy;
 }
@@ -81,6 +81,76 @@ test("synthetic isolation is not granted by browser configuration", () => {
     syntheticIsolationVerified: true,
     approvedReferences: ["11111111-1111-4111-8111-111111111111"]
   }), false);
+});
+
+function verifierFixture(overrides = {}) {
+  return {
+    version: 1, organizationId: runtime().organizationId, environmentId: configuration().environmentId,
+    actorId: "33333333-3333-4333-8333-333333333333",
+    scopeId: "44444444-4444-4444-8444-444444444444",
+    candidateId: "44444444-4444-4444-8444-444444444444",
+    positionId: "55555555-5555-4555-8555-555555555555",
+    sourceId: "66666666-6666-4666-8666-666666666666",
+    taId: "77777777-7777-4777-8777-777777777777",
+    locationId: "88888888-8888-4888-8888-888888888888",
+    validUntil: new Date(Date.now() + 60000).toISOString(), calendarEnabled: false, ...overrides
+  };
+}
+
+test("the actual policy enables synthetic scope only after a same-origin server response", async () => {
+  const proof = verifierFixture();
+  const calls = [];
+  const policy = createPolicy(async (url, request) => {
+    calls.push({ url, request });
+    return { ok: true, json: async () => ({
+      ResultCode: "SyntheticIsolationVerified", IsolationContract: JSON.stringify(proof)
+    }) };
+  });
+  assert.equal(policy.hasSyntheticIsolation(), false);
+  await policy.verifySyntheticIsolation(configuration(), runtime({ actorId: proof.actorId }));
+  assert.equal(policy.hasSyntheticIsolation(), true);
+  assert.equal(policy.getSyntheticScope().scopeId, proof.scopeId);
+  assert.equal(policy.getSyntheticScope().calendarEnabled, false);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "/api/data/v9.2/os_sr_cact");
+  assert.deepEqual(JSON.parse(calls[0].request.body), { ActionType: "VerifySyntheticIsolation" });
+});
+
+for (const [label, invalid] of Object.entries({
+  "wrong organization": { organizationId: "99999999-9999-4999-8999-999999999999" },
+  "wrong environment": { environmentId: "99999999-9999-4999-8999-999999999999" },
+  "wrong actor": { actorId: "99999999-9999-4999-8999-999999999999" },
+  "unbound Candidate": { candidateId: "99999999-9999-4999-8999-999999999999" },
+  "missing TA": { taId: null }, "unapproved reference response": { locationId: "forged" },
+  "expired response": { validUntil: new Date(0).toISOString() },
+  "unbounded response": { validUntil: new Date(Date.now() + 600000).toISOString() },
+  "Calendar enabled": { calendarEnabled: true }
+})) {
+  test(`server proof fails closed: ${label}`, async () => {
+    const policy = createPolicy(async () => ({ ok: true, json: async () => ({
+      ResultCode: "SyntheticIsolationVerified", IsolationContract: JSON.stringify(verifierFixture(invalid))
+    }) }));
+    await assert.rejects(policy.verifySyntheticIsolation(configuration(),
+      runtime({ actorId: verifierFixture().actorId })), /SYNTHETIC_VERIFIER_RESPONSE_INVALID/);
+    assert.equal(policy.hasSyntheticIsolation(), false);
+    assert.equal(policy.getSyntheticScope(), null);
+  });
+}
+
+test("a failed refresh clears a previous proof; errors never synthesize success", async () => {
+  let unavailable = false;
+  const proof = verifierFixture();
+  const policy = createPolicy(async () => unavailable ? { ok: false } : {
+    ok: true, json: async () => ({ ResultCode: "SyntheticIsolationVerified", IsolationContract: JSON.stringify(proof) })
+  });
+  const context = runtime({ actorId: proof.actorId });
+  await policy.verifySyntheticIsolation(configuration(), context);
+  unavailable = true;
+  await assert.rejects(policy.verifySyntheticIsolation(configuration(), context), /SYNTHETIC_VERIFIER_UNAVAILABLE/);
+  assert.equal(policy.hasSyntheticIsolation(), false);
+  const missing = createPolicy();
+  await assert.rejects(missing.verifySyntheticIsolation(configuration(), context));
+  assert.equal(missing.hasSyntheticIsolation(), false);
 });
 
 test("synthetic Create stays disabled before reads when server isolation is unavailable", () => {

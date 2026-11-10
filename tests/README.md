@@ -1,5 +1,17 @@
 # Tests
 
+## Synthetic isolation offline checks
+
+`dotnet run --project .\tests\CandidateCoreSdk\CandidateCoreSdk.Tests.csproj` executes the real API adapter/storage engine and new server guards against in-memory SDK fixtures, not a Dataverse connection. The synthetic assertions cover organization/caller/expiry/profile/reference rejection, all protected table CRUD bypass attempts, bulk/state/association rejection, foreign-root joins and nested lookup/expansion privacy, server-control prerequisites, same-Candidate Call/History/manual schedule/result evidence and duplicate Receipt replay. Ordinary optional-GUID defaults and accepted unscoped behavior are also tested.
+
+Run the coupled JavaScript checks with `node --test .\tests\CandidateConsolePolicy.test.cjs .\tests\CandidateConsoleIsolation.test.cjs .\tests\CandidateConsoleAvailability.test.cjs .\tests\playwright\request-classification.test.cjs .\tests\playwright\served-console-resources.test.cjs`. These include the actual policy's asynchronous verifier handshake and Console initialization/dispatch, unavailable/mismatched/expired proofs, and Calendar remaining disabled. Simulated-policy fixtures elsewhere remain explicitly test-only.
+
+Run `pwsh -NoLogo -NoProfile -File .\tests\CandidateConsole.Tests.ps1`, `pwsh -NoLogo -NoProfile -File .\tests\CandidateConsoleConfiguration.Tests.ps1` and `pwsh -NoLogo -NoProfile -File .\tests\CandidateConsoleDevChangeSet.Tests.ps1` individually. The latter also tests the new server-delta manifest's hashes, complete 59-step baseline, approval boundaries, output non-overwrite and source-drift rejection. Its marked dummy ZIP bytes test manifest mechanics only, not package validity or deployment.
+
+The read-only request classifier permits only an exact same-origin `POST /api/data/v9.2/os_sr_cact` body `{ "ActionType": "VerifySyntheticIsolation" }` as `READ_ONLY_VERIFIER_ALLOWED`. Extra fields, mutations and unknown operations remain blocked. The verifier branch contains no storage mutation. This does not update the lifecycle's one-shot payload approval or consume any claim.
+
+These are offline implementation results, not tenant guard registration, runtime acceptance, owner UAT or authorization. See the [server contract](../solutions/CandidateCore/README.md#synthetic-dev-boundary-offline-implementation-not-deployed) and [separate deployment delta](../scripts/New-BsoRsSyntheticIsolationManifest.ps1).
+
 ## Headed Candidate Core browser UAT
 
 [Playwright browser suite](playwright/candidate-core.spec.cjs) is a real VN LMV IT browser test, separate from the offline suites. From `tests\playwright`, run `npm ci`, `npm run install:browser`, then `npm test`. The isolated [configuration](playwright/playwright.config.cjs) forces headed Chromium, one worker and zero retries. No existing test runner or Solution source is changed.

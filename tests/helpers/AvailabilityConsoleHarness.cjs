@@ -52,6 +52,10 @@ function createSimulatedIsolatedPolicy(overrides = {}) {
   return {
     ...context.window.BsoRsCandidateConsolePolicy,
     hasSyntheticIsolation: () => true,
+    verifySyntheticIsolation: async () => ({ scopeId: "11111111-1111-4111-8111-111111111111" }),
+    getSyntheticScope: () => ({
+      scopeId: "11111111-1111-4111-8111-111111111111", calendarEnabled: true
+    }),
     ...overrides
   };
 }

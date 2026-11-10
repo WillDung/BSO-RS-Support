@@ -42,7 +42,7 @@ try {
     Assert-Test (@($manifest.resources).Count -eq 5 -and @($manifest.resources | Where-Object name -Like '*.css').Count -eq 0) `
         'Prepare exactly the five approved resources without CSS'
     Assert-Test (-not $manifest.deploymentReady -and $manifest.scopeApprovalRequired -and
-        $manifest.syntheticIsolation -ceq 'BLOCKED_NO_IMPLEMENTED_VERIFIER' -and
+        $manifest.syntheticIsolation -ceq 'IMPLEMENTED_OFFLINE_REQUIRES_SERVER_DEPLOYMENT_AND_VERIFICATION' -and
         $manifest.publicationConcurrency -ceq 'REQUIRES_CONFIRMED_CHANGE_WINDOW_AND_FRESH_CONDITIONAL_WRITES') `
         'Preparation cannot grant isolation, scope approval or a publication freeze'
     foreach ($resource in $manifest.resources) {
@@ -67,6 +67,47 @@ try {
             (Get-FileHash -LiteralPath (Join-Path $root "solutions\CandidateConsole\WebResources\os_\bso\$name")).Hash) `
             "Preserve application source: $name"
     }
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $packagePath = Join-Path $directory 'synthetic-package.nupkg'
+    $archive = [IO.Compression.ZipFile]::Open($packagePath, [IO.Compression.ZipArchiveMode]::Create)
+    try {
+        $entry = $archive.CreateEntry('lib/net462/os_sr_cact.dll')
+        $writer = [IO.StreamWriter]::new($entry.Open())
+        try { $writer.Write('SYNTHETIC MANIFEST FIXTURE ONLY - NOT A DEPLOYABLE ASSEMBLY') }
+        finally { $writer.Dispose() }
+    } finally { $archive.Dispose() }
+    $deltaPath = Join-Path $output 'synthetic-isolation-manifest.json'
+    $deltaScript = Join-Path $root 'scripts\New-BsoRsSyntheticIsolationManifest.ps1'
+    $deltaArgs = @{
+        PackagePath = $packagePath; ConsoleManifestPath = (Join-Path $output 'manifest.json'); OutputPath = $deltaPath
+    }
+    & $deltaScript @deltaArgs | Out-Null
+    $delta = Get-Content -LiteralPath $deltaPath -Raw | ConvertFrom-Json
+    Assert-Test (-not $delta.deploymentReady -and -not $delta.serverComponents.configuration.configurationPrepared -and
+        $delta.serverComponents.requiredBaseSteps.Count -eq 59 -and $delta.webResources.Count -eq 5) `
+        'Delta lists all 59 base guards and five resources without granting activation'
+    Assert-Test ($delta.package.sha256 -ceq (Get-FileHash -LiteralPath $packagePath).Hash.ToLowerInvariant() -and
+        $delta.sources.Count -eq 7 -and $delta.approvalBoundaries.Count -eq 5) `
+        'Delta pins server/API sources and package bytes with separate approval boundaries'
+    $deltaHash = (Get-FileHash -LiteralPath $deltaPath).Hash
+    $deltaRejected = $false
+    try { & $deltaScript @deltaArgs | Out-Null } catch {
+        $deltaRejected = $_.Exception.Message -ceq 'ISOLATION_MANIFEST_OUTPUT_ALREADY_EXISTS'
+    }
+    Assert-Test ($deltaRejected -and (Get-FileHash -LiteralPath $deltaPath).Hash -ceq $deltaHash) `
+        'Delta generation never overwrites reviewed historical evidence'
+    $deltaArgs.OutputPath = Join-Path $output 'drift-delta.json'
+    $resourcePath = Join-Path $output 'candidate-console-policy.js'
+    $savedBytes = [IO.File]::ReadAllBytes($resourcePath)
+    try {
+        [IO.File]::AppendAllText($resourcePath, "`n// SYNTHETIC DRIFT FIXTURE")
+        $deltaRejected = $false
+        try { & $deltaScript @deltaArgs | Out-Null } catch {
+            $deltaRejected = $_.Exception.Message -ceq 'ISOLATION_CONSOLE_SOURCE_DRIFT'
+        }
+        Assert-Test ($deltaRejected -and -not (Test-Path -LiteralPath $deltaArgs.OutputPath)) `
+            'Delta rejects resource drift before producing evidence'
+    } finally { [IO.File]::WriteAllBytes($resourcePath, $savedBytes) }
     $rejectedExisting = $false
     try { & $scriptPath @arguments | Out-Null } catch { $rejectedExisting = $_.Exception.Message -ceq 'DEV_CHANGE_SET_OUTPUT_ALREADY_EXISTS' }
     Assert-Test $rejectedExisting 'Never overwrite an existing prepared change set'

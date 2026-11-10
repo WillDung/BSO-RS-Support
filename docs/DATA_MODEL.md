@@ -166,6 +166,7 @@ Apply the convention consistently to Dataverse tables, custom columns, relations
 | Plug-in component | `os_sr_<operation-abbreviation>[_<component-role-abbreviation>]` | `os_sr_bkint_stp` |
 | Cloud Flow | `os_sr_<process-abbreviation>` | `os_sr_calbk` (calendar booking) |
 | Global Choice | `os_sr_<choice-abbreviation>` | `os_sr_candstat` |
+| Environment variable | `os_sr_<purpose-abbreviation>` | `os_sr_siso` (`siso` = synthetic isolation; offline deployment proposal only) |
 
 For Dataverse components whose Maker experience automatically applies the solution publisher prefix `os`, use only the `sr_<abbreviation>` stem in the name input so the resulting persisted name is `os_sr_<abbreviation>`. For programmatic metadata or other component fields that require a complete logical/schema/unique name, supply the final `os_sr_<abbreviation>` once. Inspect the resulting name before saving; do not enter the full final name into a field that will prepend `os_` and create `os_os_sr_...`.
 

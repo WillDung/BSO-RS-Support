@@ -13,6 +13,15 @@ function classifyRequest(request, url, { origin, callbackOrigin, approvedBusines
     ["xhr", "fetch"].includes(request.resourceType()) && !request.isNavigationRequest() &&
     /^\/api\/data\/v9\.(?:0|2)\/(msdyn_ReportToMonitoringHub|GetRecentItems|GetCopilotSettingsForEnvironment)$/.test(url.pathname);
   if (support || isOptionalMetricsRequest(request, url, origin)) return "OPTIONAL_SUPPORT_SUPPRESSED";
+  if (api && request.method() === "POST" && !url.search &&
+      url.pathname === "/api/data/v9.2/os_sr_cact" &&
+      ["xhr", "fetch"].includes(request.resourceType()) && !request.isNavigationRequest()) {
+    let body;
+    try { body = JSON.parse(request.postData()); } catch { body = null; }
+    if (body && Object.keys(body).length === 1 && body.ActionType === "VerifySyntheticIsolation") {
+      return "READ_ONLY_VERIFIER_ALLOWED";
+    }
+  }
   if (api && write) {
     return approvedBusinessOperation && request.method() === "POST" &&
       url.pathname === "/api/data/v9.2/os_sr_cact" && !url.search &&

@@ -3,6 +3,7 @@
 
   const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const ENVIRONMENT_MODES = new Set(["DEV", "TEST", "PROD"]);
+  let isolation = null;
 
   function blocked(reason) {
     return Object.freeze({ allowed: false, reason });
@@ -74,8 +75,47 @@
   }
 
   function hasSyntheticIsolation() {
-    // No server-controlled, approved synthetic row scope is available yet.
-    return false;
+    return isolation !== null && Date.parse(isolation.validUntil) > Date.now();
+  }
+
+  function getSyntheticScope() {
+    return hasSyntheticIsolation() ? isolation : null;
+  }
+
+  async function verifySyntheticIsolation(configuration, runtime) {
+    isolation = null;
+    const resolved = resolve(configuration, runtime);
+    if (!resolved.allowed || resolved.mode !== "DEV" || !resolved.syntheticDataOnly ||
+        !normalizeGuid(runtime.actorId)) throw new Error("SYNTHETIC_VERIFIER_CONTEXT_REJECTED");
+    const response = await global.fetch("/api/data/v9.2/os_sr_cact", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/json", "Content-Type": "application/json; charset=utf-8",
+        "OData-MaxVersion": "4.0", "OData-Version": "4.0"
+      },
+      body: JSON.stringify({ ActionType: "VerifySyntheticIsolation" })
+    });
+    if (!response.ok) throw new Error("SYNTHETIC_VERIFIER_UNAVAILABLE");
+    const result = await response.json();
+    if (!result || result.ResultCode !== "SyntheticIsolationVerified" ||
+        typeof result.IsolationContract !== "string") throw new Error("SYNTHETIC_VERIFIER_RESPONSE_INVALID");
+    const proof = JSON.parse(result.IsolationContract);
+    const guids = ["organizationId", "environmentId", "actorId", "scopeId", "candidateId",
+      "positionId", "sourceId", "taId", "locationId"];
+    if (!proof || proof.version !== 1 || proof.calendarEnabled !== false ||
+        guids.some((name) => !normalizeGuid(proof[name])) ||
+        normalizeGuid(proof.organizationId) !== normalizeGuid(runtime.organizationId) ||
+        normalizeGuid(proof.environmentId) !== normalizeGuid(configuration.environmentId) ||
+        normalizeGuid(proof.actorId) !== normalizeGuid(runtime.actorId) ||
+        normalizeGuid(proof.scopeId) !== normalizeGuid(proof.candidateId) ||
+        !Number.isFinite(Date.parse(proof.validUntil)) ||
+        Date.parse(proof.validUntil) <= Date.now() ||
+        Date.parse(proof.validUntil) > Date.now() + 125000) {
+      throw new Error("SYNTHETIC_VERIFIER_RESPONSE_INVALID");
+    }
+    isolation = Object.freeze({ ...proof });
+    return isolation;
   }
 
   function identifier(value) {
@@ -102,7 +142,8 @@
     enumerable: false,
     writable: false,
     value: Object.freeze({
-      allowsReference, hasSyntheticIsolation, resolve, syntheticCandidateFilter, syntheticReferenceFilter
+      allowsReference, hasSyntheticIsolation, getSyntheticScope, verifySyntheticIsolation,
+      resolve, syntheticCandidateFilter, syntheticReferenceFilter
     })
   });
 })(window);

@@ -54,7 +54,7 @@ class Element {
 }
 
 async function createConsole({ mode = "DEV", syntheticDataOnly = true, fixtures = {},
-  configuration = {}, serverOptions = {}, simulatedIsolation = false } = {}) {
+  configuration = {}, serverOptions = {}, simulatedIsolation = false, verifier } = {}) {
   const server = createServer(fixtures, serverOptions);
   const elements = new Map();
   const element = (name) => {
@@ -82,7 +82,8 @@ async function createConsole({ mode = "DEV", syntheticDataOnly = true, fixtures 
       Utility: {
         getGlobalContext: () => ({
           getClientUrl: () => orgUrl,
-          organizationSettings: { organizationId: orgId }
+          organizationSettings: { organizationId: orgId },
+          userSettings: { userId: guid("3") }
         }),
         getEntityMetadata: async (name) => ({
           PrimaryIdAttribute: `${name}id`,
@@ -93,6 +94,7 @@ async function createConsole({ mode = "DEV", syntheticDataOnly = true, fixtures 
     }
   };
   const fetchCalls = [];
+  if (verifier) window.fetch = verifier;
   const context = vm.createContext({
     window, document, URL, URLSearchParams,
     fetch: async (...args) => {
@@ -106,6 +108,41 @@ async function createConsole({ mode = "DEV", syntheticDataOnly = true, fixtures 
   await document.listeners.DOMContentLoaded();
   return { server, element, actionButton, workflowLabel, fetchCalls, methods: window.__testConsole };
 }
+
+test("real Console policy consumes a verifier before references/list reads and scopes subsequent writes", async () => {
+  let verified = false;
+  const ui = await createConsole({
+    verifier: async (_url, request) => {
+      assert.deepEqual(JSON.parse(request.body), { ActionType: "VerifySyntheticIsolation" });
+      verified = true;
+      return {
+        ok: true, json: async () => ({
+          ResultCode: "SyntheticIsolationVerified", IsolationContract: JSON.stringify({
+            version: 1, organizationId: orgId, environmentId: id, actorId: guid("3"),
+            scopeId: guid("4"), candidateId: guid("4"), positionId: guid("5"), sourceId: guid("6"),
+            taId: guid("7"), locationId: guid("8"), validUntil: new Date(Date.now() + 60000).toISOString(),
+            calendarEnabled: false
+          })
+        })
+      };
+    }
+  });
+  assert.equal(verified, true);
+  assert.equal(ui.methods.isCandidateCoreEnabled(), true);
+  assert.equal(ui.element("create-button").disabled, false);
+  await ui.methods.invokeCandidateCore("RecordCall", { CandidateId: guid("4") }, guid("9"));
+  const mutation = JSON.parse(ui.fetchCalls.at(-1)[1].body);
+  assert.equal(mutation.SyntheticScopeId, guid("4"));
+  assert.equal(mutation.CorrelationId, guid("9"));
+});
+
+test("verifier denial closes actual Console initialization without business queries or dispatch", async () => {
+  const ui = await createConsole({ verifier: async () => ({ ok: false }) });
+  assert.equal(ui.methods.isCandidateCoreEnabled(), false);
+  assert.equal(ui.element("create-button").disabled, true);
+  assert.deepEqual(ui.server.requests, []);
+  assert.deepEqual(ui.fetchCalls, []);
+});
 
 test("the SQL-style fixture models literal brackets, case-insensitivity, and URI decoding", () => {
   const name = "[SYNTHETIC-E2E] sample";

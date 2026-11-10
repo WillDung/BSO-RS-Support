@@ -53,10 +53,7 @@ namespace os_sr_cact
                         SyntheticIsolation.LoadForGuard(controlService, context);
                     if (isolation != null && Equals(context.InputParameters["ActionType"], SyntheticIsolation.VerifyAction))
                     {
-                        if (context.InputParameters.Any(parameter => parameter.Key != "ActionType" &&
-                            parameter.Value != null && !Equals(parameter.Value, Guid.Empty) &&
-                            !Equals(parameter.Value, "") && !Equals(parameter.Value, 0)))
-                            throw new OperationError("SYNTHETIC_VERIFIER_INPUT_REJECTED");
+                        CandidateActionInputAdapter.ValidateVerifier(context.InputParameters);
                         isolation.VerifyApiScope(controlService, callerService, context);
                         context.OutputParameters["ResultCode"] = "SyntheticIsolationVerified";
                         context.OutputParameters["IsolationContract"] = isolation.Contract();
@@ -451,6 +448,33 @@ namespace os_sr_cact
 
     internal static class CandidateActionInputAdapter
     {
+        public static void ValidateVerifier(ParameterCollection parameters)
+        {
+            if (!parameters.TryGetValue("CorrelationId", out var correlation) ||
+                !(correlation is Guid id) || id == Guid.Empty)
+                throw new OperationError("INVALID_CORRELATIONID");
+            foreach (var parameter in parameters)
+            {
+                if (parameter.Key == "ActionType" || parameter.Key == "CorrelationId") continue;
+                if (!ActionRequest.IsDeclaredInputName(parameter.Key))
+                    throw new OperationError("SYNTHETIC_VERIFIER_INPUT_REJECTED");
+                var value = parameter.Value;
+                if (value == null) continue;
+                // Dataverse supplies defaults for omitted optional Custom API parameters.
+                var empty = parameter.Key == "ExpectedStatus" || parameter.Key == "CallOutcome"
+                    ? value is int number && number == 0
+                    : parameter.Key == "StartAt" || parameter.Key == "EndAt" || parameter.Key == "ContactedAt"
+                        ? value is DateTime date && date == DateTime.MinValue
+                        : parameter.Key == "SyntheticScopeId" || parameter.Key == "CandidateId" ||
+                          parameter.Key == "PositionId" || parameter.Key == "CandidateSourceId" ||
+                          parameter.Key == "AssignedTaId" || parameter.Key == "InterviewerId" ||
+                          parameter.Key == "LocationId"
+                            ? value is Guid guid && guid == Guid.Empty
+                            : value is string text && text.Length == 0;
+                if (!empty) throw new OperationError("SYNTHETIC_VERIFIER_INPUT_REJECTED");
+            }
+        }
+
         public static ActionRequest Create(Guid actor, ParameterCollection parameters, DateTime utcNow)
         {
             var input = new Dictionary<string, object?>(StringComparer.Ordinal);

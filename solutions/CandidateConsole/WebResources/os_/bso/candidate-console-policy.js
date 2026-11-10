@@ -87,6 +87,10 @@
     const resolved = resolve(configuration, runtime);
     if (!resolved.allowed || resolved.mode !== "DEV" || !resolved.syntheticDataOnly ||
         !normalizeGuid(runtime.actorId)) throw new Error("SYNTHETIC_VERIFIER_CONTEXT_REJECTED");
+    const correlationId = typeof global.crypto?.randomUUID === "function" ? global.crypto.randomUUID() : null;
+    if (!normalizeGuid(correlationId) || correlationId === "00000000-0000-0000-0000-000000000000") {
+      throw new Error("SYNTHETIC_VERIFIER_CORRELATION_UNAVAILABLE");
+    }
     const response = await global.fetch("/api/data/v9.2/os_sr_cact", {
       method: "POST",
       credentials: "same-origin",
@@ -94,7 +98,7 @@
         Accept: "application/json", "Content-Type": "application/json; charset=utf-8",
         "OData-MaxVersion": "4.0", "OData-Version": "4.0"
       },
-      body: JSON.stringify({ ActionType: "VerifySyntheticIsolation" })
+      body: JSON.stringify({ ActionType: "VerifySyntheticIsolation", CorrelationId: correlationId })
     });
     if (!response.ok) throw new Error("SYNTHETIC_VERIFIER_UNAVAILABLE");
     const result = await response.json();

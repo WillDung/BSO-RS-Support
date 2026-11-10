@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.Remoting.Messaging;
+using System.Runtime.Serialization.Json;
 using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
@@ -26,6 +27,7 @@ internal static partial class Program
     {
         var before = passed;
         TestScopedServerProof();
+        TestVerifierCorrelationContract();
         TestSyntheticApiScope();
         var policy = SyntheticIsolation.Parse(IsolationXml);
         policy.ValidateContext(DevOrganization, Actor, DateTime.UtcNow);
@@ -451,6 +453,60 @@ internal static partial class Program
         Check(host.EffectivePrivilegeRequests > 4, "Team-effective privilege message is rechecked on every API write and proof");
     }
 
+    private static void TestVerifierCorrelationContract()
+    {
+        var host = new IsolationHost { GuardsInstalled = false, IncludeCreateReferences = true };
+        using (var wire = typeof(Program).Assembly.GetManifestResourceStream("synthetic-verifier-request.json"))
+        {
+            var serializer = new DataContractJsonSerializer(typeof(Dictionary<string, string>),
+                new DataContractJsonSerializerSettings { UseSimpleDictionaryFormat = true });
+            var body = (Dictionary<string, string>)serializer.ReadObject(wire!)!;
+            Check(body.Count == 2 && body["ActionType"] == SyntheticIsolation.VerifyAction,
+                "Exact browser wire fixture contains only read-only action and correlation");
+            host.Input["ActionType"] = body["ActionType"];
+            host.Input["CorrelationId"] = Guid.Parse(body["CorrelationId"]);
+            host.InvokeAgain();
+        }
+        foreach (var invalid in new object?[] { null, Guid.Empty, "malformed",
+            Guid.NewGuid().ToString("D"), 42 })
+        {
+            if (invalid == null) host.Input.Remove("CorrelationId");
+            else host.Input["CorrelationId"] = invalid;
+            Reject(() => host.InvokeAgain(), "INVALID_CORRELATIONID");
+        }
+        host.Input["CorrelationId"] = Guid.NewGuid();
+        foreach (var name in new[] { "CandidateId", "SyntheticScopeId", "PositionId",
+            "CandidateSourceId", "AssignedTaId", "InterviewerId", "LocationId" })
+            host.Input[name] = Guid.Empty;
+        foreach (var name in new[] { "StartAt", "EndAt", "ContactedAt" })
+            host.Input[name] = DateTime.MinValue;
+        foreach (var name in new[] { "ExpectedStatus", "CallOutcome" }) host.Input[name] = 0;
+        foreach (var name in new[] { "CandidateName", "CandidateEmail", "CandidatePhone",
+            "CandidateCvUrl", "Notes", "Reason", "ResultNotes", "ProfileFieldMask" })
+            host.Input[name] = "";
+        host.InvokeAgain();
+        var proof = (string)host.Output["IsolationContract"];
+        Check(proof.Contains("\"actorId\":\"" + Actor + "\"") &&
+            proof.Contains("\"scopeId\":\"" + Scope + "\"") && host.Writes == 0 &&
+            !host.Rows.Values.Any(row => row.LogicalName == "os_sr_oprc"),
+            "Browser GUID converted by Guid metadata plus optional wire defaults yields bound read-only proof, no receipt");
+        foreach (var change in new Dictionary<string, object>
+        {
+            ["SyntheticScopeId"] = Scope, ["CandidateId"] = Scope,
+            ["CandidateName"] = "unexpected", ["StartAt"] = DateTime.UtcNow,
+            ["ExpectedStatus"] = ActionRequest.NeedCall, ["Other"] = null!
+        })
+        {
+            var present = host.Input.TryGetValue(change.Key, out var previous);
+            host.Input[change.Key] = change.Value;
+            Reject(() => host.InvokeAgain(), "SYNTHETIC_VERIFIER_INPUT_REJECTED");
+            if (present) host.Input[change.Key] = previous;
+            else host.Input.Remove(change.Key);
+        }
+        Check(host.Writes == 0 && host.Rows.Count == 0,
+            "Invalid verifier wire inputs never create business rows or receipts");
+    }
+
     private static void RejectPolicy(Action action, string code)
     {
         try { action(); throw new Exception("Expected " + code); }
@@ -569,7 +625,11 @@ internal static partial class Program
         }
         public void Invoke(string action, int? status = null)
         {
-            if (action == SyntheticIsolation.VerifyAction) Input.Clear();
+            if (action == SyntheticIsolation.VerifyAction)
+            {
+                Input.Clear();
+                Input["CorrelationId"] = Guid.NewGuid();
+            }
             Input["ActionType"] = action;
             if (action != SyntheticIsolation.VerifyAction)
             {

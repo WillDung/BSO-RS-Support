@@ -172,8 +172,16 @@ internal static partial class Program
     private static IPluginExecutionContext Execution(Dictionary<string, object?> values) =>
         Proxy<IPluginExecutionContext>(call => values[call.MethodName.Substring(4)]);
 
-    private static void Main()
+    private static void Main(string[] args)
     {
+        if (args.Length == 1 && args[0] == "--verifier-contract")
+        {
+            TestVerifierCorrelationContract();
+            TestScopedServerProof();
+            Console.WriteLine("Scoped verifier contract checks passed: " + passed);
+            return;
+        }
+        if (args.Length != 0) throw new ArgumentException("Unsupported test filter.");
         TestSyntheticIsolation();
         var devCreate = new Host(-1, createCandidate: true);
         ConfigureDevHost(devCreate);

@@ -14,13 +14,17 @@ const request = (overrides = {}) => ({
 const classify = (url, overrides = {}, settings = options) =>
   classifyRequest(request(overrides), new URL(url), settings);
 
-test("only the exact no-input synthetic verifier is read-only; business dispatch remains forbidden", () => {
+test("only the exact correlated synthetic verifier is read-only; business dispatch remains forbidden", () => {
   const url = `${origin}/api/data/v9.2/os_sr_cact`;
-  const verifier = { ActionType: "VerifySyntheticIsolation" };
+  const verifier = require("../fixtures/synthetic-verifier-request.json");
   assert.equal(classify(url, { postData: () => JSON.stringify(verifier) }), "READ_ONLY_VERIFIER_ALLOWED");
   for (const body of [
     { ...verifier, CandidateId: "11111111-1111-4111-8111-111111111111" },
-    { ...verifier, CorrelationId: "11111111-1111-4111-8111-111111111111" },
+    { ActionType: "VerifySyntheticIsolation" },
+    { ...verifier, CorrelationId: "" },
+    { ...verifier, CorrelationId: "00000000-0000-0000-0000-000000000000" },
+    { ...verifier, CorrelationId: "malformed" },
+    { ...verifier, CorrelationId: 42 },
     { ...verifier, SyntheticScopeId: "11111111-1111-4111-8111-111111111111" },
     { ActionType: "CreateCandidate" }, {}, null
   ]) {

@@ -24,8 +24,8 @@ const policySource = fs.readFileSync(
   "utf8"
 );
 
-function createPolicy(fetch) {
-  const context = vm.createContext({ window: { fetch }, URL });
+function createPolicy(fetch, crypto = require("node:crypto").webcrypto) {
+  const context = vm.createContext({ window: { fetch, crypto }, URL });
   vm.runInContext(policySource, context);
   return context.window.BsoRsCandidateConsolePolicy;
 }
@@ -116,7 +116,37 @@ test("the actual policy enables synthetic scope only after a same-origin server 
   assert.match(policy.syntheticReferenceFilter("os_sr_ta_nm"), new RegExp(`os_sr_taid eq ${proof.taId}`));
   assert.equal(calls.length, 1);
   assert.equal(calls[0].url, "/api/data/v9.2/os_sr_cact");
-  assert.deepEqual(JSON.parse(calls[0].request.body), { ActionType: "VerifySyntheticIsolation" });
+  const body = JSON.parse(calls[0].request.body);
+  assert.deepEqual(Object.keys(body).sort(), ["ActionType", "CorrelationId"]);
+  assert.equal(body.ActionType, "VerifySyntheticIsolation");
+  assert.match(body.CorrelationId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  await policy.verifySyntheticIsolation(configuration(), runtime({ actorId: proof.actorId }));
+  assert.notEqual(JSON.parse(calls[1].request.body).CorrelationId, body.CorrelationId);
+});
+
+test("unavailable or invalid verifier UUID generation fails closed before dispatch", async () => {
+  for (const crypto of [null, {}, { randomUUID: () => "" }, { randomUUID: () => "not-a-guid" },
+    { randomUUID: () => "00000000-0000-0000-0000-000000000000" }]) {
+    let dispatched = false;
+    const policy = createPolicy(async () => { dispatched = true; }, crypto);
+    await assert.rejects(policy.verifySyntheticIsolation(configuration(),
+      runtime({ actorId: verifierFixture().actorId })), /SYNTHETIC_VERIFIER_CORRELATION_UNAVAILABLE/);
+    assert.equal(dispatched, false);
+    assert.equal(policy.hasSyntheticIsolation(), false);
+  }
+});
+
+test("browser emits the exact wire fixture exercised by the SDK handler", async () => {
+  const wire = require("./fixtures/synthetic-verifier-request.json");
+  let emitted;
+  const policy = createPolicy(async (_url, request) => {
+    emitted = JSON.parse(request.body);
+    return { ok: true, json: async () => ({
+      ResultCode: "SyntheticIsolationVerified", IsolationContract: JSON.stringify(verifierFixture())
+    }) };
+  }, { randomUUID: () => wire.CorrelationId });
+  await policy.verifySyntheticIsolation(configuration(), runtime({ actorId: verifierFixture().actorId }));
+  assert.deepEqual(emitted, wire);
 });
 
 for (const [label, invalid] of Object.entries({

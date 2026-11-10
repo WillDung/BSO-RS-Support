@@ -79,6 +79,7 @@ async function createConsole({ mode = "DEV", syntheticDataOnly = true, fixtures 
   };
   let expiryCallback;
   const window = {
+    crypto: require("node:crypto").webcrypto,
     setTimeout: (callback) => { expiryCallback = callback; return 1; },
     clearTimeout() {},
     BsoRsCandidateConsoleConfiguration: {
@@ -168,7 +169,9 @@ test("real Console policy consumes a verifier before references/list reads and s
   let deny = false;
   const ui = await createConsole({
     verifier: async (_url, request) => {
-      assert.deepEqual(JSON.parse(request.body), { ActionType: "VerifySyntheticIsolation" });
+      const body = JSON.parse(request.body);
+      assert.equal(body.ActionType, "VerifySyntheticIsolation");
+      assert.match(body.CorrelationId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
       if (deny) return { ok: false };
       verified = true;
       return {

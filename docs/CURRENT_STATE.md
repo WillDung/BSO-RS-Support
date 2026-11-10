@@ -1,5 +1,11 @@
 # Current State
 
+## Profile recovery proposal prepared; installed contract still blocks Console (2026-11-10)
+
+A fresh read-only check at approximately 07:31 UTC confirms the installed profile is still valid until **09:00 UTC**, with unchanged exact bindings and value version/ETag. An expiry-only proposal ending **2026-11-10 12:00 UTC** was prepared in protected session artifacts, preserving all eight non-expiry bindings. Its exact UTF-8 artifact SHA-256 is `46ac740b369bea82420bf371475bbc2e95e40aa8b5a3b1d4ed4d1f7b1d92661d`. The pinned 1.0.3 assembly's parser and context validation accept it. This proposal is **not specifically authorized or installed**; standing deployment authorization was not treated as permission to alter the previously pinned value. Any later update requires fresh version checks and specific approval of the expiry/payload.
+
+Five focused correlation characterizations, existing scoped-proof regressions and 50 Console policy/isolation tests passed again without rebuild. They still demonstrate the installed handler rejects a valid non-empty verifier correlation. No knowingly incompatible Console payload was substituted. Console publication, successful live v2 proof and authenticated BSO acceptance remain blocked by the backend wire contract described below. No package/profile/resource update, business mutation, journal change, commit or push occurred in this follow-up.
+
 ## Console-only verifier correlation repair blocked by installed contract (2026-11-10)
 
 The targeted follow-up found **no accepted non-empty verifier `CorrelationId` in the installed 1.0.3 handler**. Its verifier branch rejects every non-default input except `ActionType`, including a valid non-empty GUID. Live API metadata still requires Guid `CorrelationId`. Five no-rebuild characterizations using the existing compiled SDK fixture confirm: missing and empty GUID are accepted by the isolated handler; non-empty GUID, GUID string and wrong type are rejected with `SYNTHETIC_VERIFIER_INPUT_REJECTED`, all without business writes. Existing scoped-proof regressions and 50 focused Console proof/policy tests pass. These are characterization results, not a successful repair: the isolated fixture does not model Dataverse's required parameter/default injection, and the previous live empty-GUID request remains rejected.

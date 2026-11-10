@@ -1,5 +1,21 @@
 # Current State
 
+## Candidate Core 1.0.4 deployed; authenticated BSO acceptance blocked (2026-11-10)
+
+The owner explicitly authorized the new immutable 1.0.4 deployment manifest. Deployment to the existing approved environment ran **07:58:56-08:00:14 UTC**, using the existing administrative publisher identity; no exclusive publication freeze is claimed. Exact target/operator, installed 1.0.3 rollback bytes, component ETags/hashes, API metadata, effective deployment privileges and absence of conflicting deployment activity were checked. One initial read-only preflight stopped on pagination while querying all platform steps; it was narrowed to the existing package's types/steps, with failed-attempt evidence retained. No tenant write occurred in that attempt.
+
+Acknowledged writes: **one update to the existing plug-in package, three exact If-Match WebResource updates and one PublishXml restricted to those three resource IDs**. Installed assembly is **1.0.4.0**, and downloaded package bytes match SHA-256 `0ff2eea1b2e0b1d91e6f3e9b99f8e9f9d3fac3f86bca41460805c8627456a6a3`. Current and published resource hashes match the manifest. Actual cache-pinned WebResource delivery via authenticated administrative HTTP also matches:
+
+| Resource | SHA-256 |
+|---|---|
+| HTML | `d3c113c00890ceeff0df4dff929cbe7836ef9e9a614bc49eefae296c705b2d52` |
+| Policy JavaScript | `9b7180986c7ab5d0901054a16f992d6994894cc470aafc09ffbda5ec44e42727` |
+| Main JavaScript | `a1bf44c2f7cea3cfd70db11533d6b6889a5dec9c2dc39ac428396a6473290216` |
+
+These are real endpoint delivery results, **not authenticated BSO browser hash acceptance**. The protected browser run could not establish the required signed-in identity and stopped before opening Candidate Management or dispatching a verifier. The integrated browser is at Microsoft sign-in; the owner is unavailable to complete BSO authentication/MFA. **Successful live scoped v2 proof, Create-gate behavior and Calendar-disabled BSO acceptance are NOT RUN, not PASS.** Administrative HTTP/impersonation is not substituted for the non-elevated BSO.
+
+Existing API metadata and exact profile were reused without writes; profile remains unchanged and was **valid through reconciliation**, expiring **2026-11-10 09:00 UTC**. Package step topology, environment/availability/CSS resources and original lifecycle journal remain unchanged. Candidate business writes: **zero**; no lifecycle, Outlook/email, new steps, roles/settings changes, ambiguous retries, journal reset, commit or push occurred. Installed 1.0.3 rollback, historical recovery bytes, immutable manifest and per-phase execution/served/browser evidence are retained in protected session artifacts. The only remaining acceptance action is authenticating the approved non-elevated BSO and running read-only acceptance before expiry; after expiry, stop until specifically authorized profile recovery. No overall deployment PASS or Production go-live is claimed.
+
 ## Verifier wire-contract repair built as incremental 1.0.4; not deployed (2026-11-10)
 
 The narrow [handler correction](../solutions/CandidateCore/DataversePlugin.cs) now accepts the API-required typed non-empty `CorrelationId` for `VerifySyntheticIsolation`. Previously the verifier's blanket non-default-input rejection contradicted the required Guid metadata. The [Console policy](../solutions/CandidateConsole/WebResources/os_/bso/candidate-console-policy.js) generates a fresh UUID per verification and fails closed before dispatch if generation is unavailable/invalid. This is a read-only request identity, not a registered/deterministic lifecycle identity or receipt ID. Missing/empty/wrong-type correlations and non-default business/scope inputs remain rejected. Declared optional typed transport defaults are allowed, including empty dates; the precise optional parameter behind the previous live empty-GUID rejection was not observed. Actor, scope, expiry, references, privileges, proof and business receipt validation are unchanged.

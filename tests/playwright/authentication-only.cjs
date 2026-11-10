@@ -7,7 +7,8 @@ const { isAuthenticationRequest } = require("./authentication-request.cjs");
 const { classifyRequest } = require("./request-classification.cjs");
 const { verifyBrowserIdentity } = require("./browser-identity.cjs");
 const { constrainReferenceRequest } = require("./lifecycle-support.cjs");
-const { createResourceEvidence, safeConsoleUrl, identifyConsoleResource } =
+const { createResourceEvidence, safeConsoleUrl, identifyConsoleResource,
+  loadResourceManifest, verifyResourceHashes, evaluateCreateGate } =
   require("./served-console-resources.cjs");
 const { authDirectory, runDirectory, protectDirectory, loadApproval } = require("./local-settings.cjs");
 
@@ -45,6 +46,8 @@ function checkPredicate() {
 async function main() {
   checkPredicate();
   const approval = loadApproval();
+  const resourceManifest = Object.hasOwn(process.env, "BSO_UAT_RESOURCE_MANIFEST_FILE")
+    ? loadResourceManifest(process.env.BSO_UAT_RESOURCE_MANIFEST_FILE, approval) : null;
   const callback = JSON.parse(fs.readFileSync(path.join(__dirname, "lifecycle-approval.local.json"), "utf8"))
     .authenticationCallbackOrigin;
   const callbackUrl = new URL(callback);
@@ -94,7 +97,8 @@ async function main() {
     lifecycleInvoked: false, screenshotsAndTraces: "DISABLED",
     acceptanceScope: "ELEVATED_FUNCTIONAL_ONLY",
     servedConsole: {
-      iframeUrl: null, scriptElementOrder: [], resources: [], failedLoads: [], pageErrors: [], runtime: null
+      iframeUrl: null, scriptElementOrder: [], resources: [], failedLoads: [], pageErrors: [], runtime: null,
+      expectedResourceHashes: resourceManifest ? "NOT_RUN" : "NOT_REQUESTED"
     }
   };
   const callbackRequests = new WeakSet();
@@ -241,12 +245,29 @@ async function main() {
       .map(url => safeConsoleUrl(url, approval.origin)).filter(Boolean);
     await expect.poll(() => frame.locator("body").evaluate(() =>
       Boolean(window.BsoRsCandidateConsoleConfiguration)), { timeout: 30_000 }).toBe(true);
+    await expect.poll(() => frame.locator("body").evaluate(() => document.readyState),
+      { timeout: 60_000 }).toBe("complete");
     const config = await frame.locator("body").evaluate(() => {
       const value = window.BsoRsCandidateConsoleConfiguration;
       return { mode: value.mode, core: value.candidateCoreEnabled, synthetic: value.syntheticDataOnly,
         fallback: value.devDirectWriteFallbackEnabled, availability: value.availabilityEnabled === true };
     });
     assert.deepEqual(config, { mode: "DEV", core: true, synthetic: true, fallback: false, availability: false });
+    if (resourceManifest) {
+      const bindingMatches = await frame.locator("body").evaluate((target) => {
+        const config = window.BsoRsCandidateConsoleConfiguration;
+        return config.environmentId === target.environmentId && config.organizationId === target.organizationId &&
+          config.organizationUrl === target.organizationUrl;
+      }, resourceManifest.target);
+      if (!bindingMatches) throw new Error("UAT_RESOURCE_CONFIGURATION_BINDING_MISMATCH");
+      await Promise.all(consoleResourceCaptures);
+      report.servedConsole.expectedResourceHashes =
+        verifyResourceHashes(report.servedConsole.resources, resourceManifest);
+      if (report.servedConsole.expectedResourceHashes.some(resource => resource.result !== "MATCH")) {
+        throw new Error("UAT_SERVED_RESOURCE_HASH_MISMATCH");
+      }
+      if (report.servedConsole.pageErrors.length) throw new Error("UAT_UNRESOLVED_SCRIPT_ERROR");
+    }
     const current = new URL(page.url());
     if (current.origin !== approval.origin ||
         current.searchParams.get("appid") !== new URL(approval.appUrl).searchParams.get("appid")) {
@@ -265,6 +286,7 @@ async function main() {
       const workflowPath = document.getElementById("workflow-path-badge")?.textContent;
       const notice = document.getElementById("notice")?.textContent || "";
       return {
+        policyGlobalAvailable: Boolean(policy),
         policyAvailable,
         isolation,
         createEnabled: Boolean(button && !button.disabled),
@@ -272,22 +294,18 @@ async function main() {
           notice.includes("server-side synthetic data isolation")
       };
     });
-    report.syntheticIsolation = !gate.policyAvailable ? "NOT VERIFIED" : gate.isolation ? "VERIFIED" : "BLOCKED";
-    report.createCandidateEnabled = gate.createEnabled ? "YES" : "NO";
+    const gateResult = evaluateCreateGate(gate);
+    report.syntheticIsolation = gateResult.syntheticIsolation;
+    report.createCandidateEnabled = gateResult.createCandidateEnabled;
     report.servedConsole.runtime = {
-      policyAvailable: gate.policyAvailable, syntheticIsolation: report.syntheticIsolation,
+      policyGlobalAvailable: gate.policyGlobalAvailable,
+      isolationMethodAvailable: gate.policyAvailable, syntheticIsolation: report.syntheticIsolation,
       createCandidateEnabled: report.createCandidateEnabled,
       checkCalendarDisabled: await frame.locator("#availability-submit").isDisabled()
     };
-    report.createGateReason = gate.createEnabled && (!gate.policyAvailable || !gate.isolation)
-      ? "CREATE_ENABLED_WITHOUT_VERIFIED_ISOLATION"
-      : !gate.policyAvailable ? "SYNTHETIC_ISOLATION_POLICY_UNAVAILABLE"
-        : !gate.createEnabled && gate.isolation ? "CREATE_DISABLED_DESPITE_ISOLATION"
-          : !gate.isolation && !gate.knownIsolationBlock ? "ISOLATION_GATE_REASON_UNVERIFIED"
-            : !gate.isolation ? "SERVER_SIDE_SYNTHETIC_ISOLATION_UNAVAILABLE" : null;
+    report.createGateReason = gateResult.reason;
     report.requestSafety = report.blockedRequests.length ? "FAIL" : "PASS";
-    if (!gate.policyAvailable || gate.createEnabled !== gate.isolation ||
-        (!gate.isolation && !gate.knownIsolationBlock)) {
+    if (!gateResult.passed) {
       throw new Error("UAT_CREATE_ISOLATION_GATE_UNVERIFIED");
     }
     report.candidateConsoleReadOnly = "PASS";

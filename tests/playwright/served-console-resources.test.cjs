@@ -2,6 +2,11 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { analyzeSource, createResourceEvidence, identifyConsoleResource, safeConsoleUrl } =
   require("./served-console-resources.cjs");
+const { loadResourceManifest, verifyResourceHashes, evaluateCreateGate } =
+  require("./served-console-resources.cjs");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 
 const origin = "https://orgsynthetic.crm4.dynamics.com";
 
@@ -62,6 +67,7 @@ test("identifies fail-closed policy and initialization signatures", () => {
   assert.deepEqual(policy, {
     definesPolicyGlobal: true, definesIsolationCheck: true, isolationReturnsLiteralFalse: true
   });
+
   const main = analyzeSource("candidate-console.js", [
     "function isCandidateCoreEnabled() {",
     "  const policy = window.BsoRsCandidateConsolePolicy;",
@@ -80,4 +86,58 @@ test("identifies fail-closed policy and initialization signatures", () => {
   assert.deepEqual(main.createButtonAssignments, [{ line: 7, disabled: "true" }]);
   assert.ok(main.enablementDecisionStatements.some(statement => statement.statement.includes("hasSyntheticIsolation")));
   assert.ok(main.initializationDecisionStatements.some(statement => statement.statement.includes("return;")));
+});
+
+test("expected resource manifests require the exact target and five-resource scope", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "console-manifest-"));
+  const file = path.join(directory, "manifest.json");
+  const approval = { origin, organizationId: "22222222-2222-4222-8222-222222222222" };
+  const names = ["candidate-console.html", "candidate-console-environment.js", "candidate-console-policy.js",
+    "candidate-console.js", "candidate-console-availability.js"];
+  const manifest = {
+    schemaVersion: 1,
+    target: { organizationUrl: origin, organizationId: approval.organizationId,
+      environmentId: "11111111-1111-4111-8111-111111111111", solutionUniqueName: "os_sr_bso_rs_support" },
+    resources: names.map(name => ({ name: `os_/bso/${name}`, expectedSha256: "a".repeat(64) }))
+  };
+  try {
+    fs.writeFileSync(file, JSON.stringify(manifest));
+    assert.equal(loadResourceManifest(file, approval).resources.length, 5);
+    assert.throws(() => loadResourceManifest(file, { ...approval, origin: "https://other.invalid" }),
+      /UAT_RESOURCE_MANIFEST_INVALID/);
+    assert.throws(() => loadResourceManifest("relative.json", approval), /UAT_ABSOLUTE_RESOURCE_MANIFEST_REQUIRED/);
+    manifest.resources[4] = manifest.resources[0];
+    fs.writeFileSync(file, JSON.stringify(manifest));
+    assert.throws(() => loadResourceManifest(file, approval), /UAT_RESOURCE_MANIFEST_INVALID/);
+  } finally {
+    fs.rmSync(file);
+    fs.rmdirSync(directory);
+  }
+});
+
+test("read-only verification rejects missing, stale and unsuccessful served resources", () => {
+  const manifest = { resources: [{ name: "os_/bso/candidate-console.js", expectedSha256: "a".repeat(64) }] };
+  const good = { name: "candidate-console.js", status: 200, sha256: "a".repeat(64) };
+  assert.equal(verifyResourceHashes([good], manifest)[0].result, "MATCH");
+  for (const observed of [[], [{ ...good, status: 404 }], [{ ...good, sha256: "b".repeat(64) }],
+    [good, { ...good, sha256: "b".repeat(64) }]]) {
+    assert.equal(verifyResourceHashes(observed, manifest)[0].result, "MISMATCH");
+  }
+});
+
+test("a correct fail-closed Create gate is not synthetic-isolation acceptance", () => {
+  const result = evaluateCreateGate({
+    policyAvailable: true, isolation: false, createEnabled: false, knownIsolationBlock: true
+  });
+  assert.equal(result.passed, true);
+  assert.equal(result.syntheticIsolation, "BLOCKED");
+  assert.equal(result.reason, "SERVER_SIDE_SYNTHETIC_ISOLATION_UNAVAILABLE");
+  for (const gate of [
+    { policyAvailable: false, isolation: false, createEnabled: true, knownIsolationBlock: false },
+    { policyAvailable: true, isolation: false, createEnabled: true, knownIsolationBlock: false },
+    { policyAvailable: true, isolation: false, createEnabled: false, knownIsolationBlock: false },
+    { policyAvailable: true, isolation: true, createEnabled: false, knownIsolationBlock: false }
+  ]) {
+    assert.equal(evaluateCreateGate(gate).passed, false);
+  }
 });

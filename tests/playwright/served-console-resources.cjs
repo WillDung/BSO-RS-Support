@@ -5,6 +5,54 @@ const path = require("node:path");
 const RESOURCE_NAME = /^candidate-console(?:-(?:environment|policy|availability))?\.(?:html|js|css)$/i;
 const SOURCE_DIRECTORY = path.join(__dirname, "..", "..", "solutions", "CandidateConsole",
   "WebResources", "os_", "bso");
+const DEPLOYMENT_RESOURCES = Object.freeze([
+  "candidate-console.html", "candidate-console-environment.js", "candidate-console-policy.js",
+  "candidate-console.js", "candidate-console-availability.js"
+]);
+
+function loadResourceManifest(file, approval) {
+  if (!file || !path.isAbsolute(file)) throw new Error("UAT_ABSOLUTE_RESOURCE_MANIFEST_REQUIRED");
+  const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
+  const target = manifest.target;
+  if (manifest.schemaVersion !== 1 || !target || target.organizationUrl !== approval.origin ||
+      target.organizationId?.toLowerCase() !== approval.organizationId.toLowerCase() ||
+      target.solutionUniqueName !== "os_sr_bso_rs_support" ||
+      !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(target.environmentId || "") ||
+      !Array.isArray(manifest.resources) || manifest.resources.length !== DEPLOYMENT_RESOURCES.length ||
+      !DEPLOYMENT_RESOURCES.every(name => manifest.resources.filter(resource =>
+        resource.name === `os_/bso/${name}` && /^[a-f0-9]{64}$/.test(resource.expectedSha256 || "")).length === 1)) {
+    throw new Error("UAT_RESOURCE_MANIFEST_INVALID");
+  }
+  return manifest;
+}
+
+function verifyResourceHashes(resources, manifest) {
+  return manifest.resources.map(expected => {
+    const name = expected.name.slice("os_/bso/".length);
+    const observed = resources.filter(resource => resource.name === name);
+    return {
+      name, expectedSha256: expected.expectedSha256,
+      result: observed.length && observed.every(resource =>
+        resource.status === 200 && resource.sha256 === expected.expectedSha256) ? "MATCH" : "MISMATCH"
+    };
+  });
+}
+
+function evaluateCreateGate(gate) {
+  const isolation = gate.policyAvailable && gate.isolation === true;
+  const reason = gate.createEnabled && !isolation ? "CREATE_ENABLED_WITHOUT_VERIFIED_ISOLATION"
+    : !gate.policyAvailable ? "SYNTHETIC_ISOLATION_POLICY_UNAVAILABLE"
+      : !gate.createEnabled && isolation ? "CREATE_DISABLED_DESPITE_ISOLATION"
+        : !isolation && !gate.knownIsolationBlock ? "ISOLATION_GATE_REASON_UNVERIFIED"
+          : !isolation ? "SERVER_SIDE_SYNTHETIC_ISOLATION_UNAVAILABLE" : null;
+  return {
+    syntheticIsolation: !gate.policyAvailable ? "NOT VERIFIED" : isolation ? "VERIFIED" : "BLOCKED",
+    createCandidateEnabled: gate.createEnabled ? "YES" : "NO",
+    reason,
+    passed: Boolean(gate.policyAvailable && gate.createEnabled === isolation &&
+      (isolation || gate.knownIsolationBlock))
+  };
+}
 
 function identifyConsoleResource(rawUrl, expectedOrigin) {
   let url;
@@ -139,4 +187,7 @@ function safeConsoleUrl(rawUrl, expectedOrigin) {
   return identified ? safeResourceUrl(identified.url) : null;
 }
 
-module.exports = { analyzeSource, createResourceEvidence, identifyConsoleResource, safeConsoleUrl };
+module.exports = {
+  analyzeSource, createResourceEvidence, identifyConsoleResource, safeConsoleUrl,
+  loadResourceManifest, verifyResourceHashes, evaluateCreateGate
+};

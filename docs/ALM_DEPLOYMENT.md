@@ -2,6 +2,26 @@
 
 **Status:** Proposed wider delivery approach. Phase 1B created the Publisher and initially empty unmanaged Solution in VN LMV IT Production for internal IT development. On 19 October 2026, separately approved Phase 1D-C created only `os_sr_ta`; independent metadata reads verified schema and Solution inclusion. See [Current State](CURRENT_STATE.md). No pipelines, environment variables, connection references, or other project tables were created.
 
+## Bounded DEV Console refresh preparation (2026-11-10)
+
+[The offline preparer](../scripts/New-BsoRsCandidateConsoleDevChangeSet.ps1) creates an external, restricted five-resource change set using the existing [environment generator](../scripts/New-BsoRsCandidateConsoleEnvironmentConfig.ps1), unchanged policy/main/Availability source, and a reviewed published/current rollback snapshot. It emits exact baseline/expected hashes, stable resource IDs, a five-ID `publish-request.json`, and the ordered deployment procedure in `manifest.json`. It has no tenant request or browser capability and refuses an existing output path, ambiguous IDs or divergent published/current bytes. The supplied snapshot is historical evidence, not proof of the current target or absence of drift.
+
+```powershell
+.\scripts\New-BsoRsCandidateConsoleDevChangeSet.ps1 `
+  -OrganizationUrl <approved-origin> -EnvironmentId <approved-environment-guid> `
+  -OrganizationId <approved-organization-guid> `
+  -BaselineSnapshotPath <protected-rollback-snapshot.json> `
+  -OutputDirectory <new-external-directory>
+```
+
+The generated DEV configuration is bound, synthetic-only, Candidate Core enabled, direct-write fallback disabled, diagnostics OFF, and Calendar disabled by the existing false-by-default contract. It does **not** establish synthetic isolation. The current policy's `hasSyntheticIsolation()` has no arguments, configuration keys or server-proof input and returns false unconditionally. No configuration/reference ID can make it safely return true. An implemented, approved server-enforced scope for Candidate and related reads plus an actual verification contract is still missing; tests' simulated isolated policies are not deployment components. Do not remove the guard, use a positive browser flag, or infer isolation from exact references, empty reads or an elevated account.
+
+After revised content approval and resolution of that prerequisite, execute the manifest's gated sequence: exact identity/membership/permissions; confirmed edit/import/publish window; fresh published/current hashes and exact ETags; protected rollback capture/readback; one conditional PATCH per changed approved resource; current/published readback after each acknowledgment; reconfirm window and versions; one WebResource-only PublishXml; independent published/current/effective hashes; unchanged CSS; read-only Console verification. Use current ETags, not stale snapshot tags or `If-Match: *`. Stop on 412, failed/uncertain acknowledgments, intervening edits, expired/broken window or readback mismatch. Never replay a mutation or automatically roll back.
+
+The supported [conditional PATCH contract](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/perform-conditional-operations-using-web-api#apply-optimistic-concurrency-on-update) does not make the separate [PublishXml action](https://learn.microsoft.com/en-us/power-apps/developer/data-platform/webapi/reference/publishxml) conditional: that action exposes only `ParameterXml`, not a revision/hash/lease. A confirmed organizational change window remains required across update/publication/readback, including relevant makers and automated publishers. No platform lock or approved freeze has been established. See the [layer-specific limitation](P0_SLICE_2A_WEBRESOURCE_CONCURRENCY_PROOF.md#5-separate-publication-exclusivity-outcome); fixture ETag tests prove runner behavior, not unpublished-layer concurrency semantics.
+
+For later read-only verification, set the existing `BSO_UAT_APPROVAL_FILE` and `BSO_UAT_RESOURCE_MANIFEST_FILE` to absolute protected paths, then run `node .\tests\playwright\authentication-only.cjs`. The manifest must bind the same organization/origin and exactly five names/hashes. The runner checks served hashes against generated DEV bytes rather than the unconfigured repository template, exact configuration binding, complete document load, policy global versus isolation-method presence, unresolved page errors, Calendar disabled, and the fail-closed Create state. Passing the disabled Create safety check reports isolation **BLOCKED**, not lifecycle readiness. This task did not run Chromium or deploy. Do not invoke the historical [deployment helper](../scripts/Deploy-BsoRsCandidateConsole.ps1) with invented flags: its frozen five-resource inventory excludes Availability and cannot represent this revised change set unchanged.
+
 ## Managed-artifact source decision (2026-11-02)
 
 **Final outcome (2026-11-03):** `FINAL_PRODUCTION_RELEASE_CANDIDATE_BUILT`. The Managed `os_sr_bso_rs_support` **1.0.0.1** artifact has SHA-256 `cf70174044be21962c30771861aefb8fa7033014add0d0869523f418eaf55bd3`. It is the immutable Production release candidate.

@@ -1,6 +1,6 @@
 {
-  "status": "DEPLOYED_FLOW_ON_UI_OFF_SECURITY_V2_SOURCE_PENDING",
-  "deploymentState": "The existing Flow is ON; security-v2 correlation and exact-ETag source changes are not installed. Calendar UI remains disabled.",
+  "status": "DEPLOYED_FLOW_ON_ATOMIC_API_HANDOFF_UI_OFF_RUNTIME_NOT_ACCEPTED",
+  "deploymentState": "The existing Flow is ON with the reviewed os_sr_avq_complete terminal action saved through Designer. The nine-input API and configured synchronous handler, three security columns and four Calendar table guards are installed. Genuine requester/restricted-writer and provider runtime acceptance remain NOT RUN. Calendar UI remains disabled.",
   "solutionUniqueName": "os_sr_bso_rs_support",
   "name": "os_sr_avchk",
   "displayName": "BSO-RS Availability Check",
@@ -21,7 +21,7 @@
     { "sequence": 8, "operation": "Capture current UTC after the provider call, then filter and normalize suggestions using OutlookMeetingTimesAdapter and AvailabilityRules as the offline reference contract" },
     { "sequence": 9, "operation": "Before every terminal write, re-read TA and, for Onsite only, Location" },
     { "sequence": 10, "operation": "Apply ReferenceDriftPolicy.BeforeTerminalWrite to the memory-only snapshots; relevant drift or failed re-read overrides the proposed result with Failed, slots [], and REFERENCE_CHANGED" },
-    { "sequence": 11, "operation": "Write exactly one terminal Available, NoSlots or Failed result using only correlation, state, reason, error, canonical slots, queried-at and expiry; If-Match must carry the original exact ETag, never wildcard. Actual connector-to-SDK concurrency transport remains a live acceptance gate." }
+    { "sequence": 11, "operation": "Invoke os_sr_avq_complete once with QueryId, exact ExpectedRowVersion from Read_query ETag, CorrelationId, TerminalStatus, SlotsJson, ReasonCode, ErrorCode, QueriedAt and ExpiresAt. The configured synchronous handler revalidates original requester/scope/freshness/Pending and performs caller-scoped SDK UpdateRequest with IfRowVersionMatches. Wildcard If-Match is not used. Only ResultCode=Applied after a committed conditional write is success evidence; live connector-to-SDK transport and competing Dataverse writes remain acceptance gates." }
   ],
   "provider": {
     "connector": "Office 365 Outlook",
@@ -59,7 +59,7 @@
       "noValidSuggestions": "NoSlots with NO_COMMON_SLOT and slots [].",
       "persistence": "Only sorted, distinct UTC startUtc/endUtc slots, subject to count and JSON-length limits. Never persist or expose provider output, reasons, addresses, availability, locations, confidence, organizer or connector error bodies."
     },
-    "implementation": "The C# adapter is an offline reference implementation and tests, not an invocable Power Automate action and not itself a deployed Flow. The existing solution-aware Flow is ON in DEV; local security-v2 handoff changes are not deployed or live accepted."
+    "implementation": "The C# Outlook adapter remains an offline algorithm reference, not a deployed provider action. The existing solution-aware Flow is ON in DEV. Its atomic result API handoff is saved and independently verified; genuine security/provider runtime acceptance remains incomplete. See availability-result-api.contract.json."
   },
   "providerTimezoneFirstRuntimeGate": {
     "acceptedRepresentation": "timeZone exactly UTC, with an explicitly supported UTC dateTime representation; no timezone input is sent to the action.",

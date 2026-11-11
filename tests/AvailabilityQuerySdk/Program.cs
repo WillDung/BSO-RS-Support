@@ -22,6 +22,7 @@ internal static partial class Program
             TestSdkGuard();
             TestRequestSecurity();
             TestCalendarBridge();
+            TestResultWrite();
             Console.WriteLine("Calendar security checks passed: " + assertions);
             return 0;
         }

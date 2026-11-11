@@ -143,20 +143,25 @@ async function exercise({ onsite = false, roomBusy = false, empty = false, fault
       if (timezone) response.meetingTimeSuggestions[0].meetingTimeSlot.start.timeZone = timezone;
       return response;
     },
-    async updateItem(parameters, actionName) {
-      connectorCalls.push({ operation: "UpdateOnlyRecord", actionName, entity: parameters.entityName });
-      assert.equal(parameters.entityName, schema.logicalName + "s");
-      assert.equal(parameters.recordId, IDS.query);
-      const patch = Object.fromEntries(Object.entries(parameters)
+    async completeQuery(parameters, actionName) {
+      connectorCalls.push({ operation: "PerformUnboundAction", actionName, entity: "os_sr_avqs" });
+      assert.equal(parameters.actionName, "os_sr_avq_complete");
+      assert.equal(parameters["item/QueryId"], IDS.query);
+      const inputs = Object.fromEntries(Object.entries(parameters)
         .filter(([key]) => key.startsWith("item/")).map(([key, value]) => [key.slice(5), value]));
-      assert.deepEqual(Object.keys(patch).sort(), TERMINAL_FIELDS);
-      assert.equal(Object.keys(parameters).length, TERMINAL_FIELDS.length + 3);
-      assert.equal(parameters["If-Match"], persisted["@odata.etag"]);
-      const admitted = guard("Update", patch, parameters["If-Match"]);
+      assert.deepEqual(Object.keys(inputs).sort(), [
+        "QueryId", "ExpectedRowVersion", "CorrelationId", "TerminalStatus",
+        "SlotsJson", "ReasonCode", "ErrorCode", "QueriedAt", "ExpiresAt"
+      ].sort());
+      assert.equal(inputs.ExpectedRowVersion, persisted["@odata.etag"]);
+      const admitted = guard("Complete", inputs);
       assert.equal(admitted.accepted, true, admitted.error);
+      assert.equal(admitted.resultCode, "Applied");
+      assert.equal(admitted.conditionalWrites, 1);
+      const patch = Object.fromEntries(TERMINAL_FIELDS.map(key => [key, admitted.row[key]]));
       terminalWrites.push(patch);
-      persisted = { ...persisted, ...patch };
-      return structuredClone(persisted);
+      persisted = admitted.row;
+      return { ResultCode: admitted.resultCode };
     }
   });
 
@@ -166,7 +171,7 @@ async function exercise({ onsite = false, roomBusy = false, empty = false, fault
   const validStates = schema.choices.os_sr_avq_stat.map((choice) => choice.value);
   assert.equal(validStates.includes(terminal.os_sr_avq_stat), true);
   for (const [key, value] of Object.entries(original)) {
-    if (!TERMINAL_FIELDS.includes(key)) assert.deepEqual(persisted[key], value);
+    if (!TERMINAL_FIELDS.includes(key) && key !== "@odata.etag") assert.deepEqual(persisted[key], value);
   }
   assert.equal(Date.parse(terminal.os_sr_avq_exp) - Date.parse(terminal.os_sr_avq_qat), 600000);
   assert.doesNotMatch(JSON.stringify(Object.values(persisted)), /@|SYNTHETIC_PROVIDER/);

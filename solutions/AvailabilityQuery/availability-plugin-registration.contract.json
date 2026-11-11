@@ -1,11 +1,11 @@
 {
-  "status": "SECURITY_V2_SOURCE_NOT_REGISTERED",
-  "version": "1.0.1",
+  "status": "SECURITY_V2_REGISTERED_LIVE_ISOLATION_NOT_ACCEPTED",
+  "version": "1.0.2",
   "deploymentPrerequisites": [
     "Provision reviewed correlation and immutable server-clock columns; verify optimistic concurrency metadata.",
     "Render complete SecurityVersion=2 organization/requester/effective-role/TA/Location bindings with unchanged seven settings.",
     "Requester submits identical request ID and correlation; no owner or clock fields.",
-    "Result adapter supplies correlation and SDK IfRowVersionMatches with exact expected RowVersion; verify transport before registration.",
+    "Result adapter invokes os_sr_avq_complete with correlation and exact expected RowVersion; its configured synchronous handler uses SDK IfRowVersionMatches. Verify API transport before table guard registration.",
     "Verify current deployed binary and rollback hashes before any replacement."
   ],
   "solutionUniqueName": "os_sr_bso_rs_support",
@@ -81,7 +81,7 @@
   "security": [
     "No tenant or user GUID is committed.",
     "ResultWriterUserId is the current DEV owner identity used by the Dataverse Flow connection; the requester is a separate BSO test identity. A dedicated Dataverse application user is not a DEV prerequisite.",
-    "DEV_FUNCTIONAL_IDENTITY_ELEVATED_NOT_SECURITY_ACCEPTANCE: the DEV owner is elevated; retain both caller and initiating-user checks. Production identity remains a later decision.",
+    "DEV_FUNCTIONAL_IDENTITY_NOT_SECURITY_ACCEPTANCE: operator deployment capability and earlier elevation evidence cannot establish a restricted writer. A later direct-role read returned BSO only; effective restriction remains unverified. Retain both caller and initiating-user checks.",
     "No secure configuration or secret is required by this plug-in.",
     "Step registration is not permission to grant any Candidate Core privilege."
   ]

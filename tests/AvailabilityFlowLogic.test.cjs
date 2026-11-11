@@ -79,15 +79,20 @@ async function execute(options = {}) {
       if (options.providerError) throw options.providerError;
       return options.provider || { emptySuggestionsReason: '', meetingTimeSuggestions: [suggestion()] };
     },
-    updateItem: async params => {
+    completeQuery: async params => {
       writes.push(params);
-      return {};
+      return { ResultCode: 'Applied' };
     }
   });
   const patch = writes.length
-    ? Object.fromEntries(Object.entries(writes[0])
-      .filter(([name]) => name.startsWith('item/'))
-      .map(([name, value]) => [name.slice('item/'.length), value]))
+    ? {
+      os_sr_avq_stat: writes[0]['item/TerminalStatus'],
+      os_sr_avq_slts: writes[0]['item/SlotsJson'],
+      os_sr_avq_rsn: writes[0]['item/ReasonCode'] || null,
+      os_sr_avq_err: writes[0]['item/ErrorCode'] || null,
+      os_sr_avq_qat: writes[0]['item/QueriedAt'],
+      os_sr_avq_exp: writes[0]['item/ExpiresAt']
+    }
     : undefined;
   return { result, patch, writes, reads, providerCalls };
 }
@@ -107,9 +112,10 @@ test('security v2 rejects stale or uncorrelated requests before the provider', a
 test('security v2 terminal handoff retains correlation and exact expected version', async () => {
   const run = await execute();
   assert.equal(run.writes.length, 1);
-  assert.equal(run.writes[0]['If-Match'], query['@odata.etag']);
-  assert.equal(run.writes[0]['item/os_sr_avq_corr'], ids.query);
-  assert.equal(run.writes[0].recordId, ids.query);
+  assert.equal(run.writes[0].actionName, 'os_sr_avq_complete');
+  assert.equal(run.writes[0]['item/ExpectedRowVersion'], query['@odata.etag']);
+  assert.equal(run.writes[0]['item/CorrelationId'], ids.query);
+  assert.equal(run.writes[0]['item/QueryId'], ids.query);
 });
 
 function failed(run, error) {

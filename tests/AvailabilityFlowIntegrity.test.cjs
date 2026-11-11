@@ -25,7 +25,7 @@ const source = JSON.parse(fs.readFileSync(flowPath, 'utf8'));
 const changedProperties = [
   ['Check_pending', 'expression', 'd1da29a690bb0b9635c47149c386d7bb0b0fbbf64d288a4e0468007401d228b5'],
   ['Read_query', 'inputs', 'ca829114f4523e1b20fe78086f96b25c8c7f427d797808b873c30113b601ec4b'],
-  ['Write_terminal_result', 'inputs', '1a776788a3e7bd5d6ca068905ae2dd1d8e50f0c3dbb2950d4bc2dc3bcb3656f1'],
+  ['Write_terminal_result', 'inputs', '48b032bbd6623ef2abdbab2e8446c0bb5573e2b074e4d42ccb7f366764654903'],
   ['Check_pending', 'runtimeConfiguration', '8af12b516767e5514188453ed0cab2825b393b7497d54074eda57be6f807803d'],
   ['Count_business_hour_keys', 'runAfter', '37f8dfc91bdc2b9dee8fd223893393178185c0f72ab3458bf513eabead50f6a5'],
   ['Compose_config', 'runAfter', '535a5e2a0d7dd5b09bc4f8027621aefb5cc19d738fb5ed6417df29951003c857'],
@@ -118,16 +118,16 @@ const readContracts = {
   Reread_location: ['os_sr_locs', "@variables('v_loc')['id']", 'os_sr_locid,statecode,os_sr_loc_rmeml']
 };
 const terminalParameters = {
-  entityName: 'os_sr_avqs',
-  recordId: "@body('Read_query')?['os_sr_avqid']",
-  'If-Match': "@body('Read_query')?['@odata.etag']",
-  'item/os_sr_avq_corr': "@body('Read_query')?['os_sr_avq_corr']",
-  'item/os_sr_avq_stat': "@outputs('Compose_terminal')['state']",
-  'item/os_sr_avq_rsn': "@outputs('Compose_terminal')['reason']",
-  'item/os_sr_avq_err': "@outputs('Compose_terminal')['error']",
-  'item/os_sr_avq_slts': "@outputs('Compose_terminal')['slots']",
-  'item/os_sr_avq_qat': "@outputs('Compose_terminal')['queriedAt']",
-  'item/os_sr_avq_exp': "@addMinutes(outputs('Compose_terminal')['queriedAt'], variables('v_expMinutes'))"
+  actionName: 'os_sr_avq_complete',
+  'item/QueryId': "@body('Read_query')?['os_sr_avqid']",
+  'item/ExpectedRowVersion': "@outputs('Read_query')?['body/@odata.etag']",
+  'item/CorrelationId': "@body('Read_query')?['os_sr_avq_corr']",
+  'item/TerminalStatus': "@outputs('Compose_terminal')['state']",
+  'item/ReasonCode': "@coalesce(outputs('Compose_terminal')['reason'], '')",
+  'item/ErrorCode': "@coalesce(outputs('Compose_terminal')['error'], '')",
+  'item/SlotsJson': "@outputs('Compose_terminal')['slots']",
+  'item/QueriedAt': "@outputs('Compose_terminal')['queriedAt']",
+  'item/ExpiresAt': "@addMinutes(outputs('Compose_terminal')['queriedAt'], variables('v_expMinutes'))"
 };
 const outlookParameters = {
   'body/RequiredAttendees': "@coalesce(variables('v_ta')?['email'], '')",
@@ -176,7 +176,7 @@ function assertExecutionBoundary(candidate) {
     const api = outlook ? 'shared_office365' : 'shared_commondataserviceforapps';
     assert.deepEqual(action.inputs.host, {
       connectionName: api,
-      operationId: outlook ? 'FindMeetingTimes_V2' : name === 'Write_terminal_result' ? 'UpdateOnlyRecord' : 'GetItem',
+      operationId: outlook ? 'FindMeetingTimes_V2' : name === 'Write_terminal_result' ? 'PerformUnboundAction' : 'GetItem',
       apiId: `/providers/Microsoft.PowerApps/apis/${api}`
     });
     assert.equal(action.inputs.authentication, "@parameters('$authentication')");
@@ -215,7 +215,7 @@ test('every changed property, added validator and unrelated mutation is detected
     assert.throws(() => assertReviewedDelta(mutant), name);
   }
   const changedWrite = structuredClone(source);
-  changedWrite.properties.definition.actions.Write_terminal_result.inputs.parameters['item/os_sr_avq_stat'] = 'synthetic';
+  changedWrite.properties.definition.actions.Write_terminal_result.inputs.parameters['item/TerminalStatus'] = 'synthetic';
   assert.throws(() => assertReviewedDelta(changedWrite), 'Unexpected terminal expression changes reject.');
   const moved = structuredClone(source);
   const movedActions = index(moved.properties.definition.actions);
@@ -232,7 +232,7 @@ test('all executable branches enforce the exact single terminal-write and connec
 test('write, connector, branch and Pending-gate mutations are rejected', () => {
   const variants = [
     candidate => { candidate.properties.definition.actions.Write_terminal_result.inputs.parameters['item/synthetic'] = 'x'; },
-    candidate => { candidate.properties.definition.actions.Write_terminal_result.inputs.parameters.recordId = "@triggerOutputs()?['body/os_sr_avqid']"; },
+    candidate => { candidate.properties.definition.actions.Write_terminal_result.inputs.parameters['item/QueryId'] = "@triggerOutputs()?['body/os_sr_avqid']"; },
     candidate => { candidate.properties.definition.actions.Read_query.inputs.host.operationId = 'UpdateOnlyRecord'; },
     candidate => { delete candidate.properties.definition.actions.Compose_terminal.runAfter.Check_pending; },
     candidate => { candidate.properties.definition.actions.Check_pending.cases = {}; },

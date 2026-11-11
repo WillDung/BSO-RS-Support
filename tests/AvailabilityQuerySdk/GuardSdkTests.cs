@@ -1,4 +1,5 @@
 using System;
+using System.ServiceModel;
 using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.Remoting.Messaging;
@@ -284,7 +285,7 @@ internal static partial class Program
             QueryRow["os_sr_avq_dead"] = Now.AddMinutes(11);
         }
 
-        public Entity QueryRow { get; }
+        public Entity QueryRow { get; set; }
         public Entity TaRow => ta;
         public bool ReturnWrongReferenceId { get; set; }
         public bool AuthorizedRole { get; set; } = true;
@@ -293,6 +294,20 @@ internal static partial class Program
         public Entity LocationRow { get; }
         public List<string> Reads { get; } = new List<string>();
         public List<string> QueryColumns { get; } = new List<string>();
+        public Action? BeforeConditionalWrite { get; set; }
+        public int ConditionalWrites { get; private set; }
+        public bool DenyWritePrivilege { get; set; }
+        public ParameterCollection Outputs { get; } = new ParameterCollection();
+
+        public void ExecuteResult(ParameterCollection inputs)
+        {
+            context["MessageName"] = CompleteAvailabilityQuery.MessageName;
+            context["InputParameters"] = inputs;
+            context["IsInTransaction"] = true;
+            context["Depth"] = 1;
+            context["OutputParameters"] = Outputs;
+            new CompleteAvailabilityQuery(SecurityConfiguration(), () => ServerNow).Execute(this);
+        }
 
         public void Execute() => new ProtectAvailabilityQuery(
             SecurityConfiguration(), null, () => ServerNow).Execute(this);
@@ -315,6 +330,28 @@ internal static partial class Program
 
         private object Retrieve(IMethodCallMessage call)
         {
+            if (call.MethodName == "Execute")
+            {
+                var request = call.Args[0] as Microsoft.Xrm.Sdk.Messages.UpdateRequest ??
+                    throw new InvalidOperationException("Only a conditional UpdateRequest is allowed.");
+                if (request.ConcurrencyBehavior != ConcurrencyBehavior.IfRowVersionMatches ||
+                    request.Target.LogicalName != "os_sr_avq" || request.Target.Id != QueryRow.Id)
+                    throw new InvalidOperationException("Result operation changed the mutation boundary.");
+                BeforeConditionalWrite?.Invoke();
+                lock (QueryRow)
+                {
+                    if (DenyWritePrivilege)
+                        throw new FaultException<OrganizationServiceFault>(
+                            new OrganizationServiceFault { ErrorCode = -2147220960 }, "Synthetic privilege denied.");
+                    if (request.Target.RowVersion != QueryRow.RowVersion)
+                        throw new FaultException<OrganizationServiceFault>(
+                            new OrganizationServiceFault { ErrorCode = -2147088254 }, "Synthetic concurrency conflict.");
+                    foreach (var pair in request.Target.Attributes) QueryRow[pair.Key] = pair.Value;
+                    QueryRow.RowVersion = (long.Parse(QueryRow.RowVersion) + 1).ToString();
+                    ConditionalWrites++;
+                    return new Microsoft.Xrm.Sdk.Messages.UpdateResponse();
+                }
+            }
             if (call.MethodName == "RetrieveMultiple")
             {
                 var query = (QueryExpression)call.Args[0];

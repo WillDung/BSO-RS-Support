@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Runtime.Remoting.Messaging;
 using System.ServiceModel;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
 using os_sr_avqg;
 
@@ -29,7 +30,8 @@ internal static partial class Program
         {
             var input = BridgeObject(serializer.DeserializeObject(json));
             var operation = BridgeString(input, "operation");
-            if (operation != "Create" && operation != "Update") throw new FormatException();
+            if (operation != "Create" && operation != "Update" && operation != "Complete")
+                throw new FormatException();
             var caller = BridgeIdentity(BridgeString(input, "caller"));
             var initiating = input.ContainsKey("initiatingCaller")
                 ? BridgeIdentity(BridgeString(input, "initiatingCaller")) : caller;
@@ -39,9 +41,15 @@ internal static partial class Program
             var now = input.TryGetValue("now", out var clock)
                 ? DateTime.Parse((string)clock, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)
                 : DateTime.UtcNow;
-            var query = operation == "Update" ? BridgeEntity(BridgeObject(input["query"]), BridgeQueryId)
+            var query = operation != "Create" ? BridgeEntity(BridgeObject(input["query"]), BridgeQueryId)
                 : new Entity("os_sr_avq", BridgeQueryId);
-            var target = BridgeEntity(BridgeObject(input["payload"]), query.Id);
+            var apiInputs = new ParameterCollection();
+            if (operation == "Complete")
+                foreach (var pair in BridgeObject(input["payload"]))
+                    apiInputs[pair.Key] = pair.Key == "QueryId" || pair.Key == "CorrelationId"
+                        ? (object)Guid.Parse((string)pair.Value) : pair.Value;
+            var target = operation == "Complete" ? CompleteAvailabilityQuery.CreateTarget(apiInputs)
+                : BridgeEntity(BridgeObject(input["payload"]), query.Id);
             query.Id = target.Id;
             var references = BridgeObject(input["references"]);
             var taId = Guid.Parse(BridgeString(BridgeObject(references["ta"]), "id"));
@@ -71,17 +79,30 @@ internal static partial class Program
                     reference.TryGetValue(emailField, out var email) ? email : null;
                 rows.Add(row);
             }
-            if (operation == "Update") rows.Add(query);
+            if (operation != "Create") rows.Add(query);
             var host = new CalendarBridgeHost(operation, caller, initiating, target, rows);
-            new ProtectAvailabilityQuery(configuration, null, () => now).Execute(host);
-            foreach (var pair in target.Attributes) query[pair.Key] = pair.Value;
+            if (operation == "Complete")
+            {
+                host.UseResultOperation(apiInputs);
+                host.ValidateNestedUpdate = update =>
+                    new ProtectAvailabilityQuery(configuration, null, () => now).Execute(
+                        new CalendarBridgeHost("Update", caller, initiating, update, rows));
+                new CompleteAvailabilityQuery(configuration, () => now).Execute(host);
+            }
+            else
+            {
+                new ProtectAvailabilityQuery(configuration, null, () => now).Execute(host);
+                foreach (var pair in target.Attributes) query[pair.Key] = pair.Value;
+                query.RowVersion = "1";
+            }
             if (operation == "Create") query["createdby"] = new EntityReference("systemuser", caller);
-            query.RowVersion = "1";
             return serializer.Serialize(new Dictionary<string, object?>
             {
                 ["accepted"] = true,
                 ["row"] = BridgeRow(query),
-                ["reads"] = host.Reads
+                ["reads"] = host.Reads,
+                ["resultCode"] = host.Outputs.TryGetValue("ResultCode", out var resultCode) ? resultCode : null,
+                ["conditionalWrites"] = host.ConditionalWrites
             });
         }
         catch (InvalidPluginExecutionException exception)
@@ -233,6 +254,18 @@ internal static partial class Program
         }
 
         public List<string> Reads { get; } = new List<string>();
+        public ParameterCollection Outputs { get; } = new ParameterCollection();
+        public int ConditionalWrites { get; private set; }
+        public Action<Entity>? ValidateNestedUpdate { get; set; }
+
+        public void UseResultOperation(ParameterCollection inputs)
+        {
+            context["MessageName"] = CompleteAvailabilityQuery.MessageName;
+            context["IsInTransaction"] = true;
+            context["Depth"] = 1;
+            context["InputParameters"] = inputs;
+            context["OutputParameters"] = Outputs;
+        }
 
         public object GetService(Type type)
         {
@@ -250,6 +283,24 @@ internal static partial class Program
 
         private object Retrieve(IMethodCallMessage call)
         {
+            if (call.MethodName == "Execute" && call.Args[0] is UpdateRequest update &&
+                update.ConcurrencyBehavior == ConcurrencyBehavior.IfRowVersionMatches)
+            {
+                var stored = rows.Single(item => item.LogicalName == "os_sr_avq" && item.Id == update.Target.Id);
+                lock (stored)
+                {
+                    if (update.Target.RowVersion != stored.RowVersion)
+                        throw new FaultException<OrganizationServiceFault>(
+                            new OrganizationServiceFault { ErrorCode = -2147088254 });
+                    if (ValidateNestedUpdate == null) throw new InvalidOperationException();
+                    ValidateNestedUpdate(update.Target);
+                    foreach (var pair in update.Target.Attributes) stored[pair.Key] = pair.Value;
+                    stored.RowVersion = (long.Parse(stored.RowVersion, CultureInfo.InvariantCulture) + 1)
+                        .ToString(CultureInfo.InvariantCulture);
+                    ConditionalWrites++;
+                }
+                return new UpdateResponse();
+            }
             if (call.MethodName == "RetrieveMultiple")
             {
                 var roles = new EntityCollection();

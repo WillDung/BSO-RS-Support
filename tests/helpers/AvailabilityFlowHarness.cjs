@@ -478,7 +478,7 @@ class FlowFixture {
     const operation = inputs.host.operationId;
     const callbacks = {
       GetItem: this.options.getItem,
-      UpdateOnlyRecord: this.options.updateItem,
+      PerformUnboundAction: this.options.completeQuery,
       FindMeetingTimes_V2: this.options.outlook
     };
     if (!Object.hasOwn(callbacks, operation) || typeof callbacks[operation] !== "function") {

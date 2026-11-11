@@ -1,0 +1,35 @@
+{
+  "uniqueName": "os_sr_avq_complete",
+  "version": "1.0.2",
+  "bindingType": "Global",
+  "isFunction": false,
+  "isPrivate": false,
+  "allowedCustomProcessingStepType": "SyncAndAsync",
+  "mainOperationPlugin": null,
+  "handler": {
+    "pluginType": "os_sr_avqg.CompleteAvailabilityQuery",
+    "message": "os_sr_avq_complete",
+    "stage": 20,
+    "mode": 0,
+    "rank": 1,
+    "executionIdentity": "CallingUser",
+    "configuration": "Identical RenderSecured output to the table guards; no secrets.",
+    "required": "One enabled synchronous handler. No successful result is inferred without ResultCode=Applied."
+  },
+  "inputs": [
+    { "name": "QueryId", "type": "Guid", "required": true },
+    { "name": "ExpectedRowVersion", "type": "String", "required": true },
+    { "name": "CorrelationId", "type": "Guid", "required": true },
+    { "name": "TerminalStatus", "type": "Integer", "required": true },
+    { "name": "SlotsJson", "type": "String", "required": true },
+    { "name": "ReasonCode", "type": "String", "required": false },
+    { "name": "ErrorCode", "type": "String", "required": false },
+    { "name": "QueriedAt", "type": "String", "required": true },
+    { "name": "ExpiresAt", "type": "String", "required": true }
+  ],
+  "outputs": [{ "name": "ResultCode", "type": "String", "success": "Applied" }],
+  "concurrency": "Accept only canonical positive decimal RowVersion or W/\"decimal\" ETag. Execute UpdateRequest(IfRowVersionMatches) through the caller service inside the synchronous transaction. Validation reads never authorize an unconditional update.",
+  "authorization": "Exact configured writer must equal both caller and initiating user. Reuse original requester/effective-role/scope/correlation/server-clock/Pending/result-field checks. No system service or impersonation.",
+  "errors": "Throw safe fault on invalid input, stale state, wrong correlation, origin or scope. ConcurrencyVersionMismatch becomes CONCURRENCY_MISMATCH. Other SDK write faults become RESULT_WRITE_FAILED; never return Applied on fault or retry.",
+  "deployment": "Register the handler before wiring Flow. Keep Calendar disabled and no Pending creation until table guards and genuine restricted-writer/non-admin-requester runtime acceptance pass."
+}

@@ -139,6 +139,15 @@ namespace os_sr_avqg
                 !(concurrency is ConcurrencyBehavior behavior) || behavior != ConcurrencyBehavior.IfRowVersionMatches ||
                 string.IsNullOrEmpty(target.RowVersion))
                 throw Reject(trace, "CONCURRENCY_REQUIRED");
+            ValidateResult(service, settings, security, trace, now, target);
+        }
+
+        internal static void ValidateResult(IOrganizationService service, AvailabilitySettings settings,
+            AvailabilityRequestSecurity security, ITracingService trace, DateTime now, Entity target)
+        {
+            EnsureOnlyAttributes(target, ResultFields, trace);
+            AvailabilityRequestSecurity.Correlation(target);
+            if (string.IsNullOrEmpty(target.RowVersion)) throw Reject(trace, "CONCURRENCY_REQUIRED");
             var current = RetrieveReference(service, new EntityReference(Table, target.Id), Table, trace);
             security.ValidateOrigin(current);
             security.ValidateRole(service);

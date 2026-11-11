@@ -2217,20 +2217,20 @@
           "inputs": {
             "host": {
               "connectionName": "shared_commondataserviceforapps",
-              "operationId": "UpdateOnlyRecord",
+              "operationId": "PerformUnboundAction",
               "apiId": "/providers/Microsoft.PowerApps/apis/shared_commondataserviceforapps"
             },
             "parameters": {
-              "entityName": "os_sr_avqs",
-              "recordId": "@body('Read_query')?['os_sr_avqid']",
-              "If-Match": "@body('Read_query')?['@odata.etag']",
-              "item/os_sr_avq_corr": "@body('Read_query')?['os_sr_avq_corr']",
-              "item/os_sr_avq_stat": "@outputs('Compose_terminal')['state']",
-              "item/os_sr_avq_rsn": "@outputs('Compose_terminal')['reason']",
-              "item/os_sr_avq_err": "@outputs('Compose_terminal')['error']",
-              "item/os_sr_avq_slts": "@outputs('Compose_terminal')['slots']",
-              "item/os_sr_avq_qat": "@outputs('Compose_terminal')['queriedAt']",
-              "item/os_sr_avq_exp": "@addMinutes(outputs('Compose_terminal')['queriedAt'], variables('v_expMinutes'))"
+              "actionName": "os_sr_avq_complete",
+              "item/QueryId": "@body('Read_query')?['os_sr_avqid']",
+              "item/ExpectedRowVersion": "@outputs('Read_query')?['body/@odata.etag']",
+              "item/CorrelationId": "@body('Read_query')?['os_sr_avq_corr']",
+              "item/TerminalStatus": "@outputs('Compose_terminal')['state']",
+              "item/ReasonCode": "@coalesce(outputs('Compose_terminal')['reason'], '')",
+              "item/ErrorCode": "@coalesce(outputs('Compose_terminal')['error'], '')",
+              "item/SlotsJson": "@outputs('Compose_terminal')['slots']",
+              "item/QueriedAt": "@outputs('Compose_terminal')['queriedAt']",
+              "item/ExpiresAt": "@addMinutes(outputs('Compose_terminal')['queriedAt'], variables('v_expMinutes'))"
             },
             "authentication": "@parameters('$authentication')",
             "retryPolicy": {

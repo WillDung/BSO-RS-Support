@@ -382,7 +382,7 @@ $baselineDocument = Read-StrictJson $baselineText
 $baselineDocument.Dispose()
 $currentDocument = Read-StrictJson $currentText
 $currentDocument.Dispose()
-$sourceDigest = '1C7031A980B4C05132DA0EACFF97723AF5492D22226784F864299C04A3D12A02'
+$sourceDigest = 'D3C708F5BAAEC88134741E55C73B436B82D3B2521AD11BB02141232039447FF4'
 Assert-Test ((Get-CanonicalJsonHash $currentText) -ceq $sourceDigest) `
     'The complete functional source matches its independently pinned strict canonical digest.'
 Assert-Test ((Get-CanonicalJsonHash '{"b":[1,true],"a":"x"}') -ceq
@@ -592,7 +592,7 @@ try {
         [System.Text.Json.Nodes.JsonValue]::Create('fixed')
     Assert-Rejected { Assert-ExpectedFlow $expectedDocument $mutant.ToJsonString() } 'Connector retry-policy mutation rejects' 'JSON_MISMATCH'
     $mutant = [System.Text.Json.Nodes.JsonNode]::Parse($currentText)
-    (Get-FlowActionIndex $mutant)['Write_terminal_result']['inputs']['parameters']['item/os_sr_avq_stat'] =
+    (Get-FlowActionIndex $mutant)['Write_terminal_result']['inputs']['parameters']['item/TerminalStatus'] =
         [System.Text.Json.Nodes.JsonValue]::Create('synthetic-changed-expression')
     Assert-Rejected { Assert-ExpectedFlow $expectedDocument $mutant.ToJsonString() } 'Terminal-write mutation rejects' 'JSON_MISMATCH'
     $mutant = [System.Text.Json.Nodes.JsonNode]::Parse($currentText)

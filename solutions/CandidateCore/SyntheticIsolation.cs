@@ -33,7 +33,9 @@ namespace os_sr_cact
         public Guid EnvironmentId { get; }
         public Guid ActorId { get; }
         public Guid ScopeId { get; }
-        public DateTime ExpiresUtc { get; }
+        public DateTime? ExpiresUtc { get; }
+        public bool Enabled { get; }
+        public bool PersistentDev { get; }
         public string CandidateName => "[SYNTHETIC-E2E] Playwright " + ScopeId.ToString("D");
         public string CandidateEmail => "pw-" + ScopeId.ToString("D") + "@example.invalid";
 
@@ -43,11 +45,24 @@ namespace os_sr_cact
             EnvironmentId = ReadGuid(root, "environmentId");
             ActorId = ReadGuid(root, "actorId");
             ScopeId = ReadGuid(root, "scopeId");
-            if (!DateTime.TryParseExact((string?)root.Attribute("expiresUtc"), "yyyy-MM-dd'T'HH:mm:ss'Z'",
-                CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
-                out var expiry))
-                throw new OperationError("SYNTHETIC_CONFIGURATION_INVALID");
-            ExpiresUtc = expiry;
+            PersistentDev = (string?)root.Attribute("profileVersion") == "2";
+            if (PersistentDev)
+            {
+                if ((string?)root.Attribute("lifetime") != "PersistentDev" ||
+                    OrganizationId != DevCandidateSlice.DevelopmentOrganizationId ||
+                    !new[] { "true", "false" }.Contains((string?)root.Attribute("enabled")))
+                    throw new OperationError("SYNTHETIC_CONFIGURATION_INVALID");
+                Enabled = (string?)root.Attribute("enabled") == "true";
+            }
+            else
+            {
+                if (!DateTime.TryParseExact((string?)root.Attribute("expiresUtc"), "yyyy-MM-dd'T'HH:mm:ss'Z'",
+                    CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+                    out var expiry))
+                    throw new OperationError("SYNTHETIC_CONFIGURATION_INVALID");
+                ExpiresUtc = expiry;
+                Enabled = true;
+            }
             references = new Dictionary<string, Guid>(StringComparer.Ordinal)
             {
                 ["os_sr_pos"] = ReadGuid(root, "positionId"),
@@ -67,8 +82,10 @@ namespace os_sr_cact
             }))
             {
                 var root = XElement.Load(reader);
-                var attributes = new[] { "organizationId", "environmentId", "actorId", "scopeId",
-                    "expiresUtc", "positionId", "sourceId", "taId", "locationId" };
+                var bindings = new[] { "organizationId", "environmentId", "actorId", "scopeId",
+                    "positionId", "sourceId", "taId", "locationId" };
+                var attributes = bindings.Concat((string?)root.Attribute("profileVersion") == "2"
+                    ? new[] { "profileVersion", "lifetime", "enabled" } : new[] { "expiresUtc" }).ToArray();
                 if (root.Name != "syntheticIsolation" || root.HasElements ||
                     root.Attributes().Count() != attributes.Length ||
                     root.Attributes().Any(attribute => !attributes.Contains(attribute.Name.ToString())))
@@ -131,7 +148,8 @@ namespace os_sr_cact
             if (organization != DevCandidateSlice.DevelopmentOrganizationId || organization != OrganizationId)
                 throw new OperationError("SYNTHETIC_ORGANIZATION_REJECTED");
             if (actor != ActorId) throw new OperationError("SYNTHETIC_ACTOR_REJECTED");
-            if (now.Kind != DateTimeKind.Utc || now >= ExpiresUtc)
+            if (!Enabled) throw new OperationError("SYNTHETIC_PROFILE_DISABLED");
+            if (now.Kind != DateTimeKind.Utc || ExpiresUtc.HasValue && now >= ExpiresUtc.Value)
                 throw new OperationError("SYNTHETIC_SCOPE_EXPIRED");
         }
 
@@ -520,7 +538,10 @@ namespace os_sr_cact
 
         public string Contract()
         {
-            var until = ExpiresUtc < DateTime.UtcNow.AddMinutes(2) ? ExpiresUtc : DateTime.UtcNow.AddMinutes(2);
+            var now = DateTime.UtcNow;
+            ValidateContext(OrganizationId, ActorId, now);
+            var until = ExpiresUtc.HasValue && ExpiresUtc.Value < now.AddMinutes(2)
+                ? ExpiresUtc.Value : now.AddMinutes(2);
             return string.Format(CultureInfo.InvariantCulture,
                 "{{\"version\":2,\"boundary\":\"ScopedCandidateCoreApi\",\"nativeWritesDenied\":true," +
                 "\"readback\":\"CallerOwnedScope\",\"organizationId\":\"{0:D}\",\"environmentId\":\"{1:D}\"," +

@@ -174,6 +174,14 @@ internal static partial class Program
 
     private static void Main(string[] args)
     {
+        if (args.Length == 1 && args[0] == "--persistent-profile")
+        {
+            TestPersistentDevProfile();
+            TestVerifierCorrelationContract();
+            TestScopedServerProof();
+            Console.WriteLine("Persistent DEV profile checks passed: " + passed);
+            return;
+        }
         if (args.Length == 1 && args[0] == "--verifier-contract")
         {
             TestVerifierCorrelationContract();

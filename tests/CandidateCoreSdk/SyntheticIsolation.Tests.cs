@@ -28,13 +28,14 @@ internal static partial class Program
         var before = passed;
         TestScopedServerProof();
         TestVerifierCorrelationContract();
+        TestPersistentDevProfile();
         TestSyntheticApiScope();
         var policy = SyntheticIsolation.Parse(IsolationXml);
         policy.ValidateContext(DevOrganization, Actor, DateTime.UtcNow);
         Check(policy.ScopeId == Scope && policy.CandidateEmail.EndsWith(".invalid"), "Server derives exact marker identity");
         RejectPolicy(() => policy.ValidateContext(Organization, Actor, DateTime.UtcNow), "SYNTHETIC_ORGANIZATION_REJECTED");
         RejectPolicy(() => policy.ValidateContext(DevOrganization, Guid.NewGuid(), DateTime.UtcNow), "SYNTHETIC_ACTOR_REJECTED");
-        RejectPolicy(() => policy.ValidateContext(DevOrganization, Actor, policy.ExpiresUtc), "SYNTHETIC_SCOPE_EXPIRED");
+        RejectPolicy(() => policy.ValidateContext(DevOrganization, Actor, policy.ExpiresUtc!.Value), "SYNTHETIC_SCOPE_EXPIRED");
         RejectPolicy(() => SyntheticIsolation.Parse(IsolationXml.Replace("scopeId=", "forged=")),
             "SYNTHETIC_CONFIGURATION_INVALID");
         RejectPolicy(() => SyntheticIsolation.Parse(IsolationXml.Replace(Scope.ToString(), "forged")),
@@ -451,6 +452,107 @@ internal static partial class Program
             host.Rows.Values.Count(row => row.LogicalName == "os_sr_csh") == 3,
             "Restricted caller completes four API operations with History, receipts and scoped readback");
         Check(host.EffectivePrivilegeRequests > 4, "Team-effective privilege message is rechecked on every API write and proof");
+    }
+
+    private static string PersistentIsolationXml
+    {
+        get
+        {
+            var root = System.Xml.Linq.XElement.Parse(IsolationXml);
+            root.Attribute("expiresUtc")!.Remove();
+            root.SetAttributeValue("profileVersion", "2");
+            root.SetAttributeValue("lifetime", "PersistentDev");
+            root.SetAttributeValue("enabled", "true");
+            return root.ToString();
+        }
+    }
+
+    private static void TestPersistentDevProfile()
+    {
+        var xml = PersistentIsolationXml;
+        var policy = SyntheticIsolation.Parse(xml);
+        Check(policy.Enabled && policy.PersistentDev && !policy.ExpiresUtc.HasValue,
+            "Persistent DEV is explicit, enabled and has no expiry sentinel");
+        policy.ValidateContext(DevOrganization, Actor, DateTime.UtcNow.AddYears(10));
+        Check(policy.CandidateName == SyntheticIsolation.Parse(IsolationXml).CandidateName &&
+            policy.CandidateEmail == SyntheticIsolation.Parse(IsolationXml).CandidateEmail,
+            "Persistent mode preserves the exact synthetic marker");
+        RejectPolicy(() => policy.ValidateContext(Organization, Actor, DateTime.UtcNow),
+            "SYNTHETIC_ORGANIZATION_REJECTED");
+        RejectPolicy(() => policy.ValidateContext(DevOrganization, Guid.NewGuid(), DateTime.UtcNow),
+            "SYNTHETIC_ACTOR_REJECTED");
+        foreach (var attribute in new[] { "profileVersion", "lifetime", "enabled", "actorId", "scopeId",
+            "organizationId", "environmentId", "positionId", "sourceId", "taId", "locationId" })
+        {
+            var corrupt = System.Xml.Linq.XElement.Parse(xml);
+            corrupt.Attribute(attribute)!.Remove();
+            RejectPolicy(() => SyntheticIsolation.Parse(corrupt.ToString()), "SYNTHETIC_CONFIGURATION_INVALID");
+        }
+        foreach (var change in new Dictionary<string, string> {
+            ["profileVersion"] = "3", ["lifetime"] = "Unlimited", ["enabled"] = "TRUE",
+            ["expiresUtc"] = "2099-01-01T00:00:00Z", ["actorId"] = "invalid",
+            ["organizationId"] = Organization.ToString() })
+        {
+            var corrupt = System.Xml.Linq.XElement.Parse(xml);
+            corrupt.SetAttributeValue(change.Key, change.Value);
+            RejectPolicy(() => SyntheticIsolation.Parse(corrupt.ToString()), "SYNTHETIC_CONFIGURATION_INVALID");
+        }
+        var noExpiry = System.Xml.Linq.XElement.Parse(IsolationXml);
+        noExpiry.Attribute("expiresUtc")!.Remove();
+        RejectPolicy(() => SyntheticIsolation.Parse(noExpiry.ToString()), "SYNTHETIC_CONFIGURATION_INVALID");
+        var disabled = xml.Replace("enabled=\"true\"", "enabled=\"false\"");
+        RejectPolicy(() => SyntheticIsolation.Parse(disabled).Contract(), "SYNTHETIC_PROFILE_DISABLED");
+        var host = new IsolationHost { GuardsInstalled = false, IncludeCreateReferences = true, ProfileOverride = xml };
+        host.Invoke(SyntheticIsolation.VerifyAction);
+        var contract = (string)host.Output["IsolationContract"];
+        Check(contract.Contains("\"version\":2") && contract.Contains("\"boundary\":\"ScopedCandidateCoreApi\"") &&
+            contract.Contains("\"actorId\":\"" + Actor + "\"") && contract.Contains("\"scopeId\":\"" + Scope + "\"") &&
+            contract.Contains("\"calendarEnabled\":false"), "Persistent profile returns existing scoped v2 proof bindings");
+        var expires = contract.Split(new[] { "\"validUntil\":\"" }, StringSplitOptions.None)[1].Split('"')[0];
+        var validUntil = DateTime.ParseExact(expires, "yyyy-MM-ddTHH:mm:ssZ", System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal);
+        Check(validUntil > DateTime.UtcNow && validUntil <= DateTime.UtcNow.AddSeconds(121),
+            "Persistent server profile does not make browser proofs persistent");
+        host.ProfileOverride = disabled;
+        Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_PROFILE_DISABLED");
+        RejectContains(() => host.Create(), "SYNTHETIC_PROFILE_DISABLED");
+        foreach (var action in new[] { "RecordCall", "ProceedToScheduling", "MarkRound1Scheduled" })
+            Reject(() => host.Invoke(action, ActionRequest.NeedCall), "SYNTHETIC_PROFILE_DISABLED");
+        Check(host.Writes == 0 && host.Rows.Count == 0, "Revocation blocks fresh proof and all scoped mutations before storage");
+        host.ProfileOverride = xml;
+        host.MissingConfiguration = true;
+        Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_CONFIGURATION_MISSING");
+        RejectContains(() => host.Create(), "SYNTHETIC_CONFIGURATION_MISSING");
+        host.MissingConfiguration = false;
+        host.CallerId = Guid.NewGuid();
+        Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_ACTOR_REJECTED");
+        host.CallerId = Actor;
+        host.OrganizationId = Organization;
+        Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_ORGANIZATION_REJECTED");
+        host.OrganizationId = DevOrganization;
+        foreach (var reference in host.ReferenceRows.Values)
+        {
+            reference["statecode"] = new OptionSetValue(1);
+            Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_REFERENCE_REJECTED");
+            reference["statecode"] = new OptionSetValue(0);
+        }
+        host.TeamPrivilegeName = "prvBypassCustomPlugins";
+        Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_CALLER_PRIVILEGES_REJECTED");
+        host.TeamPrivilegeName = null;
+        host.ExtraPrivilegeName = "prvCreateos_sr_cand";
+        RejectContains(() => host.Create(), "SYNTHETIC_CALLER_PRIVILEGES_REJECTED");
+        host.ExtraPrivilegeName = null;
+        host.Invoke(SyntheticIsolation.VerifyAction);
+        Check(host.Writes == 0 && host.Rows.Count == 0, "Enabled restore issues proof without business mutation or receipt");
+        host.Create();
+        var writes = host.Writes;
+        host.Rows[Scope]["os_sr_cand_nm"] = "Out-of-scope synthetic fixture";
+        Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_PROFILE_REJECTED");
+        Reject(() => host.Invoke("ProceedToScheduling", ActionRequest.NeedCall), "SYNTHETIC_PROFILE_REJECTED");
+        host.Rows[Scope]["os_sr_cand_nm"] = policy.CandidateName;
+        host.Input["SyntheticScopeId"] = Guid.NewGuid();
+        Reject(() => host.InvokeAgain(), "SYNTHETIC_SCOPE_REQUIRED");
+        Check(host.Writes == writes, "Real-row and scope mismatch failures leave all stored records unchanged");
     }
 
     private static void TestVerifierCorrelationContract()

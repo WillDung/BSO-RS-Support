@@ -1,5 +1,29 @@
 # Current State
 
+## Combined Calendar configuration and connectivity check (2026-11-11)
+
+**Live provider acceptance remains BLOCKED; Flow OFF and Calendar UI disabled.** This continuation did not revisit Candidate Core or browser authentication, rebuild availability algorithms, or perform tenant writes.
+
+The exact seven owner-approved DEV values were recovered from the retained approved rendering, not reconstructed from test fixtures. The subsequent create-only authorization remains valid in scope; the historical rendering's earlier missing-write-authorization label is superseded, not a new approval request. Reusing the existing compiled renderer/parser reproduced the approved guard SHA-256 `03d948df1c13703c138361cfc63a006423fa7bb4c8a9111176db25122737a0d6`. Both existing step contracts therefore have one deterministic configuration source. All seven current Flow environment-parameter bindings match the recovered settings and have no fallback defaults. Environment-specific values and identities remain outside Git.
+
+| Definition | Purpose/source | Fresh live state |
+|---|---|---|
+| `os_sr_avq_bhrs` | Approved DEV local weekday business-hours JSON | Active String definition; no default/current value |
+| `os_sr_avq_durs` | Approved DEV meeting durations, distinct from the fixed 15-minute start grid | Active String definition; no default/current value |
+| `os_sr_avq_lead` | Approved DEV minimum lead minutes | Active Number definition; no default/current value |
+| `os_sr_avq_hzn` | Approved DEV horizon days | Active Number definition; no default/current value |
+| `os_sr_avq_exp` | Approved DEV result-expiry minutes | Active Number definition; no default/current value |
+| `os_sr_avq_dom` | Explicitly approved DEV exact mailbox domain, not inferred from the operator account | Active String definition; no default/current value |
+| `os_sr_avq_maxc` | Approved DEV provider suggestion limit | Active Number definition; no default/current value |
+
+These are non-secret application settings. Outlook authentication/consent is a separate connection dependency; mailbox targets are separate TA/Location reference fields. Fresh explicit-target reads confirm the existing active `os_sr_avchk_outlook_cr` and `os_sr_avchk_dataverse_cr` references retain their existing bindings. PAC connection inventory reports both bound connections **Connected**, so this check does **not** establish a missing password or require another sign-in. Connected status does not demonstrate effective access to the intended calendars.
+
+Fresh exact approved-mailbox queries, without active-state or display-name restrictions, returned **zero visible TA matches and zero visible Location matches**. Consequently neither approved existing reference ID can be bound to an Onsite request. This is not a tenant-wide absence claim and does not authorize creating/repurposing reference records, substituting synthetic `.invalid` mailboxes, or probing other calendars. IT/environment administration must identify accessible approved reference records for the exact authorized TA mailbox and room mailbox, confirm active state and synthetic suitability, and verify the existing Outlook connection's Free/Busy access to both resources.
+
+The existing Flow remains Draft/OFF with the previously observed modification time; the existing availability guard type still has **zero processing steps**. The seven creates remain blocked by `EXCLUSIVE_CHANGE_WINDOW_OR_PROVEN_ATOMIC_CREATE_MISSING`: a local process lock, record-specific ETag or absence read does not enforce definition-wide exclusion against other writers. The [existing runtime handoff](P0_SLICE_2A_BUSINESS_RUNTIME_CRITICAL_PATH.md#minimum-deployment-and-restoration-sequence) still requires the enforced configuration window, identical guard configuration/two-step registration, complete supported OFF Flow functional/privacy update, exact reference assurance and controlled provider smoke/restoration. No update, activation or UI enablement was attempted.
+
+**Focused validation performed:** existing compiled approved-value rendering and all seven Flow bindings PASS; `SE Asia Standard Time` is UTC+07 in winter/summer and has no DST; eight selected [actual-WDL tests](../tests/AvailabilityFlowLogic.test.cjs) PASS for exact provider inputs, unsupported-timezone rejection, sanitized 401/403/404/429/500 and timeout handling without retries. The previously passing combined free/free, entire-duration, quarter-hour and no-stitching algorithm tests were not rebuilt or rerun. No missing non-secret application-source wiring was found. **Live TA Free/Busy: NOT RUN; live room Free/Busy: NOT RUN; live combined slots: NOT RUN. Tenant writes: 0; provider calls: 0; Candidate writes: 0.**
+
 ## Candidate Core / Combined Calendar continuation (2026-11-11)
 
 **No deployment or tenant write in this continuation.** Candidate Core remains the installed 1.0.5; its persistent profile is not modified. The shared interactive browser is accessible but is at Microsoft account selection, not an authenticated Dataverse page (confirmed again at **02:14 UTC**). No browser WhoAmI, verifier or Candidate read/write was sent from that sign-in origin. Administrative PAC identity is used only for explicitly targeted configuration reads, never as BSO acceptance. **BSO acceptance remains blocked by `BSO_AUTHENTICATION_REQUIRED`**; no previous ADMIN acceptance attempt is repeated.

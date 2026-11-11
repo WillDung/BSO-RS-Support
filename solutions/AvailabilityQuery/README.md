@@ -32,6 +32,8 @@ The [approved product scope](../../docs/PRODUCT_DECISIONS.md#single-bso-check-ca
 
 ## Canonical configuration binding
 
+**Latest connectivity check (2026-11-11):** the retained owner-approved DEV values reproduce the previously reviewed guard configuration with the existing compiled renderer, and all seven current Flow parameter bindings match without defaults. No application-source binding is missing. All seven live values remain absent; create-only authorization is retained but its exclusive-change-window/atomic-create prerequisite is still unmet. Both existing bound connections report Connected, but exact approved-mailbox queries return no visible TA or Location mapping, so intended reference IDs and effective Free/Busy access remain unresolved. Do not treat this as a new credential failure or call other calendars. See the [fresh configuration/connectivity result](../../docs/CURRENT_STATE.md#combined-calendar-configuration-and-connectivity-check-2026-11-11) for exact live/offline distinctions and remaining existing-resource gates.
+
 Environment configuration -> `AvailabilityConfigurationRenderer.Render` -> identical `ProtectAvailabilityQuery` unsecure configuration on both steps.
 
 Pass exactly one resolved value for each definition in [availability-environment-variables.json](availability-environment-variables.json), including the maximum-candidates definition, plus a separate environment-specific nonsecret result-writer user GUID. No actual environment values, identity GUID, mailbox address, credential, or rendered environment output is committed. Never maintain or hand-edit duplicate step configuration.

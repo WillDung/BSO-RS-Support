@@ -1,6 +1,8 @@
 # Availability Query source (offline)
 
-This is source and a reference contract for P0 Slice 2A in the existing `os_sr_bso_rs_support` Solution. The repaired Calendar binary is installed, but security-v2 schema, registration and caller/Flow wiring are not deployed or runtime accepted. The frozen managed solution is unchanged. See [Current State](../../docs/CURRENT_STATE.md#calendar-security-v2-repaired-binary-installed-guarded-runtime-blocked-2026-11-11).
+This is source and a reference contract for P0 Slice 2A in the existing `os_sr_bso_rs_support` Solution. The repaired Calendar binary and three security-v2 columns are installed; registration and caller/Flow wiring are not deployed or runtime accepted. The frozen managed solution is unchanged. See [Current State](../../docs/CURRENT_STATE.md#calendar-security-schema-installed-flow-save-stopped-on-unpublished-layer-conflict-2026-11-11).
+
+**Activation continuation (2026-11-11):** the three approved security columns were created and verified through live derived metadata and a fresh solution export using the canonical membership helper. A narrowly prepared existing-Flow handoff save was rejected by Power Automate management with `XrmApiServerError`: an existing `ActiveUnpublished` workflow layer prevents the published update. The saved definition/connections remain unchanged and Flow ON; no retry or forced publication occurred. Reconcile that layer in the authenticated Designer before installing the handoff and verifying exact concurrency transport. Guard steps remain zero; no genuine restricted writer/non-admin requester pair was established. No Pending request, provider execution or UI enablement occurred. This supersedes the earlier source-only column status below, not the live-security gates.
 
 ## Security-v2 repair and partial deployment (2026-11-11)
 

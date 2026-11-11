@@ -11,7 +11,7 @@
     "optimisticConcurrencyRequired": true,
     "securityPatch": {
       "version": "2",
-      "status": "SOURCE_ONLY_NOT_DEPLOYED",
+      "status": "SECURITY_COLUMNS_INSTALLED_GUARD_REGISTRATION_AND_HANDOFF_PENDING",
       "correlation": "Caller sets os_sr_avqid and os_sr_avq_corr to the same nonempty canonical GUID; primary-key uniqueness rejects replay. Delete is guarded.",
       "terminalUpdate": "Exact os_sr_avq_corr plus expected RowVersion and ConcurrencyBehavior.IfRowVersionMatches are mandatory.",
       "requestClock": "Guard stamps os_sr_avq_cat and os_sr_avq_dead from server UTC. Both are immutable."

@@ -2,6 +2,18 @@
 
 This log separates explicit product rules from choices requiring confirmation. Dated entries identify the applicable decision and acceptance evidence; a design proposal is not approval.
 
+## Combined Calendar participants (APPROVED, 2026-11-11)
+
+**Source:** the owner's latest "UPDATE CALENDAR PARTICIPANT REQUIREMENTS" directive. This supersedes any assumption that BSO, TA and room are all mandatory for availability.
+
+- BSO is an **optional calendar participant** and is excluded from the mandatory Free/Busy intersection. Preserve existing administrative privileges and keep business designation distinct from connector identity and security-role assignments.
+- TA is a **required attendee**; the meeting room is a **required resource** for Combined/Onsite Calendar. Both must be free throughout the full interview duration on 15-minute boundaries. Online remains TA-only.
+- Reuse existing references and the authorized Outlook connector. The owner's latest room mailbox supersedes the earlier room target; exact endpoint values and IDs remain outside Git. Only necessary reference mappings may be updated.
+- Do not give TA administrator privileges, alter the synthetic-profile actor, reinstall Candidate Core, create Outlook events, or send email. Calendar UI remains disabled until live provider acceptance.
+- Existing source already sets `IsOrganizerOptional = true`, supplies TA as `RequiredAttendees` and Onsite room as `ResourceAttendees`, and ignores organizer availability when validating slots. This is source behavior, not proof of deployed Flow/provider acceptance.
+
+Actual mapping, privilege-preservation and provider results are recorded in [Current State](CURRENT_STATE.md).
+
 ## Single-BSO Check Calendar (APPROVED, 2026-11-07)
 
 **Source:** the owner's "SIMPLIFY TO SINGLE-BSO CHECK CALENDAR" request.

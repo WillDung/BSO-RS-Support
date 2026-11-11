@@ -402,6 +402,33 @@ test('combined availability requires both resources free across all 36 known sta
   }
 });
 
+test('combined calendar excludes optional BSO from the mandatory TA and room intersection', async () => {
+  const states = ['free', 'tentative', 'busy', 'oof', 'workingElsewhere', 'unknown'];
+  for (const bsoState of states) {
+    for (const [taState, roomState] of [['free', 'free'], ['busy', 'free'], ['free', 'busy']]) {
+      const slot = suggestion(undefined, undefined, [
+        attendee('ta@example.invalid', 'required', taState),
+        attendee('room@example.invalid', 'resource', roomState),
+        attendee('bso@example.invalid', 'optional', bsoState)
+      ]);
+      slot.organizerAvailability = bsoState;
+      const run = await execute({
+        query: { os_sr_avq_mod: 100000001, _os_sr_avq_loc_value: ids.room },
+        provider: { emptySuggestionsReason: '', meetingTimeSuggestions: [slot] }
+      });
+      assert.equal(run.providerCalls[0]['body/RequiredAttendees'], 'ta@example.invalid');
+      assert.equal(run.providerCalls[0]['body/ResourceAttendees'], 'room@example.invalid');
+      assert.equal(run.providerCalls[0]['body/IsOrganizerOptional'], true);
+      assert.ok(!JSON.stringify(run.providerCalls[0]).includes('bso@example.invalid'));
+      if (taState === 'free' && roomState === 'free') {
+        assert.equal(run.patch.os_sr_avq_stat, 100000001);
+      } else {
+        noSlots(run);
+      }
+    }
+  }
+});
+
 for (const duration of [15, 30, 45, 60]) {
   test(`combined ${duration}-minute meetings retain exact duration on a 15-minute start grid`, async () => {
     const start = Date.parse('2035-02-05T03:00:00Z');

@@ -27,6 +27,14 @@
     "connector": "Office 365 Outlook",
     "action": "Find meeting times (V2)",
     "operationId": "FindMeetingTimes_V2",
+    "participantPolicy": {
+      "approvedDate": "2026-11-11",
+      "bso": "Optional calendar participant; organizer availability is excluded from the mandatory intersection. Business role does not alter connector identity or Dataverse privileges.",
+      "ta": "Required attendee resolved from the active authorized TA reference.",
+      "room": "Required resource for Onsite/Combined Calendar, resolved from the active authorized Location reference.",
+      "requiredIntersection": "TA and room free for the entire requested duration; BSO availability cannot veto or establish a slot.",
+      "scope": "Display-only availability; no event creation, invitation, email or Candidate mutation."
+    },
     "inputs": {
       "RequiredAttendees": "Normalized TA email from the validated snapshot",
       "ResourceAttendees": "Empty for Online; normalized room email from the validated Location snapshot for Onsite",

@@ -1,6 +1,22 @@
 # Current State
 
+## Seven Calendar DEV values installed; approved mailbox mappings unresolved (2026-11-11)
+
+**Configuration: 7/7 installed and effective-value verified.** The owner's latest execution directive authorizes precise component drift checks and conditional writes where supported in place of the earlier blanket configuration-window prerequisite. That earlier stop is superseded for these seven values; no exclusive publication/change control is claimed. The exact existing target/organization/operator and definition IDs were verified. All definitions were active with absent defaults and zero value records. Before each single create, the operator/organization, exact definition including opaque ETag, and current value cardinality were checked against the fresh baseline. No existing value was overwritten, no definition was recreated, and no unrelated variable was touched.
+
+Exactly **seven acknowledged environment-variable-value CREATEs** completed, one per approved definition. Ordinary SDK POST creation does not assert definition-wide absence atomically; no such guarantee is claimed. Execution used one HTTP attempt per SDK request, durable pre-dispatch claims, unchanged-definition postchecks and independent single-value readback, stopping on conflicting/ambiguous results. No conditional update was necessary because every value was absent. All seven final Dataverse `RetrieveEnvironmentVariableValue` responses matched the approved source strings. The installed readbacks passed the existing canonical renderer/parser without a rebuild and reproduced guard SHA-256 `03d948df1c13703c138361cfc63a006423fa7bb4c8a9111176db25122737a0d6`.
+
+The approved settings are weekday 09:00-17:00 business-hours JSON, durations `30,45,60`, minimum lead `0` minutes, horizon `7` days, expiry `10` minutes, the retained approved DEV mailbox domain, and maximum candidates `25`. The fixed `SE Asia Standard Time` and 15-minute grid are unchanged. Actual environment-specific payloads, created row IDs, ETags, readbacks and the execution ledger are retained outside Git.
+
+**Reference investigation localized the actual blocker.** The existing approved synthetic TA reference is Active but maps to a non-routable `example.invalid` address. The existing approved synthetic Location is Active but its room-mailbox field is null. Independent exact-ID and exact-approved-mailbox reads confirm these are existing records with unsuitable/missing provider mappings, not inactive Dataverse records. No additional visible TA/Location matches the separately approved real mailbox addresses. This does not establish whether those Exchange mailboxes exist or are inactive, nor whether the connector lacks permission. Existing active Outlook/Dataverse connection references retain their bindings and both bound connections report Connected; Free/Busy permission remains **NOT RUN**, not a demonstrated credential failure.
+
+**Flow OFF; guard steps verified count 0; live TA/room/combined acceptance NOT RUN.** Task C explicitly follows valid references and permissions; those prerequisites are not established. No reference was repurposed, no unapproved resource was substituted, no guard step was registered and no Flow update/activation or provider call was dispatched. The exact next external dependency is an accessible approved TA reference with its authorized routable calendar mailbox and an accessible approved room reference with its authorized resource mailbox, plus confirmation that they are suitable for the controlled synthetic smoke. Effective Free/Busy access must then be verified through the existing authorized connection before proceeding with the reviewed Flow/guard changes and live acceptance. Calendar UI remains disabled.
+
+**Actual tenant writes: 7 configuration creates; Candidate writes: 0; provider calls: 0.** Candidate Core 1.0.5, profile, Candidate data, roles, organization settings and Console resources were not modified. No package rebuild, publication, lifecycle action, commit or push occurred.
+
 ## Combined Calendar configuration and connectivity check (2026-11-11)
+
+**Historical earlier check, superseded for configuration by the completed installation above.**
 
 **Live provider acceptance remains BLOCKED; Flow OFF and Calendar UI disabled.** This continuation did not revisit Candidate Core or browser authentication, rebuild availability algorithms, or perform tenant writes.
 

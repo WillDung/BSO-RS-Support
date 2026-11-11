@@ -244,8 +244,10 @@ test("the panel creates and polls only its query without requesting mailbox addr
   assert.equal(ui.calls.creates.length, 1);
   assert.equal(ui.calls.creates[0].table, "os_sr_avq");
   assert.deepEqual(Object.keys(ui.calls.creates[0].payload).sort(), [
-    "os_sr_avq_dur", "os_sr_avq_end", "os_sr_avq_mod", "os_sr_avq_strt", "os_sr_avq_ta@odata.bind"
+    "os_sr_avq_corr", "os_sr_avq_dur", "os_sr_avq_end", "os_sr_avq_mod", "os_sr_avq_strt",
+    "os_sr_avq_ta@odata.bind", "os_sr_avqid"
   ]);
+  assert.equal(ui.calls.creates[0].payload.os_sr_avq_corr, ui.calls.creates[0].payload.os_sr_avqid);
   assert.equal(ui.calls.creates[0].payload.os_sr_avq_mod, 100000000);
   assert.equal(ui.calls.creates[0].payload.os_sr_avq_dur, 60);
   assert.equal(ui.calls.creates[0].payload.os_sr_avq_strt, "2099-01-05T02:00:00.000Z");

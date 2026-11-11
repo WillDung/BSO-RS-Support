@@ -127,8 +127,7 @@ internal static partial class Program
         maximumExpiry["os_sr_avq_qat"] = DateTime.SpecifyKind(DateTime.MaxValue.AddMinutes(-1), DateTimeKind.Utc);
         maximumExpiry["os_sr_avq_exp"] = DateTime.SpecifyKind(DateTime.MaxValue, DateTimeKind.Utc);
         host = new GuardHost("Update", IntegrationUser, IntegrationUser, maximumExpiry);
-        host.Execute();
-        Equal(1, host.Reads.Count, "Expiry comparison does not overflow on a valid bounded interval.");
+        GuardRejects(host, "REQUEST_EXPIRED", "A far-future timestamp cannot refresh an old request.");
         var expiryPastLimit = ResultTarget(QueryState.NoSlots);
         expiryPastLimit["os_sr_avq_exp"] = Now.AddMinutes(12).AddSeconds(1).AddTicks(1);
         GuardRejects(new GuardHost("Update", IntegrationUser, IntegrationUser, expiryPastLimit),
@@ -153,9 +152,11 @@ internal static partial class Program
         GuardRejects(new GuardHost("Update", IntegrationUser, IntegrationUser, alteredInput),
             "UNEXPECTED_ATTRIBUTE", "The result writer cannot change request inputs.");
 
-        var start = DateTime.UtcNow.Date.AddDays(1).AddHours(2);
-        var create = new Entity("os_sr_avq")
+        var start = Now.Date.AddDays(1).AddHours(2);
+        var createId = Guid.Parse("22222222-3333-4444-5555-666666666666");
+        var create = new Entity("os_sr_avq", createId)
         {
+            ["os_sr_avq_corr"] = createId.ToString("D"),
             ["os_sr_avq_ta"] = new EntityReference("os_sr_ta", BsoUser),
             ["os_sr_avq_mod"] = new OptionSetValue((int)InterviewMode.Online),
             ["os_sr_avq_strt"] = start,
@@ -167,6 +168,8 @@ internal static partial class Program
         Equal((int)QueryState.Pending, create.GetAttributeValue<OptionSetValue>("os_sr_avq_stat").Value,
             "The separate BSO requester can create only Pending.");
         create.Attributes.Remove("os_sr_avq_stat");
+        create.Attributes.Remove("os_sr_avq_cat");
+        create.Attributes.Remove("os_sr_avq_dead");
         create["ownerid"] = new EntityReference("systemuser", IntegrationUser);
         GuardRejects(new GuardHost("Create", BsoUser, BsoUser, create),
             "UNEXPECTED_ATTRIBUTE", "Requester cannot choose a different query owner.");
@@ -178,8 +181,9 @@ internal static partial class Program
         {
             foreach (var kind in new[] { DateTimeKind.Unspecified, DateTimeKind.Local })
             {
-                var invalid = new Entity("os_sr_avq")
+                var invalid = new Entity("os_sr_avq", createId)
                 {
+                    ["os_sr_avq_corr"] = createId.ToString("D"),
                     ["os_sr_avq_ta"] = new EntityReference("os_sr_ta", BsoUser),
                     ["os_sr_avq_mod"] = new OptionSetValue((int)InterviewMode.Online),
                     ["os_sr_avq_strt"] = start,
@@ -209,6 +213,8 @@ internal static partial class Program
             ["os_sr_avq_qat"] = Now,
             ["os_sr_avq_exp"] = Now.AddMinutes(10)
         };
+        target["os_sr_avq_corr"] = target.Id.ToString("D");
+        target.RowVersion = "1";
         if (state == QueryState.NoSlots) target["os_sr_avq_rsn"] = "NO_COMMON_SLOT";
         if (state == QueryState.Failed) target["os_sr_avq_err"] = "REFERENCE_CHANGED";
         return target;
@@ -247,8 +253,10 @@ internal static partial class Program
                 ["Mode"] = 0,
                 ["UserId"] = caller,
                 ["InitiatingUserId"] = initiating,
+                ["OrganizationId"] = SecurityOrganization,
                 ["InputParameters"] = input
             };
+            input["ConcurrencyBehavior"] = ConcurrencyBehavior.IfRowVersionMatches;
             ta = new Entity("os_sr_ta", BsoUser)
             {
                 ["statecode"] = new OptionSetValue(0),
@@ -268,17 +276,26 @@ internal static partial class Program
                 ["os_sr_avq_end"] = End,
                 ["os_sr_avq_dur"] = 60
             };
+            QueryRow.RowVersion = "1";
+            QueryRow["ownerid"] = new EntityReference("systemuser", BsoUser);
+            QueryRow["createdby"] = new EntityReference("systemuser", BsoUser);
+            QueryRow["os_sr_avq_corr"] = target.Id.ToString("D");
+            QueryRow["os_sr_avq_cat"] = Now.AddMinutes(-1);
+            QueryRow["os_sr_avq_dead"] = Now.AddMinutes(11);
         }
 
         public Entity QueryRow { get; }
         public Entity TaRow => ta;
         public bool ReturnWrongReferenceId { get; set; }
+        public bool AuthorizedRole { get; set; } = true;
+        public DateTime ServerNow { get; set; } = Now;
+        public ParameterCollection Inputs => (ParameterCollection)context["InputParameters"]!;
         public Entity LocationRow { get; }
         public List<string> Reads { get; } = new List<string>();
         public List<string> QueryColumns { get; } = new List<string>();
 
         public void Execute() => new ProtectAvailabilityQuery(
-            AvailabilityConfigurationRenderer.Render(ConfigurationSource(), IntegrationUser), null).Execute(this);
+            SecurityConfiguration(), null, () => ServerNow).Execute(this);
 
         public object GetService(Type type)
         {
@@ -298,6 +315,14 @@ internal static partial class Program
 
         private object Retrieve(IMethodCallMessage call)
         {
+            if (call.MethodName == "RetrieveMultiple")
+            {
+                var query = (QueryExpression)call.Args[0];
+                if (query.EntityName != "role") throw new InvalidOperationException("Unexpected security read.");
+                return new EntityCollection(AuthorizedRole
+                    ? new List<Entity> { new Entity("role", SecurityRole) }
+                    : new List<Entity>());
+            }
             if (call.MethodName != "Retrieve")
                 throw new InvalidOperationException("The guard must not write through its service.");
             var logicalName = (string)call.Args[0];
@@ -312,6 +337,7 @@ internal static partial class Program
             if (logicalName == "os_sr_avq") QueryColumns.AddRange(columns.Columns);
             var result = new Entity(logicalName,
                 ReturnWrongReferenceId && logicalName == "os_sr_ta" ? Guid.Empty : id);
+            result.RowVersion = source.RowVersion;
             foreach (var pair in source.Attributes)
                 if (columns.AllColumns || columns.Columns.Contains(pair.Key))
                     result[pair.Key] = pair.Value;

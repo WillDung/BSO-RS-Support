@@ -15,7 +15,7 @@ const schema = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "solutions"
 const flow = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "solutions", "AvailabilityQuery",
   "os_sr_avchk.clientdata.json"), "utf8")).properties.definition;
 const TERMINAL_FIELDS = [
-  "os_sr_avq_err", "os_sr_avq_exp", "os_sr_avq_qat",
+  "os_sr_avq_corr", "os_sr_avq_err", "os_sr_avq_exp", "os_sr_avq_qat",
   "os_sr_avq_rsn", "os_sr_avq_slts", "os_sr_avq_stat"
 ];
 
@@ -46,12 +46,14 @@ async function exercise({ onsite = false, roomBusy = false, empty = false, fault
   const providerInputs = [];
   const terminalWrites = [];
   const connectorCalls = [];
-  const guard = (operation, payload) => invokeGuard({
+  const guard = (operation, payload, expectedEtag) => invokeGuard({
     operation, payload, query: persisted, references,
+    now: fixture.now, expectedEtag,
     settings: fixture.settings, caller: operation === "Create" ? "requester" : "writer"
   });
   const ui = await createUi({
     policy: createSimulatedIsolatedPolicy(),
+    requestId: IDS.query,
     clock: () => Date.parse(fixture.now),
     values: {
       "availability-mode": onsite ? "100000001" : "100000000",
@@ -148,8 +150,9 @@ async function exercise({ onsite = false, roomBusy = false, empty = false, fault
       const patch = Object.fromEntries(Object.entries(parameters)
         .filter(([key]) => key.startsWith("item/")).map(([key, value]) => [key.slice(5), value]));
       assert.deepEqual(Object.keys(patch).sort(), TERMINAL_FIELDS);
-      assert.equal(Object.keys(parameters).length, TERMINAL_FIELDS.length + 2);
-      const admitted = guard("Update", patch);
+      assert.equal(Object.keys(parameters).length, TERMINAL_FIELDS.length + 3);
+      assert.equal(parameters["If-Match"], persisted["@odata.etag"]);
+      const admitted = guard("Update", patch, parameters["If-Match"]);
       assert.equal(admitted.accepted, true, admitted.error);
       terminalWrites.push(patch);
       persisted = { ...persisted, ...patch };
@@ -166,7 +169,7 @@ async function exercise({ onsite = false, roomBusy = false, empty = false, fault
     if (!TERMINAL_FIELDS.includes(key)) assert.deepEqual(persisted[key], value);
   }
   assert.equal(Date.parse(terminal.os_sr_avq_exp) - Date.parse(terminal.os_sr_avq_qat), 600000);
-  assert.doesNotMatch(JSON.stringify(persisted), /@|SYNTHETIC_PROVIDER/);
+  assert.doesNotMatch(JSON.stringify(Object.values(persisted)), /@|SYNTHETIC_PROVIDER/);
   await ui.calls.timers.shift()();
   assert.equal(ui.calls.timers.length, 0);
   assert.equal(ui.calls.creates.length, 1);

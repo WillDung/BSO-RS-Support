@@ -6,6 +6,8 @@ using System.ServiceModel;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 
+[assembly: System.Runtime.CompilerServices.InternalsVisibleTo("AvailabilityQuerySdk.Tests")]
+
 namespace os_sr_avqg
 {
     public sealed class ProtectAvailabilityQuery : IPlugin
@@ -17,42 +19,55 @@ namespace os_sr_avqg
         private static readonly string[] CreateFields =
         {
             "os_sr_avq_ta", "os_sr_avq_loc", "os_sr_avq_mod",
-            "os_sr_avq_strt", "os_sr_avq_end", "os_sr_avq_dur"
+            "os_sr_avq_strt", "os_sr_avq_end", "os_sr_avq_dur", "os_sr_avq_corr", "os_sr_avqid"
         };
 
         private static readonly string[] ResultFields =
         {
             "os_sr_avq_stat", "os_sr_avq_rsn", "os_sr_avq_err",
-            "os_sr_avq_slts", "os_sr_avq_qat", "os_sr_avq_exp"
+            "os_sr_avq_slts", "os_sr_avq_qat", "os_sr_avq_exp", "os_sr_avq_corr"
         };
 
         private readonly string? unsecureConfiguration;
+        private readonly Func<DateTime> utcNow;
 
         public ProtectAvailabilityQuery(string? unsecureConfiguration, string? secureConfiguration)
+            : this(unsecureConfiguration, secureConfiguration, () => DateTime.UtcNow)
+        {
+        }
+
+        internal ProtectAvailabilityQuery(string? unsecureConfiguration, string? secureConfiguration,
+            Func<DateTime> utcNow)
         {
             this.unsecureConfiguration = unsecureConfiguration;
+            this.utcNow = utcNow;
         }
 
         public void Execute(IServiceProvider serviceProvider)
         {
             var context = (IPluginExecutionContext)serviceProvider.GetService(typeof(IPluginExecutionContext));
             var trace = (ITracingService)serviceProvider.GetService(typeof(ITracingService));
+            if (context.PrimaryEntityName == Table &&
+                (context.MessageName == "Assign" || context.MessageName == "Delete"))
+                throw Reject(trace, "IMMUTABLE_REQUEST");
             if (context.PrimaryEntityName != Table ||
                 (context.MessageName != "Create" && context.MessageName != "Update") ||
                 context.Stage != 20 || context.Mode != 0)
                 throw Reject(trace, "UNSUPPORTED_OPERATION");
 
             var config = PluginConfiguration.Parse(unsecureConfiguration);
+            var security = AvailabilityRequestSecurity.Parse(unsecureConfiguration, config.ResultWriterUserId);
+            if (context.OrganizationId != security.OrganizationId) throw Reject(trace, "REQUEST_SCOPE");
             var serviceFactory = (IOrganizationServiceFactory)serviceProvider.GetService(typeof(IOrganizationServiceFactory));
             var service = serviceFactory.CreateOrganizationService(context.UserId);
             if (context.MessageName == "Create")
-                ValidateCreate(context, service, config, trace);
+                ValidateCreate(context, service, config, security, trace, utcNow());
             else
-                ValidateUpdate(context, service, config, trace);
+                ValidateUpdate(context, service, config, security, trace, utcNow());
         }
 
         private static void ValidateCreate(IPluginExecutionContext context, IOrganizationService service,
-            AvailabilitySettings settings, ITracingService trace)
+            AvailabilitySettings settings, AvailabilityRequestSecurity security, ITracingService trace, DateTime now)
         {
             if (!AvailabilityMutationPolicy.IsCreateCaller(context.UserId, context.InitiatingUserId,
                     settings.ResultWriterUserId) ||
@@ -62,6 +77,13 @@ namespace os_sr_avqg
                 throw Reject(trace, "CREATE_CALLER");
 
             EnsureOnlyAttributes(target, CreateFields, trace);
+            security.ValidateRequester(context.OrganizationId, context.UserId, context.InitiatingUserId);
+            security.ValidateRole(service);
+            AvailabilityRequestSecurity.Correlation(target);
+            if (target.Contains("os_sr_avqid") &&
+                (!(target["os_sr_avqid"] is Guid id) || id != target.Id))
+                throw Reject(trace, "CORRELATION");
+            security.ValidateScope(target);
             var taReference = RequiredReference(target, "os_sr_avq_ta", TaTable, trace);
             var mode = RequiredChoice(target, "os_sr_avq_mod", trace);
             var start = RequiredUtc(target, "os_sr_avq_strt", trace);
@@ -89,14 +111,19 @@ namespace os_sr_avqg
                     location.GetAttributeValue<OptionSetValue>("statecode")?.Value == 0,
                 location?.GetAttributeValue<string>("os_sr_loc_rmeml"));
 
-            var failure = AvailabilityRules.ValidateQuery(query, settings, DateTime.UtcNow);
+            var failure = AvailabilityRules.ValidateQuery(query, settings, now);
             if (failure != null) throw Reject(trace, failure);
+            if (now.Kind != DateTimeKind.Utc || now > DateTime.MaxValue.AddMinutes(-settings.ResultExpiryMinutes))
+                throw Reject(trace, "REQUEST_EXPIRED");
+            target["ownerid"] = new EntityReference("systemuser", context.UserId);
+            target["os_sr_avq_cat"] = now;
+            target["os_sr_avq_dead"] = now.AddMinutes(settings.ResultExpiryMinutes);
             target["os_sr_avq_stat"] = new OptionSetValue((int)QueryState.Pending);
             trace.Trace("AVQ_GUARD_CREATE_ALLOWED");
         }
 
         private static void ValidateUpdate(IPluginExecutionContext context, IOrganizationService service,
-            AvailabilitySettings settings, ITracingService trace)
+            AvailabilitySettings settings, AvailabilityRequestSecurity security, ITracingService trace, DateTime now)
         {
             if (!AvailabilityMutationPolicy.IsResultUpdateCaller(context.UserId, context.InitiatingUserId,
                     settings.ResultWriterUserId) ||
@@ -107,7 +134,18 @@ namespace os_sr_avqg
                 throw Reject(trace, "UPDATE_CALLER");
 
             EnsureOnlyAttributes(target, ResultFields, trace);
+            AvailabilityRequestSecurity.Correlation(target);
+            if (!context.InputParameters.TryGetValue("ConcurrencyBehavior", out var concurrency) ||
+                !(concurrency is ConcurrencyBehavior behavior) || behavior != ConcurrencyBehavior.IfRowVersionMatches ||
+                string.IsNullOrEmpty(target.RowVersion))
+                throw Reject(trace, "CONCURRENCY_REQUIRED");
             var current = RetrieveReference(service, new EntityReference(Table, target.Id), Table, trace);
+            security.ValidateOrigin(current);
+            security.ValidateRole(service);
+            if (current.RowVersion != target.RowVersion) throw Reject(trace, "CONCURRENCY_MISMATCH");
+            if (!string.Equals(current.GetAttributeValue<string>("os_sr_avq_corr"),
+                    target.GetAttributeValue<string>("os_sr_avq_corr"), StringComparison.OrdinalIgnoreCase))
+                throw Reject(trace, "CORRELATION");
             if (RequiredChoice(current, "os_sr_avq_stat", trace) != (int)QueryState.Pending)
                 throw Reject(trace, "TERMINAL_STATE");
 
@@ -120,6 +158,9 @@ namespace os_sr_avqg
             var error = OptionalText(target, "os_sr_avq_err", trace);
             var queriedAt = RequiredUtc(target, "os_sr_avq_qat", trace);
             var expiresAt = RequiredUtc(target, "os_sr_avq_exp", trace);
+            AvailabilityRequestSecurity.ValidateFreshness(
+                RequiredUtc(current, "os_sr_avq_cat", trace), RequiredUtc(current, "os_sr_avq_dead", trace),
+                now, queriedAt, expiresAt, settings.ResultExpiryMinutes);
             if (expiresAt <= queriedAt ||
                 expiresAt.Ticks - queriedAt.Ticks >
                     (long)settings.ResultExpiryMinutes * TimeSpan.TicksPerMinute + TimeSpan.TicksPerSecond)
@@ -215,7 +256,9 @@ namespace os_sr_avqg
                     : expectedTable == LocationTable
                         ? new ColumnSet("statecode", "os_sr_loc_rmeml")
                         : new ColumnSet("os_sr_avq_stat", "os_sr_avq_ta", "os_sr_avq_loc",
-                            "os_sr_avq_mod", "os_sr_avq_strt", "os_sr_avq_end", "os_sr_avq_dur");
+                            "os_sr_avq_mod", "os_sr_avq_strt", "os_sr_avq_end", "os_sr_avq_dur",
+                            "ownerid", "createdby", "createdonbehalfby", "os_sr_avq_corr",
+                            "os_sr_avq_cat", "os_sr_avq_dead", "versionnumber");
                 var row = service.Retrieve(expectedTable, reference.Id, columns);
                 if (row == null || row.LogicalName != expectedTable || row.Id != reference.Id)
                     throw Reject(trace, "REFERENCE_READ_FAILED");
@@ -298,7 +341,8 @@ namespace os_sr_avqg
         {
             "ResultWriterUserId", "AllowedEmailDomains", "AllowedDurationsMinutes",
             "MaximumHorizonDays", "MinimumLeadTimeMinutes", "ResultExpiryMinutes", "MaximumCandidates"
-        }.Concat(Enum.GetNames(typeof(DayOfWeek)).Select(day => "BusinessHours." + day)),
+        }.Concat(AvailabilityRequestSecurity.ConfigurationKeys)
+            .Concat(Enum.GetNames(typeof(DayOfWeek)).Select(day => "BusinessHours." + day)),
             StringComparer.OrdinalIgnoreCase);
 
         public static AvailabilitySettings Parse(string? configuration)

@@ -20,7 +20,7 @@ internal static partial class Program
         return exitCode;
     }
 
-    // Test-only SDK boundary: every organization-service call is an in-memory Retrieve.
+    // Test-only SDK boundary: reference reads and effective-role queries stay in memory.
     private static string CalendarBridge(string json, out int exitCode)
     {
         var serializer = new BridgeJsonSerializer();
@@ -36,11 +36,27 @@ internal static partial class Program
             var settings = BridgeObject(input["settings"]).Select(pair =>
                 new KeyValuePair<string, string>(pair.Key, pair.Value as string ??
                     throw new FormatException())).ToArray();
-            var configuration = AvailabilityConfigurationRenderer.Render(settings, IntegrationUser);
+            var now = input.TryGetValue("now", out var clock)
+                ? DateTime.Parse((string)clock, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)
+                : DateTime.UtcNow;
             var query = operation == "Update" ? BridgeEntity(BridgeObject(input["query"]), BridgeQueryId)
                 : new Entity("os_sr_avq", BridgeQueryId);
             var target = BridgeEntity(BridgeObject(input["payload"]), query.Id);
+            query.Id = target.Id;
             var references = BridgeObject(input["references"]);
+            var taId = Guid.Parse(BridgeString(BridgeObject(references["ta"]), "id"));
+            var locationId = references.TryGetValue("location", out var locationReference) && locationReference != null
+                ? Guid.Parse(BridgeString(BridgeObject(locationReference), "id")) : SecurityLocation;
+            var configuration = AvailabilityConfigurationRenderer.RenderSecured(settings, IntegrationUser,
+                new Dictionary<string, string>
+                {
+                    ["SecurityVersion"] = "2", ["OrganizationId"] = SecurityOrganization.ToString("D"),
+                    ["RequesterUserId"] = BsoUser.ToString("D"), ["RequesterRoleId"] = SecurityRole.ToString("D"),
+                    ["TaId"] = taId.ToString("D"), ["LocationId"] = locationId.ToString("D")
+                });
+            if (input.TryGetValue("expectedEtag", out var expected) && expected is string etag &&
+                etag.StartsWith("W/\"", StringComparison.Ordinal) && etag.EndsWith("\"", StringComparison.Ordinal))
+                target.RowVersion = etag.Substring(3, etag.Length - 4);
             var rows = new List<Entity>();
             foreach (var name in new[] { "ta", "location" })
             {
@@ -57,8 +73,10 @@ internal static partial class Program
             }
             if (operation == "Update") rows.Add(query);
             var host = new CalendarBridgeHost(operation, caller, initiating, target, rows);
-            new ProtectAvailabilityQuery(configuration, null).Execute(host);
+            new ProtectAvailabilityQuery(configuration, null, () => now).Execute(host);
             foreach (var pair in target.Attributes) query[pair.Key] = pair.Value;
+            if (operation == "Create") query["createdby"] = new EntityReference("systemuser", caller);
+            query.RowVersion = "1";
             return serializer.Serialize(new Dictionary<string, object?>
             {
                 ["accepted"] = true,
@@ -116,10 +134,18 @@ internal static partial class Program
         {
             var name = pair.Key;
             var value = pair.Value;
-            if (name == "os_sr_avqid" || name.StartsWith("@", StringComparison.Ordinal)) continue;
-            if (name == "_ownerid_value" || name == "ownerid")
+            if (name == "os_sr_avqid") continue;
+            if (name == "@odata.etag")
             {
-                row["ownerid"] = new EntityReference("systemuser", Guid.Parse((string)value));
+                var etag = (string)value;
+                row.RowVersion = etag.Substring(3, etag.Length - 4);
+                continue;
+            }
+            if (name.StartsWith("@", StringComparison.Ordinal)) continue;
+            if (name == "_ownerid_value" || name == "ownerid" || name == "_createdby_value")
+            {
+                row[name == "_createdby_value" ? "createdby" : "ownerid"] =
+                    new EntityReference("systemuser", Guid.Parse((string)value));
                 continue;
             }
             if (name == "_os_sr_avq_ta_value" || name == "_os_sr_avq_loc_value")
@@ -146,7 +172,8 @@ internal static partial class Program
             else if (value is int choice && (name == "os_sr_avq_mod" || name == "os_sr_avq_stat"))
                 value = new OptionSetValue(choice);
             else if (value is string time && (name == "os_sr_avq_strt" || name == "os_sr_avq_end" ||
-                     name == "os_sr_avq_qat" || name == "os_sr_avq_exp"))
+                     name == "os_sr_avq_qat" || name == "os_sr_avq_exp" ||
+                     name == "os_sr_avq_cat" || name == "os_sr_avq_dead"))
             {
                 if (!DateTime.TryParseExact(time, new[] { "yyyy-MM-dd'T'HH:mm:ss'Z'",
                         "yyyy-MM-dd'T'HH:mm:ss.FFFFFFF'Z'", "yyyy-MM-dd'T'HH:mm:ss",
@@ -162,7 +189,11 @@ internal static partial class Program
 
     private static Dictionary<string, object?> BridgeRow(Entity row)
     {
-        var result = new Dictionary<string, object?> { ["os_sr_avqid"] = row.Id.ToString("D") };
+        var result = new Dictionary<string, object?>
+        {
+            ["os_sr_avqid"] = row.Id.ToString("D"),
+            ["@odata.etag"] = "W/\"" + row.RowVersion + "\""
+        };
         foreach (var pair in row.Attributes)
         {
             if (pair.Value is EntityReference reference)
@@ -195,8 +226,9 @@ internal static partial class Program
             {
                 ["PrimaryEntityName"] = "os_sr_avq", ["MessageName"] = message,
                 ["Stage"] = 20, ["Mode"] = 0, ["UserId"] = caller,
-                ["InitiatingUserId"] = initiating, ["InputParameters"] = new ParameterCollection
-                { ["Target"] = target }
+                ["InitiatingUserId"] = initiating, ["OrganizationId"] = SecurityOrganization,
+                ["InputParameters"] = new ParameterCollection
+                { ["Target"] = target, ["ConcurrencyBehavior"] = ConcurrencyBehavior.IfRowVersionMatches }
             };
         }
 
@@ -218,6 +250,12 @@ internal static partial class Program
 
         private object Retrieve(IMethodCallMessage call)
         {
+            if (call.MethodName == "RetrieveMultiple")
+            {
+                var roles = new EntityCollection();
+                roles.Entities.Add(new Entity("role", SecurityRole));
+                return roles;
+            }
             if (call.MethodName != "Retrieve") throw new InvalidOperationException();
             var table = (string)call.Args[0];
             var id = (Guid)call.Args[1];
@@ -225,7 +263,7 @@ internal static partial class Program
             var row = rows.SingleOrDefault(item => item.LogicalName == table && item.Id == id);
             if (row == null) throw new FaultException<OrganizationServiceFault>(
                 new OrganizationServiceFault(), "Synthetic reference unavailable.");
-            var result = new Entity(table, id);
+            var result = new Entity(table, id) { RowVersion = row.RowVersion };
             var columns = (ColumnSet)call.Args[2];
             foreach (var pair in row.Attributes)
                 if (columns.Columns.Contains(pair.Key)) result[pair.Key] = pair.Value;
@@ -236,13 +274,19 @@ internal static partial class Program
     private static void TestCalendarBridge()
     {
         var serializer = new BridgeJsonSerializer();
-        var start = DateTime.UtcNow.Date.AddDays(1).AddHours(2);
+        var clock = DateTime.UtcNow;
+        clock = new DateTime(clock.Ticks - clock.Ticks % TimeSpan.TicksPerSecond, DateTimeKind.Utc);
+        var start = clock.Date.AddDays(1).AddHours(2);
+        while (start.DayOfWeek != DayOfWeek.Monday) start = start.AddDays(1);
         var envelope = new Dictionary<string, object>
         {
             ["operation"] = "Create", ["caller"] = "requester",
+            ["now"] = clock.ToString("o"),
             ["settings"] = ConfigurationSource().ToDictionary(pair => pair.Key, pair => pair.Value),
             ["payload"] = new Dictionary<string, object>
             {
+                ["os_sr_avqid"] = BridgeQueryId.ToString("D"),
+                ["os_sr_avq_corr"] = BridgeQueryId.ToString("D"),
                 ["os_sr_avq_ta@odata.bind"] = "/os_sr_tas(" + BsoUser + ")",
                 ["os_sr_avq_mod"] = (int)InterviewMode.Online,
                 ["os_sr_avq_strt"] = start.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'"),
@@ -272,12 +316,14 @@ internal static partial class Program
         envelope["operation"] = "Update";
         envelope["caller"] = "writer";
         envelope["query"] = query;
+        envelope["expectedEtag"] = query["@odata.etag"];
         envelope["payload"] = new Dictionary<string, object?>
         {
+            ["os_sr_avq_corr"] = BridgeQueryId.ToString("D"),
             ["os_sr_avq_stat"] = (int)QueryState.NoSlots,
             ["os_sr_avq_slts"] = "[]", ["os_sr_avq_rsn"] = "NO_COMMON_SLOT",
-            ["os_sr_avq_qat"] = DateTime.UtcNow.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'"),
-            ["os_sr_avq_exp"] = DateTime.UtcNow.AddMinutes(10).ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
+            ["os_sr_avq_qat"] = clock.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'"),
+            ["os_sr_avq_exp"] = clock.AddMinutes(10).ToString("yyyy-MM-dd'T'HH:mm:ss'Z'")
         };
         output = BridgeObject(serializer.DeserializeObject(CalendarBridge(serializer.Serialize(envelope), out exit)));
         Equal(true, output["accepted"], "Bridge invokes real terminal Update guard.");

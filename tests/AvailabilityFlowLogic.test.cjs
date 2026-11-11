@@ -15,6 +15,10 @@ const ids = {
 };
 const query = {
   os_sr_avqid: ids.query,
+  os_sr_avq_corr: ids.query,
+  os_sr_avq_cat: NOW,
+  os_sr_avq_dead: '2035-02-05T00:10:00Z',
+  '@odata.etag': 'W/"1"',
   os_sr_avq_stat: 100000000,
   _os_sr_avq_ta_value: ids.ta,
   os_sr_avq_mod: 100000000,
@@ -66,6 +70,7 @@ async function execute(options = {}) {
       if (name === 'Read_query') {
         return options.readQuery ? options.readQuery(params, name, input) : input;
       }
+
       if (options.readReference) return options.readReference(params, name, { ta, room });
       return name.includes('location') ? room : ta;
     },
@@ -86,6 +91,26 @@ async function execute(options = {}) {
     : undefined;
   return { result, patch, writes, reads, providerCalls };
 }
+
+test('security v2 rejects stale or uncorrelated requests before the provider', async () => {
+  for (const invalid of [
+    { os_sr_avq_corr: null }, { os_sr_avq_corr: ids.other },
+    { '@odata.etag': null }, { os_sr_avq_dead: NOW },
+    { os_sr_avq_dead: '2035-02-04T23:59:59Z' }
+  ]) {
+    const run = await execute({ query: invalid });
+    assert.equal(run.providerCalls.length, 0);
+    assert.equal(run.writes.length, 0);
+  }
+});
+
+test('security v2 terminal handoff retains correlation and exact expected version', async () => {
+  const run = await execute();
+  assert.equal(run.writes.length, 1);
+  assert.equal(run.writes[0]['If-Match'], query['@odata.etag']);
+  assert.equal(run.writes[0]['item/os_sr_avq_corr'], ids.query);
+  assert.equal(run.writes[0].recordId, ids.query);
+});
 
 function failed(run, error) {
   assert.equal(run.writes.length, 1, 'one terminal write');

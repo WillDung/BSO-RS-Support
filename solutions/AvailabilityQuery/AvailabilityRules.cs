@@ -419,13 +419,13 @@ namespace os_sr_avqg
         private static readonly HashSet<string> CreateFieldSet = new HashSet<string>(new[]
         {
             "os_sr_avq_ta", "os_sr_avq_loc", "os_sr_avq_mod",
-            "os_sr_avq_strt", "os_sr_avq_end", "os_sr_avq_dur"
+            "os_sr_avq_strt", "os_sr_avq_end", "os_sr_avq_dur", "os_sr_avq_corr", "os_sr_avqid"
         }, StringComparer.Ordinal);
 
         private static readonly HashSet<string> ResultFieldSet = new HashSet<string>(new[]
         {
             "os_sr_avq_stat", "os_sr_avq_rsn", "os_sr_avq_err",
-            "os_sr_avq_slts", "os_sr_avq_qat", "os_sr_avq_exp"
+            "os_sr_avq_slts", "os_sr_avq_qat", "os_sr_avq_exp", "os_sr_avq_corr"
         }, StringComparer.Ordinal);
 
         public static bool IsCreateCaller(Guid caller, Guid initiating, Guid integrationUser) =>

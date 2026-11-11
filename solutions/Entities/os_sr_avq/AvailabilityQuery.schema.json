@@ -8,6 +8,14 @@
     "ownership": "UserOwned",
     "auditEnabled": false,
     "primaryId": "os_sr_avqid",
+    "optimisticConcurrencyRequired": true,
+    "securityPatch": {
+      "version": "2",
+      "status": "SOURCE_ONLY_NOT_DEPLOYED",
+      "correlation": "Caller sets os_sr_avqid and os_sr_avq_corr to the same nonempty canonical GUID; primary-key uniqueness rejects replay. Delete is guarded.",
+      "terminalUpdate": "Exact os_sr_avq_corr plus expected RowVersion and ConcurrencyBehavior.IfRowVersionMatches are mandatory.",
+      "requestClock": "Guard stamps os_sr_avq_cat and os_sr_avq_dead from server UTC. Both are immutable."
+    },
     "primaryName": {
       "logicalName": "os_sr_avq_ref",
       "type": "AutoNumber",
@@ -28,6 +36,9 @@
       ]
     },
     "fields": [
+      { "logicalName": "os_sr_avq_corr", "type": "Text", "maxLength": 36, "required": true, "immutable": true },
+      { "logicalName": "os_sr_avq_cat", "type": "DateTime", "behavior": "UserLocal", "apiValue": "UTC", "required": true, "serverManaged": true, "immutable": true },
+      { "logicalName": "os_sr_avq_dead", "type": "DateTime", "behavior": "UserLocal", "apiValue": "UTC", "required": true, "serverManaged": true, "immutable": true },
       { "logicalName": "os_sr_avq_ta", "type": "Lookup", "target": "os_sr_ta", "required": true },
       { "logicalName": "os_sr_avq_loc", "type": "Lookup", "target": "os_sr_loc", "required": false },
       { "logicalName": "os_sr_avq_mod", "type": "Choice", "required": true },

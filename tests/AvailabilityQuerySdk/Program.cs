@@ -17,6 +17,14 @@ internal static partial class Program
     {
         if (args.Length == 1 && args[0] == "--calendar-bridge")
             return RunCalendarBridge();
+        if (args.Length == 1 && args[0] == "--security")
+        {
+            TestSdkGuard();
+            TestRequestSecurity();
+            TestCalendarBridge();
+            Console.WriteLine("Calendar security checks passed: " + assertions);
+            return 0;
+        }
         TestOutlookRequest();
         TestOutlookAttendees();
         TestCombinedDurationSlots();

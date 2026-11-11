@@ -61,7 +61,7 @@ function createSimulatedIsolatedPolicy(overrides = {}) {
 }
 
 async function createUi({ enabled = true, create, read, clock, values = {}, references,
-  metadata, syntheticDataOnly = true, configuration = {}, runtime = {}, policy } = {}) {
+  metadata, syntheticDataOnly = true, configuration = {}, runtime = {}, policy, requestId } = {}) {
   const elements = new Map();
   const get = (id) => {
     if (!elements.has(id)) elements.set(id, new Element(id));
@@ -101,6 +101,7 @@ async function createUi({ enabled = true, create, read, clock, values = {}, refe
     ...runtime
   };
   const window = {
+    crypto: { randomUUID: () => requestId || ids[calls.creates.length % ids.length] },
     BsoRsCandidateConsoleConfiguration: {
       mode: "DEV", availabilityEnabled: enabled, syntheticDataOnly,
       environmentId: "44444444-4444-4444-8444-444444444444",

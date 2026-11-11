@@ -23,7 +23,9 @@ const source = JSON.parse(fs.readFileSync(flowPath, 'utf8'));
 
 // Each reviewed changed property and complete new validator is pinned independently of the candidate.
 const changedProperties = [
-  ['Check_pending', 'expression', '0b43f609b15c4f7d26bbab9b7d20c82803dbaa04e1c5c1c8bd66de647c104c5a'],
+  ['Check_pending', 'expression', 'd1da29a690bb0b9635c47149c386d7bb0b0fbbf64d288a4e0468007401d228b5'],
+  ['Read_query', 'inputs', 'ca829114f4523e1b20fe78086f96b25c8c7f427d797808b873c30113b601ec4b'],
+  ['Write_terminal_result', 'inputs', '1a776788a3e7bd5d6ca068905ae2dd1d8e50f0c3dbb2950d4bc2dc3bcb3656f1'],
   ['Check_pending', 'runtimeConfiguration', '8af12b516767e5514188453ed0cab2825b393b7497d54074eda57be6f807803d'],
   ['Count_business_hour_keys', 'runAfter', '37f8dfc91bdc2b9dee8fd223893393178185c0f72ab3458bf513eabead50f6a5'],
   ['Compose_config', 'runAfter', '535a5e2a0d7dd5b09bc4f8027621aefb5cc19d738fb5ed6417df29951003c857'],
@@ -109,7 +111,7 @@ const typeCounts = {
 };
 const readContracts = {
   Read_query: ['os_sr_avqs', "@triggerOutputs()?['body/os_sr_avqid']",
-    'os_sr_avqid,os_sr_avq_stat,_os_sr_avq_ta_value,_os_sr_avq_loc_value,os_sr_avq_mod,os_sr_avq_strt,os_sr_avq_end,os_sr_avq_dur'],
+    'os_sr_avqid,os_sr_avq_corr,os_sr_avq_cat,os_sr_avq_dead,os_sr_avq_stat,_os_sr_avq_ta_value,_os_sr_avq_loc_value,os_sr_avq_mod,os_sr_avq_strt,os_sr_avq_end,os_sr_avq_dur'],
   Read_ta: ['os_sr_tas', "@body('Read_query')?['_os_sr_avq_ta_value']", 'os_sr_taid,statecode,os_sr_ta_eml'],
   Read_location: ['os_sr_locs', "@body('Read_query')?['_os_sr_avq_loc_value']", 'os_sr_locid,statecode,os_sr_loc_rmeml'],
   Reread_ta: ['os_sr_tas', "@variables('v_ta')['id']", 'os_sr_taid,statecode,os_sr_ta_eml'],
@@ -118,6 +120,8 @@ const readContracts = {
 const terminalParameters = {
   entityName: 'os_sr_avqs',
   recordId: "@body('Read_query')?['os_sr_avqid']",
+  'If-Match': "@body('Read_query')?['@odata.etag']",
+  'item/os_sr_avq_corr': "@body('Read_query')?['os_sr_avq_corr']",
   'item/os_sr_avq_stat': "@outputs('Compose_terminal')['state']",
   'item/os_sr_avq_rsn': "@outputs('Compose_terminal')['reason']",
   'item/os_sr_avq_err': "@outputs('Compose_terminal')['error']",

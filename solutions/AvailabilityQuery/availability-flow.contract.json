@@ -1,6 +1,6 @@
 {
-  "status": "DEPLOYED_FLOW_FEATURE_OFF_LOCAL_SOURCE_HARDENING_PENDING",
-  "deploymentState": "The VN LMV IT Flow remains deployed OFF and unchanged by this offline source update.",
+  "status": "DEPLOYED_FLOW_ON_UI_OFF_SECURITY_V2_SOURCE_PENDING",
+  "deploymentState": "The existing Flow is ON; security-v2 correlation and exact-ETag source changes are not installed. Calendar UI remains disabled.",
   "solutionUniqueName": "os_sr_bso_rs_support",
   "name": "os_sr_avchk",
   "displayName": "BSO-RS Availability Check",
@@ -12,7 +12,7 @@
   },
   "actions": [
     { "sequence": 1, "operation": "Trigger on a new Pending os_sr_avq row" },
-    { "sequence": 2, "operation": "Read the created request and required inputs only" },
+    { "sequence": 2, "operation": "Read the created request, correlation, immutable server timestamps and exact ETag; require Pending, matching request ID/correlation and an unexpired deadline before provider access" },
     { "sequence": 3, "operation": "Read the referenced TA and, for Onsite only, Location" },
     { "sequence": 4, "operation": "Validate active references, permitted normalized addresses, mode, window and duration; fail closed before the provider call if invalid" },
     { "sequence": 5, "operation": "Retain only the validated reference snapshots in Flow memory" },
@@ -21,7 +21,7 @@
     { "sequence": 8, "operation": "Capture current UTC after the provider call, then filter and normalize suggestions using OutlookMeetingTimesAdapter and AvailabilityRules as the offline reference contract" },
     { "sequence": 9, "operation": "Before every terminal write, re-read TA and, for Onsite only, Location" },
     { "sequence": 10, "operation": "Apply ReferenceDriftPolicy.BeforeTerminalWrite to the memory-only snapshots; relevant drift or failed re-read overrides the proposed result with Failed, slots [], and REFERENCE_CHANGED" },
-    { "sequence": 11, "operation": "Write exactly one terminal Available, NoSlots or Failed result using only state, reason, error, canonical slots, queried-at and expiry" }
+    { "sequence": 11, "operation": "Write exactly one terminal Available, NoSlots or Failed result using only correlation, state, reason, error, canonical slots, queried-at and expiry; If-Match must carry the original exact ETag, never wildcard. Actual connector-to-SDK concurrency transport remains a live acceptance gate." }
   ],
   "provider": {
     "connector": "Office 365 Outlook",
@@ -59,7 +59,7 @@
       "noValidSuggestions": "NoSlots with NO_COMMON_SLOT and slots [].",
       "persistence": "Only sorted, distinct UTC startUtc/endUtc slots, subject to count and JSON-length limits. Never persist or expose provider output, reasons, addresses, availability, locations, confidence, organizer or connector error bodies."
     },
-    "implementation": "The C# adapter is an offline reference implementation and tests, not an invocable Power Automate action and not itself a deployed Flow. The separate solution-aware Power Automate Flow is deployed OFF in DEV; local hardening source changes still require separate review and deployment."
+    "implementation": "The C# adapter is an offline reference implementation and tests, not an invocable Power Automate action and not itself a deployed Flow. The existing solution-aware Flow is ON in DEV; local security-v2 handoff changes are not deployed or live accepted."
   },
   "providerTimezoneFirstRuntimeGate": {
     "acceptedRepresentation": "timeZone exactly UTC, with an explicitly supported UTC dateTime representation; no timezone input is sent to the action.",

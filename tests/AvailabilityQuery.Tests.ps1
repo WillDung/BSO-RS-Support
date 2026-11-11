@@ -41,13 +41,13 @@ Assert-Test (@($schema.table.fields | Where-Object logicalName -eq 'os_sr_avq_lo
 Assert-Test (@($schema.table.fields | Where-Object { $_.logicalName -match 'cand|intv' }).Count -eq 0) 'No Candidate or Interview Schedule fields exist.'
 Assert-Test (@($schema.table.fields | Where-Object { $_.logicalName -match 'provider|payload|email' }).Count -eq 0) 'No provider payload or mailbox-address fields exist.'
 Assert-Test (@($schema.table.fields | Where-Object logicalName -eq 'os_sr_avq_slts').Count -eq 1) 'Only computed slot results are persisted.'
-Assert-Test (@($schema.table.fields.logicalName | Sort-Object) -join ',' -eq 'os_sr_avq_dur,os_sr_avq_end,os_sr_avq_err,os_sr_avq_exp,os_sr_avq_loc,os_sr_avq_mod,os_sr_avq_qat,os_sr_avq_rsn,os_sr_avq_slts,os_sr_avq_stat,os_sr_avq_strt,os_sr_avq_ta') 'Availability Query field contract is unchanged.'
+Assert-Test (@($schema.table.fields.logicalName | Sort-Object) -join ',' -eq 'os_sr_avq_cat,os_sr_avq_corr,os_sr_avq_dead,os_sr_avq_dur,os_sr_avq_end,os_sr_avq_err,os_sr_avq_exp,os_sr_avq_loc,os_sr_avq_mod,os_sr_avq_qat,os_sr_avq_rsn,os_sr_avq_slts,os_sr_avq_stat,os_sr_avq_strt,os_sr_avq_ta') 'Availability Query includes only the approved operational fields and security v2 correlation/clock metadata.'
 Assert-Test (@($schema.table.relationships | ForEach-Object schemaName) -join ',' -eq 'os_sr_ta_avq,os_sr_loc_avq') 'Only TA and Location relationships exist.'
 Assert-Test (@($schema.table.relationships | Where-Object { $_.cascadeDelete -ne 'Restrict' -or $_.cascadeAssign -ne 'NoCascade' -or $_.cascadeShare -ne 'NoCascade' -or $_.cascadeUnshare -ne 'NoCascade' -or $_.cascadeReparent -ne 'NoCascade' }).Count -eq 0) 'Relationship cascades are restrictive and non-cascading.'
 
 Assert-Test (-not (Test-Path -LiteralPath $supersededConnectorPath)) 'Superseded custom connector source is absent.'
-Assert-Test ($flow.status -eq 'DEPLOYED_FLOW_FEATURE_OFF_LOCAL_SOURCE_HARDENING_PENDING' -and
-    $flow.deploymentState -match 'remains deployed OFF and unchanged') 'Local Flow hardening is not represented as a live deployment.'
+Assert-Test ($flow.status -eq 'DEPLOYED_FLOW_ON_UI_OFF_SECURITY_V2_SOURCE_PENDING' -and
+    $flow.deploymentState -match 'source changes are not installed') 'Local security handoff changes are not represented as a live deployment.'
 Assert-Test ($flow.trigger.concurrency -eq 1 -and $flow.trigger.condition -match 'Pending') 'Flow is Pending-only and serial.'
 Assert-Test (@($flow.actions.sequence) -join ',' -eq '1,2,3,4,5,6,7,8,9,10,11') 'Flow has the exact ordered eleven-step contract.'
 Assert-Test (@($flow.resultTransitions) -join ',' -eq 'Pending -> Available,Pending -> NoSlots,Pending -> Failed') 'Flow has exactly three terminal transitions.'
@@ -74,7 +74,7 @@ Assert-Test ($flow.provider.response.unknownOrMalformed -match 'PROVIDER_RESPONS
 Assert-Test ($flow.provider.response.persistence -match 'Only sorted, distinct UTC startUtc/endUtc slots' -and $flow.provider.response.persistence -match 'Never persist or expose') 'Only canonical slots persist, without provider data.'
 Assert-Test ($flow.provider.implementation -match 'not an invocable Power Automate action' -and
     $flow.provider.implementation -match 'not itself a deployed Flow' -and
-    $flow.provider.implementation -match 'separate solution-aware Power Automate Flow is deployed OFF') 'Offline adapter source is distinguished from the deployed OFF Flow.'
+    $flow.provider.implementation -match 'local security-v2 handoff changes are not deployed') 'Offline adapter source is distinguished from the existing deployed Flow.'
 Assert-Test ($flow.providerTimezoneFirstRuntimeGate.action -eq 'STOP' -and -not $flow.providerTimezoneFirstRuntimeGate.retry -and -not $flow.providerTimezoneFirstRuntimeGate.automaticConversion) 'First unsupported timezone stops without retry or conversion.'
 Assert-Test ($flow.providerTimezoneFirstRuntimeGate.capture -match 'field names, types and timezone' -and $flow.providerTimezoneFirstRuntimeGate.capture -match 'do not persist raw') 'Only sanitized synthetic shape evidence may be captured.'
 Assert-Test ($flow.retry.'429' -match 'no automatic retry' -and
@@ -97,8 +97,8 @@ Assert-Test (@($environment.definitions | Where-Object { $_.defaultValue -ne $nu
 Assert-Test (@($environment.definitions.schemaName | Sort-Object) -join ',' -eq 'os_sr_avq_bhrs,os_sr_avq_dom,os_sr_avq_durs,os_sr_avq_exp,os_sr_avq_hzn,os_sr_avq_lead,os_sr_avq_maxc') 'The canonical environment definitions include the bounded provider limit.'
 $maximum = @($environment.definitions | Where-Object schemaName -eq 'os_sr_avq_maxc')[0]
 Assert-Test ($maximum.minimum -eq 1 -and $maximum.maximum -eq 200 -and $maximum.technicalNameStatus -eq 'TECHNICAL_LEAD_APPROVED') 'Candidate-limit bounds and approved technical name are explicit.'
-Assert-Test ($environment.deploymentBinding.renderer -eq 'AvailabilityConfigurationRenderer.Render' -and $registration.unsecureConfigurationBinding.renderer -eq $environment.deploymentBinding.renderer) 'Deployment and registration share the canonical renderer.'
-Assert-Test (-not $registration.unsecureConfigurationBinding.manualValuesAllowed -and $registration.unsecureConfigurationBinding.sameRenderedBytesForSteps) 'Both steps must use identical generated values, never hand-maintained copies.'
+Assert-Test ($environment.deploymentBinding.renderer -eq 'AvailabilityConfigurationRenderer.RenderSecured' -and $registration.unsecureConfigurationBinding.renderer -eq $environment.deploymentBinding.renderer) 'Deployment and registration share the versioned security renderer.'
+Assert-Test (-not $registration.unsecureConfigurationBinding.manualValuesAllowed -and $registration.unsecureConfigurationBinding.sameRenderedBytesForSteps) 'All steps must use identical generated values, never hand-maintained copies.'
 Assert-Test ($registration.dateTimeFirstRuntimeGate.action -eq 'STOP' -and -not $registration.dateTimeFirstRuntimeGate.retry -and -not $registration.dateTimeFirstRuntimeGate.automaticNormalization) 'Unproven Dataverse DateTime transport requires stop and no normalization.'
 Assert-Test ($retention.retentionDays -eq 30 -and $retention.cleanup.frequency -eq 'Daily') 'Approved 30-day daily cleanup policy is bounded.'
 Assert-Test (-not $retention.cleanup.deleteBsoPrivilege) 'BSO has no cleanup Delete privilege.'
@@ -107,7 +107,7 @@ Assert-Test (@($role.existingBsoRole.addPrivileges | Where-Object { $_.privilege
 Assert-Test (@($role.integrationRole.privileges | Where-Object { $_.privilege -match 'os_sr_cact|os_sr_cand|os_sr_intv|os_sr_call|os_sr_csh|os_sr_oprc' }).Count -eq 0) 'Proposed least-privilege model has no Candidate Core business privilege.'
 Assert-Test ($role.integrationRole.assignTo -match '^Unassigned' -and $role.integrationRole.assignTo -match 'current owner' -and $role.deployment -match 'DEV_FUNCTIONAL_IDENTITY_ELEVATED_NOT_SECURITY_ACCEPTANCE') 'No app user or role change is a DEV dependency.'
 Assert-Test ($registration.packageId -eq 'os_sr_avqg_pkg' -and $registration.pluginType -eq 'os_sr_avqg.ProtectAvailabilityQuery') 'Guard package and plugin type are separate from Candidate Core.'
-Assert-Test (@($registration.steps | Where-Object { $_.message -notin @('Create', 'Update') -or $_.stageNumber -ne 20 -or $_.mode -ne 'Synchronous' }).Count -eq 0) 'Both guard registrations are synchronous PreOperation steps.'
+Assert-Test ($registration.steps.Count -eq 4 -and @($registration.steps | Where-Object { $_.message -notin @('Create', 'Update', 'Assign', 'Delete') -or $_.stageNumber -ne 20 -or $_.mode -ne 'Synchronous' }).Count -eq 0) 'Only request Create/Update and immutable ownership/deletion guards are synchronous PreOperation steps.'
 Assert-Test (@($registration.steps | Where-Object { $_.executionUser -ne 'Calling User' }).Count -eq 0) 'Guard steps run as Calling User.'
 Assert-Test (@($registration.steps | Where-Object { $_.message -eq 'Update' -and
     @($_.filteringAttributes).Count -ne 0 }).Count -eq 0) 'All Updates reach the guard, including immutable inputs and ownership-only changes.'
@@ -199,7 +199,7 @@ Assert-Test (@($numericFlowParameters | Where-Object { $_.Value.type -ne 'Float'
 $flowOperations = @($flowActions.Values | Where-Object type -eq 'OpenApiConnection' | ForEach-Object { $_.inputs.host.operationId })
 Assert-Test (@($flowOperations | Where-Object { $_ -notin @('GetItem', 'FindMeetingTimes_V2', 'UpdateOnlyRecord') }).Count -eq 0 -and @($flowOperations | Where-Object { $_ -eq 'FindMeetingTimes_V2' }).Count -eq 1 -and @($flowOperations | Where-Object { $_ -eq 'UpdateOnlyRecord' }).Count -eq 1) 'Flow calls Find meeting times (V2) once and writes exactly one terminal update.'
 $flowWrite = @($flowActions.Values | Where-Object { $_.type -eq 'OpenApiConnection' -and $_.inputs.host.operationId -eq 'UpdateOnlyRecord' })[0]
-Assert-Test ($flowWrite.inputs.parameters.entityName -eq 'os_sr_avqs' -and (@($flowWrite.inputs.parameters.Keys | Where-Object { $_ -like 'item/*' } | Sort-Object) -join ',') -eq 'item/os_sr_avq_err,item/os_sr_avq_exp,item/os_sr_avq_qat,item/os_sr_avq_rsn,item/os_sr_avq_slts,item/os_sr_avq_stat') 'Terminal write touches only the six approved result fields.'
+Assert-Test ($flowWrite.inputs.parameters.entityName -eq 'os_sr_avqs' -and (@($flowWrite.inputs.parameters.Keys | Where-Object { $_ -like 'item/*' } | Sort-Object) -join ',') -eq 'item/os_sr_avq_corr,item/os_sr_avq_err,item/os_sr_avq_exp,item/os_sr_avq_qat,item/os_sr_avq_rsn,item/os_sr_avq_slts,item/os_sr_avq_stat') 'Terminal write carries only correlation and the six approved result fields.'
 $flowReads = @($flowActions.Values | Where-Object { $_.type -eq 'OpenApiConnection' -and $_.inputs.host.operationId -eq 'GetItem' } | ForEach-Object { $_.inputs.parameters.entityName } | Sort-Object -Unique)
 Assert-Test (($flowReads -join ',') -eq 'os_sr_avqs,os_sr_locs,os_sr_tas') 'Flow reads only the query, TA and Location.'
 $flowProvider = @($flowActions.Values | Where-Object { $_.type -eq 'OpenApiConnection' -and $_.inputs.host.operationId -eq 'FindMeetingTimes_V2' })[0]
@@ -245,7 +245,8 @@ Assert-Test ($flowActions.Compose_drift.inputs -match "os_sr_taid" -and
     $flowActions.Compose_drift.inputs -match "statecode" -and
     $flowActions.Compose_drift.inputs -match "os_sr_ta_eml" -and
     $flowActions.Compose_drift.inputs -notmatch "name") 'TA drift compares only identity, active state and normalized email, not display name.'
-Assert-Test ((@($flowActions.Write_terminal_result.inputs.parameters.Keys | Where-Object { $_ -like 'item/*' } | Sort-Object) -join ',') -eq 'item/os_sr_avq_err,item/os_sr_avq_exp,item/os_sr_avq_qat,item/os_sr_avq_rsn,item/os_sr_avq_slts,item/os_sr_avq_stat') 'Terminal write remains limited to the six approved result fields.'
+Assert-Test ((@($flowActions.Write_terminal_result.inputs.parameters.Keys | Where-Object { $_ -like 'item/*' } | Sort-Object) -join ',') -eq 'item/os_sr_avq_corr,item/os_sr_avq_err,item/os_sr_avq_exp,item/os_sr_avq_qat,item/os_sr_avq_rsn,item/os_sr_avq_slts,item/os_sr_avq_stat') 'Terminal write remains limited to correlation and approved result fields.'
+Assert-Test ($flowActions.Write_terminal_result.inputs.parameters['If-Match'] -eq "@body('Read_query')?['@odata.etag']") 'Terminal write requires the exact original row version, not wildcard update-only.'
 Assert-Test ($flowDefinitionText -notmatch '(?i)os_sr_cand|os_sr_cact|os_sr_intv|os_sr_csh|os_sr_oprc|SendEmail|CreateEvent|graph\.microsoft|teams|"Http"|shared-' -and $flowDefinitionText -notmatch '[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}') 'Flow source has no forbidden operation, connection id or literal mailbox.'
 foreach ($errorCode in @($flowDefinitionText | Select-String -Pattern "'([A-Z_]{6,})'" -AllMatches -CaseSensitive).Matches | ForEach-Object { $_.Groups[1].Value } | Where-Object { $_ -notin @('CONFIG', 'REFERENCE', 'REQUEST', 'PROVIDER', 'RESPONSE', 'RESULT', 'NO_COMMON_SLOT') } | Sort-Object -Unique) {
     Assert-Test ($flow.safeErrors -contains $errorCode) "Flow emits only contract safe error $errorCode."

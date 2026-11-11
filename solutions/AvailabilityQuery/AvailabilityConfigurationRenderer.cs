@@ -19,6 +19,28 @@ namespace os_sr_avqg
             "os_sr_avq_hzn", "os_sr_avq_exp", "os_sr_avq_dom", "os_sr_avq_maxc"
         };
 
+        public static string RenderSecured(IEnumerable<KeyValuePair<string, string>> environmentValues,
+            Guid resultWriterUserId, IEnumerable<KeyValuePair<string, string>> securityBindings)
+        {
+            var bindings = new Dictionary<string, string>(StringComparer.Ordinal);
+            if (securityBindings == null) throw InvalidConfiguration();
+            foreach (var pair in securityBindings)
+            {
+                if (!AvailabilityRequestSecurity.ConfigurationKeys.Contains(pair.Key, StringComparer.Ordinal) ||
+                    bindings.ContainsKey(pair.Key) || string.IsNullOrWhiteSpace(pair.Value))
+                    throw InvalidConfiguration();
+                bindings.Add(pair.Key, pair.Value);
+            }
+            if (bindings.Count != AvailabilityRequestSecurity.ConfigurationKeys.Length)
+                throw InvalidConfiguration();
+            var rendered = Render(environmentValues, resultWriterUserId) + "\n" +
+                string.Join("\n", AvailabilityRequestSecurity.ConfigurationKeys
+                    .Select(key => key + "=" + bindings[key]));
+            AvailabilityRequestSecurity.Parse(rendered, resultWriterUserId);
+            PluginConfiguration.Parse(rendered);
+            return rendered;
+        }
+
         public static string Render(IEnumerable<KeyValuePair<string, string>> environmentValues,
             Guid resultWriterUserId)
         {

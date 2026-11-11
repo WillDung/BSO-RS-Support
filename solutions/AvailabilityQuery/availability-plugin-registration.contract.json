@@ -1,5 +1,13 @@
 {
-  "status": "PROPOSED_SOURCE_OFFLINE_NOT_REGISTERED",
+  "status": "SECURITY_V2_SOURCE_NOT_REGISTERED",
+  "version": "1.0.1",
+  "deploymentPrerequisites": [
+    "Provision reviewed correlation and immutable server-clock columns; verify optimistic concurrency metadata.",
+    "Render complete SecurityVersion=2 organization/requester/effective-role/TA/Location bindings with unchanged seven settings.",
+    "Requester submits identical request ID and correlation; no owner or clock fields.",
+    "Result adapter supplies correlation and SDK IfRowVersionMatches with exact expected RowVersion; verify transport before registration.",
+    "Verify current deployed binary and rollback hashes before any replacement."
+  ],
   "solutionUniqueName": "os_sr_bso_rs_support",
   "packageId": "os_sr_avqg_pkg",
   "assemblyName": "os_sr_avqg",
@@ -14,7 +22,8 @@
       "stageNumber": 20,
       "mode": "Synchronous",
       "executionUser": "Calling User",
-      "images": []
+      "images": [],
+      "rank": 1
     },
     {
       "name": "os_sr_avqg_stp_upd",
@@ -26,11 +35,36 @@
       "executionUser": "Calling User",
       "filteringAttributes": [],
       "updateCoverage": "All updates: request-only and ownership changes must also reach the immutable-field guard.",
-      "images": []
+      "images": [],
+      "rank": 1
+    },
+    {
+      "name": "os_sr_avqg_stp_asg",
+      "message": "Assign",
+      "primaryEntity": "os_sr_avq",
+      "stage": "PreOperation",
+      "stageNumber": 20,
+      "mode": "Synchronous",
+      "executionUser": "Calling User",
+      "rank": 1,
+      "images": [],
+      "behavior": "Reject request ownership reassignment."
+    },
+    {
+      "name": "os_sr_avqg_stp_del",
+      "message": "Delete",
+      "primaryEntity": "os_sr_avq",
+      "stage": "PreOperation",
+      "stageNumber": 20,
+      "mode": "Synchronous",
+      "executionUser": "Calling User",
+      "rank": 1,
+      "images": [],
+      "behavior": "Reject deletion so consumed correlation IDs cannot be reset. Retention needs an explicit later controlled procedure."
     }
   ],
   "unsecureConfigurationBinding": {
-    "renderer": "AvailabilityConfigurationRenderer.Render",
+    "renderer": "AvailabilityConfigurationRenderer.RenderSecured",
     "contract": "availability-environment-variables.json#deploymentBinding",
     "sameRenderedBytesForSteps": true,
     "manualValuesAllowed": false

@@ -368,7 +368,7 @@
             "parameters": {
               "entityName": "os_sr_avqs",
               "recordId": "@triggerOutputs()?['body/os_sr_avqid']",
-              "$select": "os_sr_avqid,os_sr_avq_stat,_os_sr_avq_ta_value,_os_sr_avq_loc_value,os_sr_avq_mod,os_sr_avq_strt,os_sr_avq_end,os_sr_avq_dur"
+              "$select": "os_sr_avqid,os_sr_avq_corr,os_sr_avq_cat,os_sr_avq_dead,os_sr_avq_stat,_os_sr_avq_ta_value,_os_sr_avq_loc_value,os_sr_avq_mod,os_sr_avq_strt,os_sr_avq_end,os_sr_avq_dur"
             },
             "authentication": "@parameters('$authentication')",
             "retryPolicy": {
@@ -391,7 +391,7 @@
         },
         "Check_pending": {
           "type": "If",
-          "expression": "@and(equals(body('Read_query')?['os_sr_avq_stat'], 100000000), not(empty(triggerOutputs()?['body/os_sr_avqid'])), equals(toLower(coalesce(body('Read_query')?['os_sr_avqid'], '')), toLower(coalesce(triggerOutputs()?['body/os_sr_avqid'], ''))))",
+          "expression": "@and(equals(body('Read_query')?['os_sr_avq_stat'], 100000000), not(empty(triggerOutputs()?['body/os_sr_avqid'])), equals(toLower(coalesce(body('Read_query')?['os_sr_avqid'], '')), toLower(coalesce(triggerOutputs()?['body/os_sr_avqid'], ''))), equals(toLower(coalesce(body('Read_query')?['os_sr_avq_corr'], '')), toLower(coalesce(triggerOutputs()?['body/os_sr_avqid'], ''))), not(empty(body('Read_query')?['@odata.etag'])), if(empty(body('Read_query')?['os_sr_avq_dead']), false, greater(ticks(body('Read_query')?['os_sr_avq_dead']), ticks(utcNow()))))",
           "actions": {},
           "else": {
             "actions": {
@@ -2223,6 +2223,8 @@
             "parameters": {
               "entityName": "os_sr_avqs",
               "recordId": "@body('Read_query')?['os_sr_avqid']",
+              "If-Match": "@body('Read_query')?['@odata.etag']",
+              "item/os_sr_avq_corr": "@body('Read_query')?['os_sr_avq_corr']",
               "item/os_sr_avq_stat": "@outputs('Compose_terminal')['state']",
               "item/os_sr_avq_rsn": "@outputs('Compose_terminal')['reason']",
               "item/os_sr_avq_err": "@outputs('Compose_terminal')['error']",

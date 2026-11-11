@@ -340,7 +340,10 @@
     showResult("Submitting availability query…");
     try {
       const xrm = getXrm();
+      const correlation = window.crypto.randomUUID();
       const payload = {
+        os_sr_avqid: correlation,
+        os_sr_avq_corr: correlation,
         [`${TABLE.query.ta}@odata.bind`]: `/${await getEntitySetName(TABLE.ta.logicalName)}(${ta})`,
         [TABLE.query.mode]: mode,
         [TABLE.query.start]: start.toISOString(),
@@ -359,7 +362,8 @@
       const created = await xrm.WebApi.createRecord(TABLE.query.logicalName, payload);
       if (submission !== activeSubmission) return;
       const id = created && typeof created.id === "string" ? created.id.replace(/[{}]/g, "") : "";
-      if (!GUID.test(id)) throw new Error("QUERY_ID_MISSING");
+      if (!GUID.test(id) || id.toLowerCase() !== correlation.toLowerCase())
+        throw new Error("QUERY_CORRELATION_MISMATCH");
       lastQueryId = id;
       showResult("Availability query pending…");
       await readQuery(id, Date.now());

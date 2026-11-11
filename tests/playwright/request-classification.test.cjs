@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
-const { classifyRequest } = require("./request-classification.cjs");
+const { classifyRequest, matchesCandidateActionResponse } = require("./request-classification.cjs");
 
 const origin = "https://orgsynthetic.crm4.dynamics.com";
 const callbackOrigin = "https://callback.crm4.dynamics.com";
@@ -35,6 +35,44 @@ test("only the exact correlated synthetic verifier is read-only; business dispat
     "FORBIDDEN_BUSINESS_OR_PROVIDER_OPERATION");
   assert.equal(classify(url, { method: () => "PATCH", postData: () => JSON.stringify(verifier) }),
     "FORBIDDEN_BUSINESS_OR_PROVIDER_OPERATION");
+});
+
+test("lifecycle response waits ignore proof refresh and match only the intended correlated business action", () => {
+  const url = `${origin}/api/data/v9.2/os_sr_cact`;
+  const correlation = "11111111-1111-4111-8111-111111111111";
+  const response = (body, target = url, overrides = {}) => ({
+    url: () => target,
+    request: () => request({ postData: () => JSON.stringify(body), ...overrides })
+  });
+  const verifier = require("../fixtures/synthetic-verifier-request.json");
+  for (const action of ["CreateCandidate", "RecordCall", "ProceedToScheduling", "MarkRound1Scheduled"]) {
+    assert.equal(matchesCandidateActionResponse(response(verifier), origin, action, correlation), false);
+    assert.equal(matchesCandidateActionResponse(response({
+      ActionType: action, CorrelationId: correlation
+    }), origin, action, correlation), true);
+    assert.equal(matchesCandidateActionResponse(response({
+      ActionType: action, CorrelationId: "22222222-2222-4222-8222-222222222222"
+    }), origin, action, correlation), false);
+    assert.equal(matchesCandidateActionResponse(response({
+      ActionType: action, CorrelationId: correlation
+    }), origin, action), false, "No response is admitted before durable correlation reservation");
+    for (const invalid of ["", "invalid", "00000000-0000-0000-0000-000000000000", null]) {
+      assert.equal(matchesCandidateActionResponse(response({
+        ActionType: action, CorrelationId: invalid
+      }), origin, action, correlation), false);
+    }
+    assert.equal(matchesCandidateActionResponse(response({
+      ActionType: "OtherAction", CorrelationId: correlation
+    }), origin, action, correlation), false);
+    assert.equal(matchesCandidateActionResponse(response({
+      ActionType: action, CorrelationId: correlation
+    }, `${url}?extra=1`), origin, action, correlation), false);
+    assert.equal(matchesCandidateActionResponse(response({
+      ActionType: action, CorrelationId: correlation
+    }, url, { method: () => "PATCH" }), origin, action, correlation), false);
+    assert.equal(matchesCandidateActionResponse(response(null), origin, action, correlation), false);
+  }
+  assert.equal(matchesCandidateActionResponse(response(verifier), origin, "VerifySyntheticIsolation", correlation), false);
 });
 
 test("Recorded collector destination is suppressed across documented transports; missing metadata stays unknown", () => {

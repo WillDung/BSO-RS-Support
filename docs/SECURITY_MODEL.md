@@ -1,5 +1,30 @@
 # Security Model
 
+## Separate operational and administrative identities (design, 2026-11-11)
+
+**Requested design, not provisioned accounts or assigned permissions.** Preserve the sole profile-bound non-admin BSO test account unchanged. A separate **BSO reference administrator** is an administrative identity, not a second operational BSO or a new Outlook connection. No account, role assignment, team membership, environment permission or tenant-wide setting is created by this design.
+
+| Identity / responsibility | Exact Dataverse role and scope | Environment / connector permission |
+|---|---|---|
+| Operational synthetic BSO | Existing **BSO-RS Support - BSO** role only, subject to the verifier's direct/team-effective checks. Preserve Basic protected-business Read, existing reference reads and the existing five Availability grants; never add native Candidate/child mutation, Receipt Read, bypass, impersonation or control-write grants. The historical 65-grant snapshot is not a substitute for fresh effective verification. | Existing app/environment access and applicable license; no new administrative role. Browser identity must be verified using same-session WhoAmI, not PAC identity. |
+| Separate BSO reference administrator | Existing **BSO-RS Support - Reference Admin**: exactly the 20 Global privileges listed below, with no BSO role, Candidate API permission or protected-business access added. Any required platform sign-in/app baseline must be reviewed separately; the 20-entry role alone is not claimed to grant environment admission or every shell feature. | Approved target-environment admission/license only. No Environment Maker, Power Platform Administrator, Global Administrator or Outlook mailbox access is required for reference CRUD. |
+| Technical deployment / profile recovery administrator | Reuse the existing separately authorized technical operator. For full Dataverse administration, the supported built-in **System Administrator** role is scoped to the target environment and must never be assigned to the operational BSO. It is not the reference-maintenance minimum and is not proposed as a permanent grant to the reference administrator. | No tenant-wide administrator grant is requested. PPAC environment lifecycle, backup/restore, audit-setting or DLP changes remain with the separately authorized existing environment/governance operator; none is needed for this task. |
+
+Reference administrator privilege matrix, from the [canonical role XML](../solutions/Roles/BSO-RS%20Support%20-%20Reference%20Admin.xml); **every entry is Global** because these reference tables are organization-owned:
+
+| Table | Create | Read | Write | Append | Append To |
+|---|---|---|---|---|---|
+| Position | `prvCreateos_sr_pos` | `prvReados_sr_pos` | `prvWriteos_sr_pos` | `prvAppendos_sr_pos` | `prvAppendToos_sr_pos` |
+| Candidate Source | `prvCreateos_sr_csrc` | `prvReados_sr_csrc` | `prvWriteos_sr_csrc` | `prvAppendos_sr_csrc` | `prvAppendToos_sr_csrc` |
+| TA | `prvCreateos_sr_ta` | `prvReados_sr_ta` | `prvWriteos_sr_ta` | `prvAppendos_sr_ta` | `prvAppendToos_sr_ta` |
+| Location | `prvCreateos_sr_loc` | `prvReados_sr_loc` | `prvWriteos_sr_loc` | `prvAppendos_sr_loc` | `prvAppendToos_sr_loc` |
+
+Delete, Assign, Share, Candidate/Call/History/Schedule/Receipt access, role management, plug-in/Custom API/environment-variable configuration and publication are **not included**. This account can edit TA/room directory addresses, so its actions must be coordinated with the existing pre-provider target-assurance/no-edit procedure; reference administration is not permission to contact arbitrary calendars.
+
+Technical administration is a different responsibility. The verified 1.0.5 package preflight checked `prvWritePluginPackage`, `prvWritePluginAssembly`, `prvWritePluginType` and `prvCreatePluginType`; WebResource maintenance separately needs `prvWriteWebResource` and `prvPublishCustomization` plus appropriate reads. Those checks are an operation-specific subset, **not a complete least-privilege custom deployment role**. Existing profile-value table metadata reports no independent table privileges: do not invent `prvWriteEnvironmentVariableValue` or assume reference Write allows revocation. Use the existing authorized technical administrator and the [conditional profile procedure](../solutions/CandidateCore/README.md#revocable-persistent-dev-profile-105), with fresh exact versions. An Environment Admin/Maker label alone is not proof of Dataverse administrative rights, and an admin role does not authorize an unapproved write.
+
+Before any later provisioning, obtain the separate account's approved identity, environment admission/license and specifically authorized role assignment. Verify its effective direct/team privileges against this matrix and confirm the operational BSO still has no inherited System Administrator/Customizer, native mutation or control privileges. Keep separate browser contexts, never copy tokens or impersonate the BSO, and retain append-only administrative change evidence. No live assignment or least-privilege acceptance is claimed here.
+
 ## Scoped Candidate Core API proof (2026-11-10; offline, not deployed)
 
 The owner's bounded UAT request is implemented as the existing API's read-only `VerifySyntheticIsolation` operation with an explicit **v2 `ScopedCandidateCoreApi`** contract. This supersedes the unconditional-false/whole-channel verifier descriptions below for the new source only. The server verifies exact configured actor/organization/scope/identity and active reference IDs, team-effective native-write/bypass/control privileges, package-backed API metadata and scoped caller readback. The same eligibility checks run before scoped writes. Missing/expired/denied proof closes the Console; Check Calendar stays disabled. See the [server contract](../solutions/CandidateCore/README.md#synthetic-dev-boundary-offline-implementation-not-deployed).

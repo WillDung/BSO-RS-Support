@@ -19,6 +19,7 @@ internal static partial class Program
             return RunCalendarBridge();
         TestOutlookRequest();
         TestOutlookAttendees();
+        TestCombinedDurationSlots();
         TestDocumentedOutlookFixture();
         TestOutlookResponseShape();
         TestOutlookSlotFiltering();
@@ -390,11 +391,12 @@ internal static partial class Program
     }
 
     private static AvailabilitySettings Settings(int leadMinutes = 0, int horizon = 61,
-        int maxCandidates = 25, int maxSlots = 200, int maxPayloadLength = 32768)
+        int maxCandidates = 25, int maxSlots = 200, int maxPayloadLength = 32768,
+        IEnumerable<int>? durations = null)
     {
         return new AvailabilitySettings(
             new[] { "example.invalid" },
-            new[] { 30, 45, 60 },
+            durations ?? new[] { 30, 45, 60 },
             new Dictionary<DayOfWeek, DailyBusinessHours>
             {
                 { DayOfWeek.Monday, new DailyBusinessHours(TimeSpan.FromHours(9), TimeSpan.FromHours(17)) },

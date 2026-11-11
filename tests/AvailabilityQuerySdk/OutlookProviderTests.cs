@@ -91,6 +91,51 @@ internal static partial class Program
             "A free organizer cannot override a busy TA");
     }
 
+    private static void TestCombinedDurationSlots()
+    {
+        var onsite = Query(InterviewMode.Onsite);
+        var states = new[] { "free", "tentative", "busy", "oof", "workingElsewhere", "unknown" };
+        foreach (var ta in states)
+        foreach (var room in states)
+        {
+            var result = Evaluate(onsite, Suggestion(Start, Start.AddHours(1),
+                Attendee("ta@example.invalid", "required", ta),
+                Attendee("room@example.invalid", "resource", room)));
+            Equal(ta == "free" && room == "free" ? QueryState.Available : QueryState.NoSlots,
+                result.State, "Combined state pair: TA " + ta + ", room " + room);
+        }
+        var freeTa = Attendee("ta@example.invalid", "required", "free");
+        var freeRoom = Attendee("room@example.invalid", "resource", "free");
+        foreach (var duration in new[] { 15, 30, 45, 60 })
+        {
+            var query = Query(InterviewMode.Onsite, duration: duration);
+            var suggestions = new[] { 0, 15, 30 }.Select(offset =>
+                Suggestion(Start.AddMinutes(offset), Start.AddMinutes(offset + duration), freeTa, freeRoom));
+            var result = AvailabilityRules.Calculate(query, Provider(suggestions.ToArray()),
+                Settings(durations: new[] { 15, 30, 45, 60 }), Now);
+            Equal(QueryState.Available, result.State, "Combined grid supports duration " + duration);
+            Equal(3, result.Slots.Count, "All three verified quarter-hour starts are retained");
+            for (var index = 0; index < result.Slots.Count; index++)
+            {
+                Equal(Start.AddMinutes(index * 15), result.Slots[index].StartUtc, "Exact quarter-hour start");
+                Equal(TimeSpan.FromMinutes(duration), result.Slots[index].EndUtc - result.Slots[index].StartUtc,
+                    "Both resources are verified over the entire requested duration");
+            }
+        }
+        AssertNoSlots(AvailabilityRules.Calculate(onsite, Provider(
+            Suggestion(Start, Start.AddMinutes(30), freeTa, freeRoom),
+            Suggestion(Start.AddMinutes(30), Start.AddHours(1), freeTa, freeRoom)), Settings(), Now),
+            "Adjacent shorter suggestions cannot be stitched into a longer proof");
+        AssertNoSlots(AvailabilityRules.Calculate(onsite, Provider(
+            Suggestion(Start, Start.AddHours(1), freeTa,
+                Attendee("room@example.invalid", "resource", "busy")),
+            Suggestion(Start.AddMinutes(15), Start.AddMinutes(75),
+                Attendee("ta@example.invalid", "required", "busy"), freeRoom)), Settings(), Now),
+            "TA and room free at different intervals do not establish combined availability");
+        AssertNoSlots(Evaluate(onsite, Suggestion(Start.AddMinutes(5), Start.AddMinutes(65), freeTa, freeRoom)),
+            "A full-duration but non-quarter-hour combined slot is rejected");
+    }
+
     private static void TestDocumentedOutlookFixture()
     {
         var now = Utc("2026-11-06T12:00:00Z");

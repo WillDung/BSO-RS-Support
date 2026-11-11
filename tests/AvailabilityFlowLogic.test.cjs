@@ -378,6 +378,76 @@ test('Onsite requires exactly one free resource room as well as a free TA', asyn
   assert.ok(good.reads.includes('Reread_location'));
 });
 
+test('combined availability requires both resources free across all 36 known state pairs', async () => {
+  const states = ['free', 'tentative', 'busy', 'oof', 'workingElsewhere', 'unknown'];
+  for (const taState of states) {
+    for (const roomState of states) {
+      const run = await execute({
+        query: { os_sr_avq_mod: 100000001, _os_sr_avq_loc_value: ids.room },
+        provider: { emptySuggestionsReason: '', meetingTimeSuggestions: [
+          suggestion(undefined, undefined, [
+            attendee('ta@example.invalid', 'required', taState),
+            attendee('room@example.invalid', 'resource', roomState)
+          ])
+        ] }
+      });
+      if (taState === 'free' && roomState === 'free') {
+        assert.equal(run.patch.os_sr_avq_stat, 100000001);
+        assert.equal(JSON.parse(run.patch.os_sr_avq_slts).length, 1);
+      } else {
+        noSlots(run);
+      }
+      assert.equal(run.providerCalls.length, 1, 'one combined call, no independent resource retries');
+    }
+  }
+});
+
+for (const duration of [15, 30, 45, 60]) {
+  test(`combined ${duration}-minute meetings retain exact duration on a 15-minute start grid`, async () => {
+    const start = Date.parse('2035-02-05T03:00:00Z');
+    const format = time => new Date(time).toISOString().slice(0, 19);
+    const times = [0, 15, 30].map(offset => start + offset * 60000);
+    const run = await execute({
+      query: { os_sr_avq_mod: 100000001, _os_sr_avq_loc_value: ids.room, os_sr_avq_dur: duration },
+      parameters: { 'Availability Allowed Durations (os_sr_avq_durs)': '15,30,45,60' },
+      provider: { emptySuggestionsReason: '', meetingTimeSuggestions: times.map(time =>
+        suggestion(format(time), format(time + duration * 60000), [
+          attendee(), attendee('room@example.invalid', 'resource')
+        ]))
+      }
+    });
+    assert.equal(run.patch.os_sr_avq_stat, 100000001);
+    assert.equal(run.providerCalls[0]['body/MeetingDuration'], duration);
+    assert.deepEqual(JSON.parse(run.patch.os_sr_avq_slts), times.map(time => ({
+      startUtc: format(time) + 'Z', endUtc: format(time + duration * 60000) + 'Z'
+    })));
+    assert.equal(run.writes.length, 1);
+  });
+}
+
+test('separate resource windows or short adjacent suggestions never synthesize a whole-duration free slot', async () => {
+  const taFree = attendee();
+  const roomFree = attendee('room@example.invalid', 'resource');
+  for (const suggestions of [
+    [
+      suggestion('2035-02-05T03:00:00', '2035-02-05T03:30:00', [taFree, roomFree]),
+      suggestion('2035-02-05T03:30:00', '2035-02-05T04:00:00', [taFree, roomFree])
+    ],
+    [
+      suggestion('2035-02-05T03:00:00', '2035-02-05T04:00:00',
+        [taFree, attendee('room@example.invalid', 'resource', 'busy')]),
+      suggestion('2035-02-05T03:15:00', '2035-02-05T04:15:00',
+        [attendee('ta@example.invalid', 'required', 'busy'), roomFree])
+    ],
+    [suggestion('2035-02-05T03:05:00', '2035-02-05T04:05:00', [taFree, roomFree])]
+  ]) {
+    noSlots(await execute({
+      query: { os_sr_avq_mod: 100000001, _os_sr_avq_loc_value: ids.room, os_sr_avq_dur: 60 },
+      provider: { emptySuggestionsReason: '', meetingTimeSuggestions: suggestions }
+    }));
+  }
+});
+
 for (const [label, mutate] of [
   ['string instead of suggestion array', body => { body.meetingTimeSuggestions = '[]'; }],
   ['unknown top-level field', body => { body.unapproved = true; }],

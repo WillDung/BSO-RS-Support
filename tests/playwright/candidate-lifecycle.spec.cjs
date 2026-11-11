@@ -4,7 +4,7 @@ const path = require("node:path");
 const { createHash } = require("node:crypto");
 const { authDirectory, runDirectory } = require("./local-settings.cjs");
 const { verifyBrowserIdentity } = require("./browser-identity.cjs");
-const { classifyRequest } = require("./request-classification.cjs");
+const { classifyRequest, matchesCandidateActionResponse } = require("./request-classification.cjs");
 const {
   captureFailure, refreshFailureEvidence, sanitizeBlockedRequest
 } = require("./lifecycle-failure.cjs");
@@ -111,6 +111,7 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
         });
         return route.abort("blockedbyclient");
       }
+      if (classification === "READ_ONLY_VERIFIER_ALLOWED") return route.continue();
       if (api && mutation && url.pathname === "/api/data/v9.2/os_sr_cact") {
         try {
           requireCondition(request.method() === "POST" && armed && !routeFailure &&
@@ -252,8 +253,8 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
       armed = { action, inputs };
       save();
       const responsePromise = page.waitForResponse(response =>
-        response.url() === `${approval.origin}/api/data/v9.2/os_sr_cact` &&
-        response.request().method() === "POST", { timeout: 30_000 });
+        matchesCandidateActionResponse(response, approval.origin, action,
+          record.attempts.at(-1)?.correlation), { timeout: 30_000 });
       // Attach rejection handling before clicking, so a failed click cannot leave an unhandled waiter.
       const observed = responsePromise.then(response => ({ response }), () => ({ error: true }));
       await click();

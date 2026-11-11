@@ -1,6 +1,10 @@
 const { isAuthenticationRequest } = require("./authentication-request.cjs");
 const { isOptionalMetricsRequest, isOptionalTelemetryRequest } = require("./platform-support-request.cjs");
 
+const isCorrelation = value => typeof value === "string" &&
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value) &&
+  value !== "00000000-0000-0000-0000-000000000000";
+
 function classifyRequest(request, url, { origin, callbackOrigin, approvedBusinessOperation = false }) {
   const write = !["GET", "HEAD", "OPTIONS"].includes(request.method());
   const api = url.origin === origin && /^\/api\/data\//i.test(url.pathname);
@@ -19,9 +23,7 @@ function classifyRequest(request, url, { origin, callbackOrigin, approvedBusines
     let body;
     try { body = JSON.parse(request.postData()); } catch { body = null; }
     if (body && Object.keys(body).length === 2 && body.ActionType === "VerifySyntheticIsolation" &&
-        typeof body.CorrelationId === "string" &&
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(body.CorrelationId) &&
-        body.CorrelationId !== "00000000-0000-0000-0000-000000000000") {
+        isCorrelation(body.CorrelationId)) {
       return "READ_ONLY_VERIFIER_ALLOWED";
     }
   }
@@ -35,4 +37,18 @@ function classifyRequest(request, url, { origin, callbackOrigin, approvedBusines
   return write ? "UNKNOWN_REQUEST_BLOCKED" : "READ_REQUEST_ALLOWED";
 }
 
-module.exports = { classifyRequest };
+function matchesCandidateActionResponse(response, origin, action, correlation) {
+  if (!["CreateCandidate", "RecordCall", "ProceedToScheduling", "MarkRound1Scheduled"].includes(action) ||
+      !isCorrelation(correlation) ||
+      response.url() !== `${origin}/api/data/v9.2/os_sr_cact`) return false;
+  const request = response.request();
+  if (classifyRequest(request, new URL(response.url()), {
+    origin, approvedBusinessOperation: true
+  }) !== "APPROVED_BUSINESS_OPERATION") return false;
+  let body;
+  try { body = JSON.parse(request.postData()); } catch { return false; }
+  return body?.ActionType === action && isCorrelation(body.CorrelationId) &&
+    body.CorrelationId.toLowerCase() === correlation.toLowerCase();
+}
+
+module.exports = { classifyRequest, matchesCandidateActionResponse };

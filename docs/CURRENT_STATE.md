@@ -1,5 +1,15 @@
 # Current State
 
+## SingleUserDev lifecycle attempt (2026-11-12)
+
+**Status: BLOCKED BEFORE MUTATION; no Candidate lifecycle writes.** The authenticated owner browser passed WhoAmI and the current server-issued SingleUserDev v4 proof. Four profile-bound reference reads each returned exactly one matching active row (`statecode=0`), and the scoped Candidate baseline returned zero rows. Calendar remains disabled.
+
+The existing marker-bound one-shot authorization expired at `2026-11-12T07:58:43Z`. Its attempt journal is absent, but its marker-specific authorization-slot file exists. The local creator reserves this slot exclusively (`wx`); the supported mechanism has no successor slot for the same marker. The authorization was not claimed, renewed, reset or overwritten. No Candidate operation was dispatched.
+
+The live v4 contract returns `candidateId` equal to its child `scopeId`; it does not return the synthetic marker in that field. The local authorization separately binds the marker to the exact synthetic name/email. The lifecycle validator and fixtures were aligned to that contract while retaining the separate marker binding. Focused `node --test .\tests\playwright\independent-authorization.test.cjs` passed 49/49, including the historical BSO v2 path. No tenant or deployed-component change was made.
+
+**Remaining blocker:** an explicit supported disposition/authorization mechanism is needed before another one-shot authorization can be issued for the occupied marker slot. Do not delete, reset, overwrite or bypass the slot. The lifecycle remains not run.
+
 ## Browser router authentication-only verification (2026-11-12)
 
 **Authentication and bounded reads: PASS; overall request safety: FAIL; lifecycle: NOT RUN.** A headed read-only run confirmed the previously blocked organization-root request was an OpenID sign-in handoff: HTTPS `POST /`, `application/x-www-form-urlencoded`, document navigation from the locally pinned regional CRM callback origin. Only form-field names (`code`, `id_token`, `session_state`, `state`) and an empty unrecognized-field count were retained; no field values, headers other than Content-Type, cookies, tokens, or request body were recorded. The [authentication predicate](../tests/playwright/authentication-request.cjs) now admits only the pinned CRM-to-organization root handoff with the exact recognized OpenID or WS-Federation field shape and no extra fields. Other CRM POSTs and API writes remain blocked.

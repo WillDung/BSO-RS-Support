@@ -154,7 +154,7 @@ function singleUserDevFixture(t) {
     nativeWritesDenied: false, scopedReads: true, globalGuardsRequired: false,
     readback: "CallerOwnedScope", organizationId: f.base.organizationId,
     environmentId: f.base.environmentId, actorId: binding.actorId, scopeId: binding.scopeId,
-    candidateId: marker, positionId: binding.positionId, sourceId: binding.sourceId,
+    candidateId: binding.scopeId, positionId: binding.positionId, sourceId: binding.sourceId,
     taId: binding.taId, locationId: binding.locationId,
     validUntil: new Date(at + 120_000).toISOString(), calendarEnabled: false, ...overrides
   });
@@ -177,6 +177,9 @@ test("A v4 SingleUserDev proof and exact owner-bound authorization are accepted"
   const proof = validateSyntheticIsolationProof(f.makeProof(), authorization, now);
   assert.equal(authorization.scope.identityScope, "SINGLE_USER_DEV");
   assert.equal(authorization.scope.syntheticIsolation.actorId, f.base.expectedActorId);
+  assert.equal(authorization.scope.syntheticIsolation.candidateId, authorization.marker);
+  assert.equal(authorization.scope.syntheticIsolation.scopeId,
+    JSON.parse(proof.contract).candidateId);
   assert.equal(proof.correlationId.startsWith("13131313-"), true);
   assert.equal(fs.existsSync(`${f.file}.attempt.jsonl`), false);
   f.claim();
@@ -202,7 +205,7 @@ for (const [label, change] of [
 for (const [label, overrides] of [
   ["wrong proof version", { version: 2 }],
   ["wrong owner proof", { actorId: "99999999-9999-4999-8999-999999999999" }],
-  ["wrong marker proof", { candidateId: "99999999-9999-4999-8999-999999999999" }],
+  ["wrong child scope proof", { candidateId: "99999999-9999-4999-8999-999999999999" }],
   ["wrong reference proof", { positionId: "99999999-9999-4999-8999-999999999999" }]
 ]) {
   test(`SingleUserDev proof rejects ${label}`, t => {

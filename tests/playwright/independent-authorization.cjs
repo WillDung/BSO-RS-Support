@@ -243,7 +243,7 @@ function validateSyntheticIsolationProof(observation, authorization, now = Date.
       environmentId: authorization.scope.environmentId,
       actorId: binding.actorId,
       scopeId: binding.scopeId,
-      candidateId: authorization.marker,
+      candidateId: binding.scopeId,
       positionId: binding.positionId,
       sourceId: binding.sourceId,
       taId: binding.taId,

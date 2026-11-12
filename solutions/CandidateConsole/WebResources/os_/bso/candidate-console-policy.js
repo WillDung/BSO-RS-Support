@@ -122,13 +122,14 @@
         typeof result.IsolationContract !== "string") throw new Error("SYNTHETIC_VERIFIER_RESPONSE_INVALID");
     const proof = JSON.parse(result.IsolationContract);
     const expectedBoundary = singleUserDev ? "SingleUserDevCandidateCoreApi" : "ScopedCandidateCoreApi";
-    const expectedVersion = singleUserDev ? 3 : 2;
+    const expectedVersion = singleUserDev ? 4 : 2;
     const expectedNativeWritesDenied = !singleUserDev;
     const guids = ["organizationId", "environmentId", "actorId", "scopeId", "candidateId",
       "positionId", "sourceId", "taId", "locationId"];
     if (!proof || proof.version !== expectedVersion || proof.boundary !== expectedBoundary ||
         proof.mode !== (singleUserDev ? "SingleUserDev" : undefined) ||
         proof.nativeWritesDenied !== expectedNativeWritesDenied ||
+        singleUserDev && (proof.scopedReads !== true || proof.globalGuardsRequired !== false) ||
         proof.readback !== "CallerOwnedScope" || proof.calendarEnabled !== false ||
         guids.some((name) => !normalizeGuid(proof[name])) ||
         normalizeGuid(proof.organizationId) !== normalizeGuid(runtime.organizationId) ||

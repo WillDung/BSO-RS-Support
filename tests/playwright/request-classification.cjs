@@ -4,6 +4,10 @@ const { isOptionalMetricsRequest, isOptionalTelemetryRequest } = require("./plat
 const isCorrelation = value => typeof value === "string" &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value) &&
   value !== "00000000-0000-0000-0000-000000000000";
+const scopedReadActions = new Set([
+  "ReadScopedCandidates", "ReadScopedPositions", "ReadScopedSources", "ReadScopedTas",
+  "ReadScopedLocations", "ReadScopedCalls", "ReadScopedHistory", "ReadScopedSchedules"
+]);
 
 function classifyRequest(request, url, { origin, callbackOrigin, approvedBusinessOperation = false }) {
   const write = !["GET", "HEAD", "OPTIONS"].includes(request.method());
@@ -22,9 +26,14 @@ function classifyRequest(request, url, { origin, callbackOrigin, approvedBusines
       ["xhr", "fetch"].includes(request.resourceType()) && !request.isNavigationRequest()) {
     let body;
     try { body = JSON.parse(request.postData()); } catch { body = null; }
-    if (body && Object.keys(body).length === 2 && body.ActionType === "VerifySyntheticIsolation" &&
+    if (body && Object.keys(body).length === 2 &&
+        ["VerifySyntheticIsolation", "VerifySingleUserDev"].includes(body.ActionType) &&
         isCorrelation(body.CorrelationId)) {
       return "READ_ONLY_VERIFIER_ALLOWED";
+    }
+    if (body && Object.keys(body).length === 3 && scopedReadActions.has(body.ActionType) &&
+        isCorrelation(body.CorrelationId) && isCorrelation(body.SyntheticScopeId)) {
+      return "SCOPED_READ_OPERATION_ALLOWED";
     }
   }
   if (api && write) {

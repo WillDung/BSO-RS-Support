@@ -57,8 +57,8 @@ Assert-Test ($script.Contains('fetch("/api/data/v9.2/os_sr_cact"') -and
     $script.Contains('credentials: "same-origin"') -and
     $script.Contains('body: JSON.stringify(request)') -and
     $script.Contains('c.correlation')) 'Call the fixed Candidate Core API with a same-origin JSON request and resolve CreateCandidate by its correlation'
-$coreInvokeStart = $script.IndexOf('async function invokeCandidateCore')
-$coreInvokeEnd = $script.IndexOf('async function resolveCreatedCandidate', $coreInvokeStart)
+$coreInvokeStart = $script.IndexOf('async function sendCandidateCoreRequest')
+$coreInvokeEnd = $script.IndexOf('async function invokeCandidateCore', $coreInvokeStart)
 $coreInvoke = $script.Substring($coreInvokeStart, $coreInvokeEnd - $coreInvokeStart)
 Assert-Test ($coreInvoke.Contains('const parameterNames = Object.keys(request);') -and
     $coreInvoke.Contains('CORE_API_ACTIONS.has(action)') -and

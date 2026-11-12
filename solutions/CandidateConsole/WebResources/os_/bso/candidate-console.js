@@ -134,10 +134,25 @@
   let busy = false;
   let syntheticQueryBlocked = false;
   let isolationExpiryTimer;
+  let isolationVerificationPromise;
   let environmentPolicy = Object.freeze({ allowed: false, reason: "CONFIGURATION_MISSING" });
   const CORE_API_ACTIONS = new Set([
     "CreateCandidate", "UpdateCandidate", "RecordCall", "ProceedToScheduling",
     "MarkRound1Scheduled", "RecordPass", "RecordFail", "RequestReschedule", "CancelRound1"
+  ]);
+  const SINGLE_USER_DEV_READ_ACTIONS = Object.freeze({
+    os_sr_cand: "ReadScopedCandidates",
+    os_sr_pos: "ReadScopedPositions",
+    os_sr_csrc: "ReadScopedSources",
+    os_sr_ta: "ReadScopedTas",
+    os_sr_loc: "ReadScopedLocations",
+    os_sr_call: "ReadScopedCalls",
+    os_sr_csh: "ReadScopedHistory",
+    os_sr_intv: "ReadScopedSchedules"
+  });
+  const SINGLE_USER_DEV_CHOICE_ATTRIBUTES = new Set([
+    "statecode", "os_sr_cand_stat", "os_sr_call_out", "os_sr_csh_prevstat",
+    "os_sr_csh_newstat", "os_sr_intv_rnd", "os_sr_intv_res", "os_sr_intv_stat"
   ]);
   const CORE_API_PARAMETER_NAMES = new Set([
     "ActionType", "SyntheticScopeId", "CandidateId", "ExpectedStatus", "CorrelationId", "CandidateName",
@@ -388,12 +403,18 @@
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
   }
 
-  async function invokeCandidateCore(action, values = {}, correlationId = newCorrelationId()) {
-    if (environmentPolicy.allowed === true && environmentPolicy.syntheticDataOnly) {
+  async function sendCandidateCoreRequest(action, values, correlationId) {
+    const scopedRead = environmentPolicy.candidateOperationMode === "SingleUserDev" &&
+      Object.values(SINGLE_USER_DEV_READ_ACTIONS).includes(action);
+    if (environmentPolicy.allowed === true && environmentPolicy.syntheticDataOnly && !scopedRead) {
       await verifyServerIsolation();
     }
     if (!isCandidateCoreEnabled()) throw new Error("CANDIDATE_CORE_ENVIRONMENT_REJECTED");
-    if (!CORE_API_ACTIONS.has(action)) throw new Error("CANDIDATE_CORE_ACTION_INVALID");
+    if (!CORE_API_ACTIONS.has(action) &&
+        !(environmentPolicy.candidateOperationMode === "SingleUserDev" &&
+          Object.values(SINGLE_USER_DEV_READ_ACTIONS).includes(action))) {
+      throw new Error("CANDIDATE_CORE_ACTION_INVALID");
+    }
     const request = { ...values, ActionType: action, CorrelationId: correlationId };
     if (environmentPolicy.syntheticDataOnly) {
       const scope = window.BsoRsCandidateConsolePolicy.getSyntheticScope();
@@ -443,10 +464,51 @@
       }
       throw error;
     }
+    return { correlationId, result };
+  }
+
+  async function invokeCandidateCore(action, values = {}, correlationId = newCorrelationId()) {
+    if (!CORE_API_ACTIONS.has(action)) throw new Error("CANDIDATE_CORE_ACTION_INVALID");
+    const { result } = await sendCandidateCoreRequest(action, values, correlationId);
     if (!result || !["Applied", "DuplicateReplay"].includes(result.ResultCode)) {
       throw new Error("CANDIDATE_CORE_RESULT_INVALID");
     }
     return { correlationId, result };
+  }
+
+  async function readSingleUserDevRecords(tableLogicalName) {
+    if (environmentPolicy.candidateOperationMode !== "SingleUserDev") {
+      throw new Error("SINGLE_USER_DEV_READ_UNAVAILABLE");
+    }
+    const action = SINGLE_USER_DEV_READ_ACTIONS[tableLogicalName];
+    if (!action) throw new Error("SINGLE_USER_DEV_READ_TABLE_INVALID");
+    const { result } = await sendCandidateCoreRequest(action, {}, newCorrelationId());
+    if (!result || result.ResultCode !== "ScopedRead" || typeof result.ScopedData !== "string") {
+      throw new Error("SINGLE_USER_DEV_READ_RESPONSE_INVALID");
+    }
+    let rows;
+    try {
+      rows = JSON.parse(result.ScopedData);
+    } catch {
+      throw new Error("SINGLE_USER_DEV_READ_RESPONSE_INVALID");
+    }
+    if (!Array.isArray(rows)) throw new Error("SINGLE_USER_DEV_READ_RESPONSE_INVALID");
+    return rows.map((row) => {
+      if (!row || typeof row !== "object" || Array.isArray(row) ||
+          row.__logicalName !== tableLogicalName) {
+        throw new Error("SINGLE_USER_DEV_READ_RESPONSE_INVALID");
+      }
+      const parsed = { ...row };
+      delete parsed.__logicalName;
+      for (const [name, value] of Object.entries(parsed)) {
+        if (SINGLE_USER_DEV_CHOICE_ATTRIBUTES.has(name) && value !== null) {
+          const number = Number(value);
+          if (!Number.isSafeInteger(number)) throw new Error("SINGLE_USER_DEV_READ_RESPONSE_INVALID");
+          parsed[name] = number;
+        }
+      }
+      return parsed;
+    });
   }
 
   async function resolveCreatedCandidate(correlationId, expectedName, expectedEmail) {
@@ -526,6 +588,11 @@
   async function retrieveAll(tableLogicalName, query) {
     try {
       if (!isCandidateCoreEnabled()) throw new Error("CONSOLE_DATA_ACCESS_BLOCKED");
+      if (environmentPolicy.candidateOperationMode === "SingleUserDev") {
+        const rows = await readSingleUserDevRecords(tableLogicalName);
+        if (!isCandidateCoreEnabled()) throw new Error("CONSOLE_DATA_ACCESS_BLOCKED");
+        return rows;
+      }
       const api = xrm().WebApi;
       let response = await api.retrieveMultipleRecords(tableLogicalName, query);
       if (!isCandidateCoreEnabled()) throw new Error("CONSOLE_DATA_ACCESS_BLOCKED");
@@ -2722,7 +2789,16 @@
     $("cancel-round1-button").addEventListener("click", showCancellationPanel);
   }
 
-  async function verifyServerIsolation() {
+  function verifyServerIsolation() {
+    if (isolationVerificationPromise) return isolationVerificationPromise;
+    const verification = verifyServerIsolationOnce();
+    isolationVerificationPromise = verification.finally(() => {
+      isolationVerificationPromise = null;
+    });
+    return isolationVerificationPromise;
+  }
+
+  async function verifyServerIsolationOnce() {
     const context = globalContext();
     const policy = window.BsoRsCandidateConsolePolicy;
     if (!policy || typeof policy.verifySyntheticIsolation !== "function") {

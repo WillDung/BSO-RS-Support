@@ -77,7 +77,7 @@ try {
         $singleUserConfiguration.devDirectWriteFallbackEnabled -eq $false -and
         $singleUserConfiguration.candidateOperationMode -ceq 'SingleUserDev' -and
         -not ($singleUserConfiguration.PSObject.Properties.Name -contains 'availabilityEnabled')) `
-        'Generate explicit SingleUserDev only for guarded synthetic DEV without Calendar'
+        'Generate explicit SingleUserDev only for server-enforced synthetic DEV without Calendar'
     Remove-Item -LiteralPath $singleUserOutputPath, $singleUserHtmlPath
 
     $singleUserRejectedOutputPath = Join-Path ([IO.Path]::GetTempPath()) "single-user-rejected-$tempName.js"

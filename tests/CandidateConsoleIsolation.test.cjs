@@ -55,7 +55,7 @@ class Element {
 
 async function createConsole({ mode = "DEV", syntheticDataOnly = true, fixtures = {},
   configuration = {}, serverOptions = {}, simulatedIsolation = false, verifier,
-  missingPolicy = false, beforeInitialize } = {}) {
+  coreFetch, missingPolicy = false, beforeInitialize } = {}) {
   const server = createServer(fixtures, serverOptions);
   const elements = new Map();
   const element = (name) => {
@@ -106,9 +106,10 @@ async function createConsole({ mode = "DEV", syntheticDataOnly = true, fixtures 
   const fetchCalls = [];
   if (verifier) window.fetch = verifier;
   const context = vm.createContext({
-    window, document, URL, URLSearchParams,
+    window, document, URL, URLSearchParams, crypto: window.crypto,
     fetch: async (...args) => {
       fetchCalls.push(args);
+      if (coreFetch) return coreFetch(...args);
       return { ok: true, text: async () => JSON.stringify({ ResultCode: "Applied" }) };
     }
   });
@@ -119,6 +120,54 @@ async function createConsole({ mode = "DEV", syntheticDataOnly = true, fixtures 
   await document.listeners.DOMContentLoaded();
   return { server, element, actionButton, workflowLabel, fetchCalls, methods: window.__testConsole,
     expireProof: () => expiryCallback() };
+}
+
+function singleUserDevContract() {
+  return {
+    version: 4, boundary: "SingleUserDevCandidateCoreApi", mode: "SingleUserDev",
+    nativeWritesDenied: false, scopedReads: true, globalGuardsRequired: false,
+    readback: "CallerOwnedScope", organizationId: orgId, environmentId: id, actorId: guid("3"),
+    scopeId: guid("4"), candidateId: guid("4"), positionId: guid("5"), sourceId: guid("6"),
+    taId: guid("7"), locationId: guid("8"), validUntil: new Date(Date.now() + 60000).toISOString(),
+    calendarEnabled: false
+  };
+}
+
+function scopedReadFixture(table, proof) {
+  const rows = {
+    os_sr_cand: [{
+      __logicalName: "os_sr_cand", os_sr_candid: proof.candidateId,
+      os_sr_cand_nm: "[SYNTHETIC-E2E] Scoped fixture", os_sr_cand_eml: "scoped@example.invalid",
+      os_sr_cand_stat: "100010000", os_sr_cand_cnum: "CAND-SYNTHETIC",
+      os_sr_cand_pos: proof.positionId, os_sr_cand_csrc: proof.sourceId,
+      os_sr_cand_ta: proof.taId, ownerid: guid("3")
+    }],
+    os_sr_pos: [{ __logicalName: "os_sr_pos", os_sr_posid: proof.positionId,
+      os_sr_pos_ttl: "[DEV] Software Engineer", statecode: "0" }],
+    os_sr_csrc: [{ __logicalName: "os_sr_csrc", os_sr_csrcid: proof.sourceId,
+      os_sr_csrc_nm: "[DEV] Internal Test Source", statecode: "0" }],
+    os_sr_ta: [{ __logicalName: "os_sr_ta", os_sr_taid: proof.taId,
+      os_sr_ta_nm: "[DEV] Synthetic Interviewer", statecode: "0" }],
+    os_sr_loc: [{ __logicalName: "os_sr_loc", os_sr_locid: proof.locationId,
+      os_sr_loc_nm: "[DEV] Test Location", statecode: "0" }],
+    os_sr_call: [],
+    os_sr_csh: [],
+    os_sr_intv: []
+  };
+  return JSON.stringify(rows[table] || []);
+}
+
+function singleUserDevVerifier(proof, requests) {
+  return async (_url, request) => {
+    const body = JSON.parse(request.body);
+    requests.push(body);
+    assert.equal(body.ActionType, "VerifySingleUserDev");
+    assert.deepEqual(Object.keys(body).sort(), ["ActionType", "CorrelationId"]);
+    return { ok: true, json: async () => ({
+      ResultCode: "SingleUserDevVerified",
+      IsolationContract: JSON.stringify(proof)
+    }) };
+  };
 }
 
 test("Create is disabled in HTML even when scripts never load", () => {
@@ -205,6 +254,62 @@ test("real Console policy consumes a verifier before references/list reads and s
     /SYNTHETIC_VERIFIER_UNAVAILABLE/);
   assert.equal(ui.fetchCalls.length, dispatches);
   assert.equal(ui.element("create-button").disabled, true);
+});
+
+test("SingleUserDev reads route through fixed scoped API actions and never use direct Web API queries", async () => {
+  const proof = singleUserDevContract();
+  const verifierRequests = [];
+  const readRequests = [];
+  const actions = {
+    ReadScopedCandidates: "os_sr_cand",
+    ReadScopedPositions: "os_sr_pos",
+    ReadScopedSources: "os_sr_csrc",
+    ReadScopedTas: "os_sr_ta",
+    ReadScopedLocations: "os_sr_loc",
+    ReadScopedCalls: "os_sr_call",
+    ReadScopedHistory: "os_sr_csh",
+    ReadScopedSchedules: "os_sr_intv"
+  };
+  const ui = await createConsole({
+    configuration: { candidateOperationMode: "SingleUserDev", devDirectWriteFallbackEnabled: false },
+    verifier: singleUserDevVerifier(proof, verifierRequests),
+    coreFetch: async (url, request) => {
+      assert.equal(url, "/api/data/v9.2/os_sr_cact");
+      assert.equal(request.method, "POST");
+      const body = JSON.parse(request.body);
+      readRequests.push(body);
+      const table = actions[body.ActionType];
+      assert.ok(table);
+      return {
+        ok: true,
+        text: async () => JSON.stringify({
+          ResultCode: "ScopedRead",
+          ScopedData: scopedReadFixture(table, proof)
+        })
+      };
+    }
+  });
+  assert.equal(ui.methods.isCandidateCoreEnabled(), true, ui.element("notice").textContent);
+  assert.equal(ui.element("create-button").disabled, false);
+  assert.equal(ui.server.requests.length, 0);
+  assert.equal(verifierRequests.length, 1);
+  assert.ok(readRequests.some((request) => request.ActionType === "ReadScopedCandidates"));
+  assert.ok(["ReadScopedPositions", "ReadScopedSources", "ReadScopedTas", "ReadScopedLocations"]
+    .every((action) => readRequests.some((request) => request.ActionType === action)));
+
+  const candidate = await ui.methods.retrieveCandidateRecord(proof.candidateId);
+  assert.equal(candidate.os_sr_candid, proof.candidateId);
+  await ui.methods.renderCallHistory(proof.candidateId);
+  await ui.methods.renderStatusHistory(proof.candidateId);
+  await ui.methods.renderSchedulingDetails(proof.candidateId);
+  assert.ok(["ReadScopedCalls", "ReadScopedHistory", "ReadScopedSchedules"]
+    .every((action) => readRequests.some((request) => request.ActionType === action)));
+  assert.ok(readRequests.every((request) => {
+    assert.deepEqual(Object.keys(request).sort(), ["ActionType", "CorrelationId", "SyntheticScopeId"]);
+    assert.equal(request.SyntheticScopeId, proof.scopeId);
+    return true;
+  }));
+  assert.equal(ui.server.requests.length, 0);
 });
 
 test("verifier denial closes actual Console initialization without business queries or dispatch", async () => {

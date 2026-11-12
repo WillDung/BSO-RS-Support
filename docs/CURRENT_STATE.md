@@ -1,6 +1,18 @@
 # Current State
 
-## SingleUserDev owner functional scope: local 1.0.6 candidate, not deployed (2026-11-12)
+## Minimal SingleUserDev scoped API: local 1.0.7 built, not deployed (2026-11-12)
+
+The latest owner direction supersedes the earlier 1.0.6 / 82-global-guard delivery plan. The local Candidate Core source now implements an additive SingleUserDev profile child and eight fixed server-side read actions on the existing private Custom API. Each read action selects a fixed table, columns, and server-constructed scope query. The Console routes SingleUserDev Candidate, reference, Call, History, and Schedule reads through those actions; other modes retain their existing read behavior. Mutations continue through the existing scoped operation contract. This is a bounded application path, not isolation from the operator's native System Administrator privileges. No global or table pipeline guard is required for this path.
+
+SingleUserDev uses proof contract v4 and requires the new String `ScopedData` Custom API response property; BSO proof remains v2 and does not require that property. The explicit `candidateOperationMode` remains synthetic-only DEV, direct-write fallback disabled, diagnostics Off, and Calendar disabled. The root BSO profile actor/scope, approved DEV marker, and four reference bindings are preserved by the additive profile format. No live profile or resource configuration was changed.
+
+**Local artifact:** Candidate Core package `1.0.7.0` built successfully from the current source. Package SHA-256: `DD7D16F156AFAC9CE8859C3A1E65CAE88FA54EBE571020B98CD3C0395AF2F976`. Assembly SHA-256: `488D18D06701AD6D03787AA3CC696969B86B797F0915E2C7C3E6807335BE0502` (FileVersion `1.0.7.0`). The package is retained outside the repository. The previously captured 1.0.5 rollback package and DLL were re-hashed: `6466A24CD032165AFF11B78846619E0A49F26268C554EF655FC233CA2E87C53F` and `278270A9388317CF63D1C8017FB7CE71575CEDCDF1A459CCF0E91BABAD497833`; the external profile/package snapshot SHA-256 is `DD771312295C7D0B72E46DDD45E2ECC1A27C0E0CE1A0A529BFBBBFE9359D37C9`.
+
+**Focused local validation:** Candidate Core SDK harness passed 939 assertions, including no-guard proof/read behavior, BSO proof compatibility, all eight fixed reads, unrelated Candidate exclusion, no read mutations, and lifecycle/history/idempotency regressions. Console policy/isolation/request-classifier suites passed 65 tests. The package build completed with zero warnings/errors. These are local checks only.
+
+**Live status and blockers:** the last verified live baseline remains Candidate Core assembly 1.0.5.0 and an `os_sr_siso` profileVersion 2 bound to the BSO actor. This turn performed no tenant reads or writes, Candidate queries, publishing, role changes, or deployment. The 1.0.7 response property, exact current package/API/Console component versions and ETags, and effective published Console source have not been verified live against this new artifact. No fresh component-level deployment manifest or controlled publisher/change window was established. Therefore package deployment, SingleUserDev profile enablement, scoped proof, and Candidate Console acceptance remain **NOT RUN / BLOCKED**. No Candidate lifecycle writes are authorized by these local tests.
+
+## Historical SingleUserDev owner functional scope: local 1.0.6 candidate, not deployed (2026-11-12)
 
 The owner-designated existing administrator is the only intended interactive operator. The local Candidate Core source now contains a bounded DEV `SingleUserDev` path in package version 1.0.6.0. It is an optional child of the existing `os_sr_siso` profile: the root BSO actor/scope and approved references remain unchanged, while the child binds the owner to a distinct row scope, preserves the existing synthetic name/email marker, and requires server-side proof for Candidate reads and business operations. The BSO proof remains v2; SingleUserDev uses a distinct v3 contract. The Console configuration generator emits this mode only for synthetic-only DEV with Candidate Core enabled, direct-write fallback disabled, diagnostics Off, and Calendar disabled.
 
@@ -16,7 +28,7 @@ The current `os_sr_siso` value is still profileVersion 2 and remains BSO-bound. 
 
 **Deployment status:** an exact external manifest and rollback are prepared, but deployment is **BLOCKED** because no exclusive package/guard/profile/WebResource change window, maker/publisher freeze, or owner `srapp` tab closure is evidenced. No tenant writes, Candidate reads/writes, role changes, Entra changes, package update, guard registration, profile update, WebResource update, or publication occurred. SingleUserDev proof and Candidate Console read-only acceptance remain **NOT RUN**. Re-read all target versions and ETags immediately before any later authorized write; stop on drift or an ambiguous result.
 
-## Candidate Core single-user functional UAT: authenticated, profile mismatch (2026-11-12)
+## Historical Candidate Core single-user functional UAT: authenticated, profile mismatch (2026-11-12; before local 1.0.7)
 
 **Owner direction supersedes the earlier BSO-only UAT plan:** the owner-designated existing System Administrator is the one intended functional user. A separate non-admin user is not required for functional UAT; non-admin isolation testing remains a separate security test.
 

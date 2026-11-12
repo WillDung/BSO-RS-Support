@@ -128,10 +128,12 @@ test("the actual policy enables synthetic scope only after a same-origin server 
 
 test("SingleUserDev requires its distinct server proof and cannot enable direct-write fallback", async () => {
   const proof = verifierFixture({
-    version: 3,
+    version: 4,
     boundary: "SingleUserDevCandidateCoreApi",
     mode: "SingleUserDev",
-    nativeWritesDenied: false
+    nativeWritesDenied: false,
+    scopedReads: true,
+    globalGuardsRequired: false
   });
   const calls = [];
   const config = configuration({
@@ -151,6 +153,30 @@ test("SingleUserDev requires its distinct server proof and cannot enable direct-
   assert.equal(policy.getSyntheticScope().mode, "SingleUserDev");
   assert.equal(calls.length, 1);
   assert.equal(JSON.parse(calls[0].request.body).ActionType, "VerifySingleUserDev");
+});
+
+test("SingleUserDev rejects the guard-dependent v3 proof and incomplete scoped-read proofs", async () => {
+  const config = configuration({
+    candidateOperationMode: "SingleUserDev",
+    devDirectWriteFallbackEnabled: false
+  });
+  for (const proof of [
+    verifierFixture({ version: 3, boundary: "SingleUserDevCandidateCoreApi", mode: "SingleUserDev",
+      nativeWritesDenied: false }),
+    verifierFixture({ version: 4, boundary: "SingleUserDevCandidateCoreApi", mode: "SingleUserDev",
+      nativeWritesDenied: false, scopedReads: true, globalGuardsRequired: true }),
+    verifierFixture({ version: 4, boundary: "SingleUserDevCandidateCoreApi", mode: "SingleUserDev",
+      nativeWritesDenied: false, scopedReads: false, globalGuardsRequired: false })
+  ]) {
+    const policy = createPolicy(async () => ({
+      ok: true, json: async () => ({
+        ResultCode: "SingleUserDevVerified", IsolationContract: JSON.stringify(proof)
+      })
+    }));
+    await assert.rejects(policy.verifySyntheticIsolation(config,
+      runtime({ actorId: proof.actorId })), /SYNTHETIC_VERIFIER_RESPONSE_INVALID/);
+    assert.equal(policy.hasSyntheticIsolation(), false);
+  }
 });
 
 test("SingleUserDev rejects fallback-enabled or non-DEV configuration", () => {

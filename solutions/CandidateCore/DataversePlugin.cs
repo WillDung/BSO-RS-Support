@@ -70,6 +70,20 @@ namespace os_sr_cact
                 }
                 else if (requestedScope || isSyntheticVerifier || isSingleUserDevVerifier)
                     throw new OperationError("SYNTHETIC_ORGANIZATION_REJECTED");
+                if (SyntheticIsolation.IsSingleUserDevReadAction(requestedAction))
+                {
+                    if (isolation == null || !isolation.SingleUserDev)
+                        throw new OperationError("SINGLE_USER_DEV_READ_REJECTED");
+                    CandidateActionInputAdapter.ValidateSingleUserDevRead(
+                        context.InputParameters, isolation.ScopeId);
+                    var controlService = factory.CreateOrganizationService(null);
+                    isolation.VerifySingleUserDevApiScope(controlService, callerService, context);
+                    var scopedReadService = factory.CreateOrganizationService(null);
+                    context.OutputParameters["ResultCode"] = "ScopedRead";
+                    context.OutputParameters["ScopedData"] =
+                        isolation.ReadSingleUserDevData(requestedAction!, scopedReadService);
+                    return;
+                }
                 var request = CandidateActionInputAdapter.Create(context.InitiatingUserId, context.InputParameters, DateTime.UtcNow);
                 if (isolation != null)
                 {
@@ -464,6 +478,27 @@ namespace os_sr_cact
 
     internal static class CandidateActionInputAdapter
     {
+        public static void ValidateSingleUserDevRead(ParameterCollection parameters, Guid scopeId)
+        {
+            if (!parameters.TryGetValue("ActionType", out var actionValue) ||
+                !(actionValue is string action) || !SyntheticIsolation.IsSingleUserDevReadAction(action) ||
+                !parameters.TryGetValue("CorrelationId", out var correlationValue) ||
+                !(correlationValue is Guid correlation) || correlation == Guid.Empty ||
+                !parameters.TryGetValue("SyntheticScopeId", out var scopeValue) ||
+                !(scopeValue is Guid scope) || scope != scopeId)
+                throw new OperationError("SYNTHETIC_READ_INPUT_REJECTED");
+
+            foreach (var parameter in parameters)
+            {
+                if (parameter.Key == "ActionType" || parameter.Key == "CorrelationId" ||
+                    parameter.Key == "SyntheticScopeId")
+                    continue;
+                if (!ActionRequest.IsDeclaredInputName(parameter.Key) ||
+                    parameter.Value != null && !IsOptionalTransportDefault(parameter.Key, parameter.Value))
+                    throw new OperationError("SYNTHETIC_READ_INPUT_REJECTED");
+            }
+        }
+
         public static void ValidateVerifier(ParameterCollection parameters)
         {
             if (!parameters.TryGetValue("CorrelationId", out var correlation) ||
@@ -474,22 +509,22 @@ namespace os_sr_cact
                 if (parameter.Key == "ActionType" || parameter.Key == "CorrelationId") continue;
                 if (!ActionRequest.IsDeclaredInputName(parameter.Key))
                     throw new OperationError("SYNTHETIC_VERIFIER_INPUT_REJECTED");
-                var value = parameter.Value;
-                if (value == null) continue;
-                // Dataverse supplies defaults for omitted optional Custom API parameters.
-                var empty = parameter.Key == "ExpectedStatus" || parameter.Key == "CallOutcome"
-                    ? value is int number && number == 0
-                    : parameter.Key == "StartAt" || parameter.Key == "EndAt" || parameter.Key == "ContactedAt"
-                        ? value is DateTime date && date == DateTime.MinValue
-                        : parameter.Key == "SyntheticScopeId" || parameter.Key == "CandidateId" ||
-                          parameter.Key == "PositionId" || parameter.Key == "CandidateSourceId" ||
-                          parameter.Key == "AssignedTaId" || parameter.Key == "InterviewerId" ||
-                          parameter.Key == "LocationId"
-                            ? value is Guid guid && guid == Guid.Empty
-                            : value is string text && text.Length == 0;
-                if (!empty) throw new OperationError("SYNTHETIC_VERIFIER_INPUT_REJECTED");
+                if (parameter.Value != null && !IsOptionalTransportDefault(parameter.Key, parameter.Value))
+                    throw new OperationError("SYNTHETIC_VERIFIER_INPUT_REJECTED");
             }
         }
+
+        private static bool IsOptionalTransportDefault(string name, object value) =>
+            name == "ExpectedStatus" || name == "CallOutcome"
+                ? value is int number && number == 0
+                : name == "StartAt" || name == "EndAt" || name == "ContactedAt"
+                    ? value is DateTime date && date == DateTime.MinValue
+                    : name == "SyntheticScopeId" || name == "CandidateId" ||
+                      name == "PositionId" || name == "CandidateSourceId" ||
+                      name == "AssignedTaId" || name == "InterviewerId" ||
+                      name == "LocationId"
+                        ? value is Guid guid && guid == Guid.Empty
+                        : value is string text && text.Length == 0;
 
         public static ActionRequest Create(Guid actor, ParameterCollection parameters, DateTime utcNow)
         {

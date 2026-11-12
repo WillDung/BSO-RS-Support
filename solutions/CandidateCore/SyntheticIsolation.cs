@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Runtime.Serialization.Json;
+using System.Text;
 using System.Xml;
 using System.Xml.Linq;
 using Microsoft.Crm.Sdk.Messages;
@@ -28,7 +30,21 @@ namespace os_sr_cact
             "Create", "Update", "Delete", "Upsert", "SetState", "SetStateDynamicEntity",
             "Assign", "Merge", "CreateMultiple", "UpdateMultiple", "UpsertMultiple", "DeleteMultiple"
         };
+        private static readonly Dictionary<string, string> SingleUserDevReadTables =
+            new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["ReadScopedCandidates"] = "os_sr_cand",
+                ["ReadScopedPositions"] = "os_sr_pos",
+                ["ReadScopedSources"] = "os_sr_csrc",
+                ["ReadScopedTas"] = "os_sr_ta",
+                ["ReadScopedLocations"] = "os_sr_loc",
+                ["ReadScopedCalls"] = "os_sr_call",
+                ["ReadScopedHistory"] = "os_sr_csh",
+                ["ReadScopedSchedules"] = "os_sr_intv"
+            };
         public static bool IsProtectedTable(string? name) => Tables.Contains(name, StringComparer.OrdinalIgnoreCase);
+        public static bool IsSingleUserDevReadAction(string? action) =>
+            action != null && SingleUserDevReadTables.ContainsKey(action);
         private readonly Dictionary<string, Guid> references;
         public Guid OrganizationId { get; }
         public Guid EnvironmentId { get; }
@@ -254,7 +270,7 @@ namespace os_sr_cact
             ValidateContext(context.OrganizationId, context.InitiatingUserId, DateTime.UtcNow);
             RequireActiveInteractiveActor(control);
             RequireApiCallerPrivileges(control);
-            RequireApiContract(control);
+            RequireApiContract(control, false);
             VerifyScopedReadback(control, caller);
         }
 
@@ -265,9 +281,123 @@ namespace os_sr_cact
                 throw new OperationError("SINGLE_USER_DEV_CONFIGURATION_INVALID");
             ValidateContext(context.OrganizationId, context.InitiatingUserId, DateTime.UtcNow);
             RequireActiveInteractiveActor(control);
-            RequireApiContract(control);
-            RequireGuardCoverage(control);
+            RequireApiContract(control, true);
             VerifyScopedReadback(control, caller);
+        }
+
+        public string ReadSingleUserDevData(string action, IOrganizationService service)
+        {
+            if (!SingleUserDev || !SingleUserDevReadTables.TryGetValue(action, out var table))
+                throw new OperationError("SINGLE_USER_DEV_READ_REJECTED");
+
+            ValidateReferences(service);
+            if (table != "os_sr_cand" && !references.ContainsKey(table) && !HasScopedCandidate(service))
+                return SerializeScopedRows(Array.Empty<Entity>());
+
+            var query = new QueryExpression(table)
+            {
+                ColumnSet = new ColumnSet(ScopedReadColumns(table)),
+                TopCount = references.ContainsKey(table) ? 2 : 101
+            };
+            query.Criteria.AddFilter(ScopeFilter(table));
+            var result = service.RetrieveMultiple(query);
+            if (result.MoreRecords || result.Entities.Count > (references.ContainsKey(table) ? 1 : 100))
+                throw new OperationError("SYNTHETIC_READBACK_LIMIT");
+            foreach (var row in result.Entities) ValidateRow(row);
+            if (references.ContainsKey(table) && result.Entities.Count != 1)
+                throw new OperationError("SYNTHETIC_REFERENCE_REJECTED");
+            return SerializeScopedRows(result.Entities);
+        }
+
+        private bool HasScopedCandidate(IOrganizationService service)
+        {
+            var query = new QueryExpression("os_sr_cand")
+            {
+                ColumnSet = new ColumnSet(VerificationColumns("os_sr_cand")),
+                TopCount = 2
+            };
+            query.Criteria.AddFilter(ScopeFilter("os_sr_cand"));
+            var rows = service.RetrieveMultiple(query);
+            if (rows.MoreRecords || rows.Entities.Count > 1)
+                throw new OperationError("SYNTHETIC_READBACK_LIMIT");
+            if (rows.Entities.Count == 0) return false;
+            ValidateRow(rows.Entities[0]);
+            return true;
+        }
+
+        private static string[] ScopedReadColumns(string table)
+        {
+            switch (table)
+            {
+                case "os_sr_cand":
+                    return new[] { "os_sr_cand_nm", "os_sr_cand_eml", "os_sr_cand_phn",
+                        "os_sr_cand_cvurl", "os_sr_cand_stat", "os_sr_cand_cnum", "os_sr_cand_corid",
+                        "os_sr_cand_pos", "os_sr_cand_csrc", "os_sr_cand_ta", "ownerid", "createdon" };
+                case "os_sr_pos": return new[] { "os_sr_pos_ttl", "statecode" };
+                case "os_sr_csrc": return new[] { "os_sr_csrc_nm", "statecode" };
+                case "os_sr_ta": return new[] { "os_sr_ta_nm", "statecode" };
+                case "os_sr_loc": return new[] { "os_sr_loc_nm", "statecode" };
+                case "os_sr_call":
+                    return new[] { "os_sr_call_cand", "os_sr_call_out", "os_sr_call_ctat",
+                        "os_sr_call_nts", "os_sr_call_ref", "os_sr_call_ctby", "ownerid" };
+                case "os_sr_csh":
+                    return new[] { "os_sr_csh_cand", "os_sr_csh_prevstat", "os_sr_csh_newstat",
+                        "os_sr_csh_chg", "os_sr_csh_rsn", "os_sr_csh_cact", "os_sr_csh_actr",
+                        "ownerid", "createdon" };
+                case "os_sr_intv":
+                    return new[] { "os_sr_intv_cand", "os_sr_intv_rnd", "os_sr_intv_strt",
+                        "os_sr_intv_end", "os_sr_intv_nts", "os_sr_intv_ta", "os_sr_intv_loc",
+                        "os_sr_intv_res", "os_sr_intv_recat", "os_sr_intv_rnts", "os_sr_intv_stat",
+                        "os_sr_intv_rsn", "os_sr_intv_chg", "ownerid", "createdon" };
+                default: throw new OperationError("SYNTHETIC_QUERY_REJECTED");
+            }
+        }
+
+        private static string SerializeScopedRows(IEnumerable<Entity> rows)
+        {
+            var values = new List<Dictionary<string, string>>();
+            foreach (var row in rows)
+            {
+                var value = new Dictionary<string, string>(StringComparer.Ordinal)
+                {
+                    ["__logicalName"] = row.LogicalName,
+                    [row.LogicalName + "id"] = row.Id.ToString("D")
+                };
+                foreach (var pair in row.Attributes)
+                {
+                    if (pair.Value == null) continue;
+                    if (pair.Value is EntityReference reference)
+                        value["_" + pair.Key + "_value"] = reference.Id.ToString("D");
+                    else if (pair.Value is OptionSetValue choice)
+                        value[pair.Key] = choice.Value.ToString(CultureInfo.InvariantCulture);
+                    else if (pair.Value is DateTime date)
+                        value[pair.Key] = DateTime.SpecifyKind(date, DateTimeKind.Utc)
+                            .ToString("yyyy-MM-dd'T'HH:mm:ss.fff'Z'", CultureInfo.InvariantCulture);
+                    else if (pair.Value is string text)
+                        value[pair.Key] = text;
+                    else if (pair.Value is Guid id)
+                        value[pair.Key] = id.ToString("D");
+                    else if (pair.Value is bool boolean)
+                        value[pair.Key] = boolean ? "true" : "false";
+                    else if (pair.Value is int number)
+                        value[pair.Key] = number.ToString(CultureInfo.InvariantCulture);
+                    else if (pair.Value is decimal amount)
+                        value[pair.Key] = amount.ToString(CultureInfo.InvariantCulture);
+                    else if (pair.Value is Money money)
+                        value[pair.Key] = money.Value.ToString(CultureInfo.InvariantCulture);
+                    else
+                        throw new OperationError("SYNTHETIC_READ_VALUE_REJECTED");
+                }
+                values.Add(value);
+            }
+
+            using (var stream = new MemoryStream())
+            {
+                new DataContractJsonSerializer(typeof(List<Dictionary<string, string>>),
+                    new DataContractJsonSerializerSettings { UseSimpleDictionaryFormat = true })
+                    .WriteObject(stream, values);
+                return Encoding.UTF8.GetString(stream.ToArray());
+            }
         }
 
         private void RequireActiveInteractiveActor(IOrganizationService control)
@@ -342,7 +472,7 @@ namespace os_sr_cact
                 throw new OperationError("SYNTHETIC_CALLER_PRIVILEGES_REJECTED");
         }
 
-        private static void RequireApiContract(IOrganizationService service)
+        private static void RequireApiContract(IOrganizationService service, bool requireScopedData)
         {
             var query = new QueryExpression("customapi")
             {
@@ -373,9 +503,14 @@ namespace os_sr_cact
                 assembly.GetAttributeValue<OptionSetValue>("sourcetype")?.Value != 4 ||
                 assembly.GetAttributeValue<EntityReference>("packageid") == null)
                 throw new OperationError("SYNTHETIC_API_CONTRACT_REJECTED");
-            foreach (var metadata in new[] {
+            var outputs = new List<(string Table, string Name, int Type)>
+            {
                 (Table: "customapirequestparameter", Name: "SyntheticScopeId", Type: 12),
-                (Table: "customapiresponseproperty", Name: "IsolationContract", Type: 10) })
+                (Table: "customapiresponseproperty", Name: "IsolationContract", Type: 10)
+            };
+            if (requireScopedData)
+                outputs.Add(("customapiresponseproperty", "ScopedData", 10));
+            foreach (var metadata in outputs)
             {
                 var parameter = new QueryExpression(metadata.Table)
                 { ColumnSet = new ColumnSet("type", "isoptional"), TopCount = 2 };
@@ -421,6 +556,20 @@ namespace os_sr_cact
             var candidate = row.GetAttributeValue<EntityReference>(CandidateColumn(row.LogicalName));
             if (candidate == null || candidate.LogicalName != "os_sr_cand" || candidate.Id != ScopeId)
                 throw new OperationError("SYNTHETIC_CANDIDATE_REJECTED");
+            if (SingleUserDev && row.LogicalName != "os_sr_oprc")
+            {
+                var owner = row.GetAttributeValue<EntityReference>("ownerid");
+                if (owner?.LogicalName != "systemuser" || owner.Id != ActorId)
+                    throw new OperationError("SYNTHETIC_OWNER_REJECTED");
+                var actorColumn = row.LogicalName == "os_sr_call" ? "os_sr_call_ctby" :
+                    row.LogicalName == "os_sr_csh" ? "os_sr_csh_actr" : null;
+                if (actorColumn != null)
+                {
+                    var actor = row.GetAttributeValue<EntityReference>(actorColumn);
+                    if (actor?.LogicalName != "systemuser" || actor.Id != ActorId)
+                        throw new OperationError("SYNTHETIC_ACTOR_REJECTED");
+                }
+            }
             if (row.LogicalName == "os_sr_intv")
             {
                 ValidateLookup(row, "os_sr_intv_ta", "os_sr_ta", true);
@@ -631,8 +780,9 @@ namespace os_sr_cact
                 ? ExpiresUtc.Value : now.AddMinutes(2);
             if (SingleUserDev)
                 return string.Format(CultureInfo.InvariantCulture,
-                    "{{\"version\":3,\"boundary\":\"SingleUserDevCandidateCoreApi\",\"mode\":\"SingleUserDev\"," +
-                    "\"nativeWritesDenied\":false,\"readback\":\"CallerOwnedScope\"," +
+                    "{{\"version\":4,\"boundary\":\"SingleUserDevCandidateCoreApi\",\"mode\":\"SingleUserDev\"," +
+                    "\"nativeWritesDenied\":false,\"scopedReads\":true,\"globalGuardsRequired\":false," +
+                    "\"readback\":\"CallerOwnedScope\"," +
                     "\"organizationId\":\"{0:D}\",\"environmentId\":\"{1:D}\",\"actorId\":\"{2:D}\"," +
                     "\"scopeId\":\"{3:D}\",\"candidateId\":\"{3:D}\",\"positionId\":\"{4:D}\"," +
                     "\"sourceId\":\"{5:D}\",\"taId\":\"{6:D}\",\"locationId\":\"{7:D}\"," +

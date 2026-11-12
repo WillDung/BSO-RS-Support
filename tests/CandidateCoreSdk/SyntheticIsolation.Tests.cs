@@ -532,6 +532,11 @@ internal static partial class Program
             System.Globalization.DateTimeStyles.AssumeUniversal | System.Globalization.DateTimeStyles.AdjustToUniversal);
         Check(validUntil > DateTime.UtcNow && validUntil <= DateTime.UtcNow.AddSeconds(121),
             "Persistent server profile does not make browser proofs persistent");
+        host.MissingScopedDataOutput = true;
+        host.Invoke(SyntheticIsolation.VerifyAction);
+        Check((string)host.Output["ResultCode"] == "SyntheticIsolationVerified",
+            "The existing BSO proof does not depend on the new SingleUserDev read response property");
+        host.MissingScopedDataOutput = false;
         host.ProfileOverride = disabled;
         Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_PROFILE_DISABLED");
         RejectContains(() => host.Create(), "SYNTHETIC_PROFILE_DISABLED");
@@ -598,8 +603,10 @@ internal static partial class Program
         {
             CallerId = SingleUserActor,
             ProfileOverride = SingleUserDevXml,
-            IncludeCreateReferences = true
+            IncludeCreateReferences = true,
+            GuardsInstalled = false
         };
+        host.Steps.Clear();
         var policy = SyntheticIsolation.ParseSingleUserDev(SingleUserDevXml);
         var bsoPolicy = SyntheticIsolation.Parse(PersistentIsolationXml);
         Check(policy.SingleUserDev && policy.PersistentDev && !policy.ExpiresUtc.HasValue,
@@ -611,11 +618,14 @@ internal static partial class Program
         host.Invoke(SyntheticIsolation.VerifySingleUserDevAction);
         var contract = (string)host.Output["IsolationContract"];
         Check((string)host.Output["ResultCode"] == "SingleUserDevVerified" &&
-            contract.Contains("\"version\":3") && contract.Contains("\"mode\":\"SingleUserDev\"") &&
+            contract.Contains("\"version\":4") && contract.Contains("\"mode\":\"SingleUserDev\"") &&
             contract.Contains("\"boundary\":\"SingleUserDevCandidateCoreApi\"") &&
             contract.Contains("\"actorId\":\"" + SingleUserActor + "\"") &&
-            contract.Contains("\"nativeWritesDenied\":false") && contract.Contains("\"calendarEnabled\":false"),
-            "SingleUserDev proof is actor-bound, distinct and does not claim privilege isolation");
+            contract.Contains("\"nativeWritesDenied\":false") &&
+            contract.Contains("\"scopedReads\":true") &&
+            contract.Contains("\"globalGuardsRequired\":false") &&
+            contract.Contains("\"calendarEnabled\":false"),
+            "SingleUserDev proof is actor-bound and advertises fixed scoped reads without claiming native privilege isolation");
         var missingGuards = new IsolationHost
         {
             CallerId = SingleUserActor,
@@ -623,16 +633,13 @@ internal static partial class Program
             GuardsInstalled = false
         };
         missingGuards.Steps.Clear();
-        Reject(() => missingGuards.Invoke(SyntheticIsolation.VerifySingleUserDevAction),
-            "SYNTHETIC_GUARD_COVERAGE_MISSING");
-
-        host.ReadProbe(new QueryExpression("os_sr_cand"));
-        var scopedList = (QueryExpression)host.LastReadQuery!;
-        bool IncludesConfiguredScope(FilterExpression filter) =>
-            filter.Conditions.Any(condition => condition.Values.Contains(SingleUserScope)) ||
-            filter.Filters.Any(IncludesConfiguredScope);
-        Check(IncludesConfiguredScope(scopedList.Criteria),
-            "Candidate list query is server-scoped to the configured synthetic record");
+        missingGuards.Invoke(SyntheticIsolation.VerifySingleUserDevAction);
+        Check((string)missingGuards.Output["ResultCode"] == "SingleUserDevVerified",
+            "SingleUserDev proof does not depend on global pipeline guards");
+        host.MissingScopedDataOutput = true;
+        Reject(() => host.Invoke(SyntheticIsolation.VerifySingleUserDevAction),
+            "SYNTHETIC_API_CONTRACT_REJECTED");
+        host.MissingScopedDataOutput = false;
         host.Create();
         Check(host.Rows.ContainsKey(SingleUserScope) &&
             host.Rows[SingleUserScope].GetAttributeValue<EntityReference>("ownerid")?.Id == SingleUserActor &&
@@ -668,6 +675,53 @@ internal static partial class Program
         Check((string)host.Output["ResultCode"] == "DuplicateReplay" && host.Writes == writesBeforeReplay,
             "SingleUserDev scheduling receipt blocks duplicate transition replay");
 
+        var scopedReadActions = new Dictionary<string, string>
+        {
+            ["ReadScopedCandidates"] = "os_sr_cand",
+            ["ReadScopedPositions"] = "os_sr_pos",
+            ["ReadScopedSources"] = "os_sr_csrc",
+            ["ReadScopedTas"] = "os_sr_ta",
+            ["ReadScopedLocations"] = "os_sr_loc",
+            ["ReadScopedCalls"] = "os_sr_call",
+            ["ReadScopedHistory"] = "os_sr_csh",
+            ["ReadScopedSchedules"] = "os_sr_intv"
+        };
+        var unrelatedCandidateId = Guid.NewGuid();
+        host.Rows[unrelatedCandidateId] = new Entity("os_sr_cand", unrelatedCandidateId)
+        {
+            ["os_sr_cand_nm"] = "Real candidate",
+            ["os_sr_cand_eml"] = "real@example.invalid",
+            ["ownerid"] = new EntityReference("systemuser", SingleUserActor)
+        };
+        var writesBeforeReads = host.Writes;
+        foreach (var action in scopedReadActions)
+        {
+            host.Input.Clear();
+            host.Input["ActionType"] = action.Key;
+            host.Input["CorrelationId"] = Guid.NewGuid();
+            host.Input["SyntheticScopeId"] = SingleUserScope;
+            host.InvokeAgain();
+            Check((string)host.Output["ResultCode"] == "ScopedRead" &&
+                ((string)host.Output["ScopedData"]).Contains("\"__logicalName\":\"" + action.Value + "\""),
+                "Fixed SingleUserDev read returns only the mapped entity type: " + action.Key + " " +
+                (string)host.Output["ScopedData"]);
+        }
+        host.Input.Clear();
+        host.Input["ActionType"] = "ReadScopedCandidates";
+        host.Input["CorrelationId"] = Guid.NewGuid();
+        host.Input["SyntheticScopeId"] = SingleUserScope;
+        host.InvokeAgain();
+        var scopedCandidates = (string)host.Output["ScopedData"];
+        Check(scopedCandidates.StartsWith("[{\"__logicalName\":\"os_sr_cand\",", StringComparison.Ordinal) &&
+            scopedCandidates.Contains("\"os_sr_candid\":\"" + SingleUserScope + "\"") &&
+            !scopedCandidates.Contains("real@example.invalid") &&
+            host.Writes == writesBeforeReads,
+            "Scoped Candidate read uses the Console JSON shape, excludes unrelated rows, and performs no mutations");
+        host.Input["Table"] = "os_sr_cand";
+        Reject(() => host.InvokeAgain(), "SYNTHETIC_READ_INPUT_REJECTED");
+        Check(host.Writes == writesBeforeReads,
+            "Caller-supplied table/query parameters are rejected before storage");
+
         host.Input.Clear();
         host.Input["ActionType"] = "RecordCall";
         host.Input["CorrelationId"] = Guid.NewGuid();
@@ -678,14 +732,6 @@ internal static partial class Program
         Reject(() => host.InvokeAgain(), "SYNTHETIC_SCOPE_REQUIRED");
         Check(host.Writes == writesBeforeReplay, "Unscoped DEV API mutation is rejected before storage");
 
-        Reject(() => host.ReadProbe(new QueryExpression("os_sr_cand"),
-            new Entity("os_sr_cand", Guid.NewGuid())
-            {
-                ["os_sr_cand_nm"] = "Real candidate",
-                ["os_sr_cand_eml"] = "real@example.invalid",
-                ["ownerid"] = new EntityReference("systemuser", SingleUserActor)
-            }), "SYNTHETIC_PROFILE_REJECTED");
-        Check(host.Writes == writesBeforeReplay, "Out-of-scope Candidate read is rejected without writes");
         Reject(() => host.Direct("Create", new Entity("os_sr_cand", Guid.NewGuid())),
             "SYNTHETIC_DIRECT_WRITE_REJECTED");
 
@@ -822,7 +868,8 @@ internal static partial class Program
         public bool MissingConfiguration, TdsEnabled, SearchEnabled, ChangeTrackingEnabled, BypassPrivilege;
         public bool OwnerReadMissing, ReceiptReadGranted, MissingPrivilegeMetadata;
         public bool LegacyGuardVerification, ApiContractInvalid, DenyReadback;
-        public bool MissingProofOutput, MissingScopeInput, InactiveCaller, GlobalBusinessRead, IncludeCreateReferences;
+        public bool MissingProofOutput, MissingScopeInput, MissingScopedDataOutput, InactiveCaller,
+            GlobalBusinessRead, IncludeCreateReferences;
         public string? TeamPrivilegeName;
         public string? ProfileOverride;
         public int EffectivePrivilegeRequests;
@@ -1075,7 +1122,11 @@ internal static partial class Program
                     } });
                 if (query.EntityName == "customapirequestparameter" || query.EntityName == "customapiresponseproperty")
                 {
-                    if (query.EntityName == "customapirequestparameter" ? MissingScopeInput : MissingProofOutput)
+                    var missing = query.EntityName == "customapirequestparameter" ? MissingScopeInput :
+                        MissingProofOutput || MissingScopedDataOutput &&
+                        query.Criteria.Conditions.Any(condition => condition.AttributeName == "uniquename" &&
+                            condition.Values.Contains("ScopedData"));
+                    if (missing)
                         return Collection(Array.Empty<Entity>());
                     return Collection(new[] { new Entity(query.EntityName, Reference)
                     { ["type"] = new OptionSetValue(query.EntityName == "customapirequestparameter" ? 12 : 10),

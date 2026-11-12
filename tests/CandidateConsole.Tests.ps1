@@ -44,7 +44,8 @@ Assert-Test ($configuration.Contains('mode: "UNCONFIGURED"') -and
     $configuration.Contains('devDirectWriteFallbackEnabled: false') -and
     $policy.Contains('actualUrl.origin.toLowerCase()') -and
     $policy.Contains('runtime.organizationId') -and
-    $policy.Contains('directWriteFallbackAvailable: mode === "DEV"')) `
+    $policy.Contains('directWriteFallbackAvailable: candidateOperationMode !== "SingleUserDev"') -and
+    $policy.Contains('mode === "DEV" && configuration.devDirectWriteFallbackEnabled')) `
     'Fail closed on unconfigured settings, verify runtime identity, and make fallback DEV-only'
 Assert-Test ($html.IndexOf('candidate-console-environment.js') -ge 0 -and
     $html.IndexOf('candidate-console-policy.js') -gt $html.IndexOf('candidate-console-environment.js') -and
@@ -497,6 +498,8 @@ Assert-Test ($deployment.Contains('[string[]]$RefreshResourceNames = @()') -and
 Assert-Test ($deployment.Contains('[switch]$CreateNewResources') -and
     $deployment.Contains('New-resource creation is restricted to the two exact Candidate Console configuration resources.') -and
     $deployment.Contains('$environmentConfiguration.environmentId -ine $target.EnvironmentId') -and
+    $deployment.Contains('$environmentConfiguration.candidateOperationMode -notin @('''', ''BsoSynthetic'', ''SingleUserDev'')') -and
+    $deployment.Contains('$environmentConfiguration.availabilityEnabled -eq $true') -and
     $deployment.Contains('Generated environment files must remain outside the repository.') -and
     $deployment.Contains('[string]$EnvironmentHtmlPath') -and
     $deployment.Contains('Generated HTML differs from the checked-in source except for the verified environment cache token.') -and

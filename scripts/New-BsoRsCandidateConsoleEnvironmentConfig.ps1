@@ -12,6 +12,7 @@ param(
     [bool]$SyntheticDataOnly = $true,
     [switch]$AvailabilityEnabled,
     [switch]$DevDirectWriteFallbackEnabled,
+    [ValidateSet('BsoSynthetic', 'SingleUserDev')][string]$CandidateOperationMode = 'BsoSynthetic',
     [ValidateSet('OFF', 'SAFE')][string]$DiagnosticsMode = 'OFF'
 )
 
@@ -29,6 +30,12 @@ if ($Mode -ne 'PROD' -and -not $SyntheticDataOnly) {
 }
 if ($Mode -ne 'DEV' -and $DevDirectWriteFallbackEnabled) {
     throw 'Direct-write fallback can be configured only for DEV.'
+}
+if ($CandidateOperationMode -ceq 'SingleUserDev' -and
+    ($Mode -cne 'DEV' -or -not $CandidateCoreEnabled -or -not $SyntheticDataOnly -or
+     $DevDirectWriteFallbackEnabled -or $DiagnosticsMode -cne 'OFF' -or
+     $ReleaseProfile -or $AvailabilityEnabled)) {
+    throw 'SingleUserDev requires bound synthetic-only DEV, Candidate Core enabled, fallback disabled, diagnostics Off, no release profile, and Calendar disabled.'
 }
 if ($releaseNeutral -and
     (-not [string]::IsNullOrWhiteSpace($OrganizationUrl) -or
@@ -112,6 +119,9 @@ $configuration = [ordered]@{
 }
 if ($AvailabilityEnabled) {
     $configuration.availabilityEnabled = $true
+}
+if ($CandidateOperationMode -ceq 'SingleUserDev') {
+    $configuration.candidateOperationMode = $CandidateOperationMode
 }
 $json = ConvertTo-Json -InputObject $configuration -Depth 4 -Compress
 $source = @"

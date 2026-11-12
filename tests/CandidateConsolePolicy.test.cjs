@@ -38,6 +38,7 @@ function configuration(overrides = {}) {
     organizationUrl: "https://dev.example.invalid",
     candidateCoreEnabled: true,
     syntheticDataOnly: true,
+    candidateOperationMode: "BsoSynthetic",
     devDirectWriteFallbackEnabled: true,
     diagnosticsMode: "OFF",
     ...overrides
@@ -60,6 +61,7 @@ test("the checked-in environment template is disabled and unconfigured", () => {
   assert.equal(value.mode, "UNCONFIGURED");
   assert.equal(value.candidateCoreEnabled, false);
   assert.equal(value.syntheticDataOnly, true);
+  assert.equal(value.candidateOperationMode, "BsoSynthetic");
   assert.equal(value.devDirectWriteFallbackEnabled, false);
   assert.equal(value.diagnosticsMode, "OFF");
 });
@@ -122,6 +124,45 @@ test("the actual policy enables synthetic scope only after a same-origin server 
   assert.match(body.CorrelationId, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   await policy.verifySyntheticIsolation(configuration(), runtime({ actorId: proof.actorId }));
   assert.notEqual(JSON.parse(calls[1].request.body).CorrelationId, body.CorrelationId);
+});
+
+test("SingleUserDev requires its distinct server proof and cannot enable direct-write fallback", async () => {
+  const proof = verifierFixture({
+    version: 3,
+    boundary: "SingleUserDevCandidateCoreApi",
+    mode: "SingleUserDev",
+    nativeWritesDenied: false
+  });
+  const calls = [];
+  const config = configuration({
+    candidateOperationMode: "SingleUserDev",
+    devDirectWriteFallbackEnabled: false
+  });
+  const policy = createPolicy(async (url, request) => {
+    calls.push({ url, request });
+    return { ok: true, json: async () => ({
+      ResultCode: "SingleUserDevVerified", IsolationContract: JSON.stringify(proof)
+    }) };
+  });
+  const resolved = policy.resolve(config, runtime({ actorId: proof.actorId }));
+  assert.equal(resolved.allowed, true);
+  assert.equal(resolved.directWriteFallbackAvailable, false);
+  await policy.verifySyntheticIsolation(config, runtime({ actorId: proof.actorId }));
+  assert.equal(policy.getSyntheticScope().mode, "SingleUserDev");
+  assert.equal(calls.length, 1);
+  assert.equal(JSON.parse(calls[0].request.body).ActionType, "VerifySingleUserDev");
+});
+
+test("SingleUserDev rejects fallback-enabled or non-DEV configuration", () => {
+  assert.equal(createPolicy().resolve(configuration({
+    candidateOperationMode: "SingleUserDev",
+    devDirectWriteFallbackEnabled: true
+  }), runtime()).allowed, false);
+  assert.equal(createPolicy().resolve(configuration({
+    mode: "TEST",
+    candidateOperationMode: "SingleUserDev",
+    devDirectWriteFallbackEnabled: false
+  }), runtime()).allowed, false);
 });
 
 test("unavailable or invalid verifier UUID generation fails closed before dispatch", async () => {

@@ -6,12 +6,12 @@
     <AssemblyName>os_sr_cact</AssemblyName>
     <RootNamespace>os_sr_cact</RootNamespace>
     <PackageId>os_sr_cact_pkg</PackageId>
-    <Version>1.0.0</Version>
+    <Version>1.0.6</Version>
     <Authors>BSO-RS-Support</Authors>
     <Company>BSO-RS-Support</Company>
     <Description>Candidate Core Dataverse plug-in package.</Description>
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <FileVersion>1.0.0.0</FileVersion>
+    <AssemblyVersion>1.0.6.0</AssemblyVersion>
+    <FileVersion>1.0.6.0</FileVersion>
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
     <SignAssembly>false</SignAssembly>

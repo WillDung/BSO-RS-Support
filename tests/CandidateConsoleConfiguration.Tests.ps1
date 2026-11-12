@@ -41,6 +41,8 @@ try {
         $configuration.syntheticDataOnly -eq $true -and
         $configuration.devDirectWriteFallbackEnabled -eq $true -and
         $configuration.diagnosticsMode -ceq 'OFF') 'Serialize only the requested environment policy'
+    Assert-Test (-not ($configuration.PSObject.Properties.Name -contains 'candidateOperationMode')) `
+        'Keep the default DEV configuration on the existing BSO synthetic path'
     Assert-Test (-not ($configuration.PSObject.Properties.Name -contains 'availabilityEnabled')) `
         'Leave availability disabled and preserve default configuration serialization'
     Assert-Test ($generated -notmatch 'https://[^"]+\.crm\d+\.dynamics\.com' -and
@@ -54,6 +56,68 @@ try {
 
     Remove-Item -LiteralPath $outputPath
     Remove-Item -LiteralPath $htmlOutputPath
+
+    $singleUserOutputPath = Join-Path ([IO.Path]::GetTempPath()) "single-user-$tempName.js"
+    $singleUserHtmlPath = Join-Path ([IO.Path]::GetTempPath()) "single-user-$tempName.html"
+    & $generatorPath `
+        -Mode DEV `
+        -OrganizationUrl 'https://dev.example.invalid' `
+        -EnvironmentId '11111111-1111-4111-8111-111111111111' `
+        -OrganizationId '22222222-2222-4222-8222-222222222222' `
+        -OutputConfigurationPath $singleUserOutputPath `
+        -OutputHtmlPath $singleUserHtmlPath `
+        -CandidateOperationMode SingleUserDev | Out-Null
+    $singleUserText = [IO.File]::ReadAllText($singleUserOutputPath)
+    $singleUserMatch = [regex]::Match($singleUserText, '(?s)const configuration = (?<json>\{.*?\});')
+    $singleUserConfiguration = $singleUserMatch.Groups['json'].Value | ConvertFrom-Json
+    Assert-Test ($singleUserMatch.Success -and
+        $singleUserConfiguration.mode -ceq 'DEV' -and
+        $singleUserConfiguration.syntheticDataOnly -eq $true -and
+        $singleUserConfiguration.candidateCoreEnabled -eq $true -and
+        $singleUserConfiguration.devDirectWriteFallbackEnabled -eq $false -and
+        $singleUserConfiguration.candidateOperationMode -ceq 'SingleUserDev' -and
+        -not ($singleUserConfiguration.PSObject.Properties.Name -contains 'availabilityEnabled')) `
+        'Generate explicit SingleUserDev only for guarded synthetic DEV without Calendar'
+    Remove-Item -LiteralPath $singleUserOutputPath, $singleUserHtmlPath
+
+    $singleUserRejectedOutputPath = Join-Path ([IO.Path]::GetTempPath()) "single-user-rejected-$tempName.js"
+    $singleUserRejectedHtmlPath = Join-Path ([IO.Path]::GetTempPath()) "single-user-rejected-$tempName.html"
+    $singleUserRejected = $false
+    try {
+        & $generatorPath `
+            -Mode DEV `
+            -OrganizationUrl 'https://dev.example.invalid' `
+            -EnvironmentId '11111111-1111-4111-8111-111111111111' `
+            -OrganizationId '22222222-2222-4222-8222-222222222222' `
+            -OutputConfigurationPath $singleUserRejectedOutputPath `
+            -OutputHtmlPath $singleUserRejectedHtmlPath `
+            -CandidateOperationMode SingleUserDev `
+            -DevDirectWriteFallbackEnabled
+    } catch {
+        $singleUserRejected = $true
+    }
+    Assert-Test ($singleUserRejected -and
+        -not (Test-Path -LiteralPath $singleUserRejectedOutputPath) -and
+        -not (Test-Path -LiteralPath $singleUserRejectedHtmlPath)) `
+        'Reject SingleUserDev when direct-write fallback is enabled'
+    $singleUserRejected = $false
+    try {
+        & $generatorPath `
+            -Mode DEV `
+            -OrganizationUrl 'https://dev.example.invalid' `
+            -EnvironmentId '11111111-1111-4111-8111-111111111111' `
+            -OrganizationId '22222222-2222-4222-8222-222222222222' `
+            -OutputConfigurationPath $singleUserRejectedOutputPath `
+            -OutputHtmlPath $singleUserRejectedHtmlPath `
+            -CandidateOperationMode SingleUserDev `
+            -AvailabilityEnabled
+    } catch {
+        $singleUserRejected = $true
+    }
+    Assert-Test ($singleUserRejected -and
+        -not (Test-Path -LiteralPath $singleUserRejectedOutputPath) -and
+        -not (Test-Path -LiteralPath $singleUserRejectedHtmlPath)) `
+        'Reject Calendar availability in SingleUserDev configuration'
     $rejectedName = "candidate-console-config-$([Guid]::NewGuid().ToString('N'))"
     $rejectedOutputPath = Join-Path ([IO.Path]::GetTempPath()) "$rejectedName.js"
     $rejectedHtmlPath = Join-Path ([IO.Path]::GetTempPath()) "$rejectedName.html"

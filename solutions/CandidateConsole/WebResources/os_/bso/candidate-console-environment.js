@@ -12,6 +12,7 @@
       organizationUrl: "",
       candidateCoreEnabled: false,
       syntheticDataOnly: true,
+      candidateOperationMode: "BsoSynthetic",
       devDirectWriteFallbackEnabled: false,
       diagnosticsMode: "OFF"
     })

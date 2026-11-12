@@ -382,7 +382,12 @@ if (-not ($PublishOnly -or $ReconcilePublishOnly) -and ($hasEnvironmentResource 
         $environmentConfiguration.candidateCoreEnabled -ne $true -or
         $environmentConfiguration.syntheticDataOnly -ne $true -or
         $environmentConfiguration.devDirectWriteFallbackEnabled -isnot [bool] -or
-        [string]$environmentConfiguration.diagnosticsMode -notin @('OFF', 'SAFE')) {
+        [string]$environmentConfiguration.diagnosticsMode -notin @('OFF', 'SAFE') -or
+        [string]$environmentConfiguration.candidateOperationMode -notin @('', 'BsoSynthetic', 'SingleUserDev') -or
+        [string]$environmentConfiguration.candidateOperationMode -ceq 'SingleUserDev' -and
+        ($environmentConfiguration.devDirectWriteFallbackEnabled -ne $false -or
+         [string]$environmentConfiguration.diagnosticsMode -cne 'OFF' -or
+         $environmentConfiguration.availabilityEnabled -eq $true)) {
         throw 'The generated environment configuration does not match the guarded DEV policy.'
     }
     $configurationHash = [Convert]::ToHexString(

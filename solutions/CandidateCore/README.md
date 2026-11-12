@@ -1,10 +1,20 @@
 # Candidate Core server operations
 
-Source for Candidate Core plug-in code used by the legacy signed `os_sr_cact` assembly and the unsigned package-backed `os_sr_cact` assembly, version `1.0.0.0`. This is authored .NET plug-in source, **not an exported/unpacked Solution**. The supported target is .NET Framework 4.6.2 with `Microsoft.CrmSdk.CoreAssemblies` pinned to 9.0.2.60; the SDK assembly is supplied by the Dataverse sandbox. No runtime dependency is merged/uploaded with the package assembly.
+Source for Candidate Core plug-in code. The local SingleUserDev candidate is version `1.0.6.0`; the deployed handler remains `1.0.5.0` until an authorized import and readback. This is authored .NET plug-in source, **not an exported/unpacked Solution**. The supported target is .NET Framework 4.6.2 with `Microsoft.CrmSdk.CoreAssemblies` pinned to 9.0.2.60; the SDK assembly is supplied by the Dataverse sandbox. No runtime dependency is merged/uploaded with the package assembly.
 
 <a id="synthetic-dev-boundary-offline-implementation-not-deployed"></a>
 
 ## Synthetic DEV boundary (scoped runtime and historical guard design)
+
+### SingleUserDev functional scope (1.0.6 source; not deployed)
+
+The local 1.0.6 source adds an optional `<singleUserDev mode="SingleUserDev" actorId="..." scopeId="..." enabled="true" />` child to the existing `os_sr_siso` profile. The root BSO actor, scope, and four reference bindings remain intact; the child has a distinct actor and Candidate row scope and reuses the configured Position, Source, TA, and Location bindings. Its synthetic name/email are derived from the unchanged root scope, preserving the existing approved marker. No new environment variable or identity is introduced. In DEV, the server derives the actor from the Dataverse execution context, requires the pinned DEV organization, active interactive user, expected Custom API handler, installed guard coverage, exact Candidate scope and approved references, and caller readback. The existing BSO proof continues to use its v2 contract and original root bindings.
+
+The Console selects this path only when its explicit `candidateOperationMode` is `SingleUserDev`; the generated configuration is restricted to synthetic-only DEV with Candidate Core enabled, direct-write fallback disabled, diagnostics Off, and Calendar disabled. All Candidate operations in this mode require the distinct server-issued v3 proof and exact synthetic scope. The existing BSO mode remains the default.
+
+This is a bounded functional path, **not an administrator isolation boundary**. Its v3 proof states `nativeWritesDenied:false`; it does not remove System Administrator or plugin-bypass capabilities, and it does not claim that the owner cannot access data through other administrative/native paths. Use it only for the Candidate Console workflow; non-admin security isolation remains a separate test. The environment GUID is trusted profile configuration, while the server pins the DEV organization ID; verify the exact environment/profile bindings before deployment.
+
+The source and package version are local only. No live profile, package, guard registration, or Console resource has been changed or accepted. The v3 proof fails closed unless all required package-backed mutation and read guard registrations are present; their current live coverage is unverified. Do not treat the profile example as tenant configuration or execute lifecycle writes before exact target/profile/guard verification and authenticated proof/read acceptance.
 
 ### Revocable persistent DEV profile (1.0.5)
 

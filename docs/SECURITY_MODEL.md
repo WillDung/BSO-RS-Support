@@ -1,5 +1,13 @@
 # Security Model
 
+## SingleUserDev owner functional scope (owner direction, 2026-11-12; local source, not deployed)
+
+The owner designated the existing administrator as the sole interactive functional-test operator; a second non-admin BSO is not a prerequisite for this DEV functional path. The local Candidate Core 1.0.6 candidate adds an opt-in child scope to the existing `os_sr_siso` profile, preserving its BSO root bindings and v2 proof while requiring the authenticated operator, a distinct Candidate row scope with the unchanged approved synthetic marker, exact configured references, and a separate v3 server-issued proof. The Console generator permits this mode only in synthetic-only DEV with direct-write fallback and Calendar disabled. See the [Candidate Core contract](../solutions/CandidateCore/README.md#singleuserdev-functional-scope-106-source-not-deployed).
+
+This mode is not a least-privilege or administrator-isolation mechanism. The proof explicitly reports `nativeWritesDenied:false`; an existing administrator retains native Dataverse and plugin-bypass capabilities outside the scoped Console/API workflow. Do not claim that SingleUserDev blocks deliberate administrative access, grants real-data authorization, or substitutes for non-admin security testing. The server pins the DEV organization; the profile's environment GUID remains trusted configuration and must be reconciled against the confirmed target before any deployment.
+
+**Status:** source and offline tests only. The v3 proof fails closed unless all required package-backed mutation/read guard registrations are installed; their live coverage is unverified. No package/profile/guard/resource deployment, tenant query, Candidate read/write, or role modification occurred. Existing BSO security requirements and the separate non-admin verifier remain applicable to their respective tests.
+
 ## Separate operational and administrative identities (design, 2026-11-11)
 
 **Requested design, not provisioned accounts or assigned permissions.** Preserve the sole profile-bound non-admin BSO test account unchanged. A separate **BSO reference administrator** is an administrative identity, not a second operational BSO or a new Outlook connection. No account, role assignment, team membership, environment permission or tenant-wide setting is created by this design.

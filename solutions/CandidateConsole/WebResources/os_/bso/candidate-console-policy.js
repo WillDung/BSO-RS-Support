@@ -3,6 +3,7 @@
 
   const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const ENVIRONMENT_MODES = new Set(["DEV", "TEST", "PROD"]);
+  const CANDIDATE_OPERATION_MODES = new Set(["BsoSynthetic", "SingleUserDev"]);
   let isolation = null;
 
   function blocked(reason) {
@@ -30,6 +31,14 @@
         typeof configuration.syntheticDataOnly !== "boolean" ||
         typeof configuration.devDirectWriteFallbackEnabled !== "boolean" ||
         !["OFF", "SAFE"].includes(configuration.diagnosticsMode)) {
+      return blocked("CONFIGURATION_INVALID");
+    }
+
+    const candidateOperationMode = configuration.candidateOperationMode || "BsoSynthetic";
+    if (!CANDIDATE_OPERATION_MODES.has(candidateOperationMode) ||
+        candidateOperationMode === "SingleUserDev" &&
+        (mode !== "DEV" || configuration.syntheticDataOnly !== true ||
+          configuration.devDirectWriteFallbackEnabled !== false)) {
       return blocked("CONFIGURATION_INVALID");
     }
 
@@ -62,8 +71,10 @@
     return Object.freeze({
       allowed: true,
       mode,
+      candidateOperationMode,
       syntheticDataOnly: configuration.syntheticDataOnly,
-      directWriteFallbackAvailable: mode === "DEV" && configuration.devDirectWriteFallbackEnabled,
+      directWriteFallbackAvailable: candidateOperationMode !== "SingleUserDev" &&
+        mode === "DEV" && configuration.devDirectWriteFallbackEnabled,
       diagnosticsMode: configuration.diagnosticsMode
     });
   }
@@ -91,6 +102,8 @@
     if (!normalizeGuid(correlationId) || correlationId === "00000000-0000-0000-0000-000000000000") {
       throw new Error("SYNTHETIC_VERIFIER_CORRELATION_UNAVAILABLE");
     }
+    const singleUserDev = resolved.candidateOperationMode === "SingleUserDev";
+    const resultCode = singleUserDev ? "SingleUserDevVerified" : "SyntheticIsolationVerified";
     const response = await global.fetch("/api/data/v9.2/os_sr_cact", {
       method: "POST",
       credentials: "same-origin",
@@ -98,17 +111,25 @@
         Accept: "application/json", "Content-Type": "application/json; charset=utf-8",
         "OData-MaxVersion": "4.0", "OData-Version": "4.0"
       },
-      body: JSON.stringify({ ActionType: "VerifySyntheticIsolation", CorrelationId: correlationId })
+      body: JSON.stringify({
+        ActionType: singleUserDev ? "VerifySingleUserDev" : "VerifySyntheticIsolation",
+        CorrelationId: correlationId
+      })
     });
     if (!response.ok) throw new Error("SYNTHETIC_VERIFIER_UNAVAILABLE");
     const result = await response.json();
-    if (!result || result.ResultCode !== "SyntheticIsolationVerified" ||
+    if (!result || result.ResultCode !== resultCode ||
         typeof result.IsolationContract !== "string") throw new Error("SYNTHETIC_VERIFIER_RESPONSE_INVALID");
     const proof = JSON.parse(result.IsolationContract);
+    const expectedBoundary = singleUserDev ? "SingleUserDevCandidateCoreApi" : "ScopedCandidateCoreApi";
+    const expectedVersion = singleUserDev ? 3 : 2;
+    const expectedNativeWritesDenied = !singleUserDev;
     const guids = ["organizationId", "environmentId", "actorId", "scopeId", "candidateId",
       "positionId", "sourceId", "taId", "locationId"];
-    if (!proof || proof.version !== 2 || proof.boundary !== "ScopedCandidateCoreApi" ||
-        proof.nativeWritesDenied !== true || proof.readback !== "CallerOwnedScope" || proof.calendarEnabled !== false ||
+    if (!proof || proof.version !== expectedVersion || proof.boundary !== expectedBoundary ||
+        proof.mode !== (singleUserDev ? "SingleUserDev" : undefined) ||
+        proof.nativeWritesDenied !== expectedNativeWritesDenied ||
+        proof.readback !== "CallerOwnedScope" || proof.calendarEnabled !== false ||
         guids.some((name) => !normalizeGuid(proof[name])) ||
         normalizeGuid(proof.organizationId) !== normalizeGuid(runtime.organizationId) ||
         normalizeGuid(proof.environmentId) !== normalizeGuid(configuration.environmentId) ||

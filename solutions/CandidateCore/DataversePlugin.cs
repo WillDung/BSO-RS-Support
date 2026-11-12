@@ -35,34 +35,50 @@ namespace os_sr_cact
                 var factory = (IOrganizationServiceFactory)serviceProvider.GetService(typeof(IOrganizationServiceFactory));
                 var callerService = factory.CreateOrganizationService(context.InitiatingUserId);
                 SyntheticIsolation? isolation = null;
-                if (context.OrganizationId == DevCandidateSlice.DevelopmentOrganizationId ||
-                    context.InputParameters.TryGetValue("SyntheticScopeId", out var requestedScope) &&
-                        requestedScope != null && !Equals(requestedScope, Guid.Empty) ||
-                    context.InputParameters.TryGetValue("ActionType", out var verifierAction) &&
-                        Equals(verifierAction, SyntheticIsolation.VerifyAction))
+                var requestedAction = context.InputParameters.TryGetValue("ActionType", out var actionInput)
+                    ? actionInput as string : null;
+                var requestedScope = context.InputParameters.TryGetValue("SyntheticScopeId", out var scopeInput) &&
+                    scopeInput is Guid scopeId && scopeId != Guid.Empty;
+                var isSyntheticVerifier = requestedAction == SyntheticIsolation.VerifyAction;
+                var isSingleUserDevVerifier = requestedAction == SyntheticIsolation.VerifySingleUserDevAction;
+                var developmentOrganization = context.OrganizationId == DevCandidateSlice.DevelopmentOrganizationId;
+                if (developmentOrganization)
                 {
-                    if (context.OrganizationId != DevCandidateSlice.DevelopmentOrganizationId)
-                        throw new OperationError("SYNTHETIC_ORGANIZATION_REJECTED");
                     var controlService = factory.CreateOrganizationService(null);
-                    var explicitIsolation =
-                        context.InputParameters.TryGetValue("SyntheticScopeId", out var scope) &&
-                            scope != null && !Equals(scope, Guid.Empty) ||
-                        context.InputParameters.TryGetValue("ActionType", out var isolationAction) &&
-                            Equals(isolationAction, SyntheticIsolation.VerifyAction);
-                    isolation = explicitIsolation ? SyntheticIsolation.Load(controlService, context) :
-                        SyntheticIsolation.LoadForGuard(controlService, context);
-                    if (isolation != null && Equals(context.InputParameters["ActionType"], SyntheticIsolation.VerifyAction))
+                    if (isSingleUserDevVerifier)
                     {
                         CandidateActionInputAdapter.ValidateVerifier(context.InputParameters);
+                        isolation = SyntheticIsolation.LoadSingleUserDev(controlService, context);
+                        isolation.VerifySingleUserDevApiScope(controlService, callerService, context);
+                        context.OutputParameters["ResultCode"] = "SingleUserDevVerified";
+                        context.OutputParameters["IsolationContract"] = isolation.Contract();
+                        return;
+                    }
+                    if (isSyntheticVerifier)
+                    {
+                        CandidateActionInputAdapter.ValidateVerifier(context.InputParameters);
+                        isolation = SyntheticIsolation.Load(controlService, context);
                         isolation.VerifyApiScope(controlService, callerService, context);
                         context.OutputParameters["ResultCode"] = "SyntheticIsolationVerified";
                         context.OutputParameters["IsolationContract"] = isolation.Contract();
                         return;
                     }
+                    isolation = SyntheticIsolation.LoadForGuard(controlService, context);
+                    if (isolation == null)
+                        throw new OperationError(requestedScope
+                            ? "SYNTHETIC_ACTOR_REJECTED" : "SYNTHETIC_PROFILE_REQUIRED");
                 }
+                else if (requestedScope || isSyntheticVerifier || isSingleUserDevVerifier)
+                    throw new OperationError("SYNTHETIC_ORGANIZATION_REJECTED");
                 var request = CandidateActionInputAdapter.Create(context.InitiatingUserId, context.InputParameters, DateTime.UtcNow);
                 if (isolation != null)
-                    isolation.VerifyApiScope(factory.CreateOrganizationService(null), callerService, context);
+                {
+                    var controlService = factory.CreateOrganizationService(null);
+                    if (isolation.SingleUserDev)
+                        isolation.VerifySingleUserDevApiScope(controlService, callerService, context);
+                    else
+                        isolation.VerifyApiScope(controlService, callerService, context);
+                }
                 isolation?.ValidateRequest(request, callerService);
                 action = request.Action;
                 if (action == "CreateCandidate") createCandidateStage = "REFERENCE_VALIDATION";

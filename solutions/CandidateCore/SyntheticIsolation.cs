@@ -17,6 +17,7 @@ namespace os_sr_cact
     {
         public const string ConfigurationName = "os_sr_siso";
         public const string VerifyAction = "VerifySyntheticIsolation";
+        public const string VerifySingleUserDevAction = "VerifySingleUserDev";
         public static readonly string[] Tables =
         {
             "os_sr_cand", "os_sr_call", "os_sr_csh", "os_sr_intv", "os_sr_oprc",
@@ -36,16 +37,30 @@ namespace os_sr_cact
         public DateTime? ExpiresUtc { get; }
         public bool Enabled { get; }
         public bool PersistentDev { get; }
-        public string CandidateName => "[SYNTHETIC-E2E] Playwright " + ScopeId.ToString("D");
-        public string CandidateEmail => "pw-" + ScopeId.ToString("D") + "@example.invalid";
+        public bool SingleUserDev { get; }
+        private bool HasSingleUserDevConfiguration { get; }
+        private Guid CandidateMarkerId { get; }
+        public string CandidateName => "[SYNTHETIC-E2E] Playwright " + CandidateMarkerId.ToString("D");
+        public string CandidateEmail => "pw-" + CandidateMarkerId.ToString("D") + "@example.invalid";
 
-        private SyntheticIsolation(XElement root)
+        private SyntheticIsolation(XElement root, bool singleUserDev = false)
         {
             OrganizationId = ReadGuid(root, "organizationId");
             EnvironmentId = ReadGuid(root, "environmentId");
-            ActorId = ReadGuid(root, "actorId");
-            ScopeId = ReadGuid(root, "scopeId");
-            PersistentDev = (string?)root.Attribute("profileVersion") == "2";
+            var profileActorId = ReadGuid(root, "actorId");
+            var profileScopeId = ReadGuid(root, "scopeId");
+            CandidateMarkerId = profileScopeId;
+            var profileVersion = (string?)root.Attribute("profileVersion");
+            PersistentDev = profileVersion == "2" || profileVersion == "3";
+            HasSingleUserDevConfiguration = profileVersion == "3";
+            var singleUserNode = singleUserDev ? root.Element("singleUserDev") : null;
+            if (singleUserDev && !HasSingleUserDevConfiguration)
+                throw new OperationError("SINGLE_USER_DEV_CONFIGURATION_MISSING");
+            if (singleUserDev && singleUserNode == null)
+                throw new OperationError("SINGLE_USER_DEV_CONFIGURATION_INVALID");
+            SingleUserDev = singleUserDev;
+            ActorId = singleUserDev ? ReadGuid(singleUserNode!, "actorId") : profileActorId;
+            ScopeId = singleUserDev ? ReadGuid(singleUserNode!, "scopeId") : profileScopeId;
             if (PersistentDev)
             {
                 if ((string?)root.Attribute("lifetime") != "PersistentDev" ||
@@ -53,6 +68,8 @@ namespace os_sr_cact
                     !new[] { "true", "false" }.Contains((string?)root.Attribute("enabled")))
                     throw new OperationError("SYNTHETIC_CONFIGURATION_INVALID");
                 Enabled = (string?)root.Attribute("enabled") == "true";
+                if (singleUserDev && (string?)singleUserNode!.Attribute("enabled") != "true")
+                    throw new OperationError("SYNTHETIC_PROFILE_DISABLED");
             }
             else
             {
@@ -72,7 +89,11 @@ namespace os_sr_cact
             };
         }
 
-        public static SyntheticIsolation Parse(string value)
+        public static SyntheticIsolation Parse(string value) => Parse(value, false);
+
+        public static SyntheticIsolation ParseSingleUserDev(string value) => Parse(value, true);
+
+        private static SyntheticIsolation Parse(string value, bool singleUserDev)
         {
             if (string.IsNullOrWhiteSpace(value) || value.Length > 4096)
                 throw new OperationError("SYNTHETIC_CONFIGURATION_INVALID");
@@ -84,13 +105,31 @@ namespace os_sr_cact
                 var root = XElement.Load(reader);
                 var bindings = new[] { "organizationId", "environmentId", "actorId", "scopeId",
                     "positionId", "sourceId", "taId", "locationId" };
-                var attributes = bindings.Concat((string?)root.Attribute("profileVersion") == "2"
-                    ? new[] { "profileVersion", "lifetime", "enabled" } : new[] { "expiresUtc" }).ToArray();
-                if (root.Name != "syntheticIsolation" || root.HasElements ||
+                var profileVersion = (string?)root.Attribute("profileVersion");
+                var profileAttributes = profileVersion == "2"
+                    ? new[] { "profileVersion", "lifetime", "enabled" }
+                    : profileVersion == "3"
+                        ? new[] { "profileVersion", "lifetime", "enabled" }
+                        : new[] { "expiresUtc" };
+                var attributes = bindings.Concat(profileAttributes).ToArray();
+                var singleUserNodes = root.Elements("singleUserDev").ToArray();
+                if (root.Name != "syntheticIsolation" ||
+                    (profileVersion == "3"
+                        ? singleUserNodes.Length != 1 || root.Elements().Count() != 1
+                        : root.Elements().Any()) ||
                     root.Attributes().Count() != attributes.Length ||
                     root.Attributes().Any(attribute => !attributes.Contains(attribute.Name.ToString())))
                     throw new OperationError("SYNTHETIC_CONFIGURATION_INVALID");
-                return new SyntheticIsolation(root);
+                if (profileVersion == "3" && (singleUserNodes[0].Attributes().Count() != 4 ||
+                    singleUserNodes[0].HasElements ||
+                    singleUserNodes[0].Attributes().Any(attribute =>
+                        !new[] { "mode", "actorId", "scopeId", "enabled" }.Contains(attribute.Name.ToString())) ||
+                    (string?)singleUserNodes[0].Attribute("mode") != "SingleUserDev" ||
+                    !new[] { "true", "false" }.Contains((string?)singleUserNodes[0].Attribute("enabled")) ||
+                    ReadGuid(root, "actorId") == ReadGuid(singleUserNodes[0], "actorId") ||
+                    ReadGuid(root, "scopeId") == ReadGuid(singleUserNodes[0], "scopeId")))
+                    throw new OperationError("SINGLE_USER_DEV_CONFIGURATION_INVALID");
+                return new SyntheticIsolation(root, singleUserDev);
             }
         }
 
@@ -108,18 +147,37 @@ namespace os_sr_cact
             return policy;
         }
 
+        public static SyntheticIsolation LoadSingleUserDev(IOrganizationService service, IPluginExecutionContext context)
+        {
+            var policy = ParseSingleUserDev(ReadProfileValue(service));
+            policy.ValidateContext(context.OrganizationId, context.InitiatingUserId, DateTime.UtcNow);
+            return policy;
+        }
+
         public static SyntheticIsolation? LoadForGuard(IOrganizationService service, IPluginExecutionContext context)
         {
             var policy = ReadProfile(service);
             if (context.OrganizationId != DevCandidateSlice.DevelopmentOrganizationId ||
                 context.OrganizationId != policy.OrganizationId)
                 throw new OperationError("SYNTHETIC_ORGANIZATION_REJECTED");
-            if (context.InitiatingUserId != policy.ActorId) return null;
-            policy.ValidateContext(context.OrganizationId, context.InitiatingUserId, DateTime.UtcNow);
-            return policy;
+            if (context.InitiatingUserId == policy.ActorId)
+            {
+                policy.ValidateContext(context.OrganizationId, context.InitiatingUserId, DateTime.UtcNow);
+                return policy;
+            }
+            var singleUserValue = ReadProfileValue(service);
+            var rootProfile = Parse(singleUserValue);
+            if (!rootProfile.HasSingleUserDevConfiguration) return null;
+            var singleUserDev = ParseSingleUserDev(singleUserValue);
+            if (context.InitiatingUserId != singleUserDev.ActorId) return null;
+            singleUserDev.ValidateContext(context.OrganizationId, context.InitiatingUserId, DateTime.UtcNow);
+            return singleUserDev;
         }
 
-        private static SyntheticIsolation ReadProfile(IOrganizationService service)
+        private static SyntheticIsolation ReadProfile(IOrganizationService service) =>
+            Parse(ReadProfileValue(service));
+
+        private static string ReadProfileValue(IOrganizationService service)
         {
             var definitions = new QueryExpression("environmentvariabledefinition")
             {
@@ -140,7 +198,8 @@ namespace os_sr_cact
             var rows = valueResult.Entities;
             if (valueResult.MoreRecords || rows.Count != 1 || rows[0].GetAttributeValue<OptionSetValue>("statecode")?.Value != 0)
                 throw new OperationError("SYNTHETIC_CONFIGURATION_MISSING");
-            return Parse(rows[0].GetAttributeValue<string>("value"));
+            return rows[0].GetAttributeValue<string>("value") ??
+                throw new OperationError("SYNTHETIC_CONFIGURATION_MISSING");
         }
 
         public void ValidateContext(Guid organization, Guid actor, DateTime now)
@@ -160,6 +219,12 @@ namespace os_sr_cact
                 throw new OperationError("SYNTHETIC_SCOPE_REQUIRED");
             if (request.Actor != ActorId || request.CandidateId.HasValue && request.CandidateId != ScopeId)
                 throw new OperationError("SYNTHETIC_CANDIDATE_REJECTED");
+            if (SingleUserDev && request.Action == "CreateCandidate")
+                foreach (var pair in new[] { ("PositionId", "os_sr_pos"), ("CandidateSourceId", "os_sr_csrc"),
+                    ("AssignedTaId", "os_sr_ta") })
+                    if (!request.Values.TryGetValue(pair.Item1, out var value) ||
+                        !(value is Guid referenceId) || referenceId != references[pair.Item2])
+                        throw new OperationError("SYNTHETIC_REFERENCE_REJECTED");
             if (request.Action != "CreateCandidate")
                 ValidateRow(service.Retrieve("os_sr_cand", ScopeId, new ColumnSet(VerificationColumns("os_sr_cand"))));
             foreach (var field in new[] { "CandidateName", "CandidateEmail" })
@@ -187,12 +252,34 @@ namespace os_sr_cact
         public void VerifyApiScope(IOrganizationService control, IOrganizationService caller, IPluginExecutionContext context)
         {
             ValidateContext(context.OrganizationId, context.InitiatingUserId, DateTime.UtcNow);
-            var user = control.Retrieve("systemuser", ActorId, new ColumnSet("isdisabled", "islicensed", "accessmode"));
-            if (!user.Contains("isdisabled") || user.GetAttributeValue<bool>("isdisabled") ||
-                !user.GetAttributeValue<bool>("islicensed") || user.GetAttributeValue<OptionSetValue>("accessmode")?.Value != 0)
-                throw new OperationError("SYNTHETIC_CALLER_INELIGIBLE");
+            RequireActiveInteractiveActor(control);
             RequireApiCallerPrivileges(control);
             RequireApiContract(control);
+            VerifyScopedReadback(control, caller);
+        }
+
+        public void VerifySingleUserDevApiScope(
+            IOrganizationService control, IOrganizationService caller, IPluginExecutionContext context)
+        {
+            if (!SingleUserDev)
+                throw new OperationError("SINGLE_USER_DEV_CONFIGURATION_INVALID");
+            ValidateContext(context.OrganizationId, context.InitiatingUserId, DateTime.UtcNow);
+            RequireActiveInteractiveActor(control);
+            RequireApiContract(control);
+            RequireGuardCoverage(control);
+            VerifyScopedReadback(control, caller);
+        }
+
+        private void RequireActiveInteractiveActor(IOrganizationService control)
+        {
+            var user = control.Retrieve("systemuser", ActorId, new ColumnSet("isdisabled", "islicensed", "accessmode"));
+            if (user.Id != ActorId || !user.Contains("isdisabled") || user.GetAttributeValue<bool>("isdisabled") ||
+                !user.GetAttributeValue<bool>("islicensed") || user.GetAttributeValue<OptionSetValue>("accessmode")?.Value != 0)
+                throw new OperationError("SYNTHETIC_CALLER_INELIGIBLE");
+        }
+
+        private void VerifyScopedReadback(IOrganizationService control, IOrganizationService caller)
+        {
             ValidateReferences(caller);
             foreach (var table in new[] { "os_sr_cand", "os_sr_call", "os_sr_csh", "os_sr_intv" })
             {
@@ -328,7 +415,7 @@ namespace os_sr_cact
                     throw new OperationError("SYNTHETIC_PROFILE_REJECTED");
                 foreach (var pair in new[] { ("os_sr_cand_pos", "os_sr_pos"), ("os_sr_cand_csrc", "os_sr_csrc"),
                     ("os_sr_cand_ta", "os_sr_ta") })
-                    ValidateLookup(row, pair.Item1, pair.Item2, false);
+                    ValidateLookup(row, pair.Item1, pair.Item2, SingleUserDev);
                 return;
             }
             var candidate = row.GetAttributeValue<EntityReference>(CandidateColumn(row.LogicalName));
@@ -542,6 +629,16 @@ namespace os_sr_cact
             ValidateContext(OrganizationId, ActorId, now);
             var until = ExpiresUtc.HasValue && ExpiresUtc.Value < now.AddMinutes(2)
                 ? ExpiresUtc.Value : now.AddMinutes(2);
+            if (SingleUserDev)
+                return string.Format(CultureInfo.InvariantCulture,
+                    "{{\"version\":3,\"boundary\":\"SingleUserDevCandidateCoreApi\",\"mode\":\"SingleUserDev\"," +
+                    "\"nativeWritesDenied\":false,\"readback\":\"CallerOwnedScope\"," +
+                    "\"organizationId\":\"{0:D}\",\"environmentId\":\"{1:D}\",\"actorId\":\"{2:D}\"," +
+                    "\"scopeId\":\"{3:D}\",\"candidateId\":\"{3:D}\",\"positionId\":\"{4:D}\"," +
+                    "\"sourceId\":\"{5:D}\",\"taId\":\"{6:D}\",\"locationId\":\"{7:D}\"," +
+                    "\"validUntil\":\"{8:yyyy-MM-ddTHH:mm:ssZ}\",\"calendarEnabled\":false}}",
+                    OrganizationId, EnvironmentId, ActorId, ScopeId, references["os_sr_pos"],
+                    references["os_sr_csrc"], references["os_sr_ta"], references["os_sr_loc"], until);
             return string.Format(CultureInfo.InvariantCulture,
                 "{{\"version\":2,\"boundary\":\"ScopedCandidateCoreApi\",\"nativeWritesDenied\":true," +
                 "\"readback\":\"CallerOwnedScope\",\"organizationId\":\"{0:D}\",\"environmentId\":\"{1:D}\"," +

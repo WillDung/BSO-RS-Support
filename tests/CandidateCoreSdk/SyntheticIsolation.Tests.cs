@@ -16,7 +16,9 @@ internal static partial class Program
         .GetType("os_sr_cact.DevCandidateSlice")!.GetField("DevelopmentOrganizationId",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!.GetValue(null)!;
     private static readonly Guid Scope = Guid.Parse("10000000-0000-4000-8000-000000000001");
+    private static readonly Guid SingleUserScope = Guid.Parse("10000000-0000-4000-8000-000000000002");
     private static readonly Guid Reference = Guid.Parse("20000000-0000-4000-8000-000000000001");
+    private static readonly Guid SingleUserActor = Guid.Parse("30000000-0000-4000-8000-000000000001");
     private static string IsolationXml => "<syntheticIsolation organizationId=\"" + DevOrganization +
         "\" environmentId=\"" + Organization + "\" actorId=\"" + Actor + "\" scopeId=\"" + Scope +
         "\" expiresUtc=\"" + DateTime.UtcNow.AddHours(1).ToString("yyyy-MM-ddTHH:mm:ssZ") +
@@ -29,6 +31,7 @@ internal static partial class Program
         TestScopedServerProof();
         TestVerifierCorrelationContract();
         TestPersistentDevProfile();
+        TestSingleUserDevScope();
         TestSyntheticApiScope();
         var policy = SyntheticIsolation.Parse(IsolationXml);
         policy.ValidateContext(DevOrganization, Actor, DateTime.UtcNow);
@@ -85,6 +88,7 @@ internal static partial class Program
             host.ExtraPrivilegeName = name;
             Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_CALLER_PRIVILEGES_REJECTED");
         }
+
         host.ExtraPrivilegeName = null;
         host.BypassPrivilege = true;
         Reject(() => host.Invoke(SyntheticIsolation.VerifyAction), "SYNTHETIC_CALLER_PRIVILEGES_REJECTED");
@@ -125,9 +129,9 @@ internal static partial class Program
         unrelated.ReadProbe(unrelatedJoin);
         unrelated.ReadProbe(new QueryExpression("os_sr_cand"),
             new Entity("os_sr_cand", Guid.NewGuid()) { ["os_sr_cand_nm"] = "Unrelated synthetic fixture" });
-        unrelated.OrdinaryCreate();
-        Check((string)unrelated.Output["ResultCode"] == "Applied" && unrelated.Writes == 2,
-            "Other DEV callers retain ordinary API/CRUD/reference/association/read behavior");
+        RejectContains(() => unrelated.OrdinaryCreate(), "SYNTHETIC_PROFILE_REQUIRED");
+        Check(unrelated.Writes == 0,
+            "Unscoped ordinary API writes are closed in DEV for callers without an approved profile");
         var metadataOnly = new IsolationHost { MissingConfiguration = true };
         metadataOnly.ReadProbe(new QueryExpression("systemuser"), new Entity("systemuser", Guid.NewGuid()));
         Check(metadataOnly.ProfileLoads == 0, "Unrelated metadata/system reads do not depend on profile availability");
@@ -467,6 +471,21 @@ internal static partial class Program
         }
     }
 
+    private static string SingleUserDevXml
+    {
+        get
+        {
+            var root = System.Xml.Linq.XElement.Parse(PersistentIsolationXml);
+            root.SetAttributeValue("profileVersion", "3");
+            root.Add(new System.Xml.Linq.XElement("singleUserDev",
+                new System.Xml.Linq.XAttribute("mode", "SingleUserDev"),
+                new System.Xml.Linq.XAttribute("actorId", SingleUserActor.ToString("D")),
+                new System.Xml.Linq.XAttribute("scopeId", SingleUserScope.ToString("D")),
+                new System.Xml.Linq.XAttribute("enabled", "true")));
+            return root.ToString();
+        }
+    }
+
     private static void TestPersistentDevProfile()
     {
         var xml = PersistentIsolationXml;
@@ -553,6 +572,165 @@ internal static partial class Program
         host.Input["SyntheticScopeId"] = Guid.NewGuid();
         Reject(() => host.InvokeAgain(), "SYNTHETIC_SCOPE_REQUIRED");
         Check(host.Writes == writes, "Real-row and scope mismatch failures leave all stored records unchanged");
+    }
+
+    private static void TestSingleUserDevScope()
+    {
+        var existingBso = new IsolationHost
+        {
+            CallerId = Actor,
+            ProfileOverride = SingleUserDevXml
+        };
+        existingBso.Invoke(SyntheticIsolation.VerifyAction);
+        Check(((string)existingBso.Output["IsolationContract"]).Contains("\"version\":2") &&
+            ((string)existingBso.Output["IsolationContract"]).Contains("\"actorId\":\"" + Actor + "\"") &&
+            ((string)existingBso.Output["IsolationContract"]).Contains("\"scopeId\":\"" + Scope + "\""),
+            "The embedded operator scope preserves the existing BSO v2 proof bindings");
+        existingBso.ReadProbe(new QueryExpression("os_sr_cand"));
+        var existingBsoList = (QueryExpression)existingBso.LastReadQuery!;
+        bool IncludesBsoScope(FilterExpression filter) =>
+            filter.Conditions.Any(condition => condition.Values.Contains(Scope)) ||
+            filter.Filters.Any(IncludesBsoScope);
+        Check(IncludesBsoScope(existingBsoList.Criteria),
+            "The existing BSO guards retain their original scope with the dual-actor profile");
+
+        var host = new IsolationHost
+        {
+            CallerId = SingleUserActor,
+            ProfileOverride = SingleUserDevXml,
+            IncludeCreateReferences = true
+        };
+        var policy = SyntheticIsolation.ParseSingleUserDev(SingleUserDevXml);
+        var bsoPolicy = SyntheticIsolation.Parse(PersistentIsolationXml);
+        Check(policy.SingleUserDev && policy.PersistentDev && !policy.ExpiresUtc.HasValue,
+            "SingleUserDev is explicit, persistent and separate from the BSO profile");
+        Check(policy.ScopeId == SingleUserScope && policy.ScopeId != bsoPolicy.ScopeId &&
+            policy.CandidateName == bsoPolicy.CandidateName &&
+            policy.CandidateEmail == bsoPolicy.CandidateEmail,
+            "SingleUserDev uses a distinct row scope with the exact existing synthetic marker");
+        host.Invoke(SyntheticIsolation.VerifySingleUserDevAction);
+        var contract = (string)host.Output["IsolationContract"];
+        Check((string)host.Output["ResultCode"] == "SingleUserDevVerified" &&
+            contract.Contains("\"version\":3") && contract.Contains("\"mode\":\"SingleUserDev\"") &&
+            contract.Contains("\"boundary\":\"SingleUserDevCandidateCoreApi\"") &&
+            contract.Contains("\"actorId\":\"" + SingleUserActor + "\"") &&
+            contract.Contains("\"nativeWritesDenied\":false") && contract.Contains("\"calendarEnabled\":false"),
+            "SingleUserDev proof is actor-bound, distinct and does not claim privilege isolation");
+        var missingGuards = new IsolationHost
+        {
+            CallerId = SingleUserActor,
+            ProfileOverride = SingleUserDevXml,
+            GuardsInstalled = false
+        };
+        missingGuards.Steps.Clear();
+        Reject(() => missingGuards.Invoke(SyntheticIsolation.VerifySingleUserDevAction),
+            "SYNTHETIC_GUARD_COVERAGE_MISSING");
+
+        host.ReadProbe(new QueryExpression("os_sr_cand"));
+        var scopedList = (QueryExpression)host.LastReadQuery!;
+        bool IncludesConfiguredScope(FilterExpression filter) =>
+            filter.Conditions.Any(condition => condition.Values.Contains(SingleUserScope)) ||
+            filter.Filters.Any(IncludesConfiguredScope);
+        Check(IncludesConfiguredScope(scopedList.Criteria),
+            "Candidate list query is server-scoped to the configured synthetic record");
+        host.Create();
+        Check(host.Rows.ContainsKey(SingleUserScope) &&
+            host.Rows[SingleUserScope].GetAttributeValue<EntityReference>("ownerid")?.Id == SingleUserActor &&
+            host.Writes == 2, "SingleUserDev Create uses only the approved synthetic scope and receipt");
+        host.Call();
+        var callWrites = host.Writes;
+        host.InvokeAgain();
+        Check((string)host.Output["ResultCode"] == "DuplicateReplay" && host.Writes == callWrites,
+            "SingleUserDev duplicate Call replays the receipt without a second mutation");
+        host.Invoke("ProceedToScheduling", ActionRequest.Answered);
+
+        host.Input.Clear();
+        host.Input["ActionType"] = "MarkRound1Scheduled";
+        host.Input["SyntheticScopeId"] = SingleUserScope;
+        host.Input["CandidateId"] = SingleUserScope;
+        host.Input["ExpectedStatus"] = ActionRequest.Waiting;
+        host.Input["CorrelationId"] = Guid.NewGuid();
+        host.Input["InterviewerId"] = Guid.NewGuid();
+        host.Input["LocationId"] = Reference;
+        host.Input["StartAt"] = DateTime.UtcNow.AddDays(1);
+        host.Input["EndAt"] = DateTime.UtcNow.AddDays(1).AddHours(1);
+        Reject(() => host.InvokeAgain(), "SYNTHETIC_REFERENCE_REJECTED");
+        Check(host.Writes == callWrites + 3, "Rejected reference mutation writes no schedule or receipt");
+
+        host.Invoke("MarkRound1Scheduled", ActionRequest.Waiting);
+        var history = host.Rows.Values.Where(row => row.LogicalName == "os_sr_csh").ToArray();
+        Check(history.Length == 3 && history.All(row =>
+            row.GetAttributeValue<EntityReference>("os_sr_csh_actr")?.Id == SingleUserActor) &&
+            host.Rows[SingleUserScope].GetAttributeValue<OptionSetValue>("os_sr_cand_stat")?.Value == ActionRequest.Scheduled,
+            "SingleUserDev lifecycle persists three actor-bound Status History transitions and schedule status");
+        var writesBeforeReplay = host.Writes;
+        host.InvokeAgain();
+        Check((string)host.Output["ResultCode"] == "DuplicateReplay" && host.Writes == writesBeforeReplay,
+            "SingleUserDev scheduling receipt blocks duplicate transition replay");
+
+        host.Input.Clear();
+        host.Input["ActionType"] = "RecordCall";
+        host.Input["CorrelationId"] = Guid.NewGuid();
+        host.Input["CandidateId"] = SingleUserScope;
+        host.Input["ExpectedStatus"] = ActionRequest.NeedCall;
+        host.Input["CallOutcome"] = ActionRequest.NeedCall;
+        host.Input["ContactedAt"] = DateTime.UtcNow.AddSeconds(-1);
+        Reject(() => host.InvokeAgain(), "SYNTHETIC_SCOPE_REQUIRED");
+        Check(host.Writes == writesBeforeReplay, "Unscoped DEV API mutation is rejected before storage");
+
+        Reject(() => host.ReadProbe(new QueryExpression("os_sr_cand"),
+            new Entity("os_sr_cand", Guid.NewGuid())
+            {
+                ["os_sr_cand_nm"] = "Real candidate",
+                ["os_sr_cand_eml"] = "real@example.invalid",
+                ["ownerid"] = new EntityReference("systemuser", SingleUserActor)
+            }), "SYNTHETIC_PROFILE_REJECTED");
+        Check(host.Writes == writesBeforeReplay, "Out-of-scope Candidate read is rejected without writes");
+        Reject(() => host.Direct("Create", new Entity("os_sr_cand", Guid.NewGuid())),
+            "SYNTHETIC_DIRECT_WRITE_REJECTED");
+
+        var wrongActor = new IsolationHost
+        {
+            CallerId = Actor,
+            ProfileOverride = SingleUserDevXml
+        };
+        Reject(() => wrongActor.Invoke(SyntheticIsolation.VerifySingleUserDevAction), "SYNTHETIC_ACTOR_REJECTED");
+        var wrongOrganization = new IsolationHost
+        {
+            CallerId = SingleUserActor,
+            ProfileOverride = SingleUserDevXml,
+            OrganizationId = Organization
+        };
+        Reject(() => wrongOrganization.Invoke(SyntheticIsolation.VerifySingleUserDevAction),
+            "SYNTHETIC_ORGANIZATION_REJECTED");
+        var missingSingleUserProfile = new IsolationHost
+        {
+            CallerId = SingleUserActor,
+            ProfileOverride = PersistentIsolationXml
+        };
+        Reject(() => missingSingleUserProfile.Invoke(SyntheticIsolation.VerifySingleUserDevAction),
+            "SINGLE_USER_DEV_CONFIGURATION_MISSING");
+
+        var wrongScope = new IsolationHost
+        {
+            CallerId = SingleUserActor,
+            ProfileOverride = SingleUserDevXml
+        };
+        wrongScope.Input["ActionType"] = "RecordCall";
+        wrongScope.Input["CorrelationId"] = Guid.NewGuid();
+        wrongScope.Input["CandidateId"] = SingleUserScope;
+        wrongScope.Input["ExpectedStatus"] = ActionRequest.NeedCall;
+        wrongScope.Input["CallOutcome"] = ActionRequest.NeedCall;
+        wrongScope.Input["ContactedAt"] = DateTime.UtcNow.AddSeconds(-1);
+        wrongScope.Input["SyntheticScopeId"] = Guid.NewGuid();
+        Reject(() => wrongScope.InvokeAgain(), "SYNTHETIC_SCOPE_REQUIRED");
+        var sameActorProfiles = new IsolationHost
+        {
+            CallerId = SingleUserActor,
+            ProfileOverride = SingleUserDevXml.Replace(Actor.ToString(), SingleUserActor.ToString())
+        };
+        Reject(() => sameActorProfiles.Invoke(SyntheticIsolation.VerifySingleUserDevAction),
+            "SINGLE_USER_DEV_CONFIGURATION_INVALID");
     }
 
     private static void TestVerifierCorrelationContract()
@@ -656,6 +834,7 @@ internal static partial class Program
         public Guid CallerId = Actor;
         public int MaxDepth, SystemReadGuardCalls, ControlReadGuardCalls, ProfileLoads;
         public int Writes;
+        public QueryBase? LastReadQuery;
         public IOrganizationService Service { get; }
         public IOrganizationService CallerService { get; }
         private IPluginExecutionContext Current => stack.Peek();
@@ -707,7 +886,9 @@ internal static partial class Program
         public void Create()
         {
             Input.Clear();
-            var profile = SyntheticIsolation.Parse(IsolationXml);
+            var profile = CallerId == SingleUserActor
+                ? SyntheticIsolation.ParseSingleUserDev(ProfileOverride ?? SingleUserDevXml)
+                : SyntheticIsolation.Parse(ProfileOverride ?? IsolationXml);
             Input["CandidateName"] = profile.CandidateName;
             Input["CandidateEmail"] = profile.CandidateEmail;
             if (IncludeCreateReferences)
@@ -727,17 +908,18 @@ internal static partial class Program
         }
         public void Invoke(string action, int? status = null)
         {
-            if (action == SyntheticIsolation.VerifyAction)
+            if (action == SyntheticIsolation.VerifyAction || action == SyntheticIsolation.VerifySingleUserDevAction)
             {
                 Input.Clear();
                 Input["CorrelationId"] = Guid.NewGuid();
             }
             Input["ActionType"] = action;
-            if (action != SyntheticIsolation.VerifyAction)
+            if (action != SyntheticIsolation.VerifyAction && action != SyntheticIsolation.VerifySingleUserDevAction)
             {
-                Input["SyntheticScopeId"] = Scope;
+                var scope = CallerId == SingleUserActor ? SingleUserScope : Scope;
+                Input["SyntheticScopeId"] = scope;
                 Input["CorrelationId"] = Guid.NewGuid();
-                if (action != "CreateCandidate") Input["CandidateId"] = Scope;
+                if (action != "CreateCandidate") Input["CandidateId"] = scope;
                 if (status.HasValue) Input["ExpectedStatus"] = status.Value;
                 if (action == "MarkRound1Scheduled")
                 {
@@ -799,6 +981,7 @@ internal static partial class Program
         }
         public void ReadProbe(QueryBase query, Entity? row = null)
         {
+            LastReadQuery = query;
             var input = new ParameterCollection { ["Query"] = query };
             var output = new ParameterCollection
             {
@@ -849,7 +1032,7 @@ internal static partial class Program
             if (call.MethodName == "Retrieve")
             {
                 var table = (string)call.Args[0];
-                if (table == "systemuser") return new Entity(table, Actor)
+                if (table == "systemuser") return new Entity(table, (Guid)call.Args[1])
                     { ["isdisabled"] = InactiveCaller, ["islicensed"] = true, ["accessmode"] = new OptionSetValue(0) };
                 if (table == "plugintype") return new Entity(table, typeId)
                     { ["typename"] = typeof(ApplyCandidateAction).FullName,

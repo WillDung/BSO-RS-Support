@@ -146,6 +146,7 @@ function singleUserDevFixture(t) {
     expectedUpn: f.base.expectedUpn,
     actorId: binding.actorId,
     syntheticIsolation: binding,
+    authenticationCallbackOrigin: new URL(f.base.appUrl).origin,
     excludedCorrelations: ["fe902569-29b8-4af0-89c8-508190769e94"]
   };
   const contract = (overrides = {}, at = now) => JSON.stringify({
@@ -185,7 +186,10 @@ test("A v4 SingleUserDev proof and exact owner-bound authorization are accepted"
 for (const [label, change] of [
   ["wrong owner", f => { f.request.scope.expectedUpn = "other@example.invalid"; }],
   ["wrong marker", f => { f.request.marker = "99999999-9999-4999-8999-999999999999"; }],
-  ["missing excluded old correlation", f => { f.request.scope.excludedCorrelations = []; }]
+  ["missing excluded old correlation", f => { f.request.scope.excludedCorrelations = []; }],
+  ["unapproved callback origin", f => {
+    f.request.scope.authenticationCallbackOrigin = "https://login.example.invalid";
+  }]
 ]) {
   test(`SingleUserDev authorization rejects ${label}`, t => {
     const f = singleUserDevFixture(t);
@@ -635,6 +639,7 @@ test("Lifecycle runner preserves BSO v2 and gates either owner scope before clai
   assert.match(source, /isSingleUserDevDirectReadBlocked\(url\)/);
   assert.match(source, /body\.SyntheticScopeId === approval\.lifecycleScope\.syntheticIsolation\.scopeId/);
   assert.match(source, /validateOperationCorrelation\(/);
+  assert.match(source, /approval\.identityScope === "SINGLE_USER_DEV" \? approval\.origin/);
   assert.match(source, /readEvidence\(page, approval\.origin, record, approval\.independentAuthorizationRecord\)/);
 });
 

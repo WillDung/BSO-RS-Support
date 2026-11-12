@@ -152,6 +152,22 @@ test("Legitimate synthetic Microsoft callback and regional federation handoff re
   assert.equal(classify("https://login.microsoft.com/bridge", auth), "AUTH_NAVIGATION");
 });
 
+test("SingleUserDev sign-in callback is limited to the approved organization origin and OpenID shape", () => {
+  const auth = {
+    resourceType: () => "document", isNavigationRequest: () => true,
+    headers: () => ({ "content-type": "application/x-www-form-urlencoded" }),
+    frame: () => ({ url: () => "https://login.microsoftonline.com/authorize" }),
+    postData: () => "code=SYNTHETIC&state=SYNTHETIC"
+  };
+  assert.equal(classify(`${origin}/`, auth, { origin, callbackOrigin: origin }), "AUTH_NAVIGATION");
+  assert.equal(classify(`${origin}/`, {
+    ...auth, frame: () => ({ url: () => "https://evil.example.invalid/authorize" })
+  }, { origin, callbackOrigin: origin }), "UNKNOWN_REQUEST_BLOCKED");
+  assert.equal(classify(`${origin}/`, {
+    ...auth, postData: () => "code=SYNTHETIC&state=SYNTHETIC&returnUrl=https://evil.example.invalid"
+  }, { origin, callbackOrigin: origin }), "UNKNOWN_REQUEST_BLOCKED");
+});
+
 test("Only a separately validated one-shot operation can receive approved classification", () => {
   const url = `${origin}/api/data/v9.2/os_sr_cact`;
   // The runner sets this flag only after sequence, arm, payload and expiry checks.

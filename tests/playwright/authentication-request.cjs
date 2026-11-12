@@ -19,7 +19,7 @@ function isAuthenticationRequest(request, url, callbackOrigin, organizationOrigi
     [...fields.keys()].every(key => allowed.has(key));
   const federation = fields.get("wa") === "wsignin1.0" && fields.has("wresult") && fields.has("wctx") &&
     [...fields.keys()].every(key => ["wa", "wresult", "wctx"].includes(key));
-  return openId || (crmHandoff && federation);
+  return (microsoftSource && openId) || (crmHandoff && federation);
 }
 
 module.exports = { isAuthenticationRequest };

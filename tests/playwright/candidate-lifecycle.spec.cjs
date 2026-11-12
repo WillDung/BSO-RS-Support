@@ -99,13 +99,15 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
       timezoneId: "Asia/Ho_Chi_Minh", acceptDownloads: false, serviceWorkers: "block"
     });
     page = context.pages()[0] || await context.newPage();
+    const callbackOrigin = approval.lifecycleScope.authenticationCallbackOrigin ||
+      (approval.identityScope === "SINGLE_USER_DEV" ? approval.origin : undefined);
     await context.route("**/*", async route => {
       const request = route.request();
       const url = new URL(request.url());
       const mutation = !["GET", "HEAD", "OPTIONS"].includes(request.method());
       const api = url.origin === approval.origin && /\/api\/data\//i.test(url.pathname);
       const classificationOptions = {
-        origin: approval.origin, callbackOrigin: approval.lifecycleScope.authenticationCallbackOrigin
+        origin: approval.origin, callbackOrigin
       };
       const classification = classifyRequest(request, url, classificationOptions);
       countClassification(classification);

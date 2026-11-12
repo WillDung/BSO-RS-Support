@@ -186,6 +186,8 @@ function validateSingleUserDevScope(scope, base, marker, candidateName, candidat
   check(scope.ownerMutationApproval === true &&
     /^[a-z0-9][a-z0-9-]{0,95}$/.test(scope.authorizationId || "") &&
     scope.appUrl === base.appUrl && scope.organizationId === base.organizationId &&
+    (scope.authenticationCallbackOrigin === undefined ||
+      scope.authenticationCallbackOrigin === new URL(scope.appUrl).origin) &&
     scope.environmentId === base.environmentId &&
     scope.environmentName === "VN LMV IT internal DEV" &&
     scope.identityScope === "SINGLE_USER_DEV" &&

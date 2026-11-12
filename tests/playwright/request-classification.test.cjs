@@ -1,6 +1,9 @@
 const assert = require("node:assert/strict");
 const { test } = require("node:test");
-const { classifyRequest, matchesCandidateActionResponse } = require("./request-classification.cjs");
+const {
+  classifyRequest, isLocalizationRequest, isUntrustedLocalizationRedirect,
+  matchesCandidateActionResponse
+} = require("./request-classification.cjs");
 
 const origin = "https://orgsynthetic.crm4.dynamics.com";
 const callbackOrigin = "https://callback.crm4.dynamics.com";
@@ -68,6 +71,74 @@ test("only the fixed SingleUserDev read actions with exact correlation and scope
     "FORBIDDEN_BUSINESS_OR_PROVIDER_OPERATION");
   assert.equal(classify(url, { method: () => "PATCH", postData: () => JSON.stringify(requestBody) }),
     "FORBIDDEN_BUSINESS_OR_PROVIDER_OPERATION");
+});
+
+test("GetResourceStrings allows only the pinned JSON localization lookup shape", () => {
+  const url = new URL(`${origin}/AppWebServices/MetadataService.asmx/GetResourceStrings`);
+  const localizationRequest = (overrides = {}) => request({
+    method: () => "POST",
+    resourceType: () => "xhr",
+    isNavigationRequest: () => false,
+    headers: () => ({ "content-type": "application/json; charset=utf-8" }),
+    postData: () => JSON.stringify({ resourceIds: ["Save", "Cancel"] }),
+    ...overrides
+  });
+  const valid = localizationRequest();
+  assert.equal(isLocalizationRequest(valid, url, origin), true);
+  assert.equal(classifyRequest(valid, url, options), "LOCALIZATION_READ_ALLOWED");
+
+  const rejected = [
+    [new URL(`${origin}/AppWebServices/MetadataService.asmx/GetEntity`), localizationRequest()],
+    [new URL("https://other.crm4.dynamics.com/AppWebServices/MetadataService.asmx/GetResourceStrings"),
+      localizationRequest()],
+    [new URL(`http://${url.host}${url.pathname}`), localizationRequest()],
+    [new URL(`${url.href}?extra=1`), localizationRequest()],
+    [url, localizationRequest({ method: () => "GET" })],
+    [url, localizationRequest({ resourceType: () => "fetch" })],
+    [url, localizationRequest({ isNavigationRequest: () => true })],
+    [url, localizationRequest({ headers: () => ({ "content-type": "application/xml" }) })],
+    [url, localizationRequest({ headers: () => ({ "content-type": "application/json" }) })],
+    [url, localizationRequest({ headers: () => ({ "content-type": "application/json; charset=iso-8859-1" }) })],
+    [url, localizationRequest({ postData: () => "{" })],
+    [url, localizationRequest({ postData: () => JSON.stringify({ resourceIds: [] }) })],
+    [url, localizationRequest({ postData: () => JSON.stringify({ resourceIds: ["ok"], extra: true }) })],
+    [url, localizationRequest({ postData: () => JSON.stringify({ resourceIds: [null] }) })],
+    [url, localizationRequest({ postData: () => JSON.stringify({ resourceIds: ["bad\u0000key"] }) })],
+    [url, localizationRequest({ postData: () => JSON.stringify({
+      ActionType: "CreateCandidate", resourceIds: ["Save"]
+    }) })],
+    [url, localizationRequest({ postData: () => JSON.stringify({
+      resourceIds: ["x".repeat(257)]
+    }) })],
+    [url, localizationRequest({ postData: () => JSON.stringify({
+      resourceIds: Array(129).fill("Save")
+    }) })]
+  ];
+  for (const [target, invalidRequest] of rejected) {
+    assert.equal(isLocalizationRequest(invalidRequest, target, origin), false);
+    assert.notEqual(classifyRequest(invalidRequest, target, options), "LOCALIZATION_READ_ALLOWED");
+  }
+  assert.equal(isLocalizationRequest(localizationRequest({
+    postData: () => "x".repeat(32769)
+  }), url, origin), false);
+});
+
+test("localization redirects cannot leave the pinned organization origin", () => {
+  const endpointUrl = `${origin}/AppWebServices/MetadataService.asmx/GetResourceStrings`;
+  const original = {
+    url: () => endpointUrl,
+    redirectedFrom: () => null
+  };
+  const redirected = target => ({
+    url: () => target,
+    redirectedFrom: () => original
+  });
+  assert.equal(isUntrustedLocalizationRedirect(
+    redirected("https://other.crm4.dynamics.com/localized"), origin), true);
+  assert.equal(isUntrustedLocalizationRedirect(
+    redirected(`${origin}/localized`), origin), false);
+  assert.equal(isUntrustedLocalizationRedirect(
+    request({ url: () => `${origin}/unrelated`, redirectedFrom: () => null }), origin), false);
 });
 
 test("lifecycle response waits ignore proof refresh and match only the intended correlated business action", () => {
@@ -244,7 +315,9 @@ test("Optional CRM support is kept separate from telemetry and ordinary reads", 
   assert.equal(classify(`${origin}/api/data/v9.2/UnknownAction`, { method: () => "POST" }),
     "FORBIDDEN_BUSINESS_OR_PROVIDER_OPERATION");
   assert.equal(classify(`${origin}/AppWebServices/MetadataService.asmx/GetResourceStrings`, {
-    resourceType: () => "xhr"
+    resourceType: () => "xhr",
+    headers: () => ({ "content-type": "application/json" }),
+    postData: () => "not-json"
   }), "UNKNOWN_REQUEST_BLOCKED");
   assert.equal(classify("https://graph.microsoft.com/v1.0/me/photos/120x120/$value", {
     method: () => "GET"

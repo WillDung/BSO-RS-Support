@@ -8,6 +8,34 @@ const scopedReadActions = new Set([
   "ReadScopedCandidates", "ReadScopedPositions", "ReadScopedSources", "ReadScopedTas",
   "ReadScopedLocations", "ReadScopedCalls", "ReadScopedHistory", "ReadScopedSchedules"
 ]);
+const localizationPath = "/AppWebServices/MetadataService.asmx/GetResourceStrings";
+
+function isLocalizationRequest(request, url, origin) {
+  if (url.protocol !== "https:" || url.origin !== origin || url.pathname !== localizationPath ||
+      url.search || request.method() !== "POST" || request.resourceType() !== "xhr" ||
+      request.isNavigationRequest()) return false;
+  const contentType = (request.headers()["content-type"] || "").trim();
+  if (!/^application\/json\s*;\s*charset=utf-8$/i.test(contentType)) return false;
+  const rawBody = request.postData() || "";
+  if (Buffer.byteLength(rawBody) > 32768) return false;
+  let body;
+  try { body = JSON.parse(rawBody); } catch { return false; }
+  return Boolean(body && typeof body === "object" && !Array.isArray(body) &&
+    Object.keys(body).length === 1 && Array.isArray(body.resourceIds) &&
+    body.resourceIds.length > 0 && body.resourceIds.length <= 128 &&
+    body.resourceIds.every(value => typeof value === "string" && value.length > 0 &&
+      value.length <= 256 && !/[\u0000-\u001f\u007f]/.test(value)));
+}
+
+function isUntrustedLocalizationRedirect(request, origin) {
+  const url = new URL(request.url());
+  for (let previous = request.redirectedFrom(); previous; previous = previous.redirectedFrom()) {
+    const previousUrl = new URL(previous.url());
+    if (previousUrl.origin === origin && previousUrl.pathname === localizationPath &&
+        url.origin !== origin) return true;
+  }
+  return false;
+}
 
 function classifyRequest(request, url, { origin, callbackOrigin, approvedBusinessOperation = false }) {
   const write = !["GET", "HEAD", "OPTIONS"].includes(request.method());
@@ -21,6 +49,7 @@ function classifyRequest(request, url, { origin, callbackOrigin, approvedBusines
     ["xhr", "fetch"].includes(request.resourceType()) && !request.isNavigationRequest() &&
     /^\/api\/data\/v9\.(?:0|2)\/(msdyn_ReportToMonitoringHub|GetRecentItems|GetCopilotSettingsForEnvironment)$/.test(url.pathname);
   if (support || isOptionalMetricsRequest(request, url, origin)) return "OPTIONAL_SUPPORT_SUPPRESSED";
+  if (isLocalizationRequest(request, url, origin)) return "LOCALIZATION_READ_ALLOWED";
   if (api && request.method() === "POST" && !url.search &&
       url.pathname === "/api/data/v9.2/os_sr_cact" &&
       ["xhr", "fetch"].includes(request.resourceType()) && !request.isNavigationRequest()) {
@@ -60,4 +89,7 @@ function matchesCandidateActionResponse(response, origin, action, correlation) {
     body.CorrelationId.toLowerCase() === correlation.toLowerCase();
 }
 
-module.exports = { classifyRequest, matchesCandidateActionResponse };
+module.exports = {
+  classifyRequest, isLocalizationRequest, isUntrustedLocalizationRedirect,
+  matchesCandidateActionResponse
+};

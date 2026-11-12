@@ -4,7 +4,7 @@ const assert = require("node:assert/strict");
 const { createHash, randomUUID } = require("node:crypto");
 const { chromium, expect } = require("@playwright/test");
 const { isAuthenticationRequest } = require("./authentication-request.cjs");
-const { classifyRequest } = require("./request-classification.cjs");
+const { classifyRequest, isUntrustedLocalizationRedirect } = require("./request-classification.cjs");
 const { verifyBrowserIdentity } = require("./browser-identity.cjs");
 const {
   constrainReferenceRequest, isSingleUserDevDirectReadBlocked
@@ -107,6 +107,105 @@ function authenticationEndpointEvidence(request, organizationOrigin) {
     navigation: request.isNavigationRequest(), sourceFrame, redirectChain,
     formFields, otherFormFieldCount, authShape
   };
+}
+
+function sanitizedContentType(headers) {
+  const value = headers["content-type"] || "";
+  const [mediaType = "", ...parameters] = value.split(";");
+  const parsedParameters = parameters.map(parameter => {
+    const [rawName, rawValue = ""] = parameter.split("=", 2);
+    const name = rawName.trim().toLowerCase();
+    const parameterValue = rawValue.trim().replace(/^["']|["']$/g, "");
+    return {
+      name,
+      value: name === "charset" && /^[a-z0-9._-]{1,32}$/i.test(parameterValue)
+        ? parameterValue.toLowerCase() : "UNRECOGNIZED"
+    };
+  }).filter(parameter => /^[a-z0-9_-]+$/i.test(parameter.name));
+  return {
+    mediaType: /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/i.test(mediaType.trim())
+      ? mediaType.trim().toLowerCase() : "UNRECOGNIZED",
+    parameters: parsedParameters.sort((left, right) => left.name.localeCompare(right.name))
+  };
+}
+
+function sanitizedPayloadShape(contentType, rawBody, redactFieldNames = false) {
+  const shape = (value, depth = 0) => {
+    if (depth > 5) return { type: "DEPTH_LIMIT" };
+    if (value === null) return { type: "null" };
+    if (Array.isArray(value)) {
+      return {
+        type: "array", length: value.length,
+        itemShapes: [...new Set(value.slice(0, 3).map(item =>
+          JSON.stringify(shape(item, depth + 1))))].map(item => JSON.parse(item))
+      };
+    }
+    if (typeof value === "object") {
+      const keys = Object.keys(value).sort();
+      return {
+        type: "object",
+        fields: keys.slice(0, 40).map(name => ({
+          ...(redactFieldNames ? {} : { name }),
+          ...shape(value[name], depth + 1)
+        })),
+        omittedFieldCount: Math.max(0, keys.length - 40)
+      };
+    }
+    return { type: typeof value };
+  };
+  const body = String(rawBody || "");
+  if (/^application\/json$/i.test(contentType.mediaType)) {
+    try { return shape(JSON.parse(body)); } catch { return { type: "MALFORMED_JSON" }; }
+  }
+  if (/^application\/x-www-form-urlencoded$/i.test(contentType.mediaType)) {
+    const form = new URLSearchParams(body);
+    const names = [...form.keys()].sort();
+    return {
+      type: "form",
+      fields: [...new Set(names)].slice(0, 40).map(name => ({ name, type: "string" })),
+      omittedFieldCount: Math.max(0, new Set(names).size - 40)
+    };
+  }
+  return { type: body ? "OPAQUE_BODY" : "EMPTY_BODY", byteLength: Buffer.byteLength(body) };
+}
+
+async function captureLocalizationResponse(response, diagnostic) {
+  const request = response.request();
+  const headers = response.headers();
+  const responseContentType = sanitizedContentType(headers);
+  let responseShape = { type: "BODY_UNAVAILABLE" };
+  try {
+    const body = await response.body();
+    responseShape = sanitizedPayloadShape(responseContentType, body.toString("utf8"), true);
+  } catch {
+    responseShape = { type: "BODY_UNAVAILABLE" };
+  }
+  const redirectLocation = response.status() >= 300 && response.status() < 400
+    ? (() => {
+      try {
+        const location = new URL(headers.location, new URL(request.url()).origin);
+        const sameOrigin = location.origin === new URL(request.url()).origin;
+        return { origin: location.origin, path: sameOrigin ? location.pathname : "REDACTED", sameOrigin };
+      } catch {
+        return { origin: "UNPARSEABLE", path: null, sameOrigin: false };
+      }
+    })() : null;
+  const responseContract = response.status() >= 200 && response.status() < 300 &&
+    responseContentType.mediaType === "application/json" &&
+    responseContentType.parameters.length === 1 &&
+    responseContentType.parameters[0].name === "charset" &&
+    responseContentType.parameters[0].value === "utf-8" &&
+    responseShape.type === "object" && responseShape.omittedFieldCount === 0 &&
+    responseShape.fields.length > 0 &&
+    responseShape.fields.every(field => field.type === "string") &&
+    redirectLocation === null;
+  Object.assign(diagnostic, {
+    responseStatus: response.status(),
+    responseContentType,
+    responseBodyShape: responseShape,
+    redirectLocation,
+    responseContract: responseContract ? "PASS" : "FAIL"
+  });
 }
 
 async function verifySingleUserDevProof(page, approval, actorId) {
@@ -266,6 +365,7 @@ async function main() {
     requestSafety: "NOT RUN",
     predicateChecksPassed: 14, callbackPostsAdmitted: 0, callbackResponseStatuses: [],
     suppressedPlatformRequests: 0, suppressedMetricsRequests: 0, optionalSuppressions: [],
+    localizationRequests: [],
     blockedRequests: [], failedRequestClasses: [],
     lifecycleInvoked: false, screenshotsAndTraces: "DISABLED",
     acceptanceScope: ownerReadOnly ? "OWNER_APPROVED_ELEVATED_READ_ONLY_SINGLE_USER_DEV_V4"
@@ -276,7 +376,9 @@ async function main() {
     }
   };
   const callbackRequests = new WeakSet();
+  const localizationRequests = new WeakMap();
   const consoleResourceCaptures = [];
+  const localizationResponseCaptures = [];
   let resourceSequence = 0;
   let verifierRequestCount = 0;
   let scopedCandidateReadRequestCount = 0;
@@ -311,6 +413,8 @@ async function main() {
     };
     context.on("response", response => {
       if (callbackRequests.has(response.request())) report.callbackResponseStatuses.push(response.status());
+      const localizationCapture = localizationRequests.get(response.request());
+      if (localizationCapture) localizationCapture.complete(response);
       const requestUrl = response.url();
       if (!identifyConsoleResource(requestUrl, approval.origin)) return;
       const sequence = ++resourceSequence;
@@ -369,6 +473,55 @@ async function main() {
       const endpointEvidence = authenticationEndpointEvidence(request, approval.origin);
       if (endpointEvidence) {
         console.log(`UAT_AUTH_HANDOFF_ENDPOINT ${JSON.stringify({ ...endpointEvidence, classification })}`);
+      }
+      let localizationDiagnostic = null;
+      if (url.origin === approval.origin &&
+          url.pathname === "/AppWebServices/MetadataService.asmx/GetResourceStrings" &&
+          request.method() === "POST") {
+        const headers = request.headers();
+        const contentType = sanitizedContentType(headers);
+        localizationDiagnostic = {
+          method: request.method(), origin: url.origin, path: url.pathname,
+          resourceType: request.resourceType(), navigation: request.isNavigationRequest(),
+          requestContentType: contentType,
+          requestBodyShape: sanitizedPayloadShape(contentType, request.postData())
+        };
+        console.log(`UAT_LOCALIZATION_ENDPOINT ${JSON.stringify(localizationDiagnostic)}`);
+      }
+      if (isUntrustedLocalizationRedirect(request, approval.origin)) {
+        report.blockedRequests.push({ ...safeClass(request), classification: "UNKNOWN_REQUEST_BLOCKED" });
+        return route.abort("blockedbyclient");
+      }
+      if (classification === "LOCALIZATION_READ_ALLOWED") {
+        if (!localizationDiagnostic) {
+          report.blockedRequests.push({ ...safeClass(request), classification: "UNKNOWN_REQUEST_BLOCKED" });
+          return route.abort("blockedbyclient");
+        }
+        report.localizationRequests.push(localizationDiagnostic);
+        let resolveCapture;
+        const capturePromise = new Promise(resolve => { resolveCapture = resolve; });
+        const timeout = setTimeout(() => {
+          localizationDiagnostic.responseFailure = "RESPONSE_TIMEOUT";
+          localizationDiagnostic.responseContract = "FAIL";
+          resolveCapture();
+        }, 15_000);
+        localizationRequests.set(request, {
+          complete: response => {
+            void (async () => {
+              try {
+                await captureLocalizationResponse(response, localizationDiagnostic);
+              } catch {
+                localizationDiagnostic.responseFailure = "RESPONSE_CAPTURE_FAILED";
+                localizationDiagnostic.responseContract = "FAIL";
+              } finally {
+                clearTimeout(timeout);
+                resolveCapture();
+              }
+            })();
+          }
+        });
+        localizationResponseCaptures.push(capturePromise);
+        return route.continue();
       }
       if (["OPTIONAL_SUPPORT_SUPPRESSED", "OPTIONAL_TELEMETRY_SUPPRESSED"].includes(classification)) {
         report.suppressedPlatformRequests++;
@@ -563,6 +716,11 @@ async function main() {
     process.exitCode = 1;
   } finally {
     await Promise.all(consoleResourceCaptures);
+    await Promise.all(localizationResponseCaptures);
+    report.localizationRouting = report.localizationRequests.length === 0 ? "NOT OBSERVED"
+      : report.localizationRequests.every(request => request.responseContract === "PASS")
+        ? "PASS" : "FAIL";
+    if (report.localizationRouting === "FAIL") process.exitCode = 1;
     report.servedConsole.resources.sort((left, right) => left.sequence - right.sequence);
     report.servedConsole.failedLoads.sort((left, right) => left.sequence - right.sequence);
     if (context) await context.close();

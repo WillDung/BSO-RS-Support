@@ -195,6 +195,23 @@ test("missing policy leaves Create disabled and performs no data access", async 
   assert.deepEqual(ui.fetchCalls, []);
 });
 
+test("a server owner rejection is specific and prevents all Candidate reads", async () => {
+  const ui = await createConsole({
+    configuration: {
+      candidateOperationMode: "SingleUserDev",
+      devDirectWriteFallbackEnabled: false
+    },
+    verifier: async () => ({
+      ok: false,
+      json: async () => ({ error: { code: "0x80040265", message: "SYNTHETIC_OWNER_REJECTED" } })
+    })
+  });
+
+  assert.match(ui.element("notice").textContent, /SYNTHETIC_OWNER_REJECTED/);
+  assert.equal(ui.element("workflow-path-badge").textContent, "SYNTHETIC QUERY BLOCKED");
+  assert.deepEqual(ui.fetchCalls, []);
+});
+
 test("a successful API operation response is not a server isolation proof", async () => {
   const ui = await createConsole({
     verifier: async () => ({ ok: true, json: async () => ({ ResultCode: "Applied" }) })

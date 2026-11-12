@@ -506,7 +506,7 @@ Assert-Test ($deployment.Contains('[switch]$CreateNewResources') -and
     $deployment.Contains('New-resource creation is restricted to the two exact Candidate Console configuration resources.') -and
     $deployment.Contains('$environmentConfiguration.environmentId -ine $target.EnvironmentId') -and
     $deployment.Contains('$environmentConfiguration.candidateOperationMode -notin @('''', ''BsoSynthetic'', ''SingleUserDev'')') -and
-    $deployment.Contains('$environmentConfiguration.availabilityEnabled -eq $true') -and
+    $deployment.Contains('$null -ne $environmentConfiguration.PSObject.Properties[''availabilityEnabled'']') -and
     $deployment.Contains('Generated environment files must remain outside the repository.') -and
     $deployment.Contains('[string]$EnvironmentHtmlPath') -and
     $deployment.Contains('Generated HTML differs from the checked-in source except for the verified environment cache token.') -and
@@ -555,34 +555,43 @@ Assert-Test ($deployment.Contains('if (-not $Continue -and -not $CreateNewResour
     -not $deployment.Contains('-Path "PublishAllXml"')) `
     'Refresh selected WebResources only, with no app/sitemap publication, global publish, or retry'
 Assert-Test ($deployment.Contains('[switch]$DevelopmentSourceAhead') -and
-    $deployment.Contains("'os_/bso/candidate-console.html' = 'b922522c7c818ae28b30814bd6adafadb260759f437b5f3a149e117d92d95fba'") -and
-    $deployment.Contains("'os_/bso/candidate-console.js' = 'cb26a8d5a859e9a72b27e25ee8220a4ad5704d4473dd37af0ee7b69ec0d55e53'") -and
-    $deployment.Contains('Development source-ahead refresh requires the exact HTML/JavaScript pair and their matching external DEV configuration.') -and
+    $deployment.Contains("'os_/bso/candidate-console.html' = 'fdd9fc9ee3fec019b21806e9beb9bc1c5ee21777b47bcfcd8eeac4d827228bcb'") -and
+    $deployment.Contains("'os_/bso/candidate-console-policy.js' = '8f9308f512fde32c4059963b3559ca788b766b5895cb46989c0f48a7e983c684'") -and
+    $deployment.Contains("'os_/bso/candidate-console.js' = '672292a5acb0011dec256df536f42087c8e5eff1a42a226318fedbfdf5a9bcae'") -and
+    $deployment.Contains('Development source-ahead refresh requires the exact reviewed HTML/policy/JavaScript set and matching external DEV configuration.') -and
     $deployment.Contains('[string]::IsNullOrWhiteSpace($EnvironmentConfigurationPath)') -and
     $deployment.Contains('[string]::IsNullOrWhiteSpace($EnvironmentHtmlPath)') -and
+    $deployment.Contains('$null -ne $environmentConfiguration.PSObject.Properties[''availabilityEnabled'']') -and
+    $deployment.Contains('$RefreshResourceNames.Count -ne $allowedDevelopmentNames.Count') -and
     $deployment.Contains('CANDIDATE_CONSOLE_DEV_SOURCE_AHEAD_PREFLIGHT_READY') -and
     $deployment.Contains('CANDIDATE_CONSOLE_DEV_SOURCE_AHEAD_REFRESHED') -and
     $deployment.Contains('PublishXmlScope = "$($resources.Count) exact web resources"') -and
     $deployment.Contains('SiteMapPatchCount = 0') -and
     $deployment.Contains('AutomaticRetries = 0') -and
+    $deployment.Contains('$_.Name -cne ''candidate-console-availability.js''') -and
     -not $deployment.Contains("Invoke-DataverseRequest -Method POST -Path 'PublishAllXml'") -and
     -not $deployment.Contains('PublishXmlCount = 0')) `
-    'DEV source-ahead path pins only the approved HTML and JavaScript and uses scoped publication'
+    'DEV source-ahead path pins only the reviewed HTML, policy, and JavaScript with scoped publication'
+$sourceAheadUnchangedStart = $deployment.IndexOf('$developmentSourceAheadUnchangedNames = @(')
+$sourceAheadUnchangedEnd = $deployment.IndexOf(')', $sourceAheadUnchangedStart)
+$sourceAheadUnchangedBlock = if ($sourceAheadUnchangedStart -ge 0 -and
+    $sourceAheadUnchangedEnd -gt $sourceAheadUnchangedStart) {
+    $deployment.Substring($sourceAheadUnchangedStart, $sourceAheadUnchangedEnd - $sourceAheadUnchangedStart)
+} else { '' }
 Assert-Test ($deployment.Contains('$developmentSourceAheadUnchangedNames = @(') -and
-    $deployment.Contains("'os_/bso/candidate-console-environment.js'") -and
-    $deployment.Contains("'os_/bso/candidate-console-policy.js'") -and
+    $sourceAheadUnchangedBlock.Contains("'os_/bso/candidate-console-environment.js'") -and
+    -not $sourceAheadUnchangedBlock.Contains("'os_/bso/candidate-console-policy.js'") -and
     $deployment.Contains('Get-ExactWebResourceState') -and
     $deployment.Contains('SelectedForRefresh = $false') -and
     $deployment.Contains('[string]$configurationHash') -and
     $deployment.Contains('unchangedMembershipCount -ne 1') -and
     $deployment.Contains('CANDIDATE_CONSOLE_SOURCE_BASELINE_UNRECONCILED')) `
-    'DEV source-ahead preflight proves unselected policy bytes match live, published source without refreshing them'
+    'DEV source-ahead preflight proves the unselected live environment configuration before publication'
 
 $hash = (Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $version = [regex]::Match($html, 'candidate-console\.js\?v=([0-9a-f]+)')
 Assert-Test ($version.Success -and $hash.StartsWith($version.Groups[1].Value)) 'Keep the script cache version tied to its content'
 $resourceVersions = @(
-    @{ Path = $configurationPath; Name = 'candidate-console-environment.js' },
     @{ Path = $policyPath; Name = 'candidate-console-policy.js' }
 )
 foreach ($resource in $resourceVersions) {
@@ -591,6 +600,9 @@ foreach ($resource in $resourceVersions) {
     Assert-Test ($resourceVersion.Success -and $resourceHash.StartsWith($resourceVersion.Groups[1].Value)) `
         "Keep $($resource.Name) cache version tied to its content"
 }
+$environmentVersion = [regex]::Match($html, 'candidate-console-environment\.js\?v=([0-9a-f]{12})')
+Assert-Test ($environmentVersion.Success -and $configuration.Contains('mode: "UNCONFIGURED"')) `
+    'Keep the checked-in disabled environment template separate from the externally bound cache version'
 
 $siteMapPath = Join-Path $root 'solutions\AppModuleSiteMaps\srapp\AppModuleSiteMap.xml'
 $siteMapXml = [xml](Get-Content -LiteralPath $siteMapPath -Raw)

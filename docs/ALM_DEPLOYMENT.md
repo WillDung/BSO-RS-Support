@@ -1,5 +1,15 @@
 # ALM and Deployment
 
+## Candidate Console proof diagnostics and cache refresh (2026-11-12)
+
+The owner-reported empty selectors were caused by a genuine fail-closed SingleUserDev proof rejection, not by an empty `ScopedData` response: the verifier returned HTTP 400 `SYNTHETIC_OWNER_REJECTED`, and initialization correctly stopped before reference reads. Source validation identifies a scoped-row ownership mismatch but not the exact row/table. Do not bypass the proof or change row ownership without an authorized reconciliation path.
+
+Updated [candidate-console-policy.js](../solutions/CandidateConsole/WebResources/os_/bso/candidate-console-policy.js) to expose only a safe uppercase server error code, and [candidate-console.js](../solutions/CandidateConsole/WebResources/os_/bso/candidate-console.js) to show that code while keeping the UI blocked and to delay the workflow-ready label until all required initialization reads succeed. Updated the HTML script cache tokens in [candidate-console.html](../solutions/CandidateConsole/WebResources/os_/bso/candidate-console.html). Position, Source, TA, and Location binding still requires a genuine successful proof and approved scoped responses; no options were populated from mock data.
+
+**Deployment completed 2026-11-12:** verified PAC identity and target, then conditionally updated exactly the HTML, policy, and Console JavaScript WebResources. All three updates returned HTTP 204; one WebResource-only `PublishXml` covering those three resources returned HTTP 204. No sitemap, app module, Candidate Core, Calendar, role, or business record was changed. Published-layer readback reconciled. Direct effective `/WebResources/` GETs returned HTTP 200 and matched the local hashes: HTML `fdd9fc9ee3fec019b21806e9beb9bc1c5ee21777b47bcfcd8eeac4d827228bcb`, policy `8f9308f512fde32c4059963b3559ca788b766b5895cb46989c0f48a7e983c684`, and Console JavaScript `672292a5acb0011dec256df536f42087c8e5eff1a42a226318fedbfdf5a9bcae`. HTML cache tokens match the two script hashes; the verified live environment-resource token remains `21ddcd925916`. The UCI-hosted page was not reopened after publication, and owner functional testing remains pending.
+
+No Candidate or related reads/writes, Playwright, or lifecycle operations were performed. The exact remaining blocker is reconciliation of the scoped-row ownership mismatch that currently prevents the server proof and all reference reads. The deployment helper's source-ahead allowlist now pins these exact reviewed HTML/policy/JavaScript hashes; the historical release manifest was not modified.
+
 ## Candidate Console reference dropdown remediation (2026-11-12)
 
 The Console source pins SingleUserDev lookup options to the exact IDs returned by the 1.0.7 scoped-read contract, uses the actual server-returned names, and preselects the profile-bound Position, Candidate Source, TA, and Location references. Ordinary mode continues to query active Dataverse rows through the existing reference filters. Loading, empty, and unavailable states are explicit. The original live cause of the owner-reported empty selectors was not independently diagnosed.

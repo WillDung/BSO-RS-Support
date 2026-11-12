@@ -128,7 +128,10 @@ $sourceCandidateConsoleNames = @(
     Get-ChildItem -LiteralPath (
         Join-Path $repositoryRoot 'solutions\CandidateConsole\WebResources\os_\bso'
     ) -File |
-        Where-Object Name -Like 'candidate-console*' |
+        Where-Object {
+            $_.Name -Like 'candidate-console*' -and
+            $_.Name -cne 'candidate-console-availability.js'
+        } |
         ForEach-Object { "os_/bso/$($_.Name)" } |
         Sort-Object
 )
@@ -169,25 +172,25 @@ foreach ($resourceName in $acceptedPublicationHashes.Keys) {
     $expectedCandidateConsoleHashes[$resourceName] = [string]$acceptedPublicationHashes[$resourceName]
 }
 $developmentSourceAheadHashes = @{
-    'os_/bso/candidate-console.html' = 'b922522c7c818ae28b30814bd6adafadb260759f437b5f3a149e117d92d95fba'
-    'os_/bso/candidate-console.js' = 'cb26a8d5a859e9a72b27e25ee8220a4ad5704d4473dd37af0ee7b69ec0d55e53'
+    'os_/bso/candidate-console.html' = 'fdd9fc9ee3fec019b21806e9beb9bc1c5ee21777b47bcfcd8eeac4d827228bcb'
+    'os_/bso/candidate-console-policy.js' = '8f9308f512fde32c4059963b3559ca788b766b5895cb46989c0f48a7e983c684'
+    'os_/bso/candidate-console.js' = '672292a5acb0011dec256df536f42087c8e5eff1a42a226318fedbfdf5a9bcae'
 }
 $developmentSourceAheadUnchangedNames = @(
-    'os_/bso/candidate-console-environment.js',
-    'os_/bso/candidate-console-policy.js'
+    'os_/bso/candidate-console-environment.js'
 )
 if ($DevelopmentSourceAhead) {
     $selectedDevelopmentNames = @($RefreshResourceNames | Sort-Object -CaseSensitive)
     $allowedDevelopmentNames = @($developmentSourceAheadHashes.Keys | Sort-Object -CaseSensitive)
     if (-not $RefreshExisting -or $Continue -or $CreateNewResources -or
         $ReleaseNeutralProfile -or $PublishOnly -or $ReconcilePublishOnly -or
-        $RefreshResourceNames.Count -ne 2 -or
+        $RefreshResourceNames.Count -ne $allowedDevelopmentNames.Count -or
         [string]::Join('|', $selectedDevelopmentNames) -cne
             [string]::Join('|', $allowedDevelopmentNames) -or
         [string]::IsNullOrWhiteSpace($EnvironmentConfigurationPath) -or
         [string]::IsNullOrWhiteSpace($EnvironmentHtmlPath) -or
         -not [string]::IsNullOrWhiteSpace($BaselineSnapshotPath)) {
-        throw 'Development source-ahead refresh requires the exact HTML/JavaScript pair and their matching external DEV configuration.'
+        throw 'Development source-ahead refresh requires the exact reviewed HTML/policy/JavaScript set and matching external DEV configuration.'
     }
     foreach ($resourceName in $allowedDevelopmentNames) {
         $resource = @($allResources | Where-Object Name -CEQ $resourceName)
@@ -387,7 +390,9 @@ if (-not ($PublishOnly -or $ReconcilePublishOnly) -and ($hasEnvironmentResource 
         [string]$environmentConfiguration.candidateOperationMode -ceq 'SingleUserDev' -and
         ($environmentConfiguration.devDirectWriteFallbackEnabled -ne $false -or
          [string]$environmentConfiguration.diagnosticsMode -cne 'OFF' -or
-         $environmentConfiguration.availabilityEnabled -eq $true)) {
+         ($null -ne $environmentConfiguration.PSObject.Properties['availabilityEnabled'] -and
+          ($environmentConfiguration.PSObject.Properties['availabilityEnabled'].Value -isnot [bool] -or
+           $environmentConfiguration.PSObject.Properties['availabilityEnabled'].Value)))) {
         throw 'The generated environment configuration does not match the guarded DEV policy.'
     }
     $configurationHash = [Convert]::ToHexString(

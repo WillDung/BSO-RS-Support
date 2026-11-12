@@ -257,6 +257,24 @@ test("a failed refresh clears a previous proof; errors never synthesize success"
   assert.equal(missing.hasSyntheticIsolation(), false);
 });
 
+test("the verifier rejection exposes only a safe server error code and clears proof", async () => {
+  const policy = createPolicy(async () => ({
+    ok: false,
+    json: async () => ({ error: { code: "0x80040265", message: "SYNTHETIC_OWNER_REJECTED" } })
+  }));
+  const config = configuration({
+    candidateOperationMode: "SingleUserDev",
+    devDirectWriteFallbackEnabled: false
+  });
+
+  await assert.rejects(
+    policy.verifySyntheticIsolation(config, runtime({ actorId: verifierFixture().actorId })),
+    /SYNTHETIC_VERIFIER_REJECTED:SYNTHETIC_OWNER_REJECTED/
+  );
+  assert.equal(policy.hasSyntheticIsolation(), false);
+  assert.equal(policy.getSyntheticScope(), null);
+});
+
 test("synthetic Create stays disabled before reads when server isolation is unavailable", () => {
   const source = fs.readFileSync(path.join(webRoot, "candidate-console.js"), "utf8");
   const coreGate = source.match(/function isCandidateCoreEnabled\(\) \{[\s\S]*?\n  \}/);

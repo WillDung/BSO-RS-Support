@@ -2878,15 +2878,20 @@
     if (environmentPolicy.allowed === true && environmentPolicy.syntheticDataOnly) {
       try {
         await verifyServerIsolation();
-      } catch {
+      } catch (error) {
         $("create-button").disabled = true;
         $("refresh-button").disabled = true;
         document.querySelectorAll("button[data-action]").forEach((button) => { button.disabled = true; });
-        showNotice("Candidate Management is blocked until server-side synthetic data isolation is established: the verifier is unavailable or rejected this scope.", true);
+        const rejection = error && typeof error.message === "string"
+          ? error.message.match(/^SYNTHETIC_VERIFIER_REJECTED:([A-Z][A-Z0-9_]{2,100})$/)
+          : null;
+        const message = rejection
+          ? `Candidate Management is blocked: server-side synthetic isolation rejected this scope (${rejection[1]}). No Candidate data was loaded; contact support to reconcile the scoped DEV records.`
+          : "Candidate Management is blocked until server-side synthetic data isolation is established: the verifier is unavailable or rejected this scope.";
+        showNotice(message, true);
         return;
       }
     }
-    updateWorkflowPathLabel();
     if (!isCandidateCoreEnabled()) {
       $("create-button").disabled = true;
       $("refresh-button").disabled = true;
@@ -2928,6 +2933,7 @@
       }
       await refreshCandidates();
       setBusy(false);
+      updateWorkflowPathLabel();
     } catch (error) {
       if (environmentPolicy.syntheticDataOnly) blockSyntheticQuery();
       logSafeFailure("CANDIDATE_MANAGEMENT_INITIALIZATION_FAILED", error);

@@ -116,7 +116,22 @@
         CorrelationId: correlationId
       })
     });
-    if (!response.ok) throw new Error("SYNTHETIC_VERIFIER_UNAVAILABLE");
+    if (!response.ok) {
+      if (typeof response.json !== "function") {
+        throw new Error("SYNTHETIC_VERIFIER_UNAVAILABLE");
+      }
+      let failure;
+      try {
+        failure = await response.json();
+      } catch {
+        throw new Error("SYNTHETIC_VERIFIER_RESPONSE_INVALID");
+      }
+      const message = failure && failure.error && failure.error.message;
+      if (typeof message === "string" && /^[A-Z][A-Z0-9_]{2,100}$/.test(message)) {
+        throw new Error(`SYNTHETIC_VERIFIER_REJECTED:${message}`);
+      }
+      throw new Error("SYNTHETIC_VERIFIER_UNAVAILABLE");
+    }
     const result = await response.json();
     if (!result || result.ResultCode !== resultCode ||
         typeof result.IsolationContract !== "string") throw new Error("SYNTHETIC_VERIFIER_RESPONSE_INVALID");

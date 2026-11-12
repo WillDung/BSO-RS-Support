@@ -47,15 +47,17 @@ class Element {
   append(...children) { this.children.push(...children); }
   appendChild(child) { this.children.push(child); return child; }
   replaceChildren(...children) { this.children = children; }
+  setAttribute(name, value) { this[name] = value; }
   removeAttribute(name) { delete this[name]; }
   reportValidity() { return true; }
   requestSubmit() {}
+  reset() {}
   scrollIntoView() {}
 }
 
 async function createConsole({ mode = "DEV", syntheticDataOnly = true, fixtures = {},
   configuration = {}, serverOptions = {}, simulatedIsolation = false, verifier,
-  coreFetch, missingPolicy = false, beforeInitialize } = {}) {
+  coreFetch, missingPolicy = false, beforeInitialize, dataMode = "CONFIGURED" } = {}) {
   const server = createServer(fixtures, serverOptions);
   const elements = new Map();
   const element = (name) => {
@@ -118,6 +120,10 @@ async function createConsole({ mode = "DEV", syntheticDataOnly = true, fixtures 
   vm.runInContext(consoleSource, context);
   if (beforeInitialize) beforeInitialize({ element, server });
   await document.listeners.DOMContentLoaded();
+  if (dataMode !== "CONFIGURED") {
+    element("candidate-data-mode").value = dataMode;
+    await element("candidate-data-mode").listeners.change();
+  }
   return { server, element, actionButton, workflowLabel, fetchCalls, methods: window.__testConsole,
     expireProof: () => expiryCallback() };
 }
@@ -755,7 +761,7 @@ for (const mode of ["DEV", "TEST"]) {
   });
 }
 
-test("non-synthetic Candidate Core still loads, and inactive references are excluded by the emitted query", async () => {
+test("explicit NORMAL mode loads non-synthetic Candidate Core and excludes inactive references", async () => {
   const active = { os_sr_posid: id, os_sr_pos_ttl: "Synthetic position A", statecode: 0 };
   const inactive = { os_sr_posid: orgId, os_sr_pos_ttl: "Synthetic position B", statecode: 1 };
   const candidate = {
@@ -763,7 +769,7 @@ test("non-synthetic Candidate Core still loads, and inactive references are excl
     os_sr_cand_eml: "sample@example.invalid", os_sr_cand_stat: 100010000
   };
   const ui = await createConsole({
-    mode: "PROD", syntheticDataOnly: false,
+    mode: "PROD", syntheticDataOnly: false, dataMode: "NORMAL",
     fixtures: { os_sr_pos: [active, inactive], os_sr_cand: [candidate] }
   });
   assert.equal(ui.methods.isCandidateCoreEnabled(), true);
@@ -782,14 +788,14 @@ test("non-synthetic Candidate Core still loads, and inactive references are excl
   assert.equal(JSON.parse(ui.fetchCalls[0][1].body).ActionType, "RecordCall");
 });
 
-test("non-synthetic reference selectors retain the existing case-sensitive visible behavior", async () => {
+test("NORMAL reference selectors match all Active records without name-prefix exclusions", async () => {
   const lower = { os_sr_taid: id, os_sr_ta_nm: "[dev] synthetic reference", statecode: 0 };
   const upper = { os_sr_taid: orgId, os_sr_ta_nm: "[DEV] synthetic reference", statecode: 0 };
   const ui = await createConsole({
-    mode: "PROD", syntheticDataOnly: false, fixtures: { os_sr_ta: [lower, upper] }
+    mode: "PROD", syntheticDataOnly: false, dataMode: "NORMAL", fixtures: { os_sr_ta: [lower, upper] }
   });
   const labels = ui.element("candidate-assigned-ta").children.map((option) => option.textContent);
   assert.ok(labels.includes(lower.os_sr_ta_nm));
-  assert.equal(labels.includes(upper.os_sr_ta_nm), false);
+  assert.equal(labels.includes(upper.os_sr_ta_nm), true);
   assert.ok(lastResponse(ui.server, "os_sr_ta").entities.some((row) => row.os_sr_taid === id));
 });

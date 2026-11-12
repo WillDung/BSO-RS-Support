@@ -8,7 +8,7 @@
   <script src="../../ClientGlobalContext.js.aspx"></script>
   <script defer src="candidate-console-environment.js?v=21ddcd925916"></script>
   <script defer src="candidate-console-policy.js?v=8f9308f512fd"></script>
-  <script defer src="candidate-console.js?v=672292a5acb0"></script>
+  <script defer src="candidate-console.js?v=f0f0669cdbc9"></script>
   <script defer src="candidate-console-availability.js?v=7df0706fcbe1"></script>
 </head>
 <body>
@@ -24,6 +24,18 @@
         <span id="real-data-badge" class="dev-badge">SYNTHETIC DATA ONLY</span>
       </div>
     </header>
+    <section class="panel" aria-labelledby="reference-mode-heading">
+      <h2 id="reference-mode-heading">Candidate data mode</h2>
+      <label class="field">
+        <span>Mode</span>
+        <select id="candidate-data-mode">
+          <option value="CONFIGURED">Configured synthetic workflow</option>
+          <option value="NORMAL">NORMAL - accessible Active references</option>
+        </select>
+      </label>
+      <p id="reference-mode-status" class="muted" role="status" aria-live="polite"></p>
+      <button id="refresh-references" class="button button-secondary" type="button">Refresh reference options</button>
+    </section>
     <label id="dev-fallback-control" class="muted workflow-switch">
       <input id="dev-fallback-toggle" type="checkbox">
       Enable DEV direct-write fallback for this browser session

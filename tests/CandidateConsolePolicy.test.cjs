@@ -279,15 +279,19 @@ test("synthetic Create stays disabled before reads when server isolation is unav
   const source = fs.readFileSync(path.join(webRoot, "candidate-console.js"), "utf8");
   const coreGate = source.match(/function isCandidateCoreEnabled\(\) \{[\s\S]*?\n  \}/);
   const initialization = source.match(/async function initialize\(\) \{([\s\S]*?)\n  \}/);
-  assert.ok(coreGate && initialization);
+  const workspace = source.match(/async function loadWorkspace\(\) \{([\s\S]*?)\n  \}/);
+  const candidateWorkspace = source.match(/async function loadCandidateWorkspace\(\) \{([\s\S]*?)\n  \}/);
+  assert.ok(coreGate && initialization && workspace && candidateWorkspace);
+  assert.match(initialization[1], /await loadWorkspace\(\)/);
+  assert.match(workspace[1], /await loadCandidateWorkspace\(\)/);
   assert.match(coreGate[0], /environmentPolicy\.syntheticDataOnly[\s\S]*?policy\.hasSyntheticIsolation\(\) === true/);
-  const blockedBranch = initialization[1].match(/if \(!isCandidateCoreEnabled\(\)\) \{([\s\S]*?)\n    \}/);
+  const blockedBranch = candidateWorkspace[1].match(/if \(!isCandidateCoreEnabled\(\)\) \{([\s\S]*?)\n    \}/);
   assert.ok(blockedBranch);
   assert.match(blockedBranch[1], /\$\("create-button"\)\.disabled = true/);
   assert.match(blockedBranch[1], /server-side synthetic data isolation/);
   assert.match(blockedBranch[1], /\breturn;/);
-  assert.ok(initialization[1].indexOf(blockedBranch[0]) <
-    initialization[1].indexOf('loadLookupOptions("os_sr_pos"'));
+  assert.ok(candidateWorkspace[1].indexOf(blockedBranch[0]) <
+    candidateWorkspace[1].indexOf('await refreshReferenceOptions()'));
 });
 
 test("synthetic query helpers escape literal brackets and reject invalid attribute paths", () => {

@@ -1,0 +1,71 @@
+{
+  "manifestVersion": 1,
+  "createdOn": "2026-11-12",
+  "status": "PUBLISHED_CURRENT_AND_EFFECTIVE_CONTENT_VERIFIED",
+  "scope": "NORMAL_REFERENCE_SELECTORS_ONLY",
+  "customApiChanges": 0,
+  "environmentConfigurationChanges": 0,
+  "resources": [
+    {
+      "name": "os_/bso/candidate-console.html",
+      "sha256": "66f4fa3327284335e5f070cd6f375aa3d00b138cfd506c390da56146a93614d0",
+      "previousSha256": "fdd9fc9ee3fec019b21806e9beb9bc1c5ee21777b47bcfcd8eeac4d827228bcb"
+    },
+    {
+      "name": "os_/bso/candidate-console.js",
+      "sha256": "f0f0669cdbc9110414177bc08c2b57eacaf19f4030f860990707e96d285a43f8",
+      "previousSha256": "672292a5acb0011dec256df536f42087c8e5eff1a42a226318fedbfdf5a9bcae"
+    }
+  ],
+  "unchangedComponents": [
+    "Candidate Core 1.0.8.0",
+    "Custom API contract and handler registration",
+    "SingleUserDev configuration and proof validation",
+    "Console environment, policy, styles and Availability resources",
+    "Security roles, assignments and teams",
+    "Calendar and application navigation"
+  ],
+  "normalModeContract": {
+    "selection": "Explicit user-facing selection; no automatic switch or remembered selection",
+    "referenceAuthorization": "Authenticated native Dataverse Web API table/row permissions",
+    "activeViewFilter": "statecode eq 0",
+    "additionalNameOrSyntheticFilters": false,
+    "candidateOperationsInCurrentSyntheticEnvironment": "BLOCKED",
+    "normalCandidateApi": "Existing os_sr_cact business actions without SyntheticScopeId only under configured non-synthetic authorization; server checks unchanged",
+    "realCandidateDataAuthorization": "NOT_GRANTED"
+  },
+  "validation": {
+    "consoleStaticAssertionsPassed": 80,
+    "offlineReferenceRuntimeAssertionsPassed": 27,
+    "existingPolicyIsolationProfileTestsPassed": 60,
+    "liveActiveViewFilterInspected": true,
+    "authenticatedActiveReferenceCounts": {
+      "position": 2,
+      "source": 2,
+      "ta": 3
+    },
+    "ownerFunctionalUat": "NOT_RUN",
+    "candidateBusinessWrites": 0
+  },
+  "deploymentTool": "../scripts/Deploy-BsoRsCandidateConsole.ps1",
+  "deploymentToolSha256": "d70fb61f89d70ddb117ea6278d548b9838bf7b4fbe880661ba29e9cdd2c5aa86",
+  "deployment": {
+    "updateDispatchToolSha256": "ed385fe3ca5999c717400f85d71c2822b16beee479422efc623d3ebd02ed229c",
+    "webResourceUpdates": 2,
+    "updateHttpStatuses": [204, 204],
+    "scopedPublishXmlCount": 1,
+    "publishHttpStatus": 204,
+    "publishedResourceCount": 2,
+    "publishAllCount": 0,
+    "repeatedContentUpdates": 0,
+    "automaticRetries": 0,
+    "originalJournalAndRollbackSnapshotPreserved": true,
+    "draftLayerUniqueIdPrepublicationCheckCorrected": true,
+    "publishedAndCurrentHashesVerified": true,
+    "directEffectiveResourceHashesVerified": true,
+    "environmentAndPolicyResourcesUnchanged": true,
+    "sharedUciPageReloaded": false,
+    "ownerUiTesting": "NOT_RUN"
+  },
+  "frozenHistoricalManifestsChanged": false
+}

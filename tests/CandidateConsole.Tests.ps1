@@ -184,11 +184,22 @@ Assert-Test ($script.Contains('loadLookupOptions("os_sr_ta"') -and
     $script.Contains('select.value = expectedId') -and
     $script.Contains('readSingleUserDevRecords(tableLogicalName)') -and
     $script.Contains('Loading options...') -and
-    $script.Contains('Options unavailable; reload the Console to retry') -and
+    $script.Contains('Options unavailable; use Refresh reference options to retry') -and
     $script.Contains('No active ${REFERENCE_OPTION_LABELS[tableName] || "reference"} records found') -and
     $script.Contains('isReferenceAllowedByDataMode(label)') -and
     $script.Contains('policy.allowsReference(label, environmentPolicy.syntheticDataOnly)')) `
     'Load active reference choices, pin SingleUserDev selections to approved profile IDs, and show lookup loading/error/empty states'
+Assert-Test ($html.Contains('id="candidate-data-mode"') -and
+    $html.Contains('value="NORMAL"') -and
+    $html.Contains('id="refresh-references"') -and
+    $script.Contains('let referenceMode = "CONFIGURED";') -and
+    $script.Contains('NORMAL_CANDIDATE_OPERATION_NOT_AUTHORIZED') -and
+    $script.Contains('CANDIDATE_WORKSPACE_NOT_READY') -and
+    $script.Contains('async function readNormalReferenceRecords') -and
+    $script.Contains('referenceMode === "NORMAL") return filter;') -and
+    $script.Contains('Promise.allSettled') -and
+    $script.Contains('previousValues[index]')) `
+    'Keep normal references explicitly selected, native permission-bound, refreshable and isolated from unauthorized Candidate operations'
 Assert-Test ($script.Contains('getActiveReference("os_sr_ta"') -and
     $script.Contains('getActiveReference("os_sr_loc"') -and
     $script.Contains('reference.statecode !== 0') -and

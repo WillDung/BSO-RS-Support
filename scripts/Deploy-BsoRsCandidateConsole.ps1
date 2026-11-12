@@ -6,6 +6,7 @@ param(
     [switch]$RefreshExisting,
     [switch]$ReleaseNeutralProfile,
     [switch]$DevelopmentSourceAhead,
+    [string]$NormalReferenceSelectorsReleaseManifestPath,
     [switch]$PublishOnly,
     [switch]$ReconcilePublishOnly,
     [switch]$CreateNewResources,
@@ -179,6 +180,33 @@ $developmentSourceAheadHashes = @{
 $developmentSourceAheadUnchangedNames = @(
     'os_/bso/candidate-console-environment.js'
 )
+$normalReferenceRelease = $null
+if (-not [string]::IsNullOrWhiteSpace($NormalReferenceSelectorsReleaseManifestPath)) {
+    $expectedManifestPath = Join-Path $repositoryRoot 'docs\CANDIDATE_CONSOLE_NORMAL_REFERENCES_RELEASE_MANIFEST.json'
+    if (-not $DevelopmentSourceAhead -or
+        [IO.Path]::GetFullPath($NormalReferenceSelectorsReleaseManifestPath) -ine $expectedManifestPath) {
+        throw 'NORMAL_REFERENCE_RELEASE_AUTHORIZATION_REQUIRED'
+    }
+    $normalReferenceRelease = Get-Content -LiteralPath $expectedManifestPath -Raw | ConvertFrom-Json
+    $normalNames = @('os_/bso/candidate-console.html', 'os_/bso/candidate-console.js')
+    if ($normalReferenceRelease.scope -cne 'NORMAL_REFERENCE_SELECTORS_ONLY' -or
+        $normalReferenceRelease.customApiChanges -ne 0 -or
+        $normalReferenceRelease.environmentConfigurationChanges -ne 0 -or
+        @($normalReferenceRelease.resources).Count -ne 2 -or
+        [string]::Join('|', @($normalReferenceRelease.resources.name | Sort-Object -CaseSensitive)) -cne
+            [string]::Join('|', $normalNames)) {
+        throw 'NORMAL_REFERENCE_RELEASE_AUTHORIZATION_REQUIRED'
+    }
+    $developmentSourceAheadHashes = @{}
+    foreach ($resource in $normalReferenceRelease.resources) {
+        if ($resource.sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+            $resource.previousSha256 -cnotmatch '^[0-9a-f]{64}$') {
+            throw 'NORMAL_REFERENCE_RELEASE_AUTHORIZATION_REQUIRED'
+        }
+        $developmentSourceAheadHashes[$resource.name] = [string]$resource.sha256
+    }
+    $developmentSourceAheadUnchangedNames += 'os_/bso/candidate-console-policy.js'
+}
 if ($DevelopmentSourceAhead) {
     $selectedDevelopmentNames = @($RefreshResourceNames | Sort-Object -CaseSensitive)
     $allowedDevelopmentNames = @($developmentSourceAheadHashes.Keys | Sort-Object -CaseSensitive)
@@ -1083,6 +1111,15 @@ try {
             $localBytes = [IO.File]::ReadAllBytes($resource.Path)
             $remoteHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($remoteBytes)).ToLowerInvariant()
             $localHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($localBytes)).ToLowerInvariant()
+            if ($null -ne $normalReferenceRelease) {
+                $pin = @($normalReferenceRelease.resources | Where-Object name -CEQ $resource.Name)[0]
+                $state = Get-ExactWebResourceState -Resource $resource -ResourceId $resourceId
+                if (-not $state.PublishedMatchesCurrent -or
+                    $state.CurrentSha256 -cne $pin.previousSha256) {
+                    throw 'NORMAL_REFERENCE_RELEASE_TARGET_DRIFT'
+                }
+                $script:RefreshBaselineResources.Add($state)
+            }
             $publishedHash = $null
             $publishedMatchesCurrent = $null
             if (-not [string]::IsNullOrWhiteSpace($BaselineSnapshotPath)) {
@@ -1388,6 +1425,10 @@ try {
             PrePublishHashes = [ordered]@{}
             RequestCounts = $script:Counts
             AutomaticRetries = 0
+        }
+        if ($null -ne $normalReferenceRelease) {
+            $script:Journal.NormalReferenceReleaseScope = $normalReferenceRelease.scope
+            $script:Journal.RollbackSnapshot = @($script:RefreshBaselineResources)
         }
         foreach ($resource in $resources) {
             $script:Journal.Dispatches.Add([ordered]@{
@@ -1705,6 +1746,16 @@ try {
                 [int]$readback.webresourcetype -ne $resource.Type) {
                 throw "Refresh resource identity changed after preflight: $($resource.Name)"
             }
+            if ($null -ne $normalReferenceRelease) {
+                $pin = @($normalReferenceRelease.resources | Where-Object name -CEQ $resource.Name)[0]
+                $currentHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData(
+                    [Convert]::FromBase64String([string]$readback.content))).ToLowerInvariant()
+                $sourceHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData(
+                    [Convert]::FromBase64String($expectedContent))).ToLowerInvariant()
+                if ($currentHash -cne $pin.previousSha256 -or $sourceHash -cne $pin.sha256) {
+                    throw 'NORMAL_REFERENCE_RELEASE_CONCURRENT_CHANGE'
+                }
+            }
             $entry.WebResourceId = $resourceId
             if ([string]$readback.content -ceq $expectedContent) {
                 $entry.State = 'GET_RECONCILED_UNCHANGED'
@@ -1735,6 +1786,22 @@ try {
             Save-Journal
         }
 
+        if ($null -ne $normalReferenceRelease) {
+            foreach ($resource in $resources) {
+                $resourceId = [string]@($existing.value | Where-Object name -CEQ $resource.Name)[0].webresourceid
+                $current = (Get-CurrentWebResource -ResourceId $resourceId).Row
+                $pin = @($normalReferenceRelease.resources | Where-Object name -CEQ $resource.Name)[0]
+                $currentHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData(
+                    [Convert]::FromBase64String([string]$current.content))).ToLowerInvariant()
+                if ([string]$current.webresourceid -ine $resourceId -or
+                    [string]$current.name -cne $resource.Name -or
+                    [string]$current.displayname -cne $resource.DisplayName -or
+                    [int]$current.webresourcetype -ne $resource.Type -or
+                    $currentHash -cne $pin.sha256) {
+                    throw 'NORMAL_REFERENCE_RELEASE_PREPUBLICATION_DRIFT'
+                }
+            }
+        }
         $parameterXml = New-CandidateConsolePublishParameterXml `
             -WebResourceIds $script:Journal.ResourceIds
         $publishEntry = @($script:Journal.Dispatches | Where-Object Name -CEQ $publishLabel)[0]

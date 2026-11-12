@@ -592,7 +592,14 @@ namespace os_sr_cact
             if (references.ContainsKey(table)) return new[] { NameColumn(table), "statecode" };
             if (table == "os_sr_cand") return new[] { "os_sr_cand_nm", "os_sr_cand_eml", "ownerid",
                 "os_sr_cand_pos", "os_sr_cand_csrc", "os_sr_cand_ta" };
-            if (table == "os_sr_intv") return new[] { "os_sr_intv_cand", "os_sr_intv_ta", "os_sr_intv_loc" };
+            if (table == "os_sr_call" && SingleUserDev)
+                return new[] { "os_sr_call_cand", "ownerid", "os_sr_call_ctby" };
+            if (table == "os_sr_csh" && SingleUserDev)
+                return new[] { "os_sr_csh_cand", "ownerid", "os_sr_csh_actr" };
+            if (table == "os_sr_intv")
+                return SingleUserDev
+                    ? new[] { "os_sr_intv_cand", "os_sr_intv_ta", "os_sr_intv_loc", "ownerid" }
+                    : new[] { "os_sr_intv_cand", "os_sr_intv_ta", "os_sr_intv_loc" };
             if (!Tables.Contains(table)) throw new OperationError("SYNTHETIC_QUERY_REJECTED");
             return new[] { CandidateColumn(table) };
         }

@@ -615,6 +615,51 @@ internal static partial class Program
             policy.CandidateName == bsoPolicy.CandidateName &&
             policy.CandidateEmail == bsoPolicy.CandidateEmail,
             "SingleUserDev uses a distinct row scope with the exact existing synthetic marker");
+        var verificationColumns = typeof(SyntheticIsolation).GetMethod("VerificationColumns",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        string[] ProjectedColumns(SyntheticIsolation isolation, string table) =>
+            (string[])verificationColumns.Invoke(isolation, new object[] { table })!;
+        foreach (var requiredColumn in new[]
+        {
+            ("os_sr_call", "ownerid"), ("os_sr_call", "os_sr_call_ctby"),
+            ("os_sr_csh", "ownerid"), ("os_sr_csh", "os_sr_csh_actr"),
+            ("os_sr_intv", "ownerid")
+        })
+            Check(ProjectedColumns(policy, requiredColumn.Item1).Contains(requiredColumn.Item2),
+                "SingleUserDev verifier projects required validation column: " + requiredColumn.Item1 + "." +
+                requiredColumn.Item2);
+        Check(!ProjectedColumns(bsoPolicy, "os_sr_call").Contains("ownerid") &&
+            !ProjectedColumns(bsoPolicy, "os_sr_intv").Contains("ownerid"),
+            "The existing BSO verification column sets remain unchanged");
+        foreach (var table in new[] { "os_sr_call", "os_sr_csh", "os_sr_intv" })
+        {
+            var row = new Entity(table, Guid.NewGuid())
+            {
+                [table + "_cand"] = new EntityReference("os_sr_cand", SingleUserScope),
+                ["ownerid"] = new EntityReference("systemuser", SingleUserActor)
+            };
+            if (table == "os_sr_call") row["os_sr_call_ctby"] = new EntityReference("systemuser", SingleUserActor);
+            if (table == "os_sr_csh") row["os_sr_csh_actr"] = new EntityReference("systemuser", SingleUserActor);
+            if (table == "os_sr_intv")
+            {
+                row["os_sr_intv_ta"] = new EntityReference("os_sr_ta", Reference);
+                row["os_sr_intv_loc"] = new EntityReference("os_sr_loc", Reference);
+            }
+            policy.ValidateRow(row);
+        }
+        var wrongOwner = new Entity("os_sr_intv", Guid.NewGuid())
+        {
+            ["os_sr_intv_cand"] = new EntityReference("os_sr_cand", SingleUserScope),
+            ["ownerid"] = new EntityReference("team", Guid.NewGuid())
+        };
+        RejectPolicy(() => policy.ValidateRow(wrongOwner), "SYNTHETIC_OWNER_REJECTED");
+        var wrongChildActor = new Entity("os_sr_call", Guid.NewGuid())
+        {
+            ["os_sr_call_cand"] = new EntityReference("os_sr_cand", SingleUserScope),
+            ["ownerid"] = new EntityReference("systemuser", SingleUserActor),
+            ["os_sr_call_ctby"] = new EntityReference("systemuser", Guid.NewGuid())
+        };
+        RejectPolicy(() => policy.ValidateRow(wrongChildActor), "SYNTHETIC_ACTOR_REJECTED");
         host.Invoke(SyntheticIsolation.VerifySingleUserDevAction);
         var contract = (string)host.Output["IsolationContract"];
         Check((string)host.Output["ResultCode"] == "SingleUserDevVerified" &&

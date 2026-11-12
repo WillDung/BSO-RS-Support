@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const { test } = require("node:test");
 const {
   classifyRequest, isLocalizationRequest, isUntrustedLocalizationRedirect,
-  matchesCandidateActionResponse
+  matchesCandidateActionResponse, suppressOptionalSupportRequest
 } = require("./request-classification.cjs");
 
 const origin = "https://orgsynthetic.crm4.dynamics.com";
@@ -312,6 +312,20 @@ test("Optional CRM support is kept separate from telemetry and ordinary reads", 
   assert.equal(classify(`${origin}/main.aspx`, { method: () => "GET" }), "READ_REQUEST_ALLOWED");
   assert.equal(classify(`${origin}/api/data/v9.2/os_sr_cact`, { method: () => "POST" }),
     "FORBIDDEN_BUSINESS_OR_PROVIDER_OPERATION");
+});
+
+test("Exact APAC OneCollector is suppressible while unknown and Candidate POSTs remain blocked", () => {
+  const telemetry = request();
+  assert.equal(classifyRequest(telemetry,
+    new URL("https://apac.events.data.microsoft.com/OneCollector/1.0/"), options),
+  "OPTIONAL_TELEMETRY_SUPPRESSED");
+  assert.equal(classify("https://apac.events.data.microsoft.com/Other"),
+    "UNKNOWN_REQUEST_BLOCKED");
+  assert.equal(classify(`${origin}/api/data/v9.2/os_sr_cact`,
+    { postData: () => JSON.stringify({
+      ActionType: "RecordCall",
+      CorrelationId: "11111111-1111-4111-8111-111111111111"
+    }) }), "FORBIDDEN_BUSINESS_OR_PROVIDER_OPERATION");
   assert.equal(classify(`${origin}/api/data/v9.2/UnknownAction`, { method: () => "POST" }),
     "FORBIDDEN_BUSINESS_OR_PROVIDER_OPERATION");
   assert.equal(classify(`${origin}/AppWebServices/MetadataService.asmx/GetResourceStrings`, {
@@ -325,4 +339,48 @@ test("Optional CRM support is kept separate from telemetry and ordinary reads", 
   assert.equal(classify("https://graph.microsoft.com/v1.0/me/events", {
     method: () => "POST"
   }), "FORBIDDEN_BUSINESS_OR_PROVIDER_OPERATION");
+});
+
+test("Suppressed telemetry does not fail lifecycle routing or consume an operation response", async () => {
+  const telemetryUrl = new URL("https://apac.events.data.microsoft.com/OneCollector/1.0/");
+  const telemetryRequest = request();
+  const report = { platformSupportRequestsSuppressed: 0, optionalSuppressions: [] };
+  let aborted = false;
+  const route = { abort: async reason => { aborted = reason === "blockedbyclient"; } };
+  const handled = await suppressOptionalSupportRequest(route,
+    classifyRequest(telemetryRequest, telemetryUrl, options), telemetryRequest, telemetryUrl, report);
+  assert.equal(handled, true);
+  assert.equal(aborted, true);
+  assert.equal(report.platformSupportRequestsSuppressed, 1);
+  assert.equal(report.optionalSuppressions.length, 1);
+
+  const operationCorrelation = "11111111-1111-4111-8111-111111111111";
+  const businessRequest = request({
+    postData: () => JSON.stringify({
+      ActionType: "RecordCall", CorrelationId: operationCorrelation,
+      CandidateId: "22222222-2222-4222-8222-222222222222"
+    })
+  });
+  const response = {
+    url: () => `${origin}/api/data/v9.2/os_sr_cact`,
+    request: () => businessRequest
+  };
+  assert.equal(matchesCandidateActionResponse(response, origin, "RecordCall", operationCorrelation), true);
+
+  const unknownUrl = new URL("https://apac.events.data.microsoft.com/Other");
+  const unknownPost = request({ postData: () => "{}" });
+  assert.equal(classifyRequest(unknownPost, unknownUrl, options), "UNKNOWN_REQUEST_BLOCKED");
+  assert.equal(await suppressOptionalSupportRequest(route, "UNKNOWN_REQUEST_BLOCKED",
+    unknownPost, unknownUrl, report), false);
+  const forbiddenUrl = new URL(`${origin}/api/data/v9.2/os_sr_cact`);
+  const forbiddenPost = request({
+    postData: () => JSON.stringify({
+      ActionType: "RecordCall", CorrelationId: operationCorrelation
+    })
+  });
+  const forbidden = classifyRequest(forbiddenPost, forbiddenUrl, options);
+  assert.equal(forbidden, "FORBIDDEN_BUSINESS_OR_PROVIDER_OPERATION");
+  assert.equal(await suppressOptionalSupportRequest(route, forbidden,
+    forbiddenPost, forbiddenUrl, report), false);
+  assert.equal(report.platformSupportRequestsSuppressed, 1);
 });

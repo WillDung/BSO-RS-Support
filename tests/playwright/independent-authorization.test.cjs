@@ -9,8 +9,13 @@ const {
   validateSyntheticIsolationProof, validateOperationCorrelation, createSingleUserDevSuccessor
 } = require("./independent-authorization.cjs");
 const {
-  ACTIONS, REFERENCE_LABELS, reserveOneShot, isSingleUserDevDirectReadBlocked
+  ACTIONS, STATUSES, REFERENCE_LABELS, reserveOneShot, isSingleUserDevDirectReadBlocked
 } = require("./lifecycle-support.cjs");
+const {
+  createContinuationAuthorization, loadContinuationAuthorization,
+  claimContinuationOperation, reserveContinuationDispatch,
+  completeContinuationOperation, readOperation, validateReadback
+} = require("./continuation-authorization.cjs");
 
 const now = Date.parse("2030-01-02T10:00:00Z");
 const configuration = { workers: 1, retries: 0, repeatEach: 1, retry: 0, repeatEachIndex: 0 };
@@ -866,7 +871,9 @@ test("Lifecycle runner preserves BSO v2 and gates either owner scope before clai
   assert.match(source, /isSingleUserDevDirectReadBlocked\(url\)/);
   assert.match(source, /body\.SyntheticScopeId === approval\.lifecycleScope\.syntheticIsolation\.scopeId/);
   assert.match(source, /validateOperationCorrelation\(/);
-  assert.match(source, /approval\.identityScope === "SINGLE_USER_DEV" \? approval\.origin/);
+  assert.match(source, /resolveAuthenticationRouting\(/);
+  assert.match(source, /organizationOrigin: approval\.origin/);
+  assert.match(source, /loadPinnedAuthenticationCallbackOrigin\(\)/);
   assert.match(source, /readEvidence\(page, approval\.origin, record, approval\.independentAuthorizationRecord\)/);
 });
 
@@ -958,4 +965,317 @@ test("Active preceding independent attempt, missing decision text and tampered a
     "independent-02.authorization.json"), request, f.base, now), /UAT_PRECEDING_ATTEMPT_ACTIVE/);
   fs.appendFileSync(f.file, " ");
   assert.throws(() => loadIndependentAuthorization(f.file, f.base, now), /UAT_INDEPENDENT_CHAIN_LINK_MISMATCH/);
+});
+
+function continuationFixture(t, authorizationId = "singleuserdev-continuation-01", issue = true) {
+  const f = singleUserDevFixture(t);
+  const authorizedAt = Date.parse("2030-01-02T11:00:00Z");
+  const candidateId = "99999999-9999-4999-8999-999999999999";
+  const createCorrelation = "abababab-abab-4bab-8bab-abababababab";
+  const prior = f.create();
+  const predecessorProof = f.makeProof(now);
+  const claimSource = `
+    const { claimIndependentAuthorization } = require(${JSON.stringify(
+      require.resolve("./independent-authorization.cjs"))});
+    const journal = claimIndependentAuthorization(${JSON.stringify(f.file)},
+      ${JSON.stringify(f.base)}, ${JSON.stringify(configuration)},
+      ${JSON.stringify(predecessorProof)}, ${now});
+    journal.record.attempts.push({
+      action: "CreateCandidate",
+      correlation: ${JSON.stringify(createCorrelation)},
+      classification: "APPROVED_BUSINESS_OPERATION",
+      outcome: "DISPATCH_RESERVED_OUTCOME_UNKNOWN"
+    });
+    journal.record.status = "DISPATCH_RESERVED_OUTCOME_UNKNOWN";
+    journal.save();
+    journal.record.status = "STOPPED_NO_RETRY_RECONCILE_ONLY";
+    journal.save();`;
+  const child = spawnSync(process.execPath, ["-e", claimSource], { encoding: "utf8" });
+  assert.equal(child.status, 0, child.stderr || child.stdout);
+
+  const proofObservation = f.makeProof(authorizedAt);
+  const candidate = {
+    candidateCount: 1, candidateId, marker: f.original.marker,
+    name: f.request.candidateName, email: f.request.candidateEmail,
+    createCorrelation, status: STATUSES[0], ownerId: f.base.expectedActorId,
+    positionId: prior.scope.syntheticIsolation.positionId,
+    sourceId: prior.scope.syntheticIsolation.sourceId,
+    taId: prior.scope.syntheticIsolation.taId,
+    callCount: 0, scheduleCount: 0, historyCount: 0,
+    callOutcome: null, callCorrelation: null, callId: null, history: []
+  };
+  const reconciliation = {
+    version: 1, checkedAt: new Date(authorizedAt).toISOString(),
+    whoAmI: {
+      actorId: f.base.expectedActorId, organizationId: f.base.organizationId
+    },
+    proofObservation, candidate,
+    counts: { candidates: 1, calls: 0, schedules: 0, history: 0 },
+    receiptReadback: "NOT_AVAILABLE_VIA_SINGLE_USER_DEV_SCOPED_API"
+  };
+  const request = {
+    ownerMutationApproval: true,
+    ownerDecisionText: "Synthetic fixture: explicitly authorize Call Answered and Proceed to Scheduling for the reconciled Candidate only.",
+    authorizedAt: new Date(authorizedAt).toISOString(),
+    marker: f.original.marker, candidateId, createCorrelation,
+    authorizationId,
+    expiresAt: new Date(authorizedAt + 60 * 60 * 1000).toISOString(),
+    reconciliation
+  };
+  const file = path.join(path.dirname(f.file),
+    `${request.authorizationId}.continuation.json`);
+  const authorization = issue
+    ? createContinuationAuthorization(file, f.file, request, f.base, authorizedAt)
+    : null;
+  return {
+    ...f, prior, file, request, authorization, candidateId, createCorrelation,
+    authorizedAt, initialState: candidate
+  };
+}
+
+function continuationState(f, authorization, phase, callCorrelation = null,
+  proceedCorrelation = null) {
+  const state = {
+    ...f.initialState,
+    status: STATUSES[0],
+    callCount: 0, scheduleCount: 0, historyCount: 0,
+    callOutcome: null, callCorrelation: null, callId: null, history: []
+  };
+  if (phase === "AFTER_CALL" || phase === "BEFORE_PROCEED" || phase === "AFTER_PROCEED") {
+    const historyId = "12121212-1212-4121-8121-121212121212";
+    state.status = STATUSES[1];
+    state.callCount = 1;
+    state.callOutcome = 100010000;
+    state.callCorrelation = callCorrelation;
+    state.callId = "13131313-1313-4131-8131-131313131313";
+    state.historyCount = 1;
+    state.history = [{
+      id: historyId, correlation: callCorrelation,
+      previousStatus: STATUSES[0], newStatus: STATUSES[1],
+      actorId: authorization.scope.actorId
+    }];
+  }
+  if (phase === "AFTER_PROCEED") {
+    state.status = STATUSES[2];
+    state.historyCount = 2;
+    state.history.push({
+      id: "14141414-1414-4141-8141-141414141414",
+      correlation: proceedCorrelation,
+      previousStatus: STATUSES[1], newStatus: STATUSES[2],
+      actorId: authorization.scope.actorId
+    });
+  }
+  return state;
+}
+
+test("A separate continuation binds only the reconciled Candidate and preserves predecessor evidence", t => {
+  const f = continuationFixture(t);
+  const authorizationBytes = fs.readFileSync(f.file);
+  const predecessorBytes = fs.readFileSync(f.file.replace(
+    "singleuserdev-continuation-01.continuation.json", "singleuserdev-01.authorization.json"));
+  const predecessorJournal = fs.readFileSync(`${f.file.replace(
+    "singleuserdev-continuation-01.continuation.json", "singleuserdev-01.authorization.json")}.attempt.jsonl`);
+  const loaded = loadContinuationAuthorization(f.file, f.base, f.authorizedAt);
+  assert.deepEqual(loaded.scope.actions, ["RecordCall", "ProceedToScheduling"]);
+  assert.equal(loaded.scope.maximumCandidates, 0);
+  assert.equal(loaded.scope.maximumInvocations, 2);
+  assert.equal(loaded.scope.candidateId, f.candidateId);
+  assert.equal(loaded.scope.createCorrelation, f.createCorrelation);
+  assert.equal(loaded.scope.excludedCorrelations.includes(f.createCorrelation), true);
+  assert.equal(loaded.scope.excludedCorrelations.includes(
+    f.prior.scope.excludedCorrelations[0]), true);
+  const priorFile = f.file.replace(
+    "singleuserdev-continuation-01.continuation.json", "singleuserdev-01.authorization.json");
+  const predecessorProofCorrelation =
+    events(`${priorFile}.attempt.jsonl`)[0].record.syntheticProof.correlationId;
+  assert.equal(loaded.scope.excludedCorrelations.includes(predecessorProofCorrelation), true);
+  assert.equal(loaded.scope.actions.includes("CreateCandidate"), false);
+  assert.deepEqual(fs.readFileSync(f.file), authorizationBytes);
+  assert.deepEqual(fs.readFileSync(f.file.replace(
+    "singleuserdev-continuation-01.continuation.json", "singleuserdev-01.authorization.json")),
+  predecessorBytes);
+  assert.deepEqual(fs.readFileSync(`${f.file.replace(
+    "singleuserdev-continuation-01.continuation.json", "singleuserdev-01.authorization.json")}.attempt.jsonl`),
+  predecessorJournal);
+});
+
+test("Continuation issuance rejects wrong scope, mismatched reconciliation, and expired authorization", t => {
+  const f = continuationFixture(t);
+  const fresh = continuationFixture(t);
+  const wrongMarker = { ...fresh.request, marker: "22222222-2222-4222-8222-222222222222" };
+  assert.throws(() => createContinuationAuthorization(
+    path.join(path.dirname(fresh.file), "bad-marker.continuation.json"),
+    fresh.file.replace("singleuserdev-continuation-01.continuation.json",
+      "singleuserdev-01.authorization.json"),
+    wrongMarker, fresh.base, fresh.authorizedAt),
+  /UAT_CONTINUATION_OWNER_DECISION_OR_TARGET_MISMATCH/);
+  const priorFile = fresh.file.replace(
+    "singleuserdev-continuation-01.continuation.json", "singleuserdev-01.authorization.json");
+  const badReadback = { ...fresh.request, reconciliation: {
+    ...fresh.request.reconciliation,
+    counts: { ...fresh.request.reconciliation.counts, calls: 1 }
+  } };
+  assert.throws(() => createContinuationAuthorization(
+    path.join(path.dirname(fresh.file), "bad-readback.continuation.json"),
+    priorFile, badReadback, fresh.base, fresh.authorizedAt),
+  /UAT_CONTINUATION_RECONCILIATION_MISMATCH/);
+  assert.throws(() => loadContinuationAuthorization(
+    f.file, f.base, Date.parse(f.authorization.scope.expiresAt) + 1),
+  /UAT_CONTINUATION_AUTHORIZATION_INVALID/);
+});
+
+test("Continuation operations are single-use, fail closed when unresolved, and never permit CreateCandidate", t => {
+  const f = continuationFixture(t);
+  const freshProof = f.makeProof(f.authorizedAt + 1);
+  const beforeCall = continuationState(f, f.authorization, "BEFORE_CALL");
+  const call = claimContinuationOperation(
+    f.file, "RecordCall", f.base, freshProof, beforeCall, f.authorizedAt + 1);
+  assert.notEqual(call.correlation, f.createCorrelation);
+  assert.throws(() => reserveContinuationDispatch(call, f.base,
+    f.makeProof(f.authorizedAt + 2), beforeCall, f.authorizedAt + 2),
+  /UAT_CONTINUATION_DISPATCH_PREFLIGHT_CHANGED/);
+  assert.throws(() => reserveContinuationDispatch(call, f.base, freshProof,
+    { ...beforeCall, status: STATUSES[1] }, f.authorizedAt + 2),
+  /UAT_CONTINUATION_DISPATCH_PREFLIGHT_CHANGED/);
+  reserveContinuationDispatch(call, f.base, freshProof, beforeCall, f.authorizedAt + 2);
+  assert.throws(() => claimContinuationOperation(
+    f.file, "RecordCall", f.base, f.makeProof(f.authorizedAt + 3),
+    continuationState(f, f.authorization, "BEFORE_CALL"), f.authorizedAt + 3),
+  /UAT_CONTINUATION_ACTION_ALREADY_CLAIMED/);
+  assert.throws(() => claimContinuationOperation(
+    f.file, "ProceedToScheduling", f.base, f.makeProof(f.authorizedAt + 4),
+    continuationState(f, f.authorization, "BEFORE_PROCEED", call.correlation),
+    f.authorizedAt + 4),
+  /UAT_CONTINUATION_PRIOR_ACTION_NOT_CONFIRMED/);
+  assert.throws(() => claimContinuationOperation(
+    f.file, "CreateCandidate", f.base, f.makeProof(f.authorizedAt + 5),
+    continuationState(f, f.authorization, "BEFORE_CALL"), f.authorizedAt + 5),
+  /UAT_CONTINUATION_ACTION_NOT_ALLOWED/);
+  assert.throws(() => reserveContinuationDispatch(call, f.base, freshProof, beforeCall,
+    f.authorizedAt + 6),
+    /UAT_CONTINUATION_OPERATION_ALREADY_DISPATCHED/);
+});
+
+test("Answered and Proceed continuation validates response, History, persistence and fresh correlations", t => {
+  const f = continuationFixture(t);
+  const beforeCall = continuationState(f, f.authorization, "BEFORE_CALL");
+  const callProof = f.makeProof(f.authorizedAt + 1);
+  const call = claimContinuationOperation(
+    f.file, "RecordCall", f.base, callProof, beforeCall, f.authorizedAt + 1);
+  reserveContinuationDispatch(call, f.base, callProof, beforeCall, f.authorizedAt + 2);
+  const afterCall = continuationState(f, f.authorization, "AFTER_CALL", call.correlation);
+  const callBody = {
+    ResultCode: "Applied", PreviousStatus: STATUSES[0], CurrentStatus: STATUSES[1],
+    CallLogId: afterCall.callId, StatusHistoryId: afterCall.history[0].id
+  };
+  assert.throws(() => completeContinuationOperation(call, f.base,
+    { httpStatus: 200, operationCorrelation: f.createCorrelation, body: callBody },
+    afterCall, f.authorizedAt + 3),
+  /UAT_CONTINUATION_OPERATION_RESPONSE_INVALID/);
+  completeContinuationOperation(call, f.base,
+    { httpStatus: 200, operationCorrelation: call.correlation, body: callBody },
+    afterCall, f.authorizedAt + 3);
+  assert.equal(readOperation(f.file, "RecordCall").last.outcome, "APPLIED");
+
+  const beforeProceed = continuationState(f, f.authorization, "BEFORE_PROCEED", call.correlation);
+  const proceedProof = f.makeProof(f.authorizedAt + 4);
+  const proceed = claimContinuationOperation(
+    f.file, "ProceedToScheduling", f.base, proceedProof, beforeProceed,
+    f.authorizedAt + 4);
+  assert.notEqual(proceed.correlation, call.correlation);
+  reserveContinuationDispatch(proceed, f.base, proceedProof, beforeProceed,
+    f.authorizedAt + 5);
+  const afterProceed = continuationState(f, f.authorization, "AFTER_PROCEED",
+    call.correlation, proceed.correlation);
+  completeContinuationOperation(proceed, f.base, {
+    httpStatus: 200,
+    operationCorrelation: proceed.correlation,
+    body: {
+      ResultCode: "Applied", PreviousStatus: STATUSES[1], CurrentStatus: STATUSES[2],
+      StatusHistoryId: afterProceed.history[1].id
+    }
+  }, afterProceed, f.authorizedAt + 6);
+  assert.equal(readOperation(f.file, "ProceedToScheduling").last.outcome, "APPLIED");
+  assert.equal(afterProceed.scheduleCount, 0);
+  assert.equal(afterProceed.history.length, 2);
+  assert.equal(afterProceed.history[1].correlation, proceed.correlation);
+  assert.equal(validateReadback(f.authorization, afterProceed, "AFTER_PROCEED",
+    call.correlation, proceed.correlation), afterProceed);
+});
+
+test("Concurrent continuation issuance has one append-only winner", async t => {
+  const f = continuationFixture(t, "unused-continuation", false);
+  const priorFile = f.file.replace(
+    "unused-continuation.continuation.json", "singleuserdev-01.authorization.json");
+  const nextRequest = {
+    ...f.request,
+    authorizationId: "singleuserdev-continuation-race",
+    expiresAt: new Date(f.authorizedAt + 30 * 60 * 1000).toISOString()
+  };
+  const nextFile = path.join(path.dirname(f.file),
+    `${nextRequest.authorizationId}.continuation.json`);
+  const source = `
+    const { createContinuationAuthorization } = require(${JSON.stringify(
+      require.resolve("./continuation-authorization.cjs"))});
+    const input = JSON.parse(process.env.BSO_CONTINUATION_TEST_INPUT);
+    try {
+      createContinuationAuthorization(input.file, input.predecessorFile,
+        input.request, input.base, input.now);
+      process.stdout.write("CREATED");
+    } catch (error) {
+      process.stdout.write(String(error.message));
+      process.exitCode = 1;
+    }`;
+  const env = {
+    ...process.env,
+    BSO_CONTINUATION_TEST_INPUT: JSON.stringify({
+      file: nextFile, predecessorFile: priorFile, request: nextRequest,
+      base: f.base, now: f.authorizedAt
+    })
+  };
+  const run = () => new Promise(resolve => {
+    const child = spawn(process.execPath, ["-e", source], { env, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    child.stdout.on("data", chunk => { stdout += chunk; });
+    child.on("close", code => resolve({ code, stdout }));
+  });
+  const results = await Promise.all([run(), run()]);
+  assert.equal(results.filter(result => result.code === 0 && result.stdout === "CREATED").length, 1);
+  assert.equal(fs.existsSync(nextFile), true);
+  assert.equal(fs.existsSync(`${priorFile}.continuation-authorization.json`), true);
+});
+
+test("Concurrent per-operation claims have exactly one winner", async t => {
+  const f = continuationFixture(t);
+  const proofObservation = f.makeProof(f.authorizedAt + 1);
+  const state = continuationState(f, f.authorization, "BEFORE_CALL");
+  const source = `
+    const { claimContinuationOperation } = require(${JSON.stringify(
+      require.resolve("./continuation-authorization.cjs"))});
+    const input = JSON.parse(process.env.BSO_CONTINUATION_TEST_INPUT);
+    try {
+      const claim = claimContinuationOperation(input.file, "RecordCall", input.base,
+        input.proof, input.state, input.now);
+      process.stdout.write(claim.correlation);
+    } catch (error) {
+      process.stdout.write(String(error.message));
+      process.exitCode = 1;
+    }`;
+  const env = {
+    ...process.env,
+    BSO_CONTINUATION_TEST_INPUT: JSON.stringify({
+      file: f.file, base: f.base, proof: proofObservation, state,
+      now: f.authorizedAt + 1
+    })
+  };
+  const run = () => new Promise(resolve => {
+    const child = spawn(process.execPath, ["-e", source], { env, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    child.stdout.on("data", chunk => { stdout += chunk; });
+    child.on("close", code => resolve({ code, stdout }));
+  });
+  const results = await Promise.all([run(), run()]);
+  assert.equal(results.filter(result => result.code === 0 &&
+    /^[0-9a-f-]{36}$/.test(result.stdout)).length, 1);
+  assert.equal(readOperation(f.file, "RecordCall").events.length, 1);
 });

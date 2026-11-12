@@ -89,7 +89,20 @@ function matchesCandidateActionResponse(response, origin, action, correlation) {
     body.CorrelationId.toLowerCase() === correlation.toLowerCase();
 }
 
+async function suppressOptionalSupportRequest(route, classification, request, url, report) {
+  if (!["OPTIONAL_SUPPORT_SUPPRESSED", "OPTIONAL_TELEMETRY_SUPPRESSED"].includes(classification)) {
+    return false;
+  }
+  report.platformSupportRequestsSuppressed++;
+  report.optionalSuppressions.push({
+    classification, host: url.hostname, path: url.pathname,
+    method: request.method(), resourceType: request.resourceType()
+  });
+  await route.abort("blockedbyclient");
+  return true;
+}
+
 module.exports = {
   classifyRequest, isLocalizationRequest, isUntrustedLocalizationRedirect,
-  matchesCandidateActionResponse
+  matchesCandidateActionResponse, suppressOptionalSupportRequest
 };

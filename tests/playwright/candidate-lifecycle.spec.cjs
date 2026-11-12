@@ -11,7 +11,9 @@ const {
 const {
   validateSyntheticIsolationProof, validateOperationCorrelation
 } = require("./independent-authorization.cjs");
-const { classifyRequest, matchesCandidateActionResponse } = require("./request-classification.cjs");
+const {
+  classifyRequest, matchesCandidateActionResponse, suppressOptionalSupportRequest
+} = require("./request-classification.cjs");
 const {
   captureFailure, refreshFailureEvidence, sanitizeBlockedRequest
 } = require("./lifecycle-failure.cjs");
@@ -123,14 +125,7 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
       if (handoffEvidence) {
         report.authenticationHandoffs.push({ ...handoffEvidence, classification });
       }
-      if (["OPTIONAL_SUPPORT_SUPPRESSED", "OPTIONAL_TELEMETRY_SUPPRESSED"].includes(classification)) {
-        report.platformSupportRequestsSuppressed++;
-        report.optionalSuppressions.push({
-          classification, host: url.hostname, path: url.pathname,
-          method: request.method(), resourceType: request.resourceType()
-        });
-        return route.abort("blockedbyclient");
-      }
+      if (await suppressOptionalSupportRequest(route, classification, request, url, report)) return;
       if (classification === "READ_ONLY_VERIFIER_ALLOWED") {
         try {
           const body = request.postDataJSON();

@@ -844,7 +844,7 @@ function validateOperationCorrelation(correlationId, record, authorization) {
 module.exports = {
   createAuthorization, loadIndependentAuthorization, claimIndependentAuthorization,
   requireOneInvocation, inspectHistory, digest, validateSyntheticIsolationProof,
-  validateOperationCorrelation, createSingleUserDevSuccessor
+  validateOperationCorrelation, createSingleUserDevSuccessor, readAttempt
 };
 
 if (require.main === module) {

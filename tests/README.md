@@ -136,6 +136,22 @@ The later [shared request classifier](playwright/request-classification.cjs) use
 
 Run only focused interceptor regressions with `node --test .\tests\playwright\platform-support-request.test.cjs .\tests\playwright\request-classification.test.cjs`. These tests use synthetic requests without browser/tenant access. The classifier's approved-business flag is supplied only after the lifecycle runner's existing one-shot sequence/arm/payload/expiry checks; it is not an independent authorization. The consumed continuation is still unusable for another run; this classification-only change does not release or reset it.
 
+### Existing Candidate continuation contract (2026-11-12)
+
+[Continuation authorization support](playwright/continuation-authorization.cjs) is a separate, offline contract for the already-reconciled synthetic Candidate. It validates the expired predecessor and its immutable authorization, slot, and terminal one-Create journal; requires a fresh v4 proof and exact Candidate readback with no Call, Schedule, or History rows; and requires a distinct explicit owner decision. It derives a bounded scope for only `RecordCall` (Answered) and `ProceedToScheduling`, binds the actual Candidate ID and original Create correlation, and excludes the predecessor proof and operation correlations. It never authorizes `CreateCandidate`.
+
+Each allowed action has its own exclusive append-only claim journal, fresh operation correlation, durable pre-dispatch reservation, and exact scoped readback/History verification. Dispatch reservation revalidates the same fresh proof and unchanged pre-operation readback; response acknowledgment requires the matching operation correlation and expected result/status. A claimed or ambiguous operation cannot be replayed, and the next action requires the previous action's verified applied response. Existing zero-dispatch succession is unchanged; the continuation link is a separate append-only sidecar and does not rewrite the predecessor authorization or journals. This contract is not wired into the browser lifecycle runner, and no continuation authorization was issued or claimed. A separate owner authorization and runner integration are still required before live mutation.
+
+The APAC OneCollector classifier now suppresses only HTTPS `POST /OneCollector/1.0/` XHR/fetch/ping requests to the exact `apac.events.data.microsoft.com` host. Its route handler aborts that request without marking the lifecycle as failed; unknown POSTs and Candidate mutations retain their existing blocks, and action-response matching remains correlation-specific. Historical evidence did not include the telemetry initiator, content type, or payload schema, and the updated route has not been re-run in a browser, so those runtime classification/acceptance gaps remain open.
+
+Run the focused offline checks with:
+
+```powershell
+node --test .\tests\playwright\independent-authorization.test.cjs .\tests\playwright\platform-support-request.test.cjs .\tests\playwright\request-classification.test.cjs
+```
+
+These tests exercise continuation binding, immutability, action limits, response/readback handling and competing claims using synthetic fixtures only. They do not create an owner authorization, launch a browser, contact Dataverse, or authorize a Candidate mutation.
+
 Offline-only runner hardening (2026-11-09) now treats non-mutating provider GETs as blocked unknown reads rather than forbidden operations, and suppresses only the exact documented optional shell support POSTs for API v9.0/v9.2. `GetResourceStrings` remains unknown and blocked because its behavior is not verified by local evidence. Future failure reports retain a sanitized assertion, execution phase, safe expected/actual values, source line, first blocked request and final category counts; cleanup failures are recorded without replacing the first failure. These changes have not been exercised in a browser and do not make a consumed authorization reusable.
 
 [Lifecycle test](playwright/candidate-lifecycle.spec.cjs) and its [separate configuration](playwright/playwright.lifecycle.config.cjs) prepare exactly one CreateCandidate -> RecordCall/Answered -> ProceedToScheduling -> future manual MarkRound1Scheduled. The runner now rejects elevated-only authorization and requires a fresh BSO-only independent authorization, exact browser identity, and exact scoped v2 proof before claiming. The historical elevated descriptor is expired, is no longer accepted by the lifecycle runner, and cannot authorize an independent attempt.

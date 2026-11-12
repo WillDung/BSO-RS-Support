@@ -28,9 +28,12 @@ test("Exact optional telemetry stays suppressed; other traffic fails closed", ()
     isOptionalTelemetryRequest({ ...request, ...overrides }, new URL(url));
   assert.equal(matches("https://browser.events.data.microsoft.com/OneCollector/1.0/"), true);
   assert.equal(matches("https://eu-mobile.events.data.microsoft.com/OneCollector/1.0/"), true);
+  assert.equal(matches("https://apac.events.data.microsoft.com/OneCollector/1.0/"), true);
   assert.equal(matches("https://browser.pipe.aria.microsoft.com/Collector/3.0/",
     { resourceType: () => "ping" }), true);
-  for (const url of ["https://browser.events.data.microsoft.com/other",
+  for (const url of ["https://apac.events.data.microsoft.com/other",
+    "https://apac.events.data.microsoft.com/OneCollector/1.0/extra",
+    "https://browser.events.data.microsoft.com/other",
     "https://browser.events.data.microsoft.com.evil.invalid/OneCollector/1.0/",
     "http://browser.events.data.microsoft.com/OneCollector/1.0/",
     "https://orgsynthetic.crm4.dynamics.com/api/data/v9.2/os_sr_cact",
@@ -41,6 +44,10 @@ test("Exact optional telemetry stays suppressed; other traffic fails closed", ()
     { isNavigationRequest: () => true }), false);
   assert.equal(matches("https://browser.events.data.microsoft.com/OneCollector/1.0/",
     { method: () => "PATCH" }), false);
+  assert.equal(matches("https://apac.events.data.microsoft.com/OneCollector/1.0/",
+    { method: () => "GET" }), false);
+  assert.equal(matches("https://apac.events.data.microsoft.com/OneCollector/1.0/",
+    { resourceType: () => "document" }), false);
   assert.equal(matches("https://browser.events.data.microsoft.com/OneCollector/1.0/",
     { resourceType: () => "document" }), false);
 });

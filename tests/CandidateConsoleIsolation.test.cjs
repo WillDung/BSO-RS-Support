@@ -65,6 +65,7 @@ async function createConsole({ mode = "DEV", syntheticDataOnly = true, fixtures 
       const value = new Element();
       value.id = name;
       if (name === "create-button") value.disabled = true;
+      if (name === "candidate-data-mode") value.options = [{ textContent: "" }];
       elements.set(name, value);
     }
     return elements.get(name);

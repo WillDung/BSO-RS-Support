@@ -19,7 +19,12 @@ function makeElement() {
   };
 }
 function element(id) {
-  if (!elements.has(id)) elements.set(id, makeElement());
+  if (!elements.has(id)) {
+    const value = makeElement();
+    value.id = id;
+    if (id === "candidate-data-mode") value.options = [{ textContent: "" }];
+    elements.set(id, value);
+  }
   return elements.get(id);
 }
 const ids = ["11111111-1111-4111-8111-111111111111",
@@ -84,7 +89,8 @@ vm.runInContext(source.replace(marker, `globalThis.testConsole = {
     environmentPolicy = { allowed: true, mode: synthetic ? "DEV" : "PROD",
       syntheticDataOnly: synthetic, candidateOperationMode: synthetic ? "SingleUserDev" : "BsoSynthetic", diagnosticsMode: "OFF" };
   },
-  setReady(ready) { workspaceReady = ready; referencesReady = ready; }
+  setReady(ready) { workspaceReady = ready; referencesReady = ready; },
+  supersede(mode) { referenceMode = mode; referenceGeneration++; }
 };`), context);
 const api = context.testConsole;
 const row = (id, name) => ({ os_sr_posid: id, os_sr_pos_ttl: name, statecode: 0 });
@@ -202,5 +208,28 @@ function check(condition) { assert.ok(condition); passed++; }
   fetchResult.ScopedData = JSON.stringify([{ ...row(ids[1], "[DEV] Wrong scope"), __logicalName: "os_sr_pos" }]);
   await assert.rejects(api.loadLookupOptions("os_sr_pos", "position", "Select position"), /OPTION_INVALID/);
   passed++;
+  api.setMode("NORMAL", true);
+  let finishOld;
+  retrieve = () => new Promise((resolve) => { finishOld = resolve; });
+  const oldLoad = api.loadLookupOptions("os_sr_pos", "position", "Select position");
+  await new Promise((resolve) => setImmediate(resolve));
+  api.supersede("CONFIGURED");
+  fetchResult.ScopedData = JSON.stringify([{ ...row(ids[0], "[DEV] Bound reference"), __logicalName: "os_sr_pos" }]);
+  await api.loadLookupOptions("os_sr_pos", "position", "Select position");
+  finishOld({ entities: [row(ids[1], "Old normal response")] });
+  await oldLoad;
+  check(select.children.length === 2 && select.value === ids[0] &&
+    select.children[1].textContent === "[DEV] Bound reference");
+  api.setMode("NORMAL", true);
+  let rejectOld;
+  retrieve = () => new Promise((resolve, reject) => { rejectOld = reject; });
+  const oldFailure = api.loadLookupOptions("os_sr_pos", "position", "Select position");
+  await new Promise((resolve) => setImmediate(resolve));
+  retrieve = async () => ({ entities: [row(ids[1], "New normal response")] });
+  await api.loadLookupOptions("os_sr_pos", "position", "Select position");
+  rejectOld(new Error("stale request failed"));
+  await oldFailure;
+  check(select.children.length === 2 && select.children[1].textContent === "New normal response" &&
+    !select.disabled);
   console.log(`Candidate Console reference runtime checks passed: ${passed}`);
 })().catch((error) => { console.error(error); process.exitCode = 1; });

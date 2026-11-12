@@ -136,6 +136,8 @@
   let isolationExpiryTimer;
   let isolationVerificationPromise;
   let referenceMode = "CONFIGURED";
+  let referenceGeneration = 0;
+  const referenceRequests = new WeakMap();
   let referencesReady = false;
   let workspaceReady = false;
   let environmentPolicy = Object.freeze({ allowed: false, reason: "CONFIGURATION_MISSING" });
@@ -284,11 +286,14 @@
         label.textContent = "Normal Candidate operations are not authorized in this synthetic environment";
       });
     }
+    const configuredModeLabel = environmentPolicy.candidateOperationMode === "SingleUserDev"
+      ? "SingleUserDev" : "Configured synthetic workflow";
+    $("candidate-data-mode").options[0].textContent = configuredModeLabel;
     $("reference-mode-status").textContent = referenceMode === "NORMAL"
       ? environmentPolicy.syntheticDataOnly
         ? "NORMAL: all Active references accessible to your Dataverse account. Candidate reads and writes remain blocked in this synthetic environment."
         : "NORMAL: authenticated Active references; Candidate operations use the normal Candidate Core API and its server-side authorization."
-      : "Configured synthetic workflow: server proof and DEV reference restrictions remain required.";
+      : `${configuredModeLabel}: server proof and DEV reference restrictions remain required.`;
   }
 
   function currentUserId() {
@@ -1231,12 +1236,16 @@
       throw new Error("NORMAL_REFERENCE_TABLE_REJECTED");
     }
     const rows = [];
+    const generation = referenceGeneration;
     const visited = new Set();
     let next = query;
     while (next) {
       if (visited.has(next)) throw new Error("REFERENCE_PAGING_RESPONSE_INVALID");
       visited.add(next);
       const response = await referenceXrm().WebApi.retrieveMultipleRecords(tableName, next);
+      if (generation !== referenceGeneration || referenceMode !== "NORMAL") {
+        throw new Error("REFERENCE_REQUEST_SUPERSEDED");
+      }
       if (!response || !Array.isArray(response.entities)) throw new Error("REFERENCE_RESPONSE_INVALID");
       rows.push(...response.entities);
       if (response.nextLink && typeof response.nextLink !== "string") {
@@ -1274,6 +1283,12 @@
     const labels = Array.isArray(emptyLabels) ? emptyLabels : ids.map(() => emptyLabels);
     if (ids.length !== labels.length) throw new Error("REFERENCE_SELECTOR_CONFIGURATION_INVALID");
     const selects = ids.map((id) => $(id));
+    const generation = referenceGeneration;
+    const mode = referenceMode;
+    const request = {};
+    selects.forEach((select) => referenceRequests.set(select, request));
+    const isCurrent = () => generation === referenceGeneration && mode === referenceMode &&
+      selects.every((select) => referenceRequests.get(select) === request && $(select.id) === select);
     const previousValues = selects.map((select) => select.value);
     selects.forEach((select) => {
       select.disabled = true;
@@ -1282,6 +1297,7 @@
     });
     try {
       const metadata = await referenceXrm().Utility.getEntityMetadata(tableName);
+      if (!isCurrent()) return;
       const primaryId = metadata.PrimaryIdAttribute;
       const primaryName = metadata.PrimaryNameAttribute;
       if (!primaryId || !primaryName || !metadata.EntitySetName) {
@@ -1295,6 +1311,7 @@
       const rows = referenceMode === "NORMAL"
         ? await readNormalReferenceRecords(tableName, query, metadata.EntitySetName)
         : await retrieveAll(tableName, query);
+      if (!isCurrent()) return;
       const expectedId = referenceMode !== "NORMAL" && environmentPolicy.candidateOperationMode === "SingleUserDev"
         ? getSingleUserDevReferenceId(tableName).toLowerCase()
         : null;
@@ -1327,6 +1344,7 @@
         select.removeAttribute("aria-busy");
       });
     } catch (error) {
+      if (!isCurrent()) return;
       selects.forEach((select) => {
         setLookupPlaceholder(select, "Options unavailable; use Refresh reference options to retry");
         select.removeAttribute("aria-busy");
@@ -1336,6 +1354,7 @@
   }
 
   async function refreshReferenceOptions() {
+    const generation = ++referenceGeneration;
     referencesReady = false;
     const results = await Promise.allSettled([
       loadLookupOptions("os_sr_pos", ["candidate-position", "edit-candidate-position"],
@@ -1349,6 +1368,7 @@
         ? Promise.resolve()
         : loadLookupOptions("os_sr_loc", "scheduling-location", "Select location")
     ]);
+    if (generation !== referenceGeneration) return;
     const failures = results.filter((result) => result.status === "rejected");
     failures.forEach((result) => logSafeFailure("REFERENCE_OPTIONS_LOAD_FAILED", result.reason));
     if (failures.length) throw new Error("REFERENCE_OPTIONS_LOAD_FAILED");
@@ -2893,6 +2913,7 @@
         return;
       }
       referenceMode = selectedMode;
+      referenceGeneration++;
       referencesReady = false;
       syntheticQueryBlocked = false;
       window.clearTimeout(isolationExpiryTimer);
@@ -3040,6 +3061,7 @@
   }
 
   async function loadWorkspace() {
+    referenceGeneration++;
     setBusy(true);
     referencesReady = false;
     workspaceReady = false;

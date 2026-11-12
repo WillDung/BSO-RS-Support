@@ -1,0 +1,63 @@
+{
+  "manifestVersion": 1,
+  "createdOn": "2026-11-12",
+  "status": "PUBLISHED_AND_VISIBLE_NORMAL_BINDING_VERIFIED",
+  "scope": "NORMAL_REFERENCE_SELECTORS_ONLY",
+  "previousReleaseManifest": "CANDIDATE_CONSOLE_NORMAL_REFERENCES_RELEASE_MANIFEST.json",
+  "customApiChanges": 0,
+  "environmentConfigurationChanges": 0,
+  "resources": [
+    {
+      "name": "os_/bso/candidate-console.html",
+      "sha256": "d4f462d7b0881c54c861371b59f90e19a0ba435faec4a73571e8accab90c9120",
+      "previousSha256": "66f4fa3327284335e5f070cd6f375aa3d00b138cfd506c390da56146a93614d0"
+    },
+    {
+      "name": "os_/bso/candidate-console.js",
+      "sha256": "658e596dc027a693b77243b0ab1ab64422c5319c8e3f9a1cd961a7c9c7dd871a",
+      "previousSha256": "f0f0669cdbc9110414177bc08c2b57eacaf19f4030f860990707e96d285a43f8"
+    }
+  ],
+  "rootCause": "Visible UCI iframe uses an old stamped HTML URL: no selector, old JavaScript token, 1/1/1 options. Even a no-store fetch of that URL returns old content; a cache-busting query returns the published selector release.",
+  "correction": [
+    "Explicit SingleUserDev label",
+    "Generation and per-selector request identity prevent stale successful or failed responses from altering current dropdowns",
+    "Superseded NORMAL paging stops before further requests",
+    "Cache-busted HTML entrypoint and JavaScript token; no automatic mode selection"
+  ],
+  "unchangedComponents": [
+    "Candidate Core 1.0.8.0 and Custom API",
+    "Environment, policy, Availability and Calendar",
+    "Security roles, assignments and teams",
+    "SingleUserDev proof and scope checks"
+  ],
+  "validation": {
+    "consoleStaticAssertionsPassed": 80,
+    "offlineReferenceRuntimeAssertionsPassed": 29,
+    "existingPolicyIsolationProfileTestsPassed": 60,
+    "candidateBusinessWrites": 0,
+    "ownerFunctionalUat": "NOT_RUN",
+    "normalCandidateOperationsOnSyntheticDev": "BLOCKED"
+  },
+  "deployment": {
+    "webResourcePatchCount": 2,
+    "patchHttpStatuses": [204, 204],
+    "scopedPublishXmlCount": 1,
+    "publishHttpStatus": 204,
+    "publicationReadback": "GET_RECONCILED",
+    "automaticRetries": 0,
+    "rollbackSnapshotAndPriorJournalPreserved": true,
+    "effectiveHtmlAndJavaScriptHashesMatch": true,
+    "visibleConsoleInstances": 1,
+    "loadedJavaScriptToken": "658e596dc027",
+    "entrypointDataParameter": "release-658e596dc027",
+    "modeAutomaticallySelected": false,
+    "configuredInitialCounts": { "position": 1, "source": 1, "ta": 1 },
+    "selectedModeAfterExplicitSelection": "NORMAL",
+    "visibleNormalCountsAfterRefresh": { "position": 2, "source": 2, "ta": 3 },
+    "visibleOptionsMatchAccessibleActiveRecordIdsAndNames": true
+  },
+  "deploymentTool": "../scripts/Deploy-BsoRsCandidateConsole.ps1",
+  "deploymentToolSha256": "bc8625d3ca2dfc05a9712b2a0f58647881a548b171e95dc86576e1be1cf97fcd",
+  "frozenHistoricalManifestsChanged": false
+}

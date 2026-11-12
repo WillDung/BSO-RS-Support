@@ -182,12 +182,15 @@ $developmentSourceAheadUnchangedNames = @(
 )
 $normalReferenceRelease = $null
 if (-not [string]::IsNullOrWhiteSpace($NormalReferenceSelectorsReleaseManifestPath)) {
-    $expectedManifestPath = Join-Path $repositoryRoot 'docs\CANDIDATE_CONSOLE_NORMAL_REFERENCES_RELEASE_MANIFEST.json'
+    $expectedManifestPaths = @(
+        (Join-Path $repositoryRoot 'docs\CANDIDATE_CONSOLE_NORMAL_REFERENCES_RELEASE_MANIFEST.json'),
+        (Join-Path $repositoryRoot 'docs\CANDIDATE_CONSOLE_MODE_BINDING_RELEASE_MANIFEST.json')
+    )
     if (-not $DevelopmentSourceAhead -or
-        [IO.Path]::GetFullPath($NormalReferenceSelectorsReleaseManifestPath) -ine $expectedManifestPath) {
+        [IO.Path]::GetFullPath($NormalReferenceSelectorsReleaseManifestPath) -notin $expectedManifestPaths) {
         throw 'NORMAL_REFERENCE_RELEASE_AUTHORIZATION_REQUIRED'
     }
-    $normalReferenceRelease = Get-Content -LiteralPath $expectedManifestPath -Raw | ConvertFrom-Json
+    $normalReferenceRelease = Get-Content -LiteralPath $NormalReferenceSelectorsReleaseManifestPath -Raw | ConvertFrom-Json
     $normalNames = @('os_/bso/candidate-console.html', 'os_/bso/candidate-console.js')
     if ($normalReferenceRelease.scope -cne 'NORMAL_REFERENCE_SELECTORS_ONLY' -or
         $normalReferenceRelease.customApiChanges -ne 0 -or

@@ -1,5 +1,19 @@
 # Current State
 
+## Visible NORMAL dropdown correction (2026-11-12)
+
+**Status: published and visible dropdown binding verified, NORMAL selected.** Browser inspection identified one visible Console iframe serving the pre-selector HTML and JavaScript token `672292a5acb0`, with one reference each. Reloading the UCI page did not clear this stale stamped-resource response. A no-store fetch of the same stamped HTML URL still returned old content, while a cache-busting query returned the published selector HTML. The [previous release manifest](CANDIDATE_CONSOLE_NORMAL_REFERENCES_RELEASE_MANIFEST.json) remains unchanged; publication alone had not refreshed this visible instance.
+
+The [corrective release manifest](CANDIDATE_CONSOLE_MODE_BINDING_RELEASE_MANIFEST.json) records the new HTML/JavaScript pins and previous-release rollback hashes. Two fresh-ETag updates and one two-resource-only `PublishXml` returned HTTP 204; readback reconciled the publication. A separate dispatch journal retains rollback bytes, with zero retries or journal reset. Environment, policy, backend, security, navigation and Calendar components were not changed.
+
+The [Console](../solutions/CandidateConsole/WebResources/os_/bso/candidate-console.js) now explicitly labels the configured mode **SingleUserDev**. Generation and per-selector request identity checks prevent obsolete success/failure responses from changing current options, and superseded NORMAL paging stops. Initialization and refresh invalidate older reference generations. Mode changes still clear prior options and require explicit selection; NORMAL is neither automatically selected nor remembered.
+
+The cache-busted app entrypoint uses the supported `main.aspx` WebResource `data` query parameter `release-658e596dc027`. It produced a visible iframe URL containing that parameter and the new JavaScript token `658e596dc027`; initial SingleUserDev options remained **1/1/1**. After explicit NORMAL selection, actual visible option counts were **Position 2, Candidate Source 2, Assigned TA 3**, excluding placeholders. Refresh retained those counts. Each option's ID and name matched an authenticated Active-row query exactly. Only one visible Console instance was found; effective HTML/JavaScript hashes matched the new manifest.
+
+Use the fresh app link supplied in the owner handoff rather than the old cached tab/bookmark, select **NORMAL**, compare the three dropdowns, and use **Refresh reference options** after reference changes. Select **SingleUserDev** for the accepted synthetic Candidate workflow. NORMAL Candidate reads/writes remain blocked in this synthetic DEV environment; this correction grants no real-data authorization.
+
+Validation: **29 synthetic offline reference checks**, **80 static Console checks**, and **60 policy/isolation/profile tests** passed, including delayed old-mode success and obsolete refresh failure. Live inspection was limited to entrypoint loading, mode/reference binding and authenticated reference reads. No Candidate writes, lifecycle UAT or owner acceptance occurred.
+
 ## NORMAL Candidate reference selectors (2026-11-12)
 
 **Status: explicit NORMAL Active-reference browsing implemented and published; normal Candidate operations remain blocked in the current synthetic DEV environment.** The owner requested that Position, Candidate Source, and Assigned TA match the authenticated user's corresponding Active Dataverse lists. Live inspection of those views found the `statecode eq 0` filter, without additional reference-name filters. Authenticated read-only queries returned **2 Positions, 2 Candidate Sources, and 3 TAs**. These are accessible Active-record counts, not a claim of owner-tested dropdown rendering.

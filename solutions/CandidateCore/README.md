@@ -1,12 +1,12 @@
 # Candidate Core server operations
 
-Source for Candidate Core plug-in code. The local SingleUserDev candidate is version `1.0.7.0`; the deployed handler remains `1.0.5.0` until an authorized import and readback. This is authored .NET plug-in source, **not an exported/unpacked Solution**. The supported target is .NET Framework 4.6.2 with `Microsoft.CrmSdk.CoreAssemblies` pinned to 9.0.2.60; the SDK assembly is supplied by the Dataverse sandbox. No runtime dependency is merged/uploaded with the package assembly.
+Source for Candidate Core plug-in code. Live Dataverse metadata read on 2026-11-12 links the existing `os_sr_cact` Custom API to the File Store assembly version `1.0.7.0`. This verifies the registered handler version, not byte-for-byte package contents; its current SingleUserDev verifier is blocked by `SYNTHETIC_OWNER_REJECTED`. This is authored .NET plug-in source, **not an exported/unpacked Solution**. The supported target is .NET Framework 4.6.2 with `Microsoft.CrmSdk.CoreAssemblies` pinned to 9.0.2.60; the SDK assembly is supplied by the Dataverse sandbox. No runtime dependency is merged/uploaded with the package assembly.
 
 <a id="synthetic-dev-boundary-offline-implementation-not-deployed"></a>
 
 ## Synthetic DEV boundary (scoped runtime and historical guard design)
 
-### SingleUserDev functional scope (1.0.7 source; built, not deployed)
+### SingleUserDev functional scope (1.0.7 source; handler registered, runtime proof blocked)
 
 The local 1.0.7 source adds an optional `<singleUserDev mode="SingleUserDev" actorId="..." scopeId="..." enabled="true" />` child to the existing `os_sr_siso` profile. The root BSO actor, scope, and four reference bindings remain intact; the child has a distinct actor and Candidate row scope and reuses the configured Position, Source, TA, and Location bindings. Its synthetic name/email are derived from the unchanged root scope, preserving the existing approved marker. No new environment variable or identity is introduced. In DEV, the server derives the actor from the Dataverse execution context, pins the organization, checks the active interactive user, expected Custom API handler and package, exact Candidate scope and approved references, and caller readback.
 
@@ -14,7 +14,7 @@ The Console selects this path only when its explicit `candidateOperationMode` is
 
 The v4 SingleUserDev proof requires the `ScopedData` String response property on the existing private Custom API. It does **not** require global/table pipeline guards; the fixed API operations perform their own server-side scope checks. The existing BSO proof does not require this new response property. The v4 proof states `nativeWritesDenied:false`: this is a bounded Candidate Console functional path, **not an administrator isolation boundary**. It does not remove System Administrator or plugin-bypass capabilities, and does not claim the operator cannot access data through other administrative/native paths. Non-admin security isolation remains a separate test.
 
-The source and package are local only. No live profile, package, Custom API response property, guard registration, or Console resource has been changed or accepted. Do not treat the profile example as tenant configuration or execute lifecycle writes before exact target/profile/component verification and authenticated proof/read acceptance.
+The live profile, package, `ScopedData` response property, and Console resources are documented in [Current State](../../docs/CURRENT_STATE.md). The runtime verifier currently fails closed, so this status is not functional acceptance. Do not treat the profile example as tenant configuration or execute lifecycle writes before exact target/profile/component verification and authenticated proof/read acceptance.
 
 ### Revocable persistent DEV profile (1.0.5)
 

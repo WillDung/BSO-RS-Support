@@ -2,9 +2,11 @@
 
 ## Candidate Console reference dropdown remediation (2026-11-12)
 
-The local Console source now pins SingleUserDev lookup options to the exact IDs returned by the 1.0.7 scoped-read contract, uses the actual server-returned names, and preselects the profile-bound Position, Candidate Source, TA, and Location references. Ordinary mode continues to query active Dataverse rows through the existing reference filters. Loading, empty, and unavailable states are explicit. This is a local implementation only: the reported live empty-dropdown cause is not yet verified because the deployed Console and component versions were not read.
+The Console source pins SingleUserDev lookup options to the exact IDs returned by the 1.0.7 scoped-read contract, uses the actual server-returned names, and preselects the profile-bound Position, Candidate Source, TA, and Location references. Ordinary mode continues to query active Dataverse rows through the existing reference filters. Loading, empty, and unavailable states are explicit. The original live cause of the owner-reported empty selectors was not independently diagnosed.
 
-The affected Console JavaScript and its HTML cache token have not been deployed. Do not publish until the exact VN LMV IT environment URL is confirmed and fresh WebResource versions/ETags are read. Then conditionally update and publish only those two WebResources with WebResource-only `PublishXml`, stopping on drift or ambiguous outcomes and reconciling effective hashes. No Candidate data, backend, roles, Calendar, or other components were changed.
+**Deployment completed 2026-11-12:** after confirming the authorized VN LMV IT target and reconciling exact component IDs, versions, published/current ETags and hashes, the JavaScript and HTML were conditionally updated (HTTP 204 each). One scoped `PublishXml` for exactly those two WebResources returned HTTP 204; no Publish All was used. Post-publication definition readback and effective served bytes matched the local payloads. JavaScript version `14527325` SHA-256: `f6f982a6782d271c0ac6e1d1219e67df827ca9308890838b378a7b118b0ad29c`. HTML version `14527330` SHA-256: `490112e3bb5805ea6fd1c174ae4c0df62735b22ae161aa83a66aa31c7fb5f972`. Served HTML cache tokens match the JavaScript hash prefix `f6f982a6782d` and the live environment-resource hash prefix `21ddcd925916`.
+
+No Candidate data, backend, roles, Calendar, or other components were changed. Playwright and lifecycle UAT were not run; owner manual functional testing remains pending.
 
 ## SingleUserDev 1.0.7 deployed; Console status refresh pending (2026-11-12)
 

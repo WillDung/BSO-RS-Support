@@ -6,7 +6,7 @@ const { test } = require("node:test");
 const { spawn, spawnSync } = require("node:child_process");
 const {
   createAuthorization, loadIndependentAuthorization, claimIndependentAuthorization, digest,
-  validateSyntheticIsolationProof, validateOperationCorrelation
+  validateSyntheticIsolationProof, validateOperationCorrelation, createSingleUserDevSuccessor
 } = require("./independent-authorization.cjs");
 const {
   ACTIONS, REFERENCE_LABELS, reserveOneShot, isSingleUserDevDirectReadBlocked
@@ -171,6 +171,52 @@ function singleUserDevFixture(t) {
   return f;
 }
 
+function singleUserDevReconciliation(f, at = Date.parse("2030-01-02T11:00:00Z")) {
+  const observation = f.makeProof(at);
+  const proof = JSON.parse(observation.contract);
+  const binding = f.request.scope.syntheticIsolation;
+  return {
+    version: 1, checkedAt: new Date(at).toISOString(), marker: f.original.marker,
+    whoAmI: { actorId: binding.actorId, organizationId: f.base.organizationId },
+    proof: { correlationId: observation.correlationId, ...proof },
+    readCounts: { candidates: 0, calls: 0, history: 0, schedules: 0 },
+    references: {
+      position: { id: binding.positionId, label: REFERENCE_LABELS.position, statecode: 0, rowCount: 1 },
+      source: { id: binding.sourceId, label: REFERENCE_LABELS.source, statecode: 0, rowCount: 1 },
+      ta: { id: binding.taId, label: REFERENCE_LABELS.ta, statecode: 0, rowCount: 1 },
+      location: { id: binding.locationId, label: REFERENCE_LABELS.location, statecode: 0, rowCount: 1 }
+    },
+    receiptReadback: "NOT_EXPOSED_FOR_SINGLE_USER_DEV",
+    attemptJournal: { state: "UNCLAIMED", dispatchCount: 0, journalHash: null }
+  };
+}
+
+function singleUserDevSuccessorRequest(f, reconciliation, at = Date.parse("2030-01-02T11:00:00Z")) {
+  const scope = JSON.parse(JSON.stringify(f.request.scope));
+  scope.authorizationId = "singleuserdev-02";
+  scope.expiresAt = new Date(at + 60 * 60 * 1000).toISOString();
+  scope.excludedCorrelations = [...new Set([
+    ...scope.excludedCorrelations.map(value => value.toLowerCase()),
+    reconciliation.proof.correlationId.toLowerCase()
+  ])];
+  return {
+    authorizedAt: new Date(at).toISOString(),
+    ownerDecisionText: "Synthetic fixture: issue one bounded successor after read-only zero-dispatch reconciliation.",
+    marker: f.original.marker, candidateName: f.request.candidateName,
+    candidateEmail: f.request.candidateEmail, scope
+  };
+}
+
+function createFixtureSuccessor(f, at = Date.parse("2030-01-02T11:00:00Z")) {
+  const prior = f.create();
+  const reconciliation = singleUserDevReconciliation(f, at);
+  const request = singleUserDevSuccessorRequest(f, reconciliation, at);
+  const file = path.join(path.dirname(f.file), `${request.scope.authorizationId}.authorization.json`);
+  const authorization = createSingleUserDevSuccessor(
+    file, f.file, request, f.base, reconciliation, at);
+  return { prior, authorization, file, request, reconciliation, at };
+}
+
 test("A v4 SingleUserDev proof and exact owner-bound authorization are accepted", t => {
   const f = singleUserDevFixture(t);
   const authorization = f.create();
@@ -223,6 +269,184 @@ test("Missing and expired SingleUserDev authorizations are rejected", t => {
   f.request.scope.expiresAt = "2030-01-02T09:59:59Z";
   assert.throws(f.create, /UAT_INDEPENDENT_AUTHORIZATION_EXPIRED/);
   assert.equal(fs.existsSync(f.file), false);
+});
+
+test("Expired SingleUserDev authorization cannot be claimed or dispatched", t => {
+  const f = singleUserDevFixture(t);
+  f.create();
+  const expiredAt = Date.parse(f.request.scope.expiresAt) + 1;
+  assert.throws(() => f.claim(configuration, expiredAt),
+    /UAT_INDEPENDENT_AUTHORIZATION_EXPIRED/);
+  assert.equal(fs.existsSync(`${f.file}.attempt.jsonl`), false);
+});
+
+test("Unresolved SingleUserDev dispatch blocks slot succession", t => {
+  const f = singleUserDevFixture(t);
+  f.create();
+  const journal = f.claim();
+  journal.record.attempts.push({
+    action: "CreateCandidate", correlation: "55555555-5555-4555-8555-555555555555",
+    outcome: "DISPATCH_RESERVED_OUTCOME_UNKNOWN"
+  });
+  journal.record.status = "DISPATCH_RESERVED_OUTCOME_UNKNOWN";
+  journal.save();
+  const at = Date.parse("2030-01-02T11:00:00Z");
+  const reconciliation = singleUserDevReconciliation(f, at);
+  const request = singleUserDevSuccessorRequest(f, reconciliation, at);
+  const nextPath = path.join(path.dirname(f.file), `${request.scope.authorizationId}.authorization.json`);
+  const linkPath = `${path.dirname(f.file)}\\singleuserdev-${f.original.marker}.authorization-slot.json.successor-authorization.json`;
+  assert.throws(() => createSingleUserDevSuccessor(
+    nextPath, f.file, request, f.base, reconciliation, at),
+  /UAT_PRIOR_DISPATCH_OR_AMBIGUITY/);
+  assert.equal(fs.existsSync(linkPath), false);
+  assert.equal(fs.existsSync(nextPath), false);
+});
+
+test("A reconciled zero-dispatch SingleUserDev authorization is immutably superseded", t => {
+  const f = singleUserDevFixture(t);
+  const { prior, authorization, file, reconciliation, at } = createFixtureSuccessor(f);
+  const priorHash = digest(f.file);
+  const markerSlotPath = path.join(path.dirname(f.file),
+    `singleuserdev-${f.original.marker}.authorization-slot.json`);
+  const priorSlotHash = digest(markerSlotPath);
+  assert.equal(authorization.version, 3);
+  assert.equal(authorization.predecessor.attemptState, "UNCLAIMED");
+  assert.equal(authorization.predecessor.dispatchCount, 0);
+  assert.equal(authorization.reconciliation.receiptReadback,
+    "NOT_EXPOSED_FOR_SINGLE_USER_DEV");
+  assert.notEqual(authorization.scope.authorizationId, f.request.scope.authorizationId);
+  assert.notEqual(authorization.attemptId, prior.attemptId);
+  assert.equal(Date.parse(authorization.scope.expiresAt) - Date.parse(authorization.authorizedAt),
+    60 * 60 * 1000);
+  assert.equal(authorization.scope.syntheticIsolation.scopeId,
+    f.request.scope.syntheticIsolation.scopeId);
+  assert.equal(digest(f.file), priorHash);
+  assert.equal(digest(markerSlotPath), priorSlotHash);
+  assert.equal(fs.existsSync(`${f.file}.attempt.jsonl`), false);
+  assert.equal(fs.existsSync(`${file}.attempt.jsonl`), false);
+  assert.throws(() => loadIndependentAuthorization(f.file, f.base, at - 60 * 60 * 1000),
+    /UAT_SINGLE_USER_DEV_AUTHORIZATION_SUPERSEDED/);
+  const proof = validateSyntheticIsolationProof(
+    f.makeProof(at), authorization, at);
+  const record = { syntheticProof: proof, attempts: [] };
+  for (const correlation of [
+    "fe902569-29b8-4af0-89c8-508190769e94",
+    reconciliation.proof.correlationId
+  ]) {
+    assert.throws(() => validateOperationCorrelation(correlation, record, authorization),
+      /UAT_OPERATION_CORRELATION_REPLAY_REJECTED/);
+  }
+  assert.equal(authorization.marker, f.original.marker);
+});
+
+test("A terminal zero-dispatch attempt can be superseded and its proof nonce stays excluded", t => {
+  const f = singleUserDevFixture(t);
+  f.create();
+  const claimSource = `
+    const {claimIndependentAuthorization}=require(${JSON.stringify(require.resolve("./independent-authorization.cjs"))});
+    const journal=claimIndependentAuthorization(${JSON.stringify(f.file)},${JSON.stringify(f.base)},
+      ${JSON.stringify(configuration)},${JSON.stringify(f.makeProof())},${now});
+    journal.record.status="STOPPED_NO_RETRY_RECONCILE_ONLY"; journal.save();`;
+  assert.equal(spawnSync(process.execPath, ["-e", claimSource], { encoding: "utf8" }).status, 0);
+  const oldJournal = events(`${f.file}.attempt.jsonl`);
+  const attemptJournal = {
+    state: "STOPPED_ZERO_DISPATCH", dispatchCount: 0,
+    journalHash: digest(`${f.file}.attempt.jsonl`)
+  };
+  const at = Date.parse("2030-01-02T11:00:00Z");
+  const reconciliation = singleUserDevReconciliation(f, at);
+  reconciliation.attemptJournal = attemptJournal;
+  const request = singleUserDevSuccessorRequest(f, reconciliation, at);
+  request.scope.excludedCorrelations.push(oldJournal[0].record.syntheticProof.correlationId);
+  const nextPath = path.join(path.dirname(f.file),
+    `${request.scope.authorizationId}.authorization.json`);
+  const next = createSingleUserDevSuccessor(
+    nextPath, f.file, request, f.base, reconciliation, at);
+  const successorProof = validateSyntheticIsolationProof(f.makeProof(at), next, at);
+  assert.throws(() => validateOperationCorrelation(
+    oldJournal[0].record.syntheticProof.correlationId,
+    { syntheticProof: successorProof, attempts: [] }, next),
+  /UAT_OPERATION_CORRELATION_REPLAY_REJECTED/);
+  assert.ok(next.scope.excludedCorrelations.some(value =>
+    value.toLowerCase() === oldJournal[0].record.syntheticProof.correlationId));
+  assert.equal(next.predecessor.attemptState, "STOPPED_ZERO_DISPATCH");
+  assert.equal(next.predecessor.dispatchCount, 0);
+});
+
+for (const [label, mutate] of [
+  ["wrong actor", request => { request.scope.actorId = "99999999-9999-4999-8999-999999999999"; }],
+  ["wrong child scope", request => {
+    request.scope.syntheticIsolation.scopeId = "99999999-9999-4999-8999-999999999999";
+  }],
+  ["wrong marker", request => { request.marker = "99999999-9999-4999-8999-999999999999"; }]
+]) {
+  test(`SingleUserDev succession rejects ${label}`, t => {
+    const f = singleUserDevFixture(t);
+    f.create();
+    const at = Date.parse("2030-01-02T11:00:00Z");
+    const reconciliation = singleUserDevReconciliation(f, at);
+    const request = singleUserDevSuccessorRequest(f, reconciliation, at);
+    mutate(request);
+    const nextPath = path.join(path.dirname(f.file), `${request.scope.authorizationId}.authorization.json`);
+    assert.throws(() => createSingleUserDevSuccessor(
+      nextPath, f.file, request, f.base, reconciliation, at));
+    assert.equal(fs.existsSync(nextPath), false);
+    assert.equal(fs.existsSync(`${path.dirname(f.file)}\\singleuserdev-${f.original.marker}.authorization-slot.json.successor-authorization.json`), false);
+  });
+}
+
+test("Concurrent claims on one SingleUserDev successor have one winner", async t => {
+  const f = singleUserDevFixture(t);
+  const { authorization, file, at } = createFixtureSuccessor(f);
+  const observation = f.makeProof(at);
+  const source = `
+    const {claimIndependentAuthorization}=require(${JSON.stringify(require.resolve("./independent-authorization.cjs"))});
+    try { claimIndependentAuthorization(${JSON.stringify(file)},${JSON.stringify(f.base)},
+      ${JSON.stringify(configuration)},${JSON.stringify(observation)},${at}); }
+    catch (error) { console.error(error.code || error.message); process.exitCode=1; }`;
+  const run = () => new Promise(resolve => {
+    const child = spawn(process.execPath, ["-e", source], { stdio: ["ignore", "pipe", "pipe"] });
+    let stderr = "";
+    child.stderr.setEncoding("utf8").on("data", chunk => { stderr += chunk; });
+    child.on("close", code => resolve({ code, stderr }));
+  });
+  const results = await Promise.all([run(), run()]);
+  assert.deepEqual(results.map(result => result.code).sort(), [0, 1]);
+  assert.equal(results.filter(result => result.code === 1)
+    .every(result => result.stderr.includes("EEXIST")), true);
+  assert.equal(authorization.scope.identityScope, "SINGLE_USER_DEV");
+  assert.equal(events(`${file}.attempt.jsonl`).length, 1);
+});
+
+test("Concurrent SingleUserDev successor issuances cannot fork one occupied slot", async t => {
+  const f = singleUserDevFixture(t);
+  f.create();
+  const at = Date.parse("2030-01-02T11:00:00Z");
+  const reconciliation = singleUserDevReconciliation(f, at);
+  const requests = ["singleuserdev-02", "singleuserdev-03"].map(authorizationId => {
+    const request = singleUserDevSuccessorRequest(f, reconciliation, at);
+    request.scope.authorizationId = authorizationId;
+    return request;
+  });
+  const run = request => new Promise(resolve => {
+    const file = path.join(path.dirname(f.file),
+      `${request.scope.authorizationId}.authorization.json`);
+    const source = `
+      const {createSingleUserDevSuccessor}=require(${JSON.stringify(require.resolve("./independent-authorization.cjs"))});
+      try { createSingleUserDevSuccessor(${JSON.stringify(file)},${JSON.stringify(f.file)},
+        ${JSON.stringify(request)},${JSON.stringify(f.base)},${JSON.stringify(reconciliation)},${at}); }
+      catch (error) { console.error(error.code || error.message); process.exitCode=1; }`;
+    const child = spawn(process.execPath, ["-e", source], { stdio: ["ignore", "pipe", "pipe"] });
+    let stderr = "";
+    child.stderr.setEncoding("utf8").on("data", chunk => { stderr += chunk; });
+    child.on("close", code => resolve({ code, stderr, file }));
+  });
+  const results = await Promise.all(requests.map(run));
+  assert.deepEqual(results.map(result => result.code).sort(), [0, 1]);
+  assert.equal(results.filter(result => result.code === 1)
+    .every(result => result.stderr.includes("EEXIST") ||
+      result.stderr.includes("UAT_SINGLE_USER_DEV_SUCCESSOR_ALREADY_EXISTS")), true);
+  assert.equal(results.filter(result => fs.existsSync(result.file)).length, 1);
 });
 
 test("Runner loads the exact SingleUserDev authorization and rejects its consumed claim", t => {

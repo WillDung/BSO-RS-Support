@@ -134,13 +134,27 @@ function validateRecord(record, base, now, allowHistoricalElevated = false) {
     const authorizedAt = Date.parse(record.authorizedAt);
     const expiresAt = Date.parse(record.scope.expiresAt);
     const maximumWindow = 2 * 60 * 60 * 1000;
-    check(record.version === 2 && record.kind === "OWNER_AUTHORIZED_SINGLE_USER_DEV_ATTEMPT" &&
+    const original = record.version === 2 &&
+      record.kind === "OWNER_AUTHORIZED_SINGLE_USER_DEV_ATTEMPT";
+    const successor = record.version === 3 &&
+      record.kind === "OWNER_AUTHORIZED_SINGLE_USER_DEV_SUCCESSOR_ATTEMPT";
+    check((original || successor) &&
       typeof record.ownerDecisionText === "string" && record.ownerDecisionText.trim().length > 0 &&
       Number.isFinite(createdAt) && createdAt <= now &&
       Number.isFinite(authorizedAt) && authorizedAt <= createdAt &&
       createdAt - authorizedAt <= maximumWindow &&
       GUID.test(record.attemptId || "") && record.history === undefined &&
-      record.previousAuthorizationFile === undefined && record.predecessor === undefined,
+      record.previousAuthorizationFile === undefined &&
+      (original
+        ? record.predecessor === undefined && record.reconciliation === undefined &&
+          record.generationSlotPath === undefined
+        : record.predecessor && typeof record.predecessor === "object" &&
+          record.reconciliation && typeof record.reconciliation === "object" &&
+          typeof record.generationSlotPath === "string" &&
+          path.isAbsolute(record.generationSlotPath) &&
+          record.generationSlotPath === path.join(
+            path.dirname(record.generationSlotPath),
+            `${record.scope.authorizationId}.authorization.json.slot.json`)),
     "UAT_SINGLE_USER_DEV_AUTHORIZATION_INVALID");
     check(Number.isFinite(expiresAt) && expiresAt > now &&
       expiresAt - authorizedAt <= maximumWindow, "UAT_INDEPENDENT_AUTHORIZATION_EXPIRED");
@@ -220,6 +234,203 @@ function validateSingleUserDevScope(scope, base, marker, candidateName, candidat
     Number.isFinite(expiresAt) && expiresAt > now &&
     now - authorizedAt <= maximumWindow && expiresAt - authorizedAt <= maximumWindow,
   "UAT_INDEPENDENT_AUTHORIZATION_EXPIRED");
+}
+
+function singleUserDevSlotPath(file, record) {
+  return record.version === 2
+    ? path.join(path.dirname(file),
+      `singleuserdev-${record.marker.toLowerCase()}.authorization-slot.json`)
+    : record.generationSlotPath;
+}
+
+function inspectSingleUserDevAttempt(file, authorization) {
+  const attemptFile = claimPath(file);
+  if (!fs.existsSync(attemptFile)) {
+    return { state: "UNCLAIMED", dispatchCount: 0, journalHash: null, proofCorrelation: null };
+  }
+  const events = readAttempt(attemptFile, file);
+  const last = events.at(-1);
+  check(events.every(event => event.record.candidateId === null &&
+    event.record.attempts.length === 0) &&
+    last.record.status === "STOPPED_NO_RETRY_RECONCILE_ONLY",
+  "UAT_PRIOR_DISPATCH_OR_AMBIGUITY");
+  requireInactive(last.pid);
+  return {
+    state: "STOPPED_ZERO_DISPATCH", dispatchCount: 0, journalHash: digest(attemptFile),
+    proofCorrelation: events[0].record.syntheticProof.correlationId
+  };
+}
+
+function validateSingleUserDevReconciliation(evidence, prior, base, attempt, authorizedAt) {
+  const checkedAt = Date.parse(evidence?.checkedAt || "");
+  const proof = evidence?.proof;
+  const binding = prior.scope.syntheticIsolation;
+  const proofKeys = [
+    "actorId", "boundary", "calendarEnabled", "candidateId", "correlationId",
+    "environmentId", "globalGuardsRequired", "locationId", "mode",
+    "nativeWritesDenied", "organizationId", "positionId", "readback",
+    "scopedReads", "scopeId", "sourceId", "taId", "validUntil", "version"
+  ];
+  check(same(Object.keys(evidence || {}).sort(), [
+    "attemptJournal", "checkedAt", "marker", "proof", "readCounts",
+    "receiptReadback", "references", "version", "whoAmI"
+  ]) && same(Object.keys(proof || {}).sort(), proofKeys.sort()) &&
+    same(Object.keys(evidence.whoAmI || {}).sort(), ["actorId", "organizationId"]) &&
+    same(Object.keys(evidence.readCounts || {}).sort(),
+      ["calls", "candidates", "history", "schedules"]) &&
+    same(Object.keys(evidence.attemptJournal || {}).sort(),
+      ["dispatchCount", "journalHash", "state"]),
+  "UAT_SINGLE_USER_DEV_RECONCILIATION_SHAPE_MISMATCH");
+  check(evidence.version === 1 && evidence.marker === prior.marker &&
+    Number.isFinite(checkedAt) && checkedAt >= Date.parse(prior.scope.expiresAt) &&
+    checkedAt <= authorizedAt && authorizedAt - checkedAt <= 120_000 &&
+    evidence.receiptReadback === "NOT_EXPOSED_FOR_SINGLE_USER_DEV" &&
+    same(evidence.readCounts, { candidates: 0, calls: 0, history: 0, schedules: 0 }) &&
+    same(evidence.attemptJournal, {
+      state: attempt.state, dispatchCount: 0, journalHash: attempt.journalHash
+    }),
+  "UAT_SINGLE_USER_DEV_RECONCILIATION_MISMATCH");
+  check(GUID.test(proof.correlationId || "") &&
+    proof.correlationId.toLowerCase() !== "00000000-0000-0000-0000-000000000000" &&
+    proof.version === 4 && proof.boundary === "SingleUserDevCandidateCoreApi" &&
+    proof.mode === "SingleUserDev" && proof.nativeWritesDenied === false &&
+    proof.scopedReads === true && proof.globalGuardsRequired === false &&
+    proof.readback === "CallerOwnedScope" && proof.calendarEnabled === false &&
+    [proof.organizationId, proof.environmentId, proof.actorId, proof.scopeId,
+      proof.candidateId, proof.positionId, proof.sourceId, proof.taId,
+      proof.locationId].every(value => GUID.test(value || "")) &&
+    proof.organizationId.toLowerCase() === prior.scope.organizationId.toLowerCase() &&
+    proof.organizationId.toLowerCase() === base.organizationId.toLowerCase() &&
+    proof.environmentId.toLowerCase() === prior.scope.environmentId.toLowerCase() &&
+    proof.environmentId.toLowerCase() === base.environmentId.toLowerCase() &&
+    proof.actorId.toLowerCase() === binding.actorId.toLowerCase() &&
+    proof.scopeId.toLowerCase() === binding.scopeId.toLowerCase() &&
+    proof.candidateId.toLowerCase() === binding.scopeId.toLowerCase() &&
+    proof.positionId.toLowerCase() === binding.positionId.toLowerCase() &&
+    proof.sourceId.toLowerCase() === binding.sourceId.toLowerCase() &&
+    proof.taId.toLowerCase() === binding.taId.toLowerCase() &&
+    proof.locationId.toLowerCase() === binding.locationId.toLowerCase() &&
+    GUID.test(evidence.whoAmI?.actorId || "") &&
+    GUID.test(evidence.whoAmI?.organizationId || "") &&
+    evidence.whoAmI.actorId.toLowerCase() === binding.actorId.toLowerCase() &&
+    evidence.whoAmI.organizationId.toLowerCase() === base.organizationId.toLowerCase(),
+  "UAT_SINGLE_USER_DEV_RECONCILIATION_PROOF_MISMATCH");
+  const validUntil = Date.parse(proof.validUntil || "");
+  check(Number.isFinite(validUntil) && validUntil > checkedAt &&
+    validUntil <= checkedAt + 125_000,
+  "UAT_SINGLE_USER_DEV_RECONCILIATION_PROOF_STALE");
+  const expectedReferences = {
+    position: { id: binding.positionId, label: REFERENCE_LABELS.position },
+    source: { id: binding.sourceId, label: REFERENCE_LABELS.source },
+    ta: { id: binding.taId, label: REFERENCE_LABELS.ta },
+    location: { id: binding.locationId, label: REFERENCE_LABELS.location }
+  };
+  check(same(Object.keys(evidence.references || {}).sort(), Object.keys(expectedReferences).sort()) &&
+    Object.entries(expectedReferences).every(([key, expected]) => {
+      const actual = evidence.references[key];
+      return actual && same(Object.keys(actual).sort(), ["id", "label", "rowCount", "statecode"]) &&
+        actual.rowCount === 1 && actual.statecode === 0 &&
+        GUID.test(actual.id || "") &&
+        actual.id.toLowerCase() === expected.id.toLowerCase() && actual.label === expected.label;
+    }),
+  "UAT_SINGLE_USER_DEV_RECONCILIATION_REFERENCES_MISMATCH");
+  return {
+    ...attempt,
+    checkedAt: evidence.checkedAt,
+    proofCorrelation: proof.correlationId.toLowerCase()
+  };
+}
+
+function sameSingleUserDevScope(prior, successor) {
+  const expected = clone(prior.scope);
+  expected.authorizationId = successor.scope.authorizationId;
+  expected.expiresAt = successor.scope.expiresAt;
+  expected.excludedCorrelations = successor.scope.excludedCorrelations;
+  return same(expected, successor.scope) &&
+    prior.scope.excludedCorrelations.every(correlation =>
+      successor.scope.excludedCorrelations.some(value =>
+        value.toLowerCase() === correlation.toLowerCase()));
+}
+
+function expectedSingleUserDevSlot(file, record) {
+  if (record.version === 2) {
+    return {
+      authorizationFile: file, authorizationHash: digest(file),
+      authorizationId: record.scope.authorizationId, attemptId: record.attemptId,
+      marker: record.marker, at: record.createdAt
+    };
+  }
+  const linkPath = record.predecessor.successorLinkPath;
+  return {
+    authorizationFile: file, authorizationHash: digest(file),
+    authorizationId: record.scope.authorizationId, attemptId: record.attemptId,
+    marker: record.marker, predecessorLinkPath: linkPath, at: record.createdAt
+  };
+}
+
+function expectedSingleUserDevSuccessorLink(file, record, authorizationHash = digest(file)) {
+  return {
+    authorizationFile: file, authorizationHash,
+    authorizationId: record.scope.authorizationId, attemptId: record.attemptId,
+    marker: record.marker,
+    predecessorAuthorizationFile: record.predecessor.authorizationFile,
+    predecessorAuthorizationHash: record.predecessor.authorizationHash,
+    reconciliationHash: record.predecessor.reconciliationHash,
+    at: record.createdAt
+  };
+}
+
+function verifySingleUserDevChain(file, record, base, visited = new Set()) {
+  const canonicalFile = path.resolve(file);
+  check(!visited.has(canonicalFile), "UAT_SINGLE_USER_DEV_SUCCESSOR_CYCLE");
+  visited.add(canonicalFile);
+  const slotPath = singleUserDevSlotPath(file, record);
+  if (record.version === 2) {
+    check(same(read(slotPath), expectedSingleUserDevSlot(file, record)),
+      "UAT_SINGLE_USER_DEV_AUTHORIZATION_SLOT_MISMATCH");
+    return slotPath;
+  }
+  check(slotPath === `${file}.slot.json` &&
+    same(read(slotPath), expectedSingleUserDevSlot(file, record)),
+  "UAT_SINGLE_USER_DEV_GENERATION_SLOT_MISMATCH");
+  const predecessor = record.predecessor;
+  absolute(predecessor.authorizationFile);
+  check(path.dirname(predecessor.authorizationFile) === path.dirname(file));
+  const prior = read(predecessor.authorizationFile);
+  const priorCreatedAt = Date.parse(prior.createdAt);
+  validateRecord(prior, base, priorCreatedAt);
+  const priorSlotPath = singleUserDevSlotPath(predecessor.authorizationFile, prior);
+  check(predecessor.authorizationHash === digest(predecessor.authorizationFile) &&
+    predecessor.authorizationId === prior.scope.authorizationId &&
+    predecessor.attemptId === prior.attemptId && predecessor.marker === prior.marker &&
+    predecessor.slotPath === priorSlotPath &&
+    predecessor.slotHash === digest(priorSlotPath) &&
+    prior.marker === record.marker && prior.candidateName === record.candidateName &&
+    prior.candidateEmail === record.candidateEmail &&
+    sameSingleUserDevScope(prior, record) &&
+    Date.parse(prior.scope.expiresAt) <= Date.parse(record.authorizedAt),
+  "UAT_SINGLE_USER_DEV_SUCCESSOR_SCOPE_MISMATCH");
+  const attempt = inspectSingleUserDevAttempt(predecessor.authorizationFile, prior);
+  check(predecessor.attemptState === attempt.state &&
+    predecessor.dispatchCount === 0 && predecessor.attemptJournalHash === attempt.journalHash &&
+    predecessor.reconciliationHash === hash(JSON.stringify(record.reconciliation)),
+  "UAT_SINGLE_USER_DEV_SUCCESSOR_JOURNAL_MISMATCH");
+  const evidence = validateSingleUserDevReconciliation(record.reconciliation, prior, base,
+    attempt, Date.parse(record.authorizedAt));
+  const requiredExcluded = new Set([
+    ...prior.scope.excludedCorrelations.map(value => value.toLowerCase()),
+    evidence.proofCorrelation,
+    ...(attempt.proofCorrelation ? [attempt.proofCorrelation.toLowerCase()] : [])
+  ]);
+  check([...requiredExcluded].every(value =>
+    record.scope.excludedCorrelations.some(item => item.toLowerCase() === value)),
+  "UAT_SINGLE_USER_DEV_SUCCESSOR_CORRELATION_NOT_EXCLUDED");
+  const successorLinkPath = `${priorSlotPath}.successor-authorization.json`;
+  check(predecessor.successorLinkPath === successorLinkPath &&
+    same(read(successorLinkPath), expectedSingleUserDevSuccessorLink(file, record)),
+  "UAT_SINGLE_USER_DEV_SUCCESSOR_LINK_MISMATCH");
+  verifySingleUserDevChain(predecessor.authorizationFile, prior, base, visited);
+  return slotPath;
 }
 
 function validateSyntheticIsolationProof(observation, authorization, now = Date.now()) {
@@ -380,13 +591,9 @@ function loadIndependentAuthorization(file, base, now = Date.now()) {
     validateRecord(record, base, now);
     check(file === path.join(path.dirname(file),
       `${record.scope.authorizationId}.authorization.json`), "UAT_AUTHORIZATION_PATH_MISMATCH");
-    const slotPath = path.join(path.dirname(file),
-      `singleuserdev-${record.marker.toLowerCase()}.authorization-slot.json`);
-    const slot = read(slotPath);
-    check(slot.authorizationFile === file && slot.authorizationHash === digest(file) &&
-      slot.authorizationId === record.scope.authorizationId &&
-      slot.attemptId === record.attemptId && slot.marker === record.marker,
-    "UAT_SINGLE_USER_DEV_AUTHORIZATION_SLOT_MISMATCH");
+    const slotPath = verifySingleUserDevChain(file, record, base);
+    check(!fs.existsSync(`${slotPath}.successor-authorization.json`),
+      "UAT_SINGLE_USER_DEV_AUTHORIZATION_SUPERSEDED");
     return record;
   }
   const history = validateRecord(record, base, now);
@@ -449,6 +656,78 @@ function createAuthorization(file, request, base, now = Date.now()) {
     at: record.createdAt
   }, "wx");
   durableWrite(file, record, "wx");
+  return loadIndependentAuthorization(file, base, now);
+}
+
+function createSingleUserDevSuccessor(file, previousFile, request, base, reconciliation, now = Date.now()) {
+  absolute(file);
+  absolute(previousFile);
+  check(!fs.existsSync(file) && path.dirname(file) === path.dirname(previousFile),
+    "UAT_SINGLE_USER_DEV_SUCCESSOR_PATH_INVALID");
+  const prior = read(previousFile);
+  const priorCreatedAt = Date.parse(prior.createdAt);
+  validateRecord(prior, base, priorCreatedAt);
+  check(prior.scope.identityScope === "SINGLE_USER_DEV" &&
+    previousFile === path.join(path.dirname(previousFile),
+      `${prior.scope.authorizationId}.authorization.json`) &&
+    Date.parse(prior.scope.expiresAt) <= now,
+  "UAT_PRECEDING_AUTHORIZATION_NOT_EXPIRED");
+  const priorSlotPath = verifySingleUserDevChain(previousFile, prior, base);
+  const priorAttempt = inspectSingleUserDevAttempt(previousFile, prior);
+  const authorizedAt = Date.parse(request.authorizedAt || "");
+  const reconciliationProof = validateSingleUserDevReconciliation(
+    reconciliation, prior, base, priorAttempt, authorizedAt);
+  const requiredExcluded = new Set([
+    ...prior.scope.excludedCorrelations.map(value => value.toLowerCase()),
+    reconciliationProof.proofCorrelation,
+    ...(priorAttempt.proofCorrelation ? [priorAttempt.proofCorrelation.toLowerCase()] : [])
+  ]);
+  const expectedScope = clone(prior.scope);
+  expectedScope.authorizationId = request.scope?.authorizationId;
+  expectedScope.expiresAt = request.scope?.expiresAt;
+  expectedScope.excludedCorrelations = [...requiredExcluded];
+  check(request.marker === prior.marker && request.candidateName === prior.candidateName &&
+    request.candidateEmail === prior.candidateEmail &&
+    typeof request.ownerDecisionText === "string" && request.ownerDecisionText.trim().length > 0 &&
+    same(request.scope, expectedScope),
+  "UAT_SINGLE_USER_DEV_SUCCESSOR_SCOPE_MISMATCH");
+  const successorLinkPath = `${priorSlotPath}.successor-authorization.json`;
+  check(!fs.existsSync(successorLinkPath), "UAT_SINGLE_USER_DEV_SUCCESSOR_ALREADY_EXISTS");
+  const createdAt = new Date(now).toISOString();
+  check(Number.isFinite(authorizedAt) && authorizedAt <= now &&
+    now - authorizedAt <= 120_000,
+  "UAT_SINGLE_USER_DEV_SUCCESSOR_AUTHORIZATION_TIME_INVALID");
+  const record = {
+    version: 3, kind: "OWNER_AUTHORIZED_SINGLE_USER_DEV_SUCCESSOR_ATTEMPT",
+    createdAt, authorizedAt: request.authorizedAt,
+    ownerDecisionText: request.ownerDecisionText, attemptId: randomUUID(),
+    scope: clone(request.scope), marker: prior.marker,
+    candidateName: prior.candidateName, candidateEmail: prior.candidateEmail,
+    predecessor: {
+      authorizationFile: previousFile, authorizationHash: digest(previousFile),
+      authorizationId: prior.scope.authorizationId, attemptId: prior.attemptId,
+      marker: prior.marker, slotPath: priorSlotPath, slotHash: digest(priorSlotPath),
+      attemptState: priorAttempt.state, dispatchCount: 0,
+      attemptJournalHash: priorAttempt.journalHash,
+      successorLinkPath, reconciliationHash: hash(JSON.stringify(reconciliation))
+    },
+    reconciliation: clone(reconciliation),
+    generationSlotPath: `${file}.slot.json`
+  };
+  validateRecord(record, base, now);
+  check(file === path.join(path.dirname(file),
+    `${record.scope.authorizationId}.authorization.json`),
+  "UAT_AUTHORIZATION_PATH_MISMATCH");
+  const bytes = `${JSON.stringify(record)}\n`;
+  const link = expectedSingleUserDevSuccessorLink(file, record, hash(bytes));
+  const slot = {
+    authorizationFile: file, authorizationHash: hash(bytes),
+    authorizationId: record.scope.authorizationId, attemptId: record.attemptId,
+    marker: record.marker, predecessorLinkPath: successorLinkPath, at: record.createdAt
+  };
+  durableWrite(successorLinkPath, link, "wx");
+  durableWrite(file, record, "wx");
+  durableWrite(record.generationSlotPath, slot, "wx");
   return loadIndependentAuthorization(file, base, now);
 }
 
@@ -565,21 +844,37 @@ function validateOperationCorrelation(correlationId, record, authorization) {
 module.exports = {
   createAuthorization, loadIndependentAuthorization, claimIndependentAuthorization,
   requireOneInvocation, inspectHistory, digest, validateSyntheticIsolationProof,
-  validateOperationCorrelation
+  validateOperationCorrelation, createSingleUserDevSuccessor
 };
 
 if (require.main === module) {
   try {
-    check(process.argv.length === 4 && process.argv[2] === "--create" &&
-      !process.env.BSO_UAT_RESUME_ZERO_DISPATCH, "UAT_LOCAL_AUTHORIZATION_CREATE_USAGE");
-    absolute(process.argv[3]);
-    const request = read(process.argv[3]);
+    check(!process.env.BSO_UAT_RESUME_ZERO_DISPATCH,
+      "UAT_LOCAL_AUTHORIZATION_CREATE_USAGE");
     const { loadApproval, protectDirectory, authDirectory } = require("./local-settings.cjs");
     const base = { ...loadApproval(), environmentId: process.env.BSO_UAT_ENVIRONMENT_ID };
     protectDirectory(authDirectory);
-    const file = path.join(authDirectory, `${request.scope.authorizationId}.authorization.json`);
-    createAuthorization(file, request, base);
-    console.log("INDEPENDENT_AUTHORIZATION_CREATED_CLAIM_UNCONSUMED");
+    if (process.argv.length === 4 && process.argv[2] === "--create") {
+      absolute(process.argv[3]);
+      const request = read(process.argv[3]);
+      const file = path.join(authDirectory, `${request.scope.authorizationId}.authorization.json`);
+      createAuthorization(file, request, base);
+      console.log("INDEPENDENT_AUTHORIZATION_CREATED_CLAIM_UNCONSUMED");
+    } else if (process.argv.length === 6 && process.argv[2] === "--successor") {
+      const previousFile = path.resolve(process.argv[3]);
+      absolute(process.argv[4]);
+      absolute(process.argv[5]);
+      check(path.dirname(previousFile) === authDirectory,
+        "UAT_SINGLE_USER_DEV_SUCCESSOR_PATH_INVALID");
+      const request = read(process.argv[4]);
+      const reconciliation = read(process.argv[5]);
+      const file = path.join(authDirectory,
+        `${request.scope.authorizationId}.authorization.json`);
+      createSingleUserDevSuccessor(file, previousFile, request, base, reconciliation);
+      console.log("SINGLE_USER_DEV_SUCCESSOR_CREATED_CLAIM_UNCONSUMED");
+    } else {
+      throw new Error("UAT_LOCAL_AUTHORIZATION_CREATE_USAGE");
+    }
   } catch (error) {
     console.error(String(error.message).match(/\bUAT_[A-Z_]+\b/)?.[0] ||
       (error.code === "EEXIST" ? "UAT_AUTHORIZATION_OR_SUCCESSOR_ALREADY_RESERVED" :

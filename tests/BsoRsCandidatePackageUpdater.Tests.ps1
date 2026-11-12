@@ -142,7 +142,9 @@ Assert-Test ($ambiguousPackageResult -ceq 'PACKAGE_IDENTITY_AMBIGUOUS') `
 
 $legacyTopology = [pscustomobject]@{
     OneExistingPackage = $true
+    ExpectedPluginTypeSetExact = $true
     PackageAssemblyLinked = $true
+    RegisteredPackageVersionUnchanged = $true
     ExpectedHandlerPackageBacked = $true
     CustomApiMetadataUnchanged = $true
     LegacyAssemblyUntouched = $true
@@ -158,6 +160,19 @@ try { Assert-PreflightTopology -Snapshot $legacyTopology; $legacyPreflightResult
 catch { $legacyPreflightResult = $_.Exception.Message }
 Assert-Test ($legacyPreflightResult -ceq 'PASS') `
     'Legacy guard topology is gated by inactivity, not a fixed 62-step count'
+$legacyTopology.ExpectedPluginTypeSetExact = $false
+$wrongTypeSetPreflight = $null
+try { Assert-PreflightTopology -Snapshot $legacyTopology; $wrongTypeSetPreflight = 'PASS' }
+catch { $wrongTypeSetPreflight = $_.Exception.Message }
+$legacyTopology.ExpectedPluginTypeSetExact = $true
+$legacyTopology.RegisteredPackageVersionUnchanged = $false
+$wrongPackageVersionPreflight = $null
+try { Assert-PreflightTopology -Snapshot $legacyTopology; $wrongPackageVersionPreflight = 'PASS' }
+catch { $wrongPackageVersionPreflight = $_.Exception.Message }
+$legacyTopology.RegisteredPackageVersionUnchanged = $true
+Assert-Test ($wrongTypeSetPreflight -ceq 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED' -and
+    $wrongPackageVersionPreflight -ceq 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED') `
+    'Preflight rejects plugin-type and registered-package-version drift'
 $legacyTopology.NoActiveLegacyHandlers = $false
 $activeLegacyPreflight = $null
 try { Assert-PreflightTopology -Snapshot $legacyTopology; $activeLegacyPreflight = 'PASS' }
@@ -206,6 +221,7 @@ $after = [pscustomobject]@{
     PackageCount = $before.PackageCount
     ApiMetadataSha256 = $before.ApiMetadataSha256
     LegacyAssemblySha256 = $before.LegacyAssemblySha256
+    ExpectedPluginTypeSetExact = $true
     OneExistingPackage = $true
     SamePackageRecord = $true
     PackageAssemblyLinked = $true
@@ -219,6 +235,8 @@ $after = [pscustomobject]@{
     NoActiveCandidateCoreProfilerWrappers = $true
     PluginTraceLogOff = $true
     NoNewPluginPackage = $true
+    RegisteredPackageVersionUnchanged = $true
+    AssemblyVersionUpdated = $true
     ModifiedOnAdvanced = $false
     ServerPackageBytesAvailable = $false
 }
@@ -419,6 +437,8 @@ Assert-Test ($updaterSource.Contains('$start.ArgumentList.Add($argument)') -and
     -not $updaterSource.Contains('ModifiedOn = [string]$PackageRow.modifiedon') -and
     -not $updaterSource.Contains('[string]$Before.ModifiedOn') -and
     $updaterSource.Contains("Manifest.releaseTooling.pacCliVersion") -and
+    $updaterSource.Contains('-ExpectedPluginTypes (Get-ManifestExpectedPluginTypes)') -and
+    $updaterSource.Contains('RegisteredPackageVersionUnchanged') -and
     $updaterSource.Contains("CommandType -ne 'Application'")) `
     'Updater uses structured PAC arguments, pinned CLI version, and restart-safe read-only journal reconciliation'
 $preflightStart = $updaterSource.IndexOf("if (`$Mode -ceq 'Preflight') {")

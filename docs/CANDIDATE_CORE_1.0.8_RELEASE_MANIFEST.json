@@ -1,0 +1,138 @@
+{
+  "manifestVersion": 1,
+  "status": "VERSIONED_CANDIDATE_ARTIFACT_VALIDATED_DEPLOYMENT_BLOCKED",
+  "createdOn": "2026-11-12",
+  "scope": "Candidate Core plug-in package update only; no Custom API, Console, guard, role, Calendar, or business-data changes.",
+  "solution": {
+    "uniqueName": "os_sr_bso_rs_support",
+    "version": "1.0.0.1",
+    "membershipCount": 87,
+    "membershipSha256": "c177173b7ef208ff498a31898dec6fa652980e82a9005faaebeb0099a35ee578"
+  },
+  "candidateCore": {
+    "packageFileName": "os_sr_cact_pkg.1.0.8.nupkg",
+    "packageUniqueName": "os_sr_cact_pkg",
+    "registeredPackageRecordVersion": "1.0.0",
+    "artifactPackageVersion": "1.0.8",
+    "packageSha256": "632840178413e40497e450a0cf9664d7d59dee83fdd7a6f836e4046f409cf739",
+    "embeddedAssemblyTypeName": "os_sr_cact.ApplyCandidateAction",
+    "embeddedAssemblySha256": "d2ee192d55092782e582e41f2e4d618db6f8482ae19e7736e481a4e00e12557b",
+    "assemblyVersion": "1.0.8.0",
+    "fileVersion": "1.0.8.0",
+    "productVersion": "1.0.8+9f8ca9962959e2ef9a6ed0b49089b55f0ee6cd22",
+    "publicKeyToken": null,
+    "sourceType": "FileStore",
+    "customApiHandlerTypeName": "os_sr_cact.ApplyCandidateAction",
+    "expectedPluginTypes": [
+      "os_sr_cact.ApplyCandidateAction",
+      "os_sr_cact.ProtectCandidateCore",
+      "os_sr_cact.SyntheticIsolationGuard",
+      "os_sr_cact.SyntheticIsolationReadGuard"
+    ],
+    "preDeploymentAssemblyVersion": "1.0.7.0",
+    "preDeploymentDisabledGuardStepCount": 50,
+    "rollbackArtifact": {
+      "fileName": "os_sr_cact_pkg.1.0.7.nupkg",
+      "artifactPackageVersion": "1.0.7",
+      "assemblyVersion": "1.0.7.0",
+      "fileVersion": "1.0.7.0",
+      "productVersion": "1.0.7+096d12d9a247adc3d5d85f4dd5a8e110d1654f8b",
+      "packageSha256": "891a066c729dfdc47673f380fe38425194cb3ca37836cfd8dc472a650de20242",
+      "embeddedAssemblySha256": "91495a6828f911ab67aeb629f3db97ed71d410537e211497448afd1897236023"
+    }
+  },
+  "customApi": {
+    "uniqueName": "os_sr_cact",
+    "metadataSha256": "642c802293f311a259f6d51879b266fdddb1ae5b0f7cd695beeb8a9133f366a5",
+    "requestParameterCount": 22,
+    "responsePropertyCount": 7,
+    "requestParameters": [
+      { "name": "ActionType", "type": 10, "isOptional": false },
+      { "name": "AssignedTaId", "type": 12, "isOptional": true },
+      { "name": "CallOutcome", "type": 7, "isOptional": true },
+      { "name": "CandidateCvUrl", "type": 10, "isOptional": true },
+      { "name": "CandidateEmail", "type": 10, "isOptional": true },
+      { "name": "CandidateId", "type": 12, "isOptional": true },
+      { "name": "CandidateName", "type": 10, "isOptional": true },
+      { "name": "CandidatePhone", "type": 10, "isOptional": true },
+      { "name": "CandidateSourceId", "type": 12, "isOptional": true },
+      { "name": "ContactedAt", "type": 1, "isOptional": true },
+      { "name": "CorrelationId", "type": 12, "isOptional": false },
+      { "name": "EndAt", "type": 1, "isOptional": true },
+      { "name": "ExpectedStatus", "type": 7, "isOptional": true },
+      { "name": "InterviewerId", "type": 12, "isOptional": true },
+      { "name": "LocationId", "type": 12, "isOptional": true },
+      { "name": "Notes", "type": 10, "isOptional": true },
+      { "name": "PositionId", "type": 12, "isOptional": true },
+      { "name": "ProfileFieldMask", "type": 10, "isOptional": true },
+      { "name": "Reason", "type": 10, "isOptional": true },
+      { "name": "ResultNotes", "type": 10, "isOptional": true },
+      { "name": "StartAt", "type": 1, "isOptional": true },
+      { "name": "SyntheticScopeId", "type": 12, "isOptional": true }
+    ],
+    "responseProperties": [
+      { "name": "CallLogId", "type": 12 },
+      { "name": "CurrentStatus", "type": 7 },
+      { "name": "IsolationContract", "type": 10 },
+      { "name": "PreviousStatus", "type": 7 },
+      { "name": "ResultCode", "type": 10 },
+      { "name": "ScopedData", "type": 10 },
+      { "name": "StatusHistoryId", "type": 12 }
+    ],
+    "changeDecision": {
+      "action": "NO_CHANGE",
+      "metadataWrites": 0,
+      "reason": "The 1.0.8.0 change only corrects verifier projection columns. The exact live API metadata hash, including ProfileFieldMask, is recorded above and verified unchanged."
+    }
+  },
+  "releaseCandidate": {
+    "artifactBuildRevision": "9f8ca9962959e2ef9a6ed0b49089b55f0ee6cd22",
+    "currentWorkspaceRevisionAtReview": "30cba4b7e0b2e9b8831702942883b7e482bc3590",
+    "reviewedSourceFiles": {
+      "solutions/CandidateCore/SyntheticIsolation.cs": "cdfd3b10d9bfbe2c805bee407434ef99321898f18e1ee33d5c1c8b55cef25fec",
+      "solutions/CandidateCore/DataversePlugin.cs": "2cf637eb3e408d938eac87bfc34850aea076f2ceff91745c2641304ad1182ba5",
+      "solutions/CandidateCore/Operation.cs": "9cd845a76be4572e03fde345c84173c10884081ab8f4ce8a333c3dd2064767e5",
+      "solutions/CandidateCorePackage/CandidateCore.Package.csproj": "0fb4a5fb424bc40159d64b9540d6926e29ad616c602612d95e610c47d699c546"
+    },
+    "target": {
+      "environmentName": "VN LMV IT",
+      "environmentIdentitySha256": "724d152cea43ea1cf19978494556677e6b381ef1b6f7cbffcdb964adc4ca0764",
+      "organizationIdentitySha256": "a83b798811cbe9943a16d9f01764b1464f28abc8196719eaf14865b0ffb2c171"
+    },
+    "componentIdentityFingerprints": {
+      "packageRecord": "bb0e2fb654f6ead9ca6233a72cd3ed46f8f31c98775a60259813a844cd6506fd",
+      "assembly": "6eb30a44506ab5de2d616b476121e83ff8a8bf462f95d088472ec2128a17e9c9",
+      "handlerType": "f6a86990264829dd9f5f579d1e7f7ab7a51c2406e861bd7891b3495d9e0f76f1",
+      "customApi": "187aa3517409c21c159fdd230e40cc16683d988515513d21ad5a3e95789a9206"
+    },
+    "reviewEvidence": {
+      "artifactHashesMatched": true,
+      "artifactContainsProjectionFix": true,
+      "registeredPackageIdentityPreserved": true,
+      "customApiProfileFieldMaskUnchanged": true,
+      "customApiMetadataWrites": 0,
+      "liveCandidateCoreAssemblyBeforeUpdate": "1.0.7.0",
+      "liveLegacyGuardSteps": 50,
+      "allLiveLegacyGuardStepsInactive": true,
+      "liveSolutionMembershipCount": 87,
+      "targetPreflight": {
+        "classification": "READ_ONLY_SECURITY_PREFLIGHT_BLOCKED",
+        "failureCode": "PACKAGE_SECURITY_PREFLIGHT_FAILED",
+        "pacPluginPushDispatched": false,
+        "tenantWrites": 0,
+        "bsoRoleExpectedPrivilegeCount": 60,
+        "bsoRoleObservedPrivilegeCount": 65,
+        "referenceAdminExpectedUserAssignments": 0,
+        "referenceAdminObservedUserAssignments": 1
+      },
+      "liveSolutionMembershipSha256": "c177173b7ef208ff498a31898dec6fa652980e82a9005faaebeb0099a35ee578"
+    }
+  },
+  "releaseTooling": {
+    "pacCliVersion": "2.13.1+g251dee1",
+    "packageUpdater": "../scripts/Update-BsoRsCandidatePluginPackage.ps1",
+    "packageUpdaterSha256": "759e03a24289f4ae34d305abd4e782609d093219c55f3cbacc17bac263621e53",
+    "focusedRegressionTest": "../tests/BsoRsCandidatePackageUpdater.Tests.ps1",
+    "focusedRegressionTestSha256": "07d13980ecf28bf81bae93ff44924af719118d644dc96f9e31940791f4130b93"
+  }
+}

@@ -10,6 +10,8 @@ param(
     [string]$ArtifactPath,
     [string]$ExpectedPackageSha256,
     [string]$ExpectedAssemblySha256,
+    [string]$ReleaseManifestPath,
+    [string]$RollbackArtifactPath,
     [string]$ExpectedPackageUniqueName,
     [string]$ExpectedHandlerTypeName,
     [string]$ExpectedSolutionUniqueName = 'os_sr_bso_rs_support',
@@ -27,7 +29,11 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $script:Root = Split-Path $PSScriptRoot -Parent
-$script:ManifestPath = Join-Path $script:Root 'docs\RELEASE_INPUT_MANIFEST.json'
+$script:ManifestPath = if ([string]::IsNullOrWhiteSpace($ReleaseManifestPath)) {
+    Join-Path $script:Root 'docs\RELEASE_INPUT_MANIFEST.json'
+} else {
+    [IO.Path]::GetFullPath($ReleaseManifestPath)
+}
 $script:Manifest = Get-Content -LiteralPath $script:ManifestPath -Raw | ConvertFrom-Json
 $script:ApiRoot = $null
 $script:AccessToken = $null
@@ -40,6 +46,58 @@ $script:PriorDispatchCount = 0
 function Stop-PackageUpdater {
     param([Parameter(Mandatory)][string]$FailureCode)
     throw [InvalidOperationException]::new($FailureCode)
+}
+
+function Get-ManifestArtifactPackageVersion {
+    if ($script:Manifest.candidateCore.PSObject.Properties['artifactPackageVersion']) {
+        return [string]$script:Manifest.candidateCore.artifactPackageVersion
+    }
+    [string]$script:Manifest.candidateCore.packageVersion
+}
+
+function Get-ManifestRegisteredPackageVersion {
+    if ($script:Manifest.candidateCore.PSObject.Properties['registeredPackageRecordVersion']) {
+        return [string]$script:Manifest.candidateCore.registeredPackageRecordVersion
+    }
+    [string]$script:Manifest.candidateCore.packageVersion
+}
+
+function Get-ManifestAssemblyVersion {
+    if ($script:Manifest.candidateCore.PSObject.Properties['assemblyVersion']) {
+        return [string]$script:Manifest.candidateCore.assemblyVersion
+    }
+    '1.0.0.0'
+}
+
+function Get-ManifestFileVersion {
+    if ($script:Manifest.candidateCore.PSObject.Properties['fileVersion']) {
+        return [string]$script:Manifest.candidateCore.fileVersion
+    }
+    Get-ManifestAssemblyVersion
+}
+
+function Get-ManifestProductVersion {
+    if ($script:Manifest.candidateCore.PSObject.Properties['productVersion']) {
+        return [string]$script:Manifest.candidateCore.productVersion
+    }
+    ''
+}
+
+function Get-ManifestExpectedPluginTypes {
+    if ($script:Manifest.candidateCore.PSObject.Properties['expectedPluginTypes']) {
+        return @($script:Manifest.candidateCore.expectedPluginTypes | ForEach-Object { [string]$_ })
+    }
+    @(
+        [string]$script:Manifest.candidateCore.customApiHandlerTypeName,
+        ([string]$script:Manifest.candidateCore.embeddedAssemblyTypeName -replace
+            '\.ApplyCandidateAction$', '.ProtectCandidateCore')
+    )
+}
+
+function Test-ManifestApiNoChange {
+    $script:Manifest.PSObject.Properties['customApi'] -and
+        $script:Manifest.customApi.PSObject.Properties['changeDecision'] -and
+        [string]$script:Manifest.customApi.changeDecision.action -ceq 'NO_CHANGE'
 }
 
 function Get-Sha256FromBytes {
@@ -105,15 +163,40 @@ function Assert-UpdaterInputs {
         ($TargetProfile -ceq 'DEV' -and $RequestedMode -in @('Preflight', 'Apply', 'Reconcile') -and
             [string]::IsNullOrWhiteSpace($ExpectedDevelopmentBaselinePath)) -or
         ($TargetProfile -ceq 'DEV' -and $RequestedMode -in @('Preflight', 'Apply') -and
+            -not (Test-ManifestApiNoChange) -and
             ([string]::IsNullOrWhiteSpace($ExpectedDevelopmentApiPlanPath) -or
                 $ExpectedDevelopmentApiPlanSha256 -cnotmatch '^[0-9a-f]{64}$'))) {
         Stop-PackageUpdater 'PACKAGE_DEVELOPMENT_SOURCE_AUTHORIZATION_REQUIRED'
     }
     if ($ExpectedPackageSha256 -cnotmatch '^[0-9a-f]{64}$' -or
+        $ExpectedPackageSha256 -ine [string]$script:Manifest.candidateCore.packageSha256 -or
         $ExpectedPackageUniqueName -cne [string]$script:Manifest.candidateCore.packageUniqueName -or
         $ExpectedHandlerTypeName -cne [string]$script:Manifest.candidateCore.customApiHandlerTypeName -or
         $ExpectedSolutionUniqueName -cne [string]$script:Manifest.solution.uniqueName) {
         Stop-PackageUpdater 'PACKAGE_ARTIFACT_VALIDATION_FAILED'
+    }
+    if ($TargetProfile -ceq 'DEV') {
+        $candidate = $script:Manifest.candidateCore
+        if ($RequestedMode -in @('Preflight', 'Apply') -and
+            $candidate.PSObject.Properties['rollbackArtifact'] -and
+            [string]::IsNullOrWhiteSpace($RollbackArtifactPath)) {
+            Stop-PackageUpdater 'PACKAGE_ROLLBACK_ARTIFACT_REQUIRED'
+        }
+        if ($ExpectedAssemblySha256 -cnotmatch '^[0-9a-f]{64}$' -or
+            $ExpectedAssemblySha256 -ine [string]$candidate.embeddedAssemblySha256) {
+            Stop-PackageUpdater 'PACKAGE_ARTIFACT_VALIDATION_FAILED'
+        }
+        if ($script:Manifest.PSObject.Properties['releaseCandidate'] -and
+            $script:Manifest.releaseCandidate.PSObject.Properties['target']) {
+            $target = $script:Manifest.releaseCandidate.target
+            if ($ExpectedEnvironmentDisplayName -cne [string]$target.environmentName -or
+                (Get-TargetIdentityFingerprint -Identifier $ExpectedEnvironmentId) -cne
+                    [string]$target.environmentIdentitySha256 -or
+                (Get-TargetIdentityFingerprint -Identifier $ExpectedOrganizationId) -cne
+                    [string]$target.organizationIdentitySha256) {
+                Stop-PackageUpdater 'PACKAGE_TARGET_IDENTITY_MISMATCH'
+            }
+        }
     }
     $null = ConvertTo-NormalizedOrganizationUrl -Value $OrganizationUrl
     $null = ConvertTo-CanonicalGuid -Value $ExpectedEnvironmentId
@@ -145,7 +228,11 @@ function Get-PackageArtifactEvidence {
         [string]$ExpectedAssemblySha256,
         [Parameter(Mandatory)][string]$ExpectedUniqueName,
         [Parameter(Mandatory)][string]$ExpectedHandler,
-        [bool]$DevelopmentSourceAheadOfFrozenRelease = $false
+        [string]$ExpectedPackageVersion = '',
+        [string]$ExpectedAssemblyVersion = '',
+        [string]$ExpectedFileVersion = '',
+        [string]$ExpectedProductVersion = '',
+        [string[]]$ExpectedPluginTypes
     )
     try {
         if (-not (Test-Path -LiteralPath $Path -PathType Leaf) -or
@@ -155,10 +242,26 @@ function Get-PackageArtifactEvidence {
         $fullPath = [IO.Path]::GetFullPath($Path)
         $packageBytes = [IO.File]::ReadAllBytes($fullPath)
         $packageHash = Get-Sha256FromBytes -Bytes $packageBytes
-        if ($packageHash -cne $ExpectedSha256 -or
-            (-not $DevelopmentSourceAheadOfFrozenRelease -and
-                $packageHash -cne [string]$script:Manifest.candidateCore.packageSha256)) {
+        if ($packageHash -cne $ExpectedSha256) {
             Stop-PackageUpdater 'PACKAGE_ARTIFACT_VALIDATION_FAILED'
+        }
+        if ([string]::IsNullOrWhiteSpace($ExpectedPackageVersion)) {
+            $ExpectedPackageVersion = Get-ManifestArtifactPackageVersion
+        }
+        if ([string]::IsNullOrWhiteSpace($ExpectedAssemblyVersion)) {
+            $ExpectedAssemblyVersion = Get-ManifestAssemblyVersion
+        }
+        if ([string]::IsNullOrWhiteSpace($ExpectedFileVersion)) {
+            $ExpectedFileVersion = Get-ManifestFileVersion
+        }
+        if ([string]::IsNullOrWhiteSpace($ExpectedProductVersion)) {
+            $ExpectedProductVersion = Get-ManifestProductVersion
+        }
+        if ($null -eq $ExpectedPluginTypes -or $ExpectedPluginTypes.Count -eq 0) {
+            $ExpectedPluginTypes = Get-ManifestExpectedPluginTypes
+        }
+        if ([string]::IsNullOrWhiteSpace($ExpectedAssemblySha256)) {
+            $ExpectedAssemblySha256 = [string]$script:Manifest.candidateCore.embeddedAssemblySha256
         }
 
         $archive = [IO.Compression.ZipArchive]::new(
@@ -187,19 +290,32 @@ function Get-PackageArtifactEvidence {
             $packageVersion = $nuspec.SelectSingleNode('/*[local-name()="package"]/*[local-name()="metadata"]/*[local-name()="version"]')
             if ($null -eq $packageId -or $null -eq $packageVersion -or
                 $packageId.InnerText -cne $ExpectedUniqueName -or
-                $packageVersion.InnerText -cne [string]$script:Manifest.candidateCore.packageVersion) {
+                $packageVersion.InnerText -cne $ExpectedPackageVersion) {
                 Stop-PackageUpdater 'PACKAGE_ARTIFACT_VALIDATION_FAILED'
             }
 
             Add-Type -AssemblyName System.Reflection.Metadata -ErrorAction Stop
             $dllBytes = Read-ZipEntryBytes -Archive $archive -EntryName 'lib/net462/os_sr_cact.dll'
             $dllHash = Get-Sha256FromBytes -Bytes $dllBytes
-            $expectedDllHash = if ($DevelopmentSourceAheadOfFrozenRelease) {
-                $ExpectedAssemblySha256
-            } else {
-                [string]$script:Manifest.candidateCore.embeddedAssemblySha256
+            if ($dllHash -cne $ExpectedAssemblySha256) {
+                Stop-PackageUpdater 'PACKAGE_ARTIFACT_VALIDATION_FAILED'
             }
-            if ($dllHash -cne $expectedDllHash) {
+            $temporaryDllPath = Join-Path ([IO.Path]::GetTempPath()) (
+                'bso-candidate-core-{0}.dll' -f [Guid]::NewGuid().ToString('N')
+            )
+            try {
+                [IO.File]::WriteAllBytes($temporaryDllPath, $dllBytes)
+                $fileVersionInfo = [Diagnostics.FileVersionInfo]::GetVersionInfo($temporaryDllPath)
+                $fileVersion = [string]$fileVersionInfo.FileVersion
+                $productVersion = [string]$fileVersionInfo.ProductVersion
+            } finally {
+                if (Test-Path -LiteralPath $temporaryDllPath) {
+                    Remove-Item -LiteralPath $temporaryDllPath -Force
+                }
+            }
+            if ($fileVersion -cne $ExpectedFileVersion -or
+                (-not [string]::IsNullOrWhiteSpace($ExpectedProductVersion) -and
+                    $productVersion -cne $ExpectedProductVersion)) {
                 Stop-PackageUpdater 'PACKAGE_ARTIFACT_VALIDATION_FAILED'
             }
             $dllStream = [IO.MemoryStream]::new($dllBytes)
@@ -216,8 +332,10 @@ function Get-PackageArtifactEvidence {
                         '{0}.{1}' -f $metadata.GetString($type.Namespace), $metadata.GetString($type.Name)
                     }
                 )
-                if ($assemblyName -cne 'os_sr_cact' -or $assemblyVersion -cne '1.0.0.0' -or
+                if ($assemblyName -cne 'os_sr_cact' -or
+                    $assemblyVersion -cne $ExpectedAssemblyVersion -or
                     $publicKey.Length -ne 0 -or $ExpectedHandler -notin $typeNames -or
+                    @($ExpectedPluginTypes | Where-Object { $_ -notin $typeNames }).Count -gt 0 -or
                     [string]$script:Manifest.candidateCore.publicKeyToken -ne '') {
                     Stop-PackageUpdater 'PACKAGE_ARTIFACT_VALIDATION_FAILED'
                 }
@@ -235,6 +353,9 @@ function Get-PackageArtifactEvidence {
             DllSha256 = $dllHash
             UniqueName = $packageId.InnerText
             Version = $packageVersion.InnerText
+            AssemblyVersion = $assemblyVersion
+            FileVersion = $fileVersion
+            ProductVersion = $productVersion
             HandlerTypeName = $ExpectedHandler
         }
     } catch {
@@ -269,7 +390,7 @@ function Resolve-PackageMatch {
     $packageId = [Guid]::Empty
     if ([string]$row.uniquename -cne $UniqueName -or
         [string]$row.name -cne $UniqueName -or
-        [string]$row.version -cne [string]$script:Manifest.candidateCore.packageVersion -or
+        [string]$row.version -cne (Get-ManifestRegisteredPackageVersion) -or
         -not [Guid]::TryParse([string]$row.pluginpackageid, [ref]$packageId) -or
         $packageId -eq [Guid]::Empty) {
         Stop-PackageUpdater 'PACKAGE_IDENTITY_AMBIGUOUS'
@@ -611,6 +732,7 @@ function Get-SanitizedTopologyPredicates {
     param([Parameter(Mandatory)][object]$Snapshot)
     [ordered]@{
         oneExistingPackage = [bool]$Snapshot.OneExistingPackage
+        expectedPluginTypeSetExact = [bool]$Snapshot.ExpectedPluginTypeSetExact
         packageAssemblyLinked = [bool]$Snapshot.PackageAssemblyLinked
         expectedHandlerPackageBacked = [bool]$Snapshot.ExpectedHandlerPackageBacked
         customApiMetadataUnchanged = [bool]$Snapshot.CustomApiMetadataUnchanged
@@ -620,6 +742,8 @@ function Get-SanitizedTopologyPredicates {
         noActiveCandidateCoreProfilerWrappers = [bool]$Snapshot.NoActiveCandidateCoreProfilerWrappers
         pluginTraceLogOff = [bool]$Snapshot.PluginTraceLogOff
         noNewPluginPackage = [bool]$Snapshot.NoNewPluginPackage
+        registeredPackageVersionUnchanged = [bool]$Snapshot.RegisteredPackageVersionUnchanged
+        assemblyVersionUpdated = [bool]$Snapshot.AssemblyVersionUpdated
         modifiedOnAdvanced = [bool]$Snapshot.ModifiedOnAdvanced
         serverPackageBytesAvailable = [bool]$Snapshot.ServerPackageBytesAvailable
     }
@@ -648,19 +772,26 @@ function Test-SnapshotEquivalent {
     $legacyAssemblyHash = if ($Before.PSObject.Properties['LegacyAssemblySha256']) {
         [string]$Before.LegacyAssemblySha256
     } else { [string]$Before.legacyAssemblySha256 }
+    $versionValid = $true
+    if ($After.PSObject.Properties['AssemblyVersion']) {
+        $versionValid = [string]$After.AssemblyVersion -ceq (Get-ManifestAssemblyVersion) -and
+            [string]$After.PackageVersion -ceq (Get-ManifestRegisteredPackageVersion)
+    }
     $identityValid = [string]$After.PackageIdFingerprint -ceq $packageFingerprint -and
         (Get-Sha256FromBytes -Bytes ([Text.Encoding]::UTF8.GetBytes(([string]$After.AssemblyId).ToLowerInvariant()))) -ceq $assemblyFingerprint -and
         (Get-Sha256FromBytes -Bytes ([Text.Encoding]::UTF8.GetBytes(([string]$After.HandlerTypeId).ToLowerInvariant()))) -ceq $handlerFingerprint -and
         (Get-Sha256FromBytes -Bytes ([Text.Encoding]::UTF8.GetBytes(([string]$After.LegacyAssemblyId).ToLowerInvariant()))) -ceq $legacyFingerprint -and
         [int]$After.PackageCount -eq $packageCount -and
         [string]$After.ApiMetadataSha256 -ceq $apiMetadataFingerprint -and
-        [string]$After.LegacyAssemblySha256 -ceq $legacyAssemblyHash
+        [string]$After.LegacyAssemblySha256 -ceq $legacyAssemblyHash -and
+        $versionValid
     $requiredPredicates = @(
-        'OneExistingPackage', 'SamePackageRecord', 'PackageAssemblyLinked',
+        'OneExistingPackage', 'ExpectedPluginTypeSetExact', 'SamePackageRecord', 'PackageAssemblyLinked',
         'SamePackageAssembly', 'ExpectedHandlerPackageBacked', 'SameHandlerType',
         'CustomApiMetadataUnchanged', 'LegacyAssemblyUntouched',
         'AllProtectCandidateCoreStepsInactive', 'NoActiveLegacyHandlers', 'NoActiveCandidateCoreProfilerWrappers',
-        'PluginTraceLogOff', 'NoNewPluginPackage'
+        'PluginTraceLogOff', 'NoNewPluginPackage', 'RegisteredPackageVersionUnchanged',
+        'AssemblyVersionUpdated'
     )
     $predicatesValid = @($requiredPredicates | Where-Object { -not [bool]$After.$_ }).Count -eq 0
     $identityValid -and $predicatesValid
@@ -868,6 +999,14 @@ function Get-ApiMetadataSnapshot {
             }
         })
         OutputNames = @($outputs | ForEach-Object { [string]$_.uniquename } | Sort-Object -CaseSensitive)
+        OutputDetails = @($outputs | ForEach-Object {
+            [pscustomobject]@{
+                Id = [string]$_.customapiresponsepropertyid
+                Name = [string]$_.uniquename
+                Type = [int]$_.type
+                ApiId = [string]$_._customapiid_value
+            }
+        })
         Hash = Get-Sha256FromBytes -Bytes ([Text.Encoding]::UTF8.GetBytes(
             (ConvertTo-Json -InputObject $canonical -Depth 15 -Compress)
         ))
@@ -913,7 +1052,10 @@ function Get-TopologySnapshot {
     } | Where-Object { $_ })
     $types = @(Get-PagedRows -Path "plugintypes?`$select=plugintypeid,typename,_pluginassemblyid_value&`$filter=_pluginassemblyid_value eq $($assembly.pluginassemblyid)")
     $handlerTypes = @($types | Where-Object typename -CEQ $ExpectedHandlerTypeName)
+    if ($handlerTypes.Count -ne 1) { Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED' }
     $guardName = [string]$script:Manifest.candidateCore.embeddedAssemblyTypeName -replace '\.ApplyCandidateAction$', '.ProtectCandidateCore'
+    $expectedPluginTypes = @(Get-ManifestExpectedPluginTypes | Sort-Object -CaseSensitive)
+    $actualPluginTypes = @($types | ForEach-Object { [string]$_.typename } | Sort-Object -CaseSensitive)
     $guardTypes = @(Get-PagedRows -Path "plugintypes?`$select=plugintypeid,typename,_pluginassemblyid_value&`$filter=typename eq '$guardName'")
     $legacyAssemblies = @(Get-PagedRows -Path "pluginassemblies?`$select=pluginassemblyid,name,version,publickeytoken,sourcetype,content&`$filter=name eq 'os_sr_cact'")
     $legacyRows = @($legacyAssemblies | Where-Object { [string]$_.pluginassemblyid -ine [string]$assembly.pluginassemblyid })
@@ -956,7 +1098,8 @@ function Get-TopologySnapshot {
         [int]$organization.plugintracelogsetting -eq 0
 
     $apiSnapshot = Get-ApiMetadataSnapshot -UniqueName 'os_sr_cact'
-    $packageTypesExact = $types.Count -eq 2 -and $handlerTypes.Count -eq 1 -and
+    $packageTypesExact = $types.Count -eq $expectedPluginTypes.Count -and
+        [string]::Join('|', $actualPluginTypes) -ceq [string]::Join('|', $expectedPluginTypes) -and
         @($types | Where-Object typename -CEQ $guardName).Count -eq 1 -and
         @($types | Where-Object { [string]$_._pluginassemblyid_value -ine [string]$assembly.pluginassemblyid }).Count -eq 0
     $packageLinked = [string]$assembly.$packageLookup -ieq [string]$PackageRow.pluginpackageid
@@ -1006,7 +1149,10 @@ function Get-TopologySnapshot {
         PackageVersion = [string]$PackageRow.version
         ModifiedOn = $PackageRow.modifiedon
         AssemblyId = [string]$assembly.pluginassemblyid
+        AssemblyVersion = [string]$assembly.version
         HandlerTypeId = [string]$handlerTypes[0].plugintypeid
+        PluginTypeNames = @($actualPluginTypes)
+        ExpectedPluginTypeSetExact = $packageTypesExact
         ApiMetadataSha256 = [string]$apiSnapshot.Hash
         ApiId = [string]$apiSnapshot.Api.customapiid
         ApiUniqueName = [string]$apiSnapshot.Api.uniquename
@@ -1017,6 +1163,7 @@ function Get-TopologySnapshot {
         ApiInputNames = @($apiSnapshot.InputNames)
         ApiInputDetails = @($apiSnapshot.InputDetails)
         ApiOutputNames = @($apiSnapshot.OutputNames)
+        ApiOutputDetails = @($apiSnapshot.OutputDetails)
         LegacyAssemblyId = [string]$legacyAssembly.pluginassemblyid
         LegacyAssemblySha256 = $legacyContentHash
         PackageCount = $allPackageRows.Count
@@ -1035,6 +1182,9 @@ function Get-TopologySnapshot {
         NoActiveCandidateCoreProfilerWrappers = $activeProfiler.Count -eq 0
         PluginTraceLogOff = $traceOff
         NoNewPluginPackage = $packageCountMatches
+        RegisteredPackageVersionUnchanged =
+            [string]$PackageRow.version -ceq (Get-ManifestRegisteredPackageVersion)
+        AssemblyVersionUpdated = [string]$assembly.version -ceq (Get-ManifestAssemblyVersion)
         ModifiedOnAdvanced = $modifiedAdvanced
         ServerPackageBytesAvailable = $false
     }
@@ -1043,7 +1193,8 @@ function Get-TopologySnapshot {
 function Assert-PreflightTopology {
     param([Parameter(Mandatory)][object]$Snapshot)
     $predicates = @(
-        'OneExistingPackage', 'PackageAssemblyLinked', 'ExpectedHandlerPackageBacked',
+        'OneExistingPackage', 'ExpectedPluginTypeSetExact', 'PackageAssemblyLinked',
+        'RegisteredPackageVersionUnchanged', 'ExpectedHandlerPackageBacked',
         'CustomApiMetadataUnchanged', 'LegacyAssemblyUntouched',
         'AllProtectCandidateCoreStepsInactive', 'NoActiveLegacyHandlers', 'NoActiveCandidateCoreProfilerWrappers',
         'PluginTraceLogOff', 'NoNewPluginPackage'
@@ -1157,8 +1308,69 @@ function Get-DevelopmentMembershipFingerprint {
     }
 }
 
+function Test-ApiContractMatchesReleaseManifest {
+    param([Parameter(Mandatory)][object]$Snapshot)
+    if (-not (Test-ManifestApiNoChange)) { return $false }
+    $contract = $script:Manifest.customApi
+    if ([int]$contract.changeDecision.metadataWrites -ne 0) { return $false }
+    $expectedHash = [string]$contract.metadataSha256
+    $actualHash = if ($Snapshot.PSObject.Properties['ApiMetadataSha256']) {
+        [string]$Snapshot.ApiMetadataSha256
+    } elseif ($Snapshot.PSObject.Properties['Hash']) {
+        [string]$Snapshot.Hash
+    } else {
+        ''
+    }
+    $inputDetails = if ($Snapshot.PSObject.Properties['ApiInputDetails']) {
+        @($Snapshot.ApiInputDetails)
+    } elseif ($Snapshot.PSObject.Properties['InputDetails']) {
+        @($Snapshot.InputDetails)
+    } else {
+        @()
+    }
+    $outputDetails = if ($Snapshot.PSObject.Properties['ApiOutputDetails']) {
+        @($Snapshot.ApiOutputDetails)
+    } elseif ($Snapshot.PSObject.Properties['OutputDetails']) {
+        @($Snapshot.OutputDetails)
+    } else {
+        @()
+    }
+    $expectedInputs = @($contract.requestParameters | ForEach-Object {
+        '{0}|{1}|{2}' -f [string]$_.name, [int]$_.type, [bool]$_.isOptional
+    } | Sort-Object -CaseSensitive)
+    $actualInputs = @($inputDetails | ForEach-Object {
+        '{0}|{1}|{2}' -f [string]$_.Name, [int]$_.Type, [bool]$_.IsOptional
+    } | Sort-Object -CaseSensitive)
+    $expectedOutputs = @($contract.responseProperties | ForEach-Object {
+        '{0}|{1}' -f [string]$_.name, [int]$_.type
+    } | Sort-Object -CaseSensitive)
+    $actualOutputs = @($outputDetails | ForEach-Object {
+        '{0}|{1}' -f [string]$_.Name, [int]$_.Type
+    } | Sort-Object -CaseSensitive)
+    $maskInputs = @($inputDetails | Where-Object { [string]$_.Name -ceq 'ProfileFieldMask' })
+    return $actualHash -ceq $expectedHash -and
+        $expectedInputs.Count -gt 0 -and $expectedOutputs.Count -gt 0 -and
+        [string]::Join('|', $actualInputs) -ceq [string]::Join('|', $expectedInputs) -and
+        [string]::Join('|', $actualOutputs) -ceq [string]::Join('|', $expectedOutputs) -and
+        $maskInputs.Count -eq 1 -and [int]$maskInputs[0].Type -eq 10 -and
+        [bool]$maskInputs[0].IsOptional
+}
+
 function Get-ApprovedDevelopmentApiParameterPlan {
     param([Parameter(Mandatory)][object]$Baseline)
+    if (Test-ManifestApiNoChange) {
+        if (-not (Test-ApiContractMatchesReleaseManifest -Snapshot $Baseline)) {
+            Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED'
+        }
+        return [pscustomobject]@{
+            Action = 'NO_CHANGE'
+            ApiId = [string]$Baseline.Api.customapiid
+            ExpectedMissingNames = @()
+            AutomaticRetries = 0
+            MaximumPostDispatches = 0
+            Writes = @()
+        }
+    }
     if (-not (Test-Path -LiteralPath $ExpectedDevelopmentApiPlanPath -PathType Leaf) -or
         (Get-FileHash -LiteralPath $ExpectedDevelopmentApiPlanPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne
             $ExpectedDevelopmentApiPlanSha256) {
@@ -1204,6 +1416,40 @@ function Get-ApprovedDevelopmentApiParameterPlan {
         Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED'
     }
     $plan
+}
+
+function Test-ReleaseCandidateBaselineSnapshot {
+    param(
+        [Parameter(Mandatory)][object]$PackageSnapshot,
+        [Parameter(Mandatory)][object]$Membership
+    )
+    if (-not $script:Manifest.PSObject.Properties['releaseCandidate']) { return $true }
+    $core = $script:Manifest.candidateCore
+    $identities = $script:Manifest.releaseCandidate.componentIdentityFingerprints
+    $expectedTypes = @($core.expectedPluginTypes | ForEach-Object { [string]$_ } |
+        Sort-Object -CaseSensitive)
+    $actualTypes = @($PackageSnapshot.PluginTypeNames | ForEach-Object { [string]$_ } |
+        Sort-Object -CaseSensitive)
+    $apiIdFingerprint = Get-TargetIdentityFingerprint -Identifier ([string]$PackageSnapshot.ApiId)
+    $assemblyIdFingerprint = Get-TargetIdentityFingerprint -Identifier ([string]$PackageSnapshot.AssemblyId)
+    $handlerIdFingerprint = Get-TargetIdentityFingerprint -Identifier ([string]$PackageSnapshot.HandlerTypeId)
+    return [string]$PackageSnapshot.PackageVersion -ceq
+            [string]$core.registeredPackageRecordVersion -and
+        [string]$PackageSnapshot.AssemblyVersion -ceq [string]$core.preDeploymentAssemblyVersion -and
+        [string]$PackageSnapshot.PackageIdFingerprint -ceq
+            [string]$identities.packageRecord -and
+        $assemblyIdFingerprint -ceq [string]$identities.assembly -and
+        $handlerIdFingerprint -ceq [string]$identities.handlerType -and
+        $apiIdFingerprint -ceq [string]$identities.customApi -and
+        [string]$PackageSnapshot.ApiMetadataSha256 -ceq
+            [string]$script:Manifest.customApi.metadataSha256 -and
+        [string]::Join('|', $actualTypes) -ceq [string]::Join('|', $expectedTypes) -and
+        [int]$Membership.Count -eq [int]$script:Manifest.solution.membershipCount -and
+        [string]$Membership.Fingerprint -ceq
+            [string]$script:Manifest.solution.membershipSha256 -and
+        [int]$PackageSnapshot.ProtectCandidateCoreStepCount -eq
+            [int]$core.preDeploymentDisabledGuardStepCount -and
+        [bool]$PackageSnapshot.AllProtectCandidateCoreStepsInactive
 }
 
 function Test-ApprovedDevelopmentMembershipDelta {
@@ -1256,7 +1502,7 @@ function Assert-DevelopmentDeploymentBaseline {
     $solutions = @(Get-PagedRows -Path "solutions?%24select=solutionid,uniquename,version&%24filter=uniquename%20eq%20%27$solutionName%27")
     $apps = @(Get-PagedRows -Path "appmodules?%24select=appmoduleid,uniquename,statecode&%24filter=uniquename%20eq%20%27srapp%27")
     if ($solutions.Count -ne 1 -or $solutions[0].uniquename -cne $solutionName -or
-        [string]$solutions[0].version -cne '1.0.0.1' -or
+        [string]$solutions[0].version -cne [string]$script:Manifest.solution.version -or
         [string]$solutions[0].solutionid -ine [string]$baseline.Solution.solutionid -or
         $apps.Count -ne 1 -or $apps[0].uniquename -cne 'srapp' -or
         [string]$apps[0].appmoduleid -ine [string]$baseline.App.appmoduleid -or
@@ -1283,13 +1529,23 @@ function Assert-DevelopmentDeploymentBaseline {
             [int]$_.rootcomponentbehavior
     } | Sort-Object -CaseSensitive)
     $apiPlan = Get-ApprovedDevelopmentApiParameterPlan -Baseline $baseline
+    if (-not (Test-ReleaseCandidateBaselineSnapshot -PackageSnapshot $PackageSnapshot `
+            -Membership $membership)) {
+        Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED'
+    }
     $maskInputs = @($PackageSnapshot.ApiInputDetails | Where-Object {
         [string]$_.Name -ceq 'ProfileFieldMask'
     })
     $maskPresent = $maskInputs.Count -eq 1
-    $membershipMatchesApprovedPlan = Test-ApprovedDevelopmentMembershipDelta `
-        -BaselineLines $baselineMembershipLines -CurrentLines $membership.Lines `
-        -ApiParameterId ([string]$apiPlan.Writes[0].Id) -ApiParameterPresent $maskPresent
+    if ($apiPlan.Action -ceq 'NO_CHANGE') {
+        $membershipMatchesApprovedPlan =
+            [string]::Join("`n", $baselineMembershipLines) -ceq
+                [string]::Join("`n", @($membership.Lines | Sort-Object -CaseSensitive))
+    } else {
+        $membershipMatchesApprovedPlan = Test-ApprovedDevelopmentMembershipDelta `
+            -BaselineLines $baselineMembershipLines -CurrentLines $membership.Lines `
+            -ApiParameterId ([string]$apiPlan.Writes[0].Id) -ApiParameterPresent $maskPresent
+    }
     if (-not $modifiedOnMatches) {
         Stop-PackageUpdater 'PACKAGE_MODIFIED_SINCE_BASELINE'
     }
@@ -1298,23 +1554,32 @@ function Assert-DevelopmentDeploymentBaseline {
         Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED'
     }
 
-    $contract = Get-Content -LiteralPath (Join-Path $script:Root 'docs\PHASE_3C_API_CONTRACT.json') -Raw |
-        ConvertFrom-Json
-    $expectedInputs = @($contract.inputs | Where-Object {
-        $maskPresent -or [string]$_.name -cne 'ProfileFieldMask'
-    } | ForEach-Object { [string]$_.name } | Sort-Object -CaseSensitive)
-    $expectedOutputs = @($contract.outputs | ForEach-Object { [string]$_.name } |
-        Sort-Object -CaseSensitive)
-    $actualInputs = @($PackageSnapshot.ApiInputNames | Sort-Object -CaseSensitive)
-    $actualOutputs = @($PackageSnapshot.ApiOutputNames | Sort-Object -CaseSensitive)
-    $expectedInputCount = if ($maskPresent) { 21 } else { 20 }
-    if ($maskInputs.Count -gt 1 -or $PackageSnapshot.ApiInputCount -ne $expectedInputCount -or
-        $PackageSnapshot.ApiOutputCount -ne 5 -or
-        [string]::Join('|', $actualInputs) -cne [string]::Join('|', $expectedInputs) -or
-        [string]::Join('|', $actualOutputs) -cne [string]::Join('|', $expectedOutputs)) {
-        Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED'
+    if ($apiPlan.Action -ceq 'NO_CHANGE') {
+        if (-not $maskPresent -or
+            -not (Test-ApiContractMatchesReleaseManifest -Snapshot $PackageSnapshot) -or
+            [string]$PackageSnapshot.ApiMetadataSha256 -cne
+                [string]$baseline.ApiMetadataSha256) {
+            Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED'
+        }
+    } else {
+        $contract = Get-Content -LiteralPath (Join-Path $script:Root 'docs\PHASE_3C_API_CONTRACT.json') -Raw |
+            ConvertFrom-Json
+        $expectedInputs = @($contract.inputs | Where-Object {
+            $maskPresent -or [string]$_.name -cne 'ProfileFieldMask'
+        } | ForEach-Object { [string]$_.name } | Sort-Object -CaseSensitive)
+        $expectedOutputs = @($contract.outputs | ForEach-Object { [string]$_.name } |
+            Sort-Object -CaseSensitive)
+        $actualInputs = @($PackageSnapshot.ApiInputNames | Sort-Object -CaseSensitive)
+        $actualOutputs = @($PackageSnapshot.ApiOutputNames | Sort-Object -CaseSensitive)
+        $expectedInputCount = if ($maskPresent) { 21 } else { 20 }
+        if ($maskInputs.Count -gt 1 -or $PackageSnapshot.ApiInputCount -ne $expectedInputCount -or
+            $PackageSnapshot.ApiOutputCount -ne 5 -or
+            [string]::Join('|', $actualInputs) -cne [string]::Join('|', $expectedInputs) -or
+            [string]::Join('|', $actualOutputs) -cne [string]::Join('|', $expectedOutputs)) {
+            Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED'
+        }
     }
-    if ($maskPresent -and
+    if ($apiPlan.Action -cne 'NO_CHANGE' -and $maskPresent -and
         ([string]$maskInputs[0].Id -ine [string]$apiPlan.Writes[0].Id -or
             [string]$maskInputs[0].ApiId -ine [string]$apiPlan.ApiId -or
             [int]$maskInputs[0].Type -ne [int]$apiPlan.Writes[0].Type -or
@@ -1360,6 +1625,12 @@ function Assert-DevelopmentDeploymentBaseline {
         ApiInputCount = $PackageSnapshot.ApiInputCount
         ProfileFieldMaskParameterReconciled = $maskPresent
         ApiOutputCount = $PackageSnapshot.ApiOutputCount
+        CustomApiMetadataDecision = if ($apiPlan.Action -ceq 'NO_CHANGE') {
+            'NO_CHANGE'
+        } else {
+            'APPROVED_PARAMETER_PLAN'
+        }
+        CustomApiMetadataWrites = if ($apiPlan.Action -ceq 'NO_CHANGE') { 0 } else { 1 }
         ProtectCandidateCoreStepCount = $PackageSnapshot.ProtectCandidateCoreStepCount
         AllProtectCandidateCoreStepsInactive = [bool]$PackageSnapshot.AllProtectCandidateCoreStepsInactive
         NoActiveLegacyHandlers = [bool]$PackageSnapshot.NoActiveLegacyHandlers
@@ -1437,14 +1708,23 @@ function Invoke-PacPluginPush {
 }
 
 function New-PlanResult {
-    param([Parameter(Mandatory)][object]$Artifact)
+    param(
+        [Parameter(Mandatory)][object]$Artifact,
+        [AllowNull()][object]$RollbackArtifact
+    )
     [pscustomobject]@{
         Result = 'PACKAGE_UPDATE_PLAN_READY_NOT_DISPATCHED'
         TargetProfile = $TargetProfile
         PackageFileName = $Artifact.FileName
         PackageSha256 = $Artifact.Sha256
         PackageUniqueName = $Artifact.UniqueName
-        PackageVersion = $Artifact.Version
+        ArtifactPackageVersion = $Artifact.Version
+        RegisteredPackageVersion = Get-ManifestRegisteredPackageVersion
+        AssemblyVersion = $Artifact.AssemblyVersion
+        FileVersion = $Artifact.FileVersion
+        ProductVersion = $Artifact.ProductVersion
+        RollbackPackageSha256 = if ($null -eq $RollbackArtifact) { $null } else { $RollbackArtifact.Sha256 }
+        RollbackAssemblyVersion = if ($null -eq $RollbackArtifact) { $null } else { $RollbackArtifact.AssemblyVersion }
         HandlerTypeName = $Artifact.HandlerTypeName
         PacCommand = 'pac plugin push'
         ArgumentContract = @(
@@ -1471,10 +1751,29 @@ function Invoke-PackageUpdaterMain {
         -ExpectedSha256 $ExpectedPackageSha256 `
         -ExpectedUniqueName $ExpectedPackageUniqueName `
         -ExpectedHandler $ExpectedHandlerTypeName `
-        -DevelopmentSourceAheadOfFrozenRelease ([bool]$DevelopmentSourceAheadOfFrozenRelease) `
-        -ExpectedAssemblySha256 $ExpectedAssemblySha256
+        -ExpectedAssemblySha256 $ExpectedAssemblySha256 `
+        -ExpectedPackageVersion (Get-ManifestArtifactPackageVersion) `
+        -ExpectedAssemblyVersion (Get-ManifestAssemblyVersion) `
+        -ExpectedFileVersion (Get-ManifestFileVersion) `
+        -ExpectedProductVersion (Get-ManifestProductVersion) `
+        -ExpectedPluginTypes (Get-ManifestExpectedPluginTypes)
+    $rollbackArtifact = $null
+    if (-not [string]::IsNullOrWhiteSpace($RollbackArtifactPath)) {
+        $rollback = $script:Manifest.candidateCore.rollbackArtifact
+        if ($null -eq $rollback) { Stop-PackageUpdater 'PACKAGE_ROLLBACK_ARTIFACT_VALIDATION_FAILED' }
+        $rollbackArtifact = Get-PackageArtifactEvidence -Path $RollbackArtifactPath `
+            -ExpectedSha256 ([string]$rollback.packageSha256) `
+            -ExpectedAssemblySha256 ([string]$rollback.embeddedAssemblySha256) `
+            -ExpectedUniqueName $ExpectedPackageUniqueName `
+            -ExpectedHandler $ExpectedHandlerTypeName `
+            -ExpectedPackageVersion ([string]$rollback.artifactPackageVersion) `
+            -ExpectedAssemblyVersion ([string]$rollback.assemblyVersion) `
+            -ExpectedFileVersion ([string]$rollback.fileVersion) `
+            -ExpectedProductVersion ([string]$rollback.productVersion) `
+            -ExpectedPluginTypes (Get-ManifestExpectedPluginTypes)
+    }
     if ($Mode -ceq 'Plan') {
-        return New-PlanResult -Artifact $artifact
+        return New-PlanResult -Artifact $artifact -RollbackArtifact $rollbackArtifact
     }
 
     if ($TargetProfile -cne 'DEV') {

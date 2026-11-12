@@ -5,9 +5,12 @@ const assert = require("node:assert/strict");
 const { test } = require("node:test");
 const { spawn, spawnSync } = require("node:child_process");
 const {
-  createAuthorization, loadIndependentAuthorization, claimIndependentAuthorization, digest
+  createAuthorization, loadIndependentAuthorization, claimIndependentAuthorization, digest,
+  validateSyntheticIsolationProof, validateOperationCorrelation
 } = require("./independent-authorization.cjs");
-const { ACTIONS, REFERENCE_LABELS, reserveOneShot } = require("./lifecycle-support.cjs");
+const {
+  ACTIONS, REFERENCE_LABELS, reserveOneShot, isSingleUserDevDirectReadBlocked
+} = require("./lifecycle-support.cjs");
 
 const now = Date.parse("2030-01-02T10:00:00Z");
 const configuration = { workers: 1, retries: 0, repeatEach: 1, retry: 0, repeatEachIndex: 0 };
@@ -119,6 +122,184 @@ function fixture(t) {
   };
 }
 
+function singleUserDevFixture(t) {
+  const f = fixture(t);
+  const marker = f.original.marker;
+  const binding = {
+    actorId: f.request.scope.actorId,
+    candidateId: marker,
+    locationId: f.request.scope.syntheticIsolation.locationId,
+    positionId: f.request.scope.syntheticIsolation.positionId,
+    scopeId: "22222222-2222-4222-8222-222222222222",
+    sourceId: f.request.scope.syntheticIsolation.sourceId,
+    taId: f.request.scope.syntheticIsolation.taId
+  };
+  f.base.expectedActorId = binding.actorId;
+  f.request.ownerDecisionText = "Synthetic fixture: authorize one SingleUserDev lifecycle invocation.";
+  f.request.marker = marker;
+  f.request.candidateName = `[SYNTHETIC-E2E] Playwright ${marker}`;
+  f.request.candidateEmail = `pw-${marker}@example.invalid`;
+  f.request.scope = {
+    ...f.request.scope,
+    authorizationId: "singleuserdev-01",
+    identityScope: "SINGLE_USER_DEV",
+    expectedUpn: f.base.expectedUpn,
+    actorId: binding.actorId,
+    syntheticIsolation: binding,
+    excludedCorrelations: ["fe902569-29b8-4af0-89c8-508190769e94"]
+  };
+  const contract = (overrides = {}, at = now) => JSON.stringify({
+    version: 4, boundary: "SingleUserDevCandidateCoreApi", mode: "SingleUserDev",
+    nativeWritesDenied: false, scopedReads: true, globalGuardsRequired: false,
+    readback: "CallerOwnedScope", organizationId: f.base.organizationId,
+    environmentId: f.base.environmentId, actorId: binding.actorId, scopeId: binding.scopeId,
+    candidateId: marker, positionId: binding.positionId, sourceId: binding.sourceId,
+    taId: binding.taId, locationId: binding.locationId,
+    validUntil: new Date(at + 120_000).toISOString(), calendarEnabled: false, ...overrides
+  });
+  let proofSequence = 0;
+  f.makeProof = (at = now, overrides = {}) => ({
+    correlationId: `13131313-1313-4131-8131-${String(++proofSequence).padStart(12, "0")}`,
+    contract: contract(overrides, at)
+  });
+  f.proofContract = contract;
+  f.file = path.join(path.dirname(f.file), "singleuserdev-01.authorization.json");
+  f.create = () => createAuthorization(f.file, f.request, f.base, now);
+  f.claim = (config = configuration, at = now) =>
+    claimIndependentAuthorization(f.file, f.base, config, f.makeProof(at), at);
+  return f;
+}
+
+test("A v4 SingleUserDev proof and exact owner-bound authorization are accepted", t => {
+  const f = singleUserDevFixture(t);
+  const authorization = f.create();
+  const proof = validateSyntheticIsolationProof(f.makeProof(), authorization, now);
+  assert.equal(authorization.scope.identityScope, "SINGLE_USER_DEV");
+  assert.equal(authorization.scope.syntheticIsolation.actorId, f.base.expectedActorId);
+  assert.equal(proof.correlationId.startsWith("13131313-"), true);
+  assert.equal(fs.existsSync(`${f.file}.attempt.jsonl`), false);
+  f.claim();
+  assert.throws(f.claim, error => error.code === "EEXIST");
+});
+
+for (const [label, change] of [
+  ["wrong owner", f => { f.request.scope.expectedUpn = "other@example.invalid"; }],
+  ["wrong marker", f => { f.request.marker = "99999999-9999-4999-8999-999999999999"; }],
+  ["missing excluded old correlation", f => { f.request.scope.excludedCorrelations = []; }]
+]) {
+  test(`SingleUserDev authorization rejects ${label}`, t => {
+    const f = singleUserDevFixture(t);
+    change(f);
+    assert.throws(f.create, /UAT_SINGLE_USER_DEV_SCOPE_OR_TARGET_MISMATCH/);
+    assert.equal(fs.existsSync(f.file), false);
+  });
+}
+
+for (const [label, overrides] of [
+  ["wrong proof version", { version: 2 }],
+  ["wrong owner proof", { actorId: "99999999-9999-4999-8999-999999999999" }],
+  ["wrong marker proof", { candidateId: "99999999-9999-4999-8999-999999999999" }],
+  ["wrong reference proof", { positionId: "99999999-9999-4999-8999-999999999999" }]
+]) {
+  test(`SingleUserDev proof rejects ${label}`, t => {
+    const f = singleUserDevFixture(t);
+    const authorization = f.create();
+    assert.throws(() => validateSyntheticIsolationProof({
+      ...f.makeProof(), contract: f.proofContract(overrides)
+    }, authorization, now), /UAT_SINGLE_USER_DEV_PROOF_SCOPE_OR_FRESHNESS_MISMATCH/);
+  });
+}
+
+test("Missing and expired SingleUserDev authorizations are rejected", t => {
+  const f = singleUserDevFixture(t);
+  assert.throws(() => loadIndependentAuthorization(f.file, f.base, now));
+  f.request.scope.expiresAt = "2030-01-02T09:59:59Z";
+  assert.throws(f.create, /UAT_INDEPENDENT_AUTHORIZATION_EXPIRED/);
+  assert.equal(fs.existsSync(f.file), false);
+});
+
+test("Runner loads the exact SingleUserDev authorization and rejects its consumed claim", t => {
+  const f = singleUserDevFixture(t);
+  f.create();
+  const approvalPath = path.join(path.dirname(f.file), "read-only.json");
+  write(approvalPath, {
+    ...f.base, candidateNumber: "CAND-123456", syntheticReadScopeApproved: true,
+    syntheticLifecycleAuthorized: false, identityScope: "OWNER_APPROVED_ELEVATED_READ_ONLY"
+  });
+  const source = `
+    Date.now=()=>${now};
+    const {loadLifecycleApproval}=require(${JSON.stringify(require.resolve("./lifecycle-support.cjs"))});
+    const approval=loadLifecycleApproval();
+    if (approval.identityScope !== "SINGLE_USER_DEV" ||
+        approval.expectedActorId !== ${JSON.stringify(f.base.expectedActorId)} ||
+        approval.lifecycleScope.syntheticIsolation.scopeId !==
+          ${JSON.stringify(f.request.scope.syntheticIsolation.scopeId)}) process.exitCode=2;`;
+  const env = {
+    ...process.env, BSO_UAT_APPROVAL_FILE: approvalPath,
+    BSO_UAT_INDEPENDENT_AUTHORIZATION_FILE: f.file,
+    BSO_UAT_ENVIRONMENT_ID: f.base.environmentId,
+    BSO_UAT_RESUME_ZERO_DISPATCH: ""
+  };
+  assert.equal(spawnSync(process.execPath, ["-e", source], { encoding: "utf8", env }).status, 0);
+  f.claim();
+  const consumed = `
+    Date.now=()=>${now};
+    const {loadLifecycleApproval}=require(${JSON.stringify(require.resolve("./lifecycle-support.cjs"))});
+    try { loadLifecycleApproval(); process.exitCode=2; }
+    catch (error) {
+      if (error.message !== "UAT_INDEPENDENT_AUTHORIZATION_ALREADY_CLAIMED") process.exitCode=3;
+    }`;
+  assert.equal(spawnSync(process.execPath, ["-e", consumed], { encoding: "utf8", env }).status, 0);
+});
+
+test("Excluded and duplicate SingleUserDev operation correlations are rejected", t => {
+  const f = singleUserDevFixture(t);
+  const authorization = f.create();
+  const record = {
+    syntheticProof: validateSyntheticIsolationProof(f.makeProof(), authorization, now),
+    attempts: []
+  };
+  assert.throws(() => validateOperationCorrelation(
+    "fe902569-29b8-4af0-89c8-508190769e94", record, authorization),
+  /UAT_OPERATION_CORRELATION_REPLAY_REJECTED/);
+  const correlation = "66666666-6666-4666-8666-666666666666";
+  assert.equal(validateOperationCorrelation(correlation, record, authorization), correlation);
+  record.attempts.push({ correlation });
+  assert.throws(() => validateOperationCorrelation(correlation, record, authorization),
+    /UAT_OPERATION_CORRELATION_REPLAY_REJECTED/);
+});
+
+test("An ambiguous SingleUserDev dispatch blocks the next lifecycle operation", t => {
+  const f = singleUserDevFixture(t);
+  f.create();
+  const journal = f.claim();
+  journal.record.attempts.push({
+    action: ACTIONS[0], correlation: "66666666-6666-4666-8666-666666666666",
+    outcome: "DISPATCH_RESERVED_OUTCOME_UNKNOWN"
+  });
+  journal.record.status = "DISPATCH_RESERVED_OUTCOME_UNKNOWN";
+  journal.save();
+  journal.record.attempts.push({
+    action: ACTIONS[1], correlation: "77777777-7777-4777-8777-777777777777",
+    outcome: "DISPATCH_RESERVED_OUTCOME_UNKNOWN"
+  });
+  assert.throws(journal.save, /UAT_PRIOR_DISPATCH_OR_AMBIGUITY/);
+  assert.equal(events(`${f.file}.attempt.jsonl`).at(-1).record.attempts.length, 1);
+});
+
+test("SingleUserDev direct reads of Candidate, lifecycle and receipt tables are blocked", () => {
+  for (const entitySet of ["os_sr_cands", "os_sr_calls", "os_sr_cshs", "os_sr_intvs", "os_sr_oprcs"]) {
+    assert.equal(isSingleUserDevDirectReadBlocked(new URL(
+      `https://orgsynthetic.crm4.dynamics.com/api/data/v9.2/${entitySet}`)), true);
+    assert.equal(isSingleUserDevDirectReadBlocked(new URL(
+      `https://orgsynthetic.crm4.dynamics.com/api/data/v9.0/${entitySet}`)), true);
+    assert.equal(isSingleUserDevDirectReadBlocked(new URL(
+      `https://orgsynthetic.crm4.dynamics.com/api/data/v9.2/${entitySet}(11111111-1111-4111-8111-111111111111)`)), true);
+  }
+  assert.equal(isSingleUserDevDirectReadBlocked(new URL(
+    "https://orgsynthetic.crm4.dynamics.com/api/data/v9.2/accounts")), false);
+});
+
 test("One durable authorization links consumed history, preserves hashes/marker, leaves claim unconsumed", t => {
   const f = fixture(t);
   const record = f.create();
@@ -178,7 +359,7 @@ test("Different authorizations cannot fork the same predecessor", t => {
 
 test("Missing, expired, future-dated or unapproved authorizations fail closed", t => {
   const f = fixture(t);
-  assert.throws(f.claim, error => error.code === "ENOENT");
+  assert.throws(f.claim, /UAT_INDEPENDENT_AUTHORIZATION_MISSING/);
   f.request.scope.expiresAt = "2021-01-01T00:00:00Z";
   assert.throws(f.create, /UAT_INDEPENDENT_AUTHORIZATION_EXPIRED/);
   f.request.scope.expiresAt = "2030-01-02T10:30:00Z";
@@ -439,16 +620,22 @@ test("Independent lifecycle claim is deferred until all read-only and form gates
   assert.ok(referenceSelection > consoleGate && claim > referenceSelection && create > claim);
 });
 
-test("Lifecycle runner requires exact BSO identity and scoped v2 proof before claiming", () => {
+test("Lifecycle runner preserves BSO v2 and gates either owner scope before claiming", () => {
   const source = fs.readFileSync(path.join(__dirname, "candidate-lifecycle.spec.cjs"), "utf8");
-  const bsoOnlyGate = source.indexOf('requireCondition(approval.identityScope === "BSO_ONLY"');
   const identityGate = source.indexOf("identity.userId === approval.expectedActorId.toLowerCase()");
+  const bsoOnlyGate = source.indexOf('if (approval.identityScope === "BSO_ONLY")', identityGate);
   const proofGate = source.indexOf("validateSyntheticIsolationProof(syntheticProofObservation");
   const claim = source.indexOf("journal = reserveOneShot(approval", proofGate);
   const firstDispatch = source.indexOf('await invokeOnce("CreateCandidate"', claim);
-  assert.ok(bsoOnlyGate >= 0 && identityGate > bsoOnlyGate);
-  assert.ok(proofGate > identityGate && claim > proofGate && firstDispatch > claim);
+  assert.ok(identityGate >= 0 && bsoOnlyGate > identityGate);
+  assert.ok(proofGate > bsoOnlyGate && claim > proofGate && firstDispatch > claim);
   assert.match(source, /identity\.bsoRole && !identity\.elevated/);
+  assert.match(source, /VerifySingleUserDev/);
+  assert.match(source, /SCOPED_READ_OPERATION_ALLOWED/);
+  assert.match(source, /isSingleUserDevDirectReadBlocked\(url\)/);
+  assert.match(source, /body\.SyntheticScopeId === approval\.lifecycleScope\.syntheticIsolation\.scopeId/);
+  assert.match(source, /validateOperationCorrelation\(/);
+  assert.match(source, /readEvidence\(page, approval\.origin, record, approval\.independentAuthorizationRecord\)/);
 });
 
 test("Four ordered synthetic dispatch/acknowledgment pairs and persistence snapshots can be appended", t => {

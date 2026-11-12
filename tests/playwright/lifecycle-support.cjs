@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const { randomUUID } = require("node:crypto");
 const { authDirectory, loadApproval } = require("./local-settings.cjs");
 const { consumeReleasedClaim, consumeEligibleRecovery } = require("./zero-dispatch-recovery.cjs");
 
@@ -19,6 +20,23 @@ const REFERENCE_SCHEMA = Object.freeze({
   ta: Object.freeze({ collection: "os_sr_tas", id: "os_sr_taid", name: "os_sr_ta_nm" }),
   location: Object.freeze({ collection: "os_sr_locs", id: "os_sr_locid", name: "os_sr_loc_nm" })
 });
+const SINGLE_USER_DEV_READ_ACTIONS = Object.freeze({
+  os_sr_cand: "ReadScopedCandidates",
+  os_sr_pos: "ReadScopedPositions",
+  os_sr_csrc: "ReadScopedSources",
+  os_sr_ta: "ReadScopedTas",
+  os_sr_loc: "ReadScopedLocations",
+  os_sr_call: "ReadScopedCalls",
+  os_sr_csh: "ReadScopedHistory",
+  os_sr_intv: "ReadScopedSchedules"
+});
+const SINGLE_USER_DEV_BLOCKED_COLLECTIONS = new Set([
+  "os_sr_cands", "os_sr_calls", "os_sr_cshs", "os_sr_intvs", "os_sr_oprcs"
+]);
+const SINGLE_USER_DEV_CHOICE_ATTRIBUTES = new Set([
+  "statecode", "os_sr_cand_stat", "os_sr_call_out", "os_sr_csh_prevstat",
+  "os_sr_csh_newstat", "os_sr_intv_rnd", "os_sr_intv_res", "os_sr_intv_stat"
+]);
 const REFERENCE_QUERY_OPTIONS = new Set(["$select", "$filter", "$orderby", "$top", "$count", "$skip", "$skiptoken"]);
 const GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const requireCondition = (condition, code) => { if (!condition) throw new Error(code); };
@@ -74,6 +92,17 @@ function constrainReferenceRequest(url) {
   return "NOT_REFERENCE";
 }
 
+function isSingleUserDevDirectReadBlocked(url) {
+  let pathname;
+  try {
+    pathname = decodeURIComponent(url.pathname).toLowerCase();
+  } catch {
+    return true;
+  }
+  const match = pathname.match(/^\/api\/data\/v[0-9]+\.[0-9]+\/([^/]+)(?:\/|$)/);
+  return Boolean(match && SINGLE_USER_DEV_BLOCKED_COLLECTIONS.has(match[1].replace(/\([^)]*\)$/, "")));
+}
+
 function loadLifecycleApproval() {
   const base = loadApproval();
   if (Object.hasOwn(process.env, "BSO_UAT_INDEPENDENT_AUTHORIZATION_FILE")) {
@@ -87,7 +116,7 @@ function loadLifecycleApproval() {
     const authorization = loadIndependentAuthorization(file, target);
     return {
       ...target, authorizationBase: target, expectedUpn: authorization.scope.expectedUpn,
-      expectedActorId: authorization.scope.actorId, identityScope: "BSO_ONLY",
+      expectedActorId: authorization.scope.actorId, identityScope: authorization.scope.identityScope,
       approved: true, lifecycleScope: authorization.scope,
       independentAuthorizationFile: file, independentAuthorizationHash: digest(file),
       independentAuthorizationRecord: authorization
@@ -177,6 +206,59 @@ async function readRows(page, origin, table, columns, filter) {
   }, { origin, table, columns, filter });
 }
 
+async function readSingleUserDevRows(page, origin, logicalName, scopeId, record) {
+  const action = SINGLE_USER_DEV_READ_ACTIONS[logicalName];
+  requireCondition(action && GUID.test(scopeId || ""), "UAT_SINGLE_USER_DEV_READ_SCOPE_INVALID");
+  let correlationId;
+  do {
+    correlationId = randomUUID();
+  } while (correlationId.toLowerCase() === record.syntheticProof?.correlationId ||
+    record.attempts.some(attempt => attempt.correlation === correlationId.toLowerCase()));
+  const choiceAttributes = [...SINGLE_USER_DEV_CHOICE_ATTRIBUTES];
+  return page.evaluate(async ({ origin, action, scopeId, correlationId, logicalName, choiceAttributes }) => {
+    const response = await fetch(`${origin}/api/data/v9.2/os_sr_cact`, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json; charset=utf-8",
+        "OData-MaxVersion": "4.0",
+        "OData-Version": "4.0"
+      },
+      body: JSON.stringify({ ActionType: action, CorrelationId: correlationId, SyntheticScopeId: scopeId })
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(`UAT_SCOPED_READ_FAILED:${logicalName}:${response.status}`);
+    if (!body || body.ResultCode !== "ScopedRead" || typeof body.ScopedData !== "string") {
+      throw new Error("UAT_SCOPED_READ_RESPONSE_INVALID");
+    }
+    let rows;
+    try {
+      rows = JSON.parse(body.ScopedData);
+    } catch {
+      throw new Error("UAT_SCOPED_READ_RESPONSE_INVALID");
+    }
+    if (!Array.isArray(rows) || rows.length > 100 ||
+        rows.some(row => !row || typeof row !== "object" || Array.isArray(row) ||
+          row.__logicalName !== logicalName)) {
+      throw new Error("UAT_SCOPED_READ_RESPONSE_INVALID");
+    }
+    const choiceSet = new Set(choiceAttributes);
+    return rows.map(row => {
+      const parsed = { ...row };
+      delete parsed.__logicalName;
+      for (const [name, value] of Object.entries(parsed)) {
+        if (choiceSet.has(name) && value !== null) {
+          const number = Number(value);
+          if (!Number.isSafeInteger(number)) throw new Error("UAT_SCOPED_READ_RESPONSE_INVALID");
+          parsed[name] = number;
+        }
+      }
+      return parsed;
+    });
+  }, { origin, action, scopeId, correlationId, logicalName, choiceAttributes });
+}
+
 function scopedReadFailure(error) {
   const match = String(error?.message || "").match(/\bUAT_SCOPED_READ_FAILED:([a-z0-9_]+):([1-5][0-9]{2})\b/);
   return match ? { collection: match[1], httpStatus: Number(match[2]) } : null;
@@ -204,7 +286,19 @@ const TABLES = Object.freeze([
   ]]
 ]);
 
-async function readEvidence(page, origin, record) {
+async function readEvidence(page, origin, record, authorization) {
+  if (authorization?.scope.identityScope === "SINGLE_USER_DEV") {
+    const scopeId = authorization.scope.syntheticIsolation.scopeId;
+    const scoped = {};
+    for (const [name, logicalName] of [
+      ["candidate", "os_sr_cand"], ["call", "os_sr_call"],
+      ["schedule", "os_sr_intv"], ["history", "os_sr_csh"]
+    ]) {
+      scoped[name] = await readSingleUserDevRows(page, origin, logicalName, scopeId, record);
+    }
+    scoped.receipt = [];
+    return scoped;
+  }
   const evidence = {};
   const selector = `os_sr_cand_nm eq '${record.candidateName}' or os_sr_cand_eml eq '${record.candidateEmail}'`;
   for (const [name, table, stem, columns] of TABLES) {
@@ -220,9 +314,11 @@ function counts(evidence) {
   return Object.fromEntries(Object.entries(evidence).map(([table, rows]) => [table, rows.length]));
 }
 
-function validateEvidence(evidence, record, completed, userId, references, schedule) {
+function validateEvidence(evidence, record, completed, userId, references, schedule,
+  identityScope = "BSO_ONLY") {
   const expected = { candidate: 1, call: completed >= 2 ? 1 : 0,
-    schedule: completed === 4 ? 1 : 0, history: completed - 1, receipt: completed };
+    schedule: completed === 4 ? 1 : 0, history: completed - 1,
+    receipt: identityScope === "SINGLE_USER_DEV" ? 0 : completed };
   requireCondition(JSON.stringify(counts(evidence)) === JSON.stringify(expected), "UAT_EXACT_COUNTS_MISMATCH");
   const candidate = evidence.candidate[0];
   requireCondition(candidate.os_sr_candid === record.candidateId &&
@@ -237,18 +333,29 @@ function validateEvidence(evidence, record, completed, userId, references, sched
     candidate._os_sr_cand_ta_value === references.ta, "UAT_CANDIDATE_READBACK_MISMATCH");
   for (let index = 0; index < completed; index++) {
     const attempt = record.attempts[index];
-    const receipts = evidence.receipt.filter(row => row.os_sr_oprc_corid === attempt.correlation);
-    requireCondition(receipts.length === 1 && receipts[0].os_sr_oprc_cact === ACTIONS[index] &&
-      receipts[0].os_sr_oprc_newstat === STATUSES[index] &&
-      (receipts[0].os_sr_oprc_prevstat ?? null) === (index === 0 ? null : STATUSES[index - 1]),
-    "UAT_RECEIPT_EVIDENCE_MISMATCH");
+    let receipt;
+    if (identityScope === "SINGLE_USER_DEV") {
+      requireCondition(attempt.outcome === "APPLIED" &&
+        attempt.response?.ResultCode === "Applied" &&
+        attempt.response.CurrentStatus === STATUSES[index] &&
+        attempt.correlation.toLowerCase() !== record.syntheticProof.correlationId &&
+        record.attempts.filter(item => item.correlation === attempt.correlation).length === 1,
+      "UAT_SINGLE_USER_DEV_OPERATION_IDEMPOTENCY_EVIDENCE_MISMATCH");
+    } else {
+      const receipts = evidence.receipt.filter(row => row.os_sr_oprc_corid === attempt.correlation);
+      requireCondition(receipts.length === 1 && receipts[0].os_sr_oprc_cact === ACTIONS[index] &&
+        receipts[0].os_sr_oprc_newstat === STATUSES[index] &&
+        (receipts[0].os_sr_oprc_prevstat ?? null) === (index === 0 ? null : STATUSES[index - 1]),
+      "UAT_RECEIPT_EVIDENCE_MISMATCH");
+      receipt = receipts[0];
+    }
     if (index > 0) {
       const histories = evidence.history.filter(row => row.os_sr_csh_corid === attempt.correlation);
       requireCondition(histories.length === 1 &&
         histories[0].os_sr_csh_prevstat === STATUSES[index - 1] &&
         histories[0].os_sr_csh_newstat === STATUSES[index] &&
         histories[0]._os_sr_csh_actr_value === userId &&
-        receipts[0].os_sr_oprc_histref === histories[0].os_sr_cshid &&
+        (identityScope === "SINGLE_USER_DEV" || receipt.os_sr_oprc_histref === histories[0].os_sr_cshid) &&
         attempt.response.StatusHistoryId?.toLowerCase() === histories[0].os_sr_cshid,
       "UAT_HISTORY_EVIDENCE_MISMATCH");
     }
@@ -259,13 +366,14 @@ function validateEvidence(evidence, record, completed, userId, references, sched
       call.os_sr_call_corid === record.attempts[1].correlation &&
       Date.parse(call.os_sr_call_ctat) === Date.parse(record.attempts[1].contactedAt) &&
       record.attempts[1].response.CallLogId?.toLowerCase() === call.os_sr_callid &&
-      evidence.receipt.find(row => row.os_sr_oprc_cact === "RecordCall").os_sr_oprc_callref === call.os_sr_callid,
+      (identityScope === "SINGLE_USER_DEV" ||
+        evidence.receipt.find(row => row.os_sr_oprc_cact === "RecordCall").os_sr_oprc_callref === call.os_sr_callid),
     "UAT_CALL_EVIDENCE_MISMATCH");
   }
   if (completed === 4) {
     const row = evidence.schedule[0];
     requireCondition(row.os_sr_intv_rnd === 100000000 && row.os_sr_intv_stat === 100000001 &&
-      row.statecode === 0 && row.os_sr_intv_res === 100000000 &&
+      (identityScope === "SINGLE_USER_DEV" || row.statecode === 0) && row.os_sr_intv_res === 100000000 &&
       row._os_sr_intv_ta_value === references.ta && row._os_sr_intv_loc_value === references.location &&
       Date.parse(row.os_sr_intv_strt) === Date.parse(schedule.start) &&
       Date.parse(row.os_sr_intv_end) === Date.parse(schedule.end), "UAT_SCHEDULE_EVIDENCE_MISMATCH");
@@ -274,6 +382,7 @@ function validateEvidence(evidence, record, completed, userId, references, sched
 
 module.exports = {
   ACTIONS, STATUSES, REFERENCE_LABELS, REFERENCE_SCHEMA, GUID, requireCondition, referenceQuery,
-  approvedReferenceId, constrainReferenceRequest, loadLifecycleApproval, reserveOneShot, readRows, scopedReadFailure,
-  readEvidence, counts, validateEvidence
+  approvedReferenceId, constrainReferenceRequest, isSingleUserDevDirectReadBlocked,
+  loadLifecycleApproval, reserveOneShot, readRows, scopedReadFailure,
+  readSingleUserDevRows, readEvidence, counts, validateEvidence
 };

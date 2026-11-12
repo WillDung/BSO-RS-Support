@@ -3,6 +3,9 @@ const path = require("node:path");
 const { createHash, randomUUID } = require("node:crypto");
 const { readConsumedPreDispatch } = require("./zero-dispatch-recovery.cjs");
 const { ACTIONS, REFERENCE_LABELS, GUID } = require("./lifecycle-support.cjs");
+const SINGLE_USER_DEV_EXCLUDED_CORRELATIONS = Object.freeze([
+  "fe902569-29b8-4af0-89c8-508190769e94"
+]);
 
 const check = (condition, code = "UAT_INDEPENDENT_AUTHORIZATION_REFUSED") => {
   if (!condition) throw new Error(code);
@@ -126,6 +129,25 @@ function validateScope(scope, base, oldScope, now, allowHistoricalElevated = fal
 }
 
 function validateRecord(record, base, now, allowHistoricalElevated = false) {
+  if (record.scope?.identityScope === "SINGLE_USER_DEV") {
+    const createdAt = Date.parse(record.createdAt);
+    const authorizedAt = Date.parse(record.authorizedAt);
+    const expiresAt = Date.parse(record.scope.expiresAt);
+    const maximumWindow = 2 * 60 * 60 * 1000;
+    check(record.version === 2 && record.kind === "OWNER_AUTHORIZED_SINGLE_USER_DEV_ATTEMPT" &&
+      typeof record.ownerDecisionText === "string" && record.ownerDecisionText.trim().length > 0 &&
+      Number.isFinite(createdAt) && createdAt <= now &&
+      Number.isFinite(authorizedAt) && authorizedAt <= createdAt &&
+      createdAt - authorizedAt <= maximumWindow &&
+      GUID.test(record.attemptId || "") && record.history === undefined &&
+      record.previousAuthorizationFile === undefined && record.predecessor === undefined,
+    "UAT_SINGLE_USER_DEV_AUTHORIZATION_INVALID");
+    check(Number.isFinite(expiresAt) && expiresAt > now &&
+      expiresAt - authorizedAt <= maximumWindow, "UAT_INDEPENDENT_AUTHORIZATION_EXPIRED");
+    validateSingleUserDevScope(record.scope, base, record.marker, record.candidateName,
+      record.candidateEmail, record.authorizedAt, now);
+    return null;
+  }
   const createdAt = Date.parse(record.createdAt);
   const authorizedAt = Date.parse(record.authorizedAt);
   const expiresAt = Date.parse(record.scope?.expiresAt);
@@ -155,6 +177,49 @@ function validateRecord(record, base, now, allowHistoricalElevated = false) {
   return history;
 }
 
+function validateSingleUserDevScope(scope, base, marker, candidateName, candidateEmail, authorizedAtText, now) {
+  const binding = scope.syntheticIsolation;
+  const bindingKeys = ["actorId", "candidateId", "locationId", "positionId", "scopeId", "sourceId", "taId"];
+  const referenceIds = binding && [
+    binding.positionId, binding.sourceId, binding.taId, binding.locationId
+  ];
+  check(scope.ownerMutationApproval === true &&
+    /^[a-z0-9][a-z0-9-]{0,95}$/.test(scope.authorizationId || "") &&
+    scope.appUrl === base.appUrl && scope.organizationId === base.organizationId &&
+    scope.environmentId === base.environmentId &&
+    scope.environmentName === "VN LMV IT internal DEV" &&
+    scope.identityScope === "SINGLE_USER_DEV" &&
+    typeof scope.expectedUpn === "string" &&
+    scope.expectedUpn.toLowerCase() === base.expectedUpn.toLowerCase() &&
+    binding && Object.keys(binding).sort().join(",") === bindingKeys.join(",") &&
+    bindingKeys.every(key => GUID.test(binding[key] || "")) &&
+    binding.actorId.toLowerCase() === scope.actorId?.toLowerCase() &&
+    (!base.expectedActorId || binding.actorId.toLowerCase() === base.expectedActorId.toLowerCase()) &&
+    binding.candidateId.toLowerCase() === marker?.toLowerCase() &&
+    new Set([binding.actorId, binding.scopeId, binding.candidateId,
+      ...referenceIds].map(value => value.toLowerCase())).size === 7 &&
+    candidateName === `[SYNTHETIC-E2E] Playwright ${marker}` &&
+    candidateEmail === `pw-${marker}@example.invalid` &&
+    scope.maximumCandidates === 1 && scope.maximumInvocations === 1 &&
+    scope.noRetries === true && scope.retries === 0 &&
+    scope.callOutcome === "Answered" && scope.readbackOnlyAfterOperations === true &&
+    same(scope.actions, ACTIONS) && same(scope.referenceLabels, REFERENCE_LABELS) &&
+    Array.isArray(scope.excludedCorrelations) &&
+    scope.excludedCorrelations.every(value => GUID.test(value)) &&
+    new Set(scope.excludedCorrelations.map(value => value.toLowerCase())).size ===
+      scope.excludedCorrelations.length &&
+    SINGLE_USER_DEV_EXCLUDED_CORRELATIONS.every(correlation =>
+      scope.excludedCorrelations.some(value => value.toLowerCase() === correlation)),
+  "UAT_SINGLE_USER_DEV_SCOPE_OR_TARGET_MISMATCH");
+  const authorizedAt = Date.parse(authorizedAtText || "");
+  const expiresAt = Date.parse(scope.expiresAt || "");
+  const maximumWindow = 2 * 60 * 60 * 1000;
+  check(Number.isFinite(authorizedAt) && authorizedAt <= now &&
+    Number.isFinite(expiresAt) && expiresAt > now &&
+    now - authorizedAt <= maximumWindow && expiresAt - authorizedAt <= maximumWindow,
+  "UAT_INDEPENDENT_AUTHORIZATION_EXPIRED");
+}
+
 function validateSyntheticIsolationProof(observation, authorization, now = Date.now()) {
   const zeroGuid = "00000000-0000-0000-0000-000000000000";
   check(observation && typeof observation === "object" &&
@@ -170,6 +235,34 @@ function validateSyntheticIsolationProof(observation, authorization, now = Date.
     throw new Error("UAT_SYNTHETIC_PROOF_RESPONSE_INVALID");
   }
   const binding = authorization.scope.syntheticIsolation;
+  if (authorization.scope.identityScope === "SINGLE_USER_DEV") {
+    const expected = {
+      organizationId: authorization.scope.organizationId,
+      environmentId: authorization.scope.environmentId,
+      actorId: binding.actorId,
+      scopeId: binding.scopeId,
+      candidateId: authorization.marker,
+      positionId: binding.positionId,
+      sourceId: binding.sourceId,
+      taId: binding.taId,
+      locationId: binding.locationId
+    };
+    const validUntil = Date.parse(proof?.validUntil);
+    check(proof?.version === 4 && proof.boundary === "SingleUserDevCandidateCoreApi" &&
+      proof.mode === "SingleUserDev" && proof.nativeWritesDenied === false &&
+      proof.scopedReads === true && proof.globalGuardsRequired === false &&
+      proof.readback === "CallerOwnedScope" && proof.calendarEnabled === false &&
+      !authorization.scope.excludedCorrelations.some(value =>
+        value.toLowerCase() === observation.correlationId.toLowerCase()) &&
+      Object.entries(expected).every(([name, value]) =>
+        GUID.test(proof[name] || "") && proof[name].toLowerCase() === value.toLowerCase()) &&
+      Number.isFinite(validUntil) && validUntil > now + 30_000 && validUntil <= now + 125_000,
+    "UAT_SINGLE_USER_DEV_PROOF_SCOPE_OR_FRESHNESS_MISMATCH");
+    return {
+      correlationId: observation.correlationId.toLowerCase(),
+      contract: observation.contract
+    };
+  }
   const expected = {
     organizationId: authorization.scope.organizationId,
     environmentId: authorization.scope.environmentId,
@@ -205,7 +298,7 @@ function readAttempt(file, authorization) {
     marker: approval.marker, candidateName: approval.candidateName,
     candidateEmail: approval.candidateEmail, candidateId: null
   };
-  if (approval.scope.identityScope === "BSO_ONLY") {
+  if (["BSO_ONLY", "SINGLE_USER_DEV"].includes(approval.scope.identityScope)) {
     initial.syntheticProof = validateSyntheticIsolationProof(
       first.record.syntheticProof, approval, Date.parse(first.at));
   }
@@ -279,7 +372,21 @@ function verifyLink(file, record) {
 
 function loadIndependentAuthorization(file, base, now = Date.now()) {
   absolute(file);
+  check(fs.existsSync(file), "UAT_INDEPENDENT_AUTHORIZATION_MISSING");
   const record = read(file);
+  if (record.scope?.identityScope === "SINGLE_USER_DEV") {
+    validateRecord(record, base, now);
+    check(file === path.join(path.dirname(file),
+      `${record.scope.authorizationId}.authorization.json`), "UAT_AUTHORIZATION_PATH_MISMATCH");
+    const slotPath = path.join(path.dirname(file),
+      `singleuserdev-${record.marker.toLowerCase()}.authorization-slot.json`);
+    const slot = read(slotPath);
+    check(slot.authorizationFile === file && slot.authorizationHash === digest(file) &&
+      slot.authorizationId === record.scope.authorizationId &&
+      slot.attemptId === record.attemptId && slot.marker === record.marker,
+    "UAT_SINGLE_USER_DEV_AUTHORIZATION_SLOT_MISMATCH");
+    return record;
+  }
   const history = validateRecord(record, base, now);
   check(file === path.join(path.dirname(record.history.journalPath),
     `${record.scope.authorizationId}.authorization.json`), "UAT_AUTHORIZATION_PATH_MISMATCH");
@@ -293,6 +400,28 @@ function loadIndependentAuthorization(file, base, now = Date.now()) {
 function createAuthorization(file, request, base, now = Date.now()) {
   absolute(file);
   check(!fs.existsSync(file), "UAT_AUTHORIZATION_RECORD_ALREADY_EXISTS");
+  if (request.scope?.identityScope === "SINGLE_USER_DEV") {
+    const record = {
+      version: 2, kind: "OWNER_AUTHORIZED_SINGLE_USER_DEV_ATTEMPT",
+      createdAt: new Date(now).toISOString(), authorizedAt: request.authorizedAt,
+      ownerDecisionText: request.ownerDecisionText, attemptId: randomUUID(),
+      scope: clone(request.scope), marker: request.marker,
+      candidateName: request.candidateName, candidateEmail: request.candidateEmail
+    };
+    validateRecord(record, base, now);
+    check(file === path.join(path.dirname(file),
+      `${record.scope.authorizationId}.authorization.json`), "UAT_AUTHORIZATION_PATH_MISMATCH");
+    const bytes = `${JSON.stringify(record)}\n`;
+    const slotPath = path.join(path.dirname(file),
+      `singleuserdev-${record.marker.toLowerCase()}.authorization-slot.json`);
+    durableWrite(slotPath, {
+      authorizationFile: file, authorizationHash: hash(bytes),
+      authorizationId: record.scope.authorizationId, attemptId: record.attemptId,
+      marker: record.marker, at: record.createdAt
+    }, "wx");
+    durableWrite(file, record, "wx");
+    return loadIndependentAuthorization(file, base, now);
+  }
   const history = inspectHistory(request.history);
   const record = {
     version: 1, kind: "OWNER_AUTHORIZED_INDEPENDENT_ATTEMPT",
@@ -350,6 +479,9 @@ function validateSnapshot(record, previous, authorization) {
     check(attempt.action === ACTIONS[index] && GUID.test(attempt.correlation) &&
       !correlations.has(attempt.correlation.toLowerCase()) &&
       ["DISPATCH_RESERVED_OUTCOME_UNKNOWN", "APPLIED"].includes(attempt.outcome));
+    validateOperationCorrelation(attempt.correlation, {
+      ...record, attempts: record.attempts.slice(0, index)
+    }, authorization);
     correlations.add(attempt.correlation.toLowerCase());
     const before = previous.attempts[index];
     if (before) {
@@ -378,7 +510,8 @@ function validateSnapshot(record, previous, authorization) {
 function claimIndependentAuthorization(file, base, configuration, proofObservation, now = Date.now()) {
   requireOneInvocation(configuration);
   const authorization = loadIndependentAuthorization(file, base, now);
-  check(authorization.scope.identityScope === "BSO_ONLY", "UAT_BSO_ONLY_AUTHORIZATION_REQUIRED");
+  check(["BSO_ONLY", "SINGLE_USER_DEV"].includes(authorization.scope.identityScope),
+    "UAT_UNSUPPORTED_AUTHORIZATION_SCOPE");
   const syntheticProof = validateSyntheticIsolationProof(proofObservation, authorization, now);
   const record = {
     authorizationId: authorization.scope.authorizationId, attemptId: authorization.attemptId,
@@ -415,9 +548,22 @@ function claimIndependentAuthorization(file, base, configuration, proofObservati
   };
 }
 
+function validateOperationCorrelation(correlationId, record, authorization) {
+  const proofCorrelation = record.syntheticProof?.correlationId?.toLowerCase();
+  const excluded = authorization.scope.excludedCorrelations || [];
+  check(GUID.test(correlationId || "") &&
+    correlationId.toLowerCase() !== "00000000-0000-0000-0000-000000000000" &&
+    correlationId.toLowerCase() !== proofCorrelation &&
+    !excluded.some(value => value.toLowerCase() === correlationId.toLowerCase()) &&
+    !record.attempts.some(attempt => attempt.correlation.toLowerCase() === correlationId.toLowerCase()),
+  "UAT_OPERATION_CORRELATION_REPLAY_REJECTED");
+  return correlationId.toLowerCase();
+}
+
 module.exports = {
   createAuthorization, loadIndependentAuthorization, claimIndependentAuthorization,
-  requireOneInvocation, inspectHistory, digest, validateSyntheticIsolationProof
+  requireOneInvocation, inspectHistory, digest, validateSyntheticIsolationProof,
+  validateOperationCorrelation
 };
 
 if (require.main === module) {

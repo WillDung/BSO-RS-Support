@@ -4,15 +4,18 @@ const path = require("node:path");
 const { createHash } = require("node:crypto");
 const { authDirectory, runDirectory } = require("./local-settings.cjs");
 const { verifyBrowserIdentity } = require("./browser-identity.cjs");
-const { validateSyntheticIsolationProof } = require("./independent-authorization.cjs");
+const {
+  validateSyntheticIsolationProof, validateOperationCorrelation
+} = require("./independent-authorization.cjs");
 const { classifyRequest, matchesCandidateActionResponse } = require("./request-classification.cjs");
 const {
   captureFailure, refreshFailureEvidence, sanitizeBlockedRequest
 } = require("./lifecycle-failure.cjs");
 const {
   ACTIONS, STATUSES, REFERENCE_LABELS, REFERENCE_SCHEMA, GUID, requireCondition, referenceQuery,
-  approvedReferenceId, constrainReferenceRequest, loadLifecycleApproval, reserveOneShot, readRows, scopedReadFailure,
-  readEvidence, counts, validateEvidence
+  approvedReferenceId, constrainReferenceRequest, isSingleUserDevDirectReadBlocked,
+  loadLifecycleApproval, reserveOneShot, readRows, scopedReadFailure,
+  readSingleUserDevRows, readEvidence, counts, validateEvidence
 } = require("./lifecycle-support.cjs");
 
 test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) => {
@@ -21,9 +24,13 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
     preparation: "READY",
     ownerMutationApproval: approval.approved ? "PRESENT" : "MISSING",
     bsoIdentity: "NOT RUN",
+    authenticatedOwner: "NOT RUN",
     scopedV2Proof: "NOT RUN",
+    singleUserDevProof: "NOT RUN",
     lifecycle: "NOT RUN",
-    acceptanceScope: "BSO_ONLY_SCOPED_V2_PROOF_REQUIRED",
+    acceptanceScope: approval.identityScope === "SINGLE_USER_DEV"
+      ? "SINGLE_USER_DEV_V4_BOUNDED_FUNCTIONAL"
+      : "BSO_ONLY_SCOPED_V2_PROOF_REQUIRED",
     scopedReadFailure: null,
     baselineCounts: null,
     counts: null,
@@ -79,13 +86,13 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
   };
 
   try {
-    requireCondition(approval.identityScope === "BSO_ONLY" &&
+    requireCondition(["BSO_ONLY", "SINGLE_USER_DEV"].includes(approval.identityScope) &&
       approval.independentAuthorizationRecord,
-    "UAT_BSO_ONLY_INDEPENDENT_AUTHORIZATION_REQUIRED");
+    "UAT_SUPPORTED_INDEPENDENT_AUTHORIZATION_REQUIRED");
     requireCondition(testInfo.config.workers === 1 && testInfo.project.retries === 0 &&
       testInfo.project.repeatEach === 1 && testInfo.retry === 0 && testInfo.repeatEachIndex === 0,
     "UAT_ONE_SHOT_RUNNER_CONFIGURATION_REQUIRED");
-    requireCondition(record, "UAT_BSO_ONLY_INDEPENDENT_AUTHORIZATION_REQUIRED");
+    requireCondition(record, "UAT_SUPPORTED_INDEPENDENT_AUTHORIZATION_REQUIRED");
     phase = "browser-initialization";
     context = await chromium.launchPersistentContext(authDirectory, {
       headless: false, viewport: { width: 1440, height: 1000 },
@@ -110,7 +117,35 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
         });
         return route.abort("blockedbyclient");
       }
-      if (classification === "READ_ONLY_VERIFIER_ALLOWED") return route.continue();
+      if (classification === "READ_ONLY_VERIFIER_ALLOWED") {
+        try {
+          const body = request.postDataJSON();
+          const expectedAction = approval.identityScope === "SINGLE_USER_DEV"
+            ? "VerifySingleUserDev" : "VerifySyntheticIsolation";
+          requireCondition(body.ActionType === expectedAction &&
+            Object.keys(body).sort().join(",") === "ActionType,CorrelationId" &&
+            GUID.test(body.CorrelationId),
+          "UAT_VERIFIER_REQUEST_SCOPE_MISMATCH");
+          return route.continue();
+        } catch (error) {
+          routeFailure = String(error.message).match(/\bUAT_[A-Z_]+\b/)?.[0] || "UAT_VERIFIER_REQUEST_REJECTED";
+          report.forbiddenRequestsBlocked++;
+          return route.abort("blockedbyclient");
+        }
+      }
+      if (classification === "SCOPED_READ_OPERATION_ALLOWED") {
+        try {
+          const body = request.postDataJSON();
+          requireCondition(approval.identityScope === "SINGLE_USER_DEV" &&
+            body.SyntheticScopeId === approval.lifecycleScope.syntheticIsolation.scopeId,
+          "UAT_SCOPED_READ_BOUNDARY_MISMATCH");
+          return route.continue();
+        } catch (error) {
+          routeFailure = String(error.message).match(/\bUAT_[A-Z_]+\b/)?.[0] || "UAT_SCOPED_READ_REJECTED";
+          report.forbiddenRequestsBlocked++;
+          return route.abort("blockedbyclient");
+        }
+      }
       if (api && mutation && url.pathname === "/api/data/v9.2/os_sr_cact") {
         try {
           requireCondition(request.method() === "POST" && armed && !routeFailure &&
@@ -118,11 +153,15 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
           const body = request.postDataJSON();
           const index = record.attempts.length;
           requireCondition(body.ActionType === ACTIONS[index] && body.ActionType === armed.action &&
-            GUID.test(body.CorrelationId) &&
-            body.CorrelationId.toLowerCase() !== record.syntheticProof.correlationId &&
-            !record.attempts.some(attempt => attempt.correlation === body.CorrelationId.toLowerCase()),
+            (approval.identityScope !== "SINGLE_USER_DEV" ||
+              body.SyntheticScopeId === approval.lifecycleScope.syntheticIsolation.scopeId),
           "UAT_OPERATION_SEQUENCE_MISMATCH");
+          const correlation = validateOperationCorrelation(
+            body.CorrelationId, record, approval.independentAuthorizationRecord);
           const expected = { ...armed.inputs, ActionType: armed.action, CorrelationId: body.CorrelationId };
+          if (approval.identityScope === "SINGLE_USER_DEV") {
+            expected.SyntheticScopeId = approval.lifecycleScope.syntheticIsolation.scopeId;
+          }
           if (armed.action === "RecordCall") {
             const contacted = Date.parse(body.ContactedAt);
             requireCondition(Number.isFinite(contacted) && contacted <= Date.now() + 5000 &&
@@ -138,12 +177,14 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
           countClassification("APPROVED_BUSINESS_OPERATION");
           // Consume the arm before awaiting anything; a concurrent retry must not pass.
           armed = null;
-          const previous = await readRows(page, approval.origin, "os_sr_oprcs", ["os_sr_oprcid"],
-            `os_sr_oprc_corid eq '${body.CorrelationId.toLowerCase()}'`);
-          requireCondition(previous.length === 0, "UAT_CORRELATION_ALREADY_EXISTS");
+          if (approval.identityScope !== "SINGLE_USER_DEV") {
+            const previous = await readRows(page, approval.origin, "os_sr_oprcs", ["os_sr_oprcid"],
+              `os_sr_oprc_corid eq '${correlation}'`);
+            requireCondition(previous.length === 0, "UAT_CORRELATION_ALREADY_EXISTS");
+          }
           assertNoUnexpected();
           record.attempts.push({
-            action: body.ActionType, correlation: body.CorrelationId.toLowerCase(),
+            action: body.ActionType, correlation,
             classification: "APPROVED_BUSINESS_OPERATION",
             contactedAt: body.ContactedAt, outcome: "DISPATCH_RESERVED_OUTCOME_UNKNOWN"
           });
@@ -171,6 +212,17 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
         const kind = { classification, method: request.method(), host: url.hostname, path: url.pathname,
           resourceType: request.resourceType(), navigation: request.isNavigationRequest() };
         recordBlockedRequest(kind);
+        return route.abort("blockedbyclient");
+      }
+      if (approval.identityScope === "SINGLE_USER_DEV" && api &&
+          request.method() === "GET" && isSingleUserDevDirectReadBlocked(url)) {
+        routeFailure = "UAT_UNSCOPED_SINGLE_USER_DEV_READ_BLOCKED";
+        report.unknownRequestsBlocked++;
+        recordBlockedRequest({
+          classification: "UNKNOWN_REQUEST_BLOCKED", method: request.method(),
+          host: url.hostname, path: url.pathname, resourceType: request.resourceType(),
+          navigation: request.isNavigationRequest()
+        });
         return route.abort("blockedbyclient");
       }
       // Keep the normal Console list path, but constrain the server response to this one marker.
@@ -204,10 +256,14 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
     phase = "identity-verification";
     await page.goto(`${approval.origin}/main.aspx?pagetype=apps`, { waitUntil: "domcontentloaded" });
     const identity = await verifyBrowserIdentity(page, approval, 480_000);
-    requireCondition(identity.bsoRole && !identity.elevated &&
-      identity.userId === approval.expectedActorId.toLowerCase(),
-    "UAT_APPROVED_BSO_IDENTITY_MISMATCH");
-    report.bsoIdentity = "PASS";
+    requireCondition(identity.userId === approval.expectedActorId.toLowerCase(),
+      "UAT_APPROVED_ACTOR_IDENTITY_MISMATCH");
+    if (approval.identityScope === "BSO_ONLY") {
+      requireCondition(identity.bsoRole && !identity.elevated, "UAT_APPROVED_BSO_IDENTITY_MISMATCH");
+      report.bsoIdentity = "PASS";
+    } else {
+      report.authenticatedOwner = "PASS";
+    }
     report.exactOrganizationAndAccount = "VERIFIED";
     assertNoUnexpected();
 
@@ -215,10 +271,14 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
     references = {};
     for (const key of Object.keys(REFERENCE_SCHEMA)) {
       const query = referenceQuery(key);
-      const rows = await readRows(page, approval.origin, query.collection, query.columns, query.filter);
+      const rows = approval.identityScope === "SINGLE_USER_DEV"
+        ? await readSingleUserDevRows(page, approval.origin, {
+          position: "os_sr_pos", source: "os_sr_csrc", ta: "os_sr_ta", location: "os_sr_loc"
+        }[key], approval.lifecycleScope.syntheticIsolation.scopeId, record)
+        : await readRows(page, approval.origin, query.collection, query.columns, query.filter);
       references[key] = approvedReferenceId(key, rows);
     }
-    if (approval.identityScope === "BSO_ONLY") {
+    if (["BSO_ONLY", "SINGLE_USER_DEV"].includes(approval.identityScope)) {
       const binding = approval.lifecycleScope.syntheticIsolation;
       requireCondition(references.position.toLowerCase() === binding.positionId.toLowerCase() &&
         references.source.toLowerCase() === binding.sourceId.toLowerCase() &&
@@ -228,30 +288,34 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
     }
 
     phase = "synthetic-baseline-readback";
-    evidence = await readEvidence(page, approval.origin, record);
+    evidence = await readEvidence(page, approval.origin, record, approval.independentAuthorizationRecord);
     report.baselineCounts = counts(evidence);
     requireCondition(Object.values(report.baselineCounts).every(count => count === 0), "UAT_NONEMPTY_SYNTHETIC_BASELINE");
     save();
 
     phase = "candidate-console-navigation";
+    const verifierAction = approval.identityScope === "SINGLE_USER_DEV"
+      ? "VerifySingleUserDev" : "VerifySyntheticIsolation";
+    const verifierResultCode = approval.identityScope === "SINGLE_USER_DEV"
+      ? "SingleUserDevVerified" : "SyntheticIsolationVerified";
     const verifierResponse = page.waitForResponse(response => {
       const request = response.request();
       const url = new URL(response.url());
       if (request.method() !== "POST" || url.origin !== approval.origin ||
           url.pathname !== "/api/data/v9.2/os_sr_cact") return false;
       try {
-        return request.postDataJSON().ActionType === "VerifySyntheticIsolation";
+        return request.postDataJSON().ActionType === verifierAction;
       } catch {
         return false;
       }
     }, { timeout: 30_000 }).then(async response => {
       const requestBody = response.request().postDataJSON();
       requireCondition(Object.keys(requestBody).sort().join(",") === "ActionType,CorrelationId" &&
-        requestBody.ActionType === "VerifySyntheticIsolation" && GUID.test(requestBody.CorrelationId),
+        requestBody.ActionType === verifierAction && GUID.test(requestBody.CorrelationId),
       "UAT_SYNTHETIC_PROOF_REQUEST_SHAPE_INVALID");
       requireCondition(response.ok(), "UAT_SYNTHETIC_PROOF_REQUEST_FAILED");
       const body = await response.json();
-      requireCondition(body.ResultCode === "SyntheticIsolationVerified" &&
+      requireCondition(body.ResultCode === verifierResultCode &&
         typeof body.IsolationContract === "string", "UAT_SYNTHETIC_PROOF_RESPONSE_INVALID");
       return { correlationId: requestBody.CorrelationId, contract: body.IsolationContract };
     });
@@ -263,12 +327,13 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
     await expect(frame.getByRole("heading", { name: "Candidate Management", exact: true })).toBeVisible();
     await expect.poll(() => frame.locator("body").evaluate(() =>
       Boolean(window.BsoRsCandidateConsoleConfiguration))).toBe(true);
-    const configuration = await frame.locator("body").evaluate(() => {
+    const configuration = await frame.locator("body").evaluate(({ identityScope }) => {
       const config = window.BsoRsCandidateConsoleConfiguration;
       return config.mode === "DEV" && config.candidateCoreEnabled === true &&
         config.syntheticDataOnly === true && config.devDirectWriteFallbackEnabled === false &&
+        (identityScope !== "SINGLE_USER_DEV" || config.candidateOperationMode === "SingleUserDev") &&
         config.availabilityEnabled !== true;
-    });
+    }, { identityScope: approval.identityScope });
     requireCondition(configuration, "UAT_UNSAFE_CONSOLE_CONFIGURATION");
     await expect(frame.locator("#availability-submit")).toBeDisabled();
     await expect(frame.locator("#create-button")).toBeEnabled();
@@ -277,7 +342,8 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
     syntheticProofObservation = verifier.proof;
     validateSyntheticIsolationProof(syntheticProofObservation,
       approval.independentAuthorizationRecord);
-    report.scopedV2Proof = "VERIFIED";
+    if (approval.identityScope === "SINGLE_USER_DEV") report.singleUserDevProof = "VERIFIED";
+    else report.scopedV2Proof = "VERIFIED";
     const tomorrow = new Date(Date.now() + 7 * 3600000);
     tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
     while ([0, 6].includes(tomorrow.getUTCDay())) tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
@@ -315,16 +381,17 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
       report.dispatchedOperations.push(action);
       save();
 
-      evidence = await readEvidence(page, approval.origin, record);
+      evidence = await readEvidence(page, approval.origin, record, approval.independentAuthorizationRecord);
       if (index === 0) {
         requireCondition(evidence.candidate.length === 1, "UAT_CREATED_CANDIDATE_NOT_UNIQUE");
         record.candidateId = evidence.candidate[0].os_sr_candid;
         requireCondition(GUID.test(record.candidateId), "UAT_CREATED_CANDIDATE_ID_INVALID");
         // Read again with exact lookups now that the generated Candidate ID is known.
-        evidence = await readEvidence(page, approval.origin, record);
+        evidence = await readEvidence(page, approval.origin, record, approval.independentAuthorizationRecord);
       }
       report.counts = counts(evidence);
-      validateEvidence(evidence, record, index + 1, identity.userId, references, schedule);
+      validateEvidence(evidence, record, index + 1, identity.userId, references, schedule,
+        approval.identityScope);
       save();
       await expect(frame.locator("#detail-heading")).toHaveText(record.candidateName);
       const status = frame.locator("#candidate-details dt").filter({ hasText: /^Status$/ }).locator("+ dd");
@@ -350,7 +417,8 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
         repeatEach: testInfo.project.repeatEach, retry: testInfo.retry,
         repeatEachIndex: testInfo.repeatEachIndex
       }, syntheticProofObservation);
-      report.scopedV2Proof = "PASS";
+      if (approval.identityScope === "SINGLE_USER_DEV") report.singleUserDevProof = "PASS";
+      else report.scopedV2Proof = "PASS";
       requireCondition(record.marker === journal.record.marker &&
         record.candidateName === journal.record.candidateName &&
         record.candidateEmail === journal.record.candidateEmail &&
@@ -404,8 +472,9 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
     await expect(frame.locator("#schedule-history-rows tr:not(:has(td.empty))")).toHaveCount(1);
     await expect(frame.locator("#status-history-rows tr:not(:has(td.empty))")).toHaveCount(3);
     await expect(frame.locator("#availability-submit")).toBeDisabled();
-    evidence = await readEvidence(page, approval.origin, record);
-    validateEvidence(evidence, record, 4, identity.userId, references, schedule);
+    evidence = await readEvidence(page, approval.origin, record, approval.independentAuthorizationRecord);
+    validateEvidence(evidence, record, 4, identity.userId, references, schedule,
+      approval.identityScope);
     requireCondition(fingerprint(evidence) === before, "UAT_RELOAD_PERSISTENCE_MISMATCH");
     assertNoUnexpected();
     requireCondition(record.attempts.length === 4 && report.dispatchedOperations.length === 4,
@@ -418,9 +487,11 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
   } catch (error) {
     armed = null;
     if (phase === "identity-verification" && report.bsoIdentity !== "PASS") {
-      report.bsoIdentity = "FAIL";
+      if (approval.identityScope === "SINGLE_USER_DEV") report.authenticatedOwner = "FAIL";
+      else report.bsoIdentity = "FAIL";
     }
     if (report.scopedV2Proof === "VERIFIED") report.scopedV2Proof = "FAIL";
+    if (report.singleUserDevProof === "VERIFIED") report.singleUserDevProof = "FAIL";
     report.lifecycle = "FAIL";
     report.scopedReadFailure = scopedReadFailure(error);
     const primaryError = captureFailure(failureState, error, phase, report);

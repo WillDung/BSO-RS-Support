@@ -5,6 +5,10 @@ const { createHash } = require("node:crypto");
 const { authDirectory, runDirectory } = require("./local-settings.cjs");
 const { verifyBrowserIdentity } = require("./browser-identity.cjs");
 const {
+  loadPinnedAuthenticationCallbackOrigin, resolveAuthenticationRouting,
+  inspectAuthenticationHandoff
+} = require("./authentication-routing.cjs");
+const {
   validateSyntheticIsolationProof, validateOperationCorrelation
 } = require("./independent-authorization.cjs");
 const { classifyRequest, matchesCandidateActionResponse } = require("./request-classification.cjs");
@@ -20,6 +24,7 @@ const {
 
 test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) => {
   const approval = loadLifecycleApproval();
+  const readOnlyMode = process.env.BSO_UAT_LIFECYCLE_READ_ONLY === "true";
   const report = {
     preparation: "READY",
     ownerMutationApproval: approval.approved ? "PRESENT" : "MISSING",
@@ -42,7 +47,9 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
     unknownRequestsBlocked: 0,
     blockedRequestKinds: [],
     firstRelevantBlockedRequest: null,
+    authenticationHandoffs: [],
     requestCategoryCounts: {},
+    readOnlyVerification: readOnlyMode ? "PENDING" : "NOT REQUESTED",
     dispatchedOperations: [],
     screenshotsAndTraces: "DISABLED"
   };
@@ -99,18 +106,23 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
       timezoneId: "Asia/Ho_Chi_Minh", acceptDownloads: false, serviceWorkers: "block"
     });
     page = context.pages()[0] || await context.newPage();
-    const callbackOrigin = approval.lifecycleScope.authenticationCallbackOrigin ||
-      (approval.identityScope === "SINGLE_USER_DEV" ? approval.origin : undefined);
+    const routing = resolveAuthenticationRouting({
+      organizationOrigin: approval.origin,
+      scopedCallbackOrigin: approval.lifecycleScope.authenticationCallbackOrigin,
+      pinnedCallbackOrigin: loadPinnedAuthenticationCallbackOrigin()
+    });
     await context.route("**/*", async route => {
       const request = route.request();
       const url = new URL(request.url());
       const mutation = !["GET", "HEAD", "OPTIONS"].includes(request.method());
       const api = url.origin === approval.origin && /\/api\/data\//i.test(url.pathname);
-      const classificationOptions = {
-        origin: approval.origin, callbackOrigin
-      };
+      const classificationOptions = routing;
       const classification = classifyRequest(request, url, classificationOptions);
       countClassification(classification);
+      const handoffEvidence = inspectAuthenticationHandoff(request, approval.origin);
+      if (handoffEvidence) {
+        report.authenticationHandoffs.push({ ...handoffEvidence, classification });
+      }
       if (["OPTIONAL_SUPPORT_SUPPRESSED", "OPTIONAL_TELEMETRY_SUPPRESSED"].includes(classification)) {
         report.platformSupportRequestsSuppressed++;
         report.optionalSuppressions.push({
@@ -150,7 +162,7 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
       }
       if (api && mutation && url.pathname === "/api/data/v9.2/os_sr_cact") {
         try {
-          requireCondition(request.method() === "POST" && armed && !routeFailure &&
+          requireCondition(!readOnlyMode && request.method() === "POST" && armed && !routeFailure &&
             Date.parse(approval.lifecycleScope.expiresAt) > Date.now(), "UAT_UNARMED_OR_REPEATED_OPERATION");
           const body = request.postDataJSON();
           const index = record.attempts.length;
@@ -346,6 +358,15 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
       approval.independentAuthorizationRecord);
     if (approval.identityScope === "SINGLE_USER_DEV") report.singleUserDevProof = "VERIFIED";
     else report.scopedV2Proof = "VERIFIED";
+    if (readOnlyMode) {
+      requireCondition(Object.values(report.baselineCounts || {}).every(count => count === 0),
+        "UAT_READ_ONLY_BASELINE_NOT_EMPTY");
+      assertNoUnexpected();
+      report.readOnlyVerification = "PASS";
+      report.lifecycle = "NOT RUN";
+      writeReport();
+      return;
+    }
     const tomorrow = new Date(Date.now() + 7 * 3600000);
     tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
     while ([0, 6].includes(tomorrow.getUTCDay())) tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);

@@ -3,6 +3,10 @@ const path = require("node:path");
 const assert = require("node:assert/strict");
 const { createHash, randomUUID } = require("node:crypto");
 const { chromium, expect } = require("@playwright/test");
+const {
+  loadPinnedAuthenticationCallbackOrigin, resolveAuthenticationRouting,
+  inspectAuthenticationHandoff
+} = require("./authentication-routing.cjs");
 const { isAuthenticationRequest } = require("./authentication-request.cjs");
 const { classifyRequest, isUntrustedLocalizationRedirect } = require("./request-classification.cjs");
 const { verifyBrowserIdentity } = require("./browser-identity.cjs");
@@ -52,61 +56,6 @@ function checkPredicate() {
   }), new URL(`${organization}/`), callback, organization), false);
   assert.equal(isAuthenticationRequest(request({ postData: () => "CandidateName=SYNTHETIC" }),
     new URL(`${organization}/`), callback, organization), false);
-}
-
-function authenticationEndpointEvidence(request, organizationOrigin) {
-  const url = new URL(request.url());
-  if (url.origin !== organizationOrigin || url.pathname !== "/" ||
-      request.method() !== "POST" || request.resourceType() !== "document" ||
-      !request.isNavigationRequest()) return null;
-  const rawContentType = request.headers()["content-type"] || "";
-  const contentType = /^application\/x-www-form-urlencoded(?:\s*;\s*charset=[a-z0-9._-]+)?$/i
-    .test(rawContentType.trim()) ? rawContentType.trim() : "UNRECOGNIZED";
-  let formFields = [];
-  let otherFormFieldCount = 0;
-  let authShape = "UNAVAILABLE";
-  try {
-    const fields = new URLSearchParams(request.postData() || "");
-    const safeNames = new Set([
-      "code", "id_token", "state", "session_state", "error", "error_description", "error_uri",
-      "wa", "wresult", "wctx", "SAMLResponse", "RelayState", "client_info", "scope",
-      "response", "response_type", "grant_type", "resource", "client_id"
-    ]);
-    const names = [...fields.keys()];
-    formFields = [...new Set(names.filter(name => safeNames.has(name)))].sort();
-    otherFormFieldCount = names.filter(name => !safeNames.has(name)).length;
-    const openIdNames = new Set([
-      "code", "id_token", "state", "session_state", "error", "error_description", "error_uri"
-    ]);
-    const openId = fields.has("state") &&
-      (fields.has("code") || fields.has("id_token") || fields.has("error")) &&
-      names.every(name => openIdNames.has(name));
-    const federation = fields.get("wa") === "wsignin1.0" &&
-      fields.has("wresult") && fields.has("wctx") &&
-      names.every(name => ["wa", "wresult", "wctx"].includes(name));
-    const saml = fields.has("SAMLResponse") && names.every(name =>
-      ["SAMLResponse", "RelayState"].includes(name));
-    authShape = openId ? "OPENID" : federation ? "WS_FEDERATION" : saml ? "SAML" : "UNKNOWN";
-  } catch {}
-  let sourceFrame = null;
-  try {
-    const source = new URL(request.frame().url());
-    sourceFrame = { origin: source.origin, path: source.pathname };
-  } catch {}
-  const redirectChain = [];
-  for (let current = request.redirectedFrom(); current && redirectChain.length < 12;
-    current = current.redirectedFrom()) {
-    const currentUrl = new URL(current.url());
-    redirectChain.unshift({
-      method: current.method(), origin: currentUrl.origin, path: currentUrl.pathname
-    });
-  }
-  return {
-    endpoint: { origin: url.origin, path: url.pathname },
-    method: request.method(), contentType, resourceType: request.resourceType(),
-    navigation: request.isNavigationRequest(), sourceFrame, redirectChain,
-    formFields, otherFormFieldCount, authShape
-  };
 }
 
 function sanitizedContentType(headers) {
@@ -309,13 +258,11 @@ async function main() {
   const ownerReadOnly = approval.identityScope === "OWNER_APPROVED_ELEVATED_READ_ONLY";
   const resourceManifest = !ownerReadOnly && Object.hasOwn(process.env, "BSO_UAT_RESOURCE_MANIFEST_FILE")
     ? loadResourceManifest(process.env.BSO_UAT_RESOURCE_MANIFEST_FILE, approval) : null;
-  const callback = JSON.parse(fs.readFileSync(path.join(__dirname, "lifecycle-approval.local.json"), "utf8"))
-    .authenticationCallbackOrigin;
-  const callbackUrl = new URL(callback);
-  if (callbackUrl.protocol !== "https:" || callbackUrl.origin !== callback ||
-      !/^[a-z0-9-]+\.crm[0-9]*\.dynamics\.com$/i.test(callbackUrl.hostname)) {
-    throw new Error("UAT_INVALID_AUTHENTICATION_CALLBACK_ORIGIN");
-  }
+  const routing = resolveAuthenticationRouting({
+    organizationOrigin: approval.origin,
+    pinnedCallbackOrigin: loadPinnedAuthenticationCallbackOrigin()
+  });
+  const callback = routing.callbackOrigin;
   const journalPath = path.join(authDirectory, "owner-lifecycle-20261109-01.json");
   const singleUserDevAuthorizationPath = path.join(authDirectory, "singleuserdev-uat-runner-01.authorization.json");
   const independentAuthorizationPath = path.join(authDirectory, "owner-lifecycle-20261109-02.authorization.json");
@@ -469,8 +416,8 @@ async function main() {
       const request = route.request();
       const url = new URL(request.url());
       const api = url.origin === approval.origin && /\/api\/data\//i.test(url.pathname);
-      const classification = classifyRequest(request, url, { origin: approval.origin, callbackOrigin: callback });
-      const endpointEvidence = authenticationEndpointEvidence(request, approval.origin);
+      const classification = classifyRequest(request, url, routing);
+      const endpointEvidence = inspectAuthenticationHandoff(request, approval.origin);
       if (endpointEvidence) {
         console.log(`UAT_AUTH_HANDOFF_ENDPOINT ${JSON.stringify({ ...endpointEvidence, classification })}`);
       }

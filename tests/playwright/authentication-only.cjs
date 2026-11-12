@@ -1,12 +1,14 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const assert = require("node:assert/strict");
-const { createHash } = require("node:crypto");
+const { createHash, randomUUID } = require("node:crypto");
 const { chromium, expect } = require("@playwright/test");
 const { isAuthenticationRequest } = require("./authentication-request.cjs");
 const { classifyRequest } = require("./request-classification.cjs");
 const { verifyBrowserIdentity } = require("./browser-identity.cjs");
-const { constrainReferenceRequest } = require("./lifecycle-support.cjs");
+const {
+  constrainReferenceRequest, isSingleUserDevDirectReadBlocked
+} = require("./lifecycle-support.cjs");
 const { createResourceEvidence, safeConsoleUrl, identifyConsoleResource,
   loadResourceManifest, verifyResourceHashes, evaluateCreateGate } =
   require("./served-console-resources.cjs");
@@ -39,14 +41,174 @@ function checkPredicate() {
   assert.equal(isAuthenticationRequest(handoff, new URL(`${organization}/`), callback, organization), true);
   assert.equal(isAuthenticationRequest(handoff, new URL(`${organization}/api/data/v9.2/os_sr_cact`),
     callback, organization), false);
+  const openIdHandoff = request({
+    frame: () => ({ url: () => `${callback}/` }),
+    postData: () => "code=SYNTHETIC&id_token=SYNTHETIC&session_state=SYNTHETIC&state=SYNTHETIC"
+  });
+  assert.equal(isAuthenticationRequest(openIdHandoff, new URL(`${organization}/`), callback, organization), true);
+  assert.equal(isAuthenticationRequest(request({
+    frame: () => ({ url: () => `${callback}/` }),
+    postData: () => "code=SYNTHETIC&state=SYNTHETIC&extra=SYNTHETIC"
+  }), new URL(`${organization}/`), callback, organization), false);
   assert.equal(isAuthenticationRequest(request({ postData: () => "CandidateName=SYNTHETIC" }),
     new URL(`${organization}/`), callback, organization), false);
+}
+
+function authenticationEndpointEvidence(request, organizationOrigin) {
+  const url = new URL(request.url());
+  if (url.origin !== organizationOrigin || url.pathname !== "/" ||
+      request.method() !== "POST" || request.resourceType() !== "document" ||
+      !request.isNavigationRequest()) return null;
+  const rawContentType = request.headers()["content-type"] || "";
+  const contentType = /^application\/x-www-form-urlencoded(?:\s*;\s*charset=[a-z0-9._-]+)?$/i
+    .test(rawContentType.trim()) ? rawContentType.trim() : "UNRECOGNIZED";
+  let formFields = [];
+  let otherFormFieldCount = 0;
+  let authShape = "UNAVAILABLE";
+  try {
+    const fields = new URLSearchParams(request.postData() || "");
+    const safeNames = new Set([
+      "code", "id_token", "state", "session_state", "error", "error_description", "error_uri",
+      "wa", "wresult", "wctx", "SAMLResponse", "RelayState", "client_info", "scope",
+      "response", "response_type", "grant_type", "resource", "client_id"
+    ]);
+    const names = [...fields.keys()];
+    formFields = [...new Set(names.filter(name => safeNames.has(name)))].sort();
+    otherFormFieldCount = names.filter(name => !safeNames.has(name)).length;
+    const openIdNames = new Set([
+      "code", "id_token", "state", "session_state", "error", "error_description", "error_uri"
+    ]);
+    const openId = fields.has("state") &&
+      (fields.has("code") || fields.has("id_token") || fields.has("error")) &&
+      names.every(name => openIdNames.has(name));
+    const federation = fields.get("wa") === "wsignin1.0" &&
+      fields.has("wresult") && fields.has("wctx") &&
+      names.every(name => ["wa", "wresult", "wctx"].includes(name));
+    const saml = fields.has("SAMLResponse") && names.every(name =>
+      ["SAMLResponse", "RelayState"].includes(name));
+    authShape = openId ? "OPENID" : federation ? "WS_FEDERATION" : saml ? "SAML" : "UNKNOWN";
+  } catch {}
+  let sourceFrame = null;
+  try {
+    const source = new URL(request.frame().url());
+    sourceFrame = { origin: source.origin, path: source.pathname };
+  } catch {}
+  const redirectChain = [];
+  for (let current = request.redirectedFrom(); current && redirectChain.length < 12;
+    current = current.redirectedFrom()) {
+    const currentUrl = new URL(current.url());
+    redirectChain.unshift({
+      method: current.method(), origin: currentUrl.origin, path: currentUrl.pathname
+    });
+  }
+  return {
+    endpoint: { origin: url.origin, path: url.pathname },
+    method: request.method(), contentType, resourceType: request.resourceType(),
+    navigation: request.isNavigationRequest(), sourceFrame, redirectChain,
+    formFields, otherFormFieldCount, authShape
+  };
+}
+
+async function verifySingleUserDevProof(page, approval, actorId) {
+  const expectedEnvironmentId = approval.environmentId || process.env.BSO_UAT_ENVIRONMENT_ID || null;
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    .test(expectedEnvironmentId || "")) {
+    throw new Error("UAT_EXPECTED_ENVIRONMENT_ID_REQUIRED");
+  }
+  const result = await page.evaluate(async ({
+    origin, organizationId, environmentId, actorId, correlationId
+  }) => {
+    const guid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const normalize = value => String(value || "").replace(/[{}]/g, "").toLowerCase();
+    try {
+      const response = await fetch(`${origin}/api/data/v9.2/os_sr_cact`, {
+        method: "POST", credentials: "same-origin",
+        headers: {
+          Accept: "application/json", "Content-Type": "application/json; charset=utf-8",
+          "OData-MaxVersion": "4.0", "OData-Version": "4.0"
+        },
+        body: JSON.stringify({ ActionType: "VerifySingleUserDev", CorrelationId: correlationId })
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok || body?.ResultCode !== "SingleUserDevVerified" ||
+          typeof body.IsolationContract !== "string") {
+        return { status: response.status, valid: false, scopeId: null };
+      }
+      const proof = JSON.parse(body.IsolationContract);
+      const proofGuids = ["organizationId", "environmentId", "actorId", "scopeId", "candidateId",
+        "positionId", "sourceId", "taId", "locationId"];
+      const expiresAt = Date.parse(proof.validUntil);
+      const now = Date.now();
+      const valid = proof.version === 4 &&
+        proof.boundary === "SingleUserDevCandidateCoreApi" &&
+        proof.mode === "SingleUserDev" && proof.nativeWritesDenied === false &&
+        proof.scopedReads === true && proof.globalGuardsRequired === false &&
+        proof.readback === "CallerOwnedScope" && proof.calendarEnabled === false &&
+        proofGuids.every(name => guid.test(proof[name])) &&
+        normalize(proof.organizationId) === normalize(organizationId) &&
+        normalize(proof.actorId) === normalize(actorId) &&
+        (!environmentId || normalize(proof.environmentId) === normalize(environmentId)) &&
+        normalize(proof.scopeId) === normalize(proof.candidateId) &&
+        Number.isFinite(expiresAt) && expiresAt > now && expiresAt <= now + 125000;
+      return { status: response.status, valid, scopeId: valid ? proof.scopeId : null };
+    } catch {
+      return { status: 0, valid: false, scopeId: null };
+    }
+  }, {
+    origin: approval.origin,
+    organizationId: approval.organizationId,
+    environmentId: expectedEnvironmentId,
+    actorId,
+    correlationId: randomUUID()
+  });
+  if (result.status !== 200 || !result.valid ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(result.scopeId || "")) {
+    throw new Error("UAT_SINGLE_USER_DEV_PROOF_FAILED");
+  }
+  return result.scopeId;
+}
+
+async function readScopedCandidateBaseline(page, origin, scopeId) {
+  const result = await page.evaluate(async ({ origin, scopeId, correlationId }) => {
+    try {
+      const response = await fetch(`${origin}/api/data/v9.2/os_sr_cact`, {
+        method: "POST", credentials: "same-origin",
+        headers: {
+          Accept: "application/json", "Content-Type": "application/json; charset=utf-8",
+          "OData-MaxVersion": "4.0", "OData-Version": "4.0"
+        },
+        body: JSON.stringify({
+          ActionType: "ReadScopedCandidates", CorrelationId: correlationId,
+          SyntheticScopeId: scopeId
+        })
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok || body?.ResultCode !== "ScopedRead" ||
+          typeof body.ScopedData !== "string") {
+        return { status: response.status, valid: false, count: null };
+      }
+      const rows = JSON.parse(body.ScopedData);
+      if (!Array.isArray(rows) || rows.length > 100 ||
+          rows.some(row => !row || typeof row !== "object" || Array.isArray(row) ||
+            row.__logicalName !== "os_sr_cand")) {
+        return { status: response.status, valid: false, count: null };
+      }
+      return { status: response.status, valid: true, count: rows.length };
+    } catch {
+      return { status: 0, valid: false, count: null };
+    }
+  }, { origin, scopeId, correlationId: randomUUID() });
+  if (result.status !== 200 || !result.valid || !Number.isSafeInteger(result.count)) {
+    throw new Error("UAT_SCOPED_CANDIDATE_READ_FAILED");
+  }
+  return result.count;
 }
 
 async function main() {
   checkPredicate();
   const approval = loadApproval();
-  const resourceManifest = Object.hasOwn(process.env, "BSO_UAT_RESOURCE_MANIFEST_FILE")
+  const ownerReadOnly = approval.identityScope === "OWNER_APPROVED_ELEVATED_READ_ONLY";
+  const resourceManifest = !ownerReadOnly && Object.hasOwn(process.env, "BSO_UAT_RESOURCE_MANIFEST_FILE")
     ? loadResourceManifest(process.env.BSO_UAT_RESOURCE_MANIFEST_FILE, approval) : null;
   const callback = JSON.parse(fs.readFileSync(path.join(__dirname, "lifecycle-approval.local.json"), "utf8"))
     .authenticationCallbackOrigin;
@@ -56,10 +218,13 @@ async function main() {
     throw new Error("UAT_INVALID_AUTHENTICATION_CALLBACK_ORIGIN");
   }
   const journalPath = path.join(authDirectory, "owner-lifecycle-20261109-01.json");
+  const singleUserDevAuthorizationPath = path.join(authDirectory, "singleuserdev-uat-runner-01.authorization.json");
   const independentAuthorizationPath = path.join(authDirectory, "owner-lifecycle-20261109-02.authorization.json");
   const latestIndependentAuthorizationPath = path.join(authDirectory, "owner-lifecycle-20261109-03.authorization.json");
   const preservedPaths = [
     journalPath,
+    singleUserDevAuthorizationPath,
+    `${singleUserDevAuthorizationPath}.attempt.jsonl`,
     `${journalPath}.login-recovery-claim`,
     `${journalPath}.continuation.jsonl`,
     `${journalPath}.recovery-eligible.json`,
@@ -80,7 +245,11 @@ async function main() {
     }
   };
   const before = preservedPaths.map(hash);
-  const journal = JSON.parse(fs.readFileSync(journalPath, "utf8"));
+  const v4AuthorizationIndex = preservedPaths.indexOf(singleUserDevAuthorizationPath);
+  const v4ClaimIndex = preservedPaths.indexOf(`${singleUserDevAuthorizationPath}.attempt.jsonl`);
+  const v4AuthorizationBefore = before[v4AuthorizationIndex];
+  const v4ClaimBefore = before[v4ClaimIndex];
+  const journal = ownerReadOnly ? null : JSON.parse(fs.readFileSync(journalPath, "utf8"));
   protectDirectory(authDirectory);
   protectDirectory(runDirectory);
   const report = {
@@ -88,14 +257,19 @@ async function main() {
     exactIdentityAndOrganization: "FAIL", candidateConsoleReadOnly: "FAIL",
     candidateCoreControlsVisible: "NOT VERIFIED",
     syntheticIsolation: "NOT VERIFIED", createCandidateEnabled: "NOT VERIFIED",
+    singleUserDevProof: "NOT RUN", scopedCandidateBaseline: "NOT RUN",
+    scopedCandidateCount: null,
     createGateReason: null,
     businessMutationsDispatched: 0, lifecycleJournal: "ERROR",
+    singleUseAuthorization: v4AuthorizationBefore === null ? "MISSING"
+      : v4ClaimBefore === null ? "UNCLAIMED" : "CLAIMED_OR_ATTEMPTED",
     requestSafety: "NOT RUN",
-    predicateChecksPassed: 12, callbackPostsAdmitted: 0, callbackResponseStatuses: [],
+    predicateChecksPassed: 14, callbackPostsAdmitted: 0, callbackResponseStatuses: [],
     suppressedPlatformRequests: 0, suppressedMetricsRequests: 0, optionalSuppressions: [],
     blockedRequests: [], failedRequestClasses: [],
     lifecycleInvoked: false, screenshotsAndTraces: "DISABLED",
-    acceptanceScope: "ELEVATED_FUNCTIONAL_ONLY",
+    acceptanceScope: ownerReadOnly ? "OWNER_APPROVED_ELEVATED_READ_ONLY_SINGLE_USER_DEV_V4"
+      : "ELEVATED_FUNCTIONAL_ONLY",
     servedConsole: {
       iframeUrl: null, scriptElementOrder: [], resources: [], failedLoads: [], pageErrors: [], runtime: null,
       expectedResourceHashes: resourceManifest ? "NOT_RUN" : "NOT_REQUESTED"
@@ -104,6 +278,9 @@ async function main() {
   const callbackRequests = new WeakSet();
   const consoleResourceCaptures = [];
   let resourceSequence = 0;
+  let verifierRequestCount = 0;
+  let scopedCandidateReadRequestCount = 0;
+  let verifiedSingleUserDevScopeId = null;
   let phase = "APP_INITIALIZATION";
   let context;
   try {
@@ -189,6 +366,10 @@ async function main() {
       const url = new URL(request.url());
       const api = url.origin === approval.origin && /\/api\/data\//i.test(url.pathname);
       const classification = classifyRequest(request, url, { origin: approval.origin, callbackOrigin: callback });
+      const endpointEvidence = authenticationEndpointEvidence(request, approval.origin);
+      if (endpointEvidence) {
+        console.log(`UAT_AUTH_HANDOFF_ENDPOINT ${JSON.stringify({ ...endpointEvidence, classification })}`);
+      }
       if (["OPTIONAL_SUPPORT_SUPPRESSED", "OPTIONAL_TELEMETRY_SUPPRESSED"].includes(classification)) {
         report.suppressedPlatformRequests++;
         if (url.pathname === "/AppWebServices/MetricsReportingService.asmx/Report") report.suppressedMetricsRequests++;
@@ -203,12 +384,50 @@ async function main() {
         report.blockedRequests.push({ ...safeClass(request), classification });
         return route.abort("blockedbyclient");
       }
+      if (classification === "READ_ONLY_VERIFIER_ALLOWED" && ownerReadOnly) {
+        try {
+          const body = request.postDataJSON();
+          if (verifierRequestCount !== 0 || body.ActionType !== "VerifySingleUserDev" ||
+              Object.keys(body).sort().join(",") !== "ActionType,CorrelationId" ||
+              !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+                .test(body.CorrelationId)) {
+            throw new Error("UAT_SINGLE_USER_DEV_VERIFIER_REQUEST_REJECTED");
+          }
+          verifierRequestCount++;
+        } catch {
+          report.blockedRequests.push({ ...safeClass(request), classification: "UNKNOWN_REQUEST_BLOCKED" });
+          return route.abort("blockedbyclient");
+        }
+      }
+      if (classification === "SCOPED_READ_OPERATION_ALLOWED") {
+        try {
+          const body = request.postDataJSON();
+          if (!ownerReadOnly || scopedCandidateReadRequestCount !== 0 ||
+              body.ActionType !== "ReadScopedCandidates" ||
+              Object.keys(body).sort().join(",") !== "ActionType,CorrelationId,SyntheticScopeId" ||
+              body.SyntheticScopeId !== verifiedSingleUserDevScopeId) {
+            throw new Error("UAT_SCOPED_CANDIDATE_READ_REJECTED");
+          }
+          scopedCandidateReadRequestCount++;
+        } catch {
+          report.blockedRequests.push({ ...safeClass(request), classification: "UNKNOWN_REQUEST_BLOCKED" });
+          return route.abort("blockedbyclient");
+        }
+      }
       if (auth && [callback, approval.origin].includes(url.origin) && request.method() === "POST") {
         callbackRequests.add(request);
         report.callbackPostsAdmitted++;
       }
+      if (ownerReadOnly && api && request.method() === "GET") {
+        const referenceScope = constrainReferenceRequest(url);
+        if (isSingleUserDevDirectReadBlocked(url) || referenceScope !== "NOT_REFERENCE") {
+          report.blockedRequests.push({ ...safeClass(request), classification: "UNKNOWN_REQUEST_BLOCKED" });
+          return route.abort("blockedbyclient");
+        }
+      }
       // The app may auto-read Candidates: limit its list to the preserved synthetic marker.
-      if (api && request.method() === "GET" && url.pathname === "/api/data/v9.2/os_sr_cands") {
+      if (!ownerReadOnly && api && request.method() === "GET" &&
+          url.pathname === "/api/data/v9.2/os_sr_cands") {
         const scope = `os_sr_cand_nm eq '${journal.candidateName}'`;
         const existing = url.searchParams.get("$filter");
         url.searchParams.set("$filter", existing ? `(${existing}) and (${scope})` : scope);
@@ -229,88 +448,109 @@ async function main() {
       waitUntil: "domcontentloaded", timeout: 120_000
     });
     const identity = await verifyBrowserIdentity(page, approval, 480_000);
-    if (!identity.bsoRole) throw new Error("UAT_REQUIRED_BSO_ROLE_MISSING");
+    if (approval.identityScope === "BSO_ONLY" && !identity.bsoRole) {
+      throw new Error("UAT_REQUIRED_BSO_ROLE_MISSING");
+    }
+    if (ownerReadOnly && !identity.elevated) {
+      throw new Error("UAT_APPROVED_ELEVATED_IDENTITY_MISSING");
+    }
     report.exactIdentityAndOrganization = "PASS";
-    phase = "SRAPP_INITIALIZATION";
-    await page.goto(approval.appUrl, { waitUntil: "domcontentloaded" });
-    await page.getByRole("treeitem", { name: "Candidate Management", exact: true }).click();
-    phase = "CONSOLE_INITIALIZATION";
-    const frame = page.frameLocator('iframe[src*="candidate-console.html"]');
-    await expect(frame.getByRole("heading", { name: "Candidate Management", exact: true }))
-      .toBeVisible({ timeout: 60_000 });
-    const iframeUrl = await page.locator('iframe[src*="candidate-console.html"]').evaluate(element => element.src);
-    report.servedConsole.iframeUrl = safeConsoleUrl(iframeUrl, approval.origin);
-    report.servedConsole.scriptElementOrder = (await frame.locator("script[src]").evaluateAll(elements =>
-      elements.map(element => element.src)))
-      .map(url => safeConsoleUrl(url, approval.origin)).filter(Boolean);
-    await expect.poll(() => frame.locator("body").evaluate(() =>
-      Boolean(window.BsoRsCandidateConsoleConfiguration)), { timeout: 30_000 }).toBe(true);
-    await expect.poll(() => frame.locator("body").evaluate(() => document.readyState),
-      { timeout: 60_000 }).toBe("complete");
-    const config = await frame.locator("body").evaluate(() => {
-      const value = window.BsoRsCandidateConsoleConfiguration;
-      return { mode: value.mode, core: value.candidateCoreEnabled, synthetic: value.syntheticDataOnly,
-        fallback: value.devDirectWriteFallbackEnabled, availability: value.availabilityEnabled === true };
-    });
-    assert.deepEqual(config, { mode: "DEV", core: true, synthetic: true, fallback: false, availability: false });
-    if (resourceManifest) {
-      const bindingMatches = await frame.locator("body").evaluate((target) => {
-        const config = window.BsoRsCandidateConsoleConfiguration;
-        return config.environmentId === target.environmentId && config.organizationId === target.organizationId &&
-          config.organizationUrl === target.organizationUrl;
-      }, resourceManifest.target);
-      if (!bindingMatches) throw new Error("UAT_RESOURCE_CONFIGURATION_BINDING_MISMATCH");
-      await Promise.all(consoleResourceCaptures);
-      report.servedConsole.expectedResourceHashes =
-        verifyResourceHashes(report.servedConsole.resources, resourceManifest);
-      if (report.servedConsole.expectedResourceHashes.some(resource => resource.result !== "MATCH")) {
-        throw new Error("UAT_SERVED_RESOURCE_HASH_MISMATCH");
+    if (ownerReadOnly) {
+      phase = "singleuserdev-v4-proof";
+      verifiedSingleUserDevScopeId = await verifySingleUserDevProof(page, approval, identity.userId);
+      report.singleUserDevProof = "PASS";
+      report.syntheticIsolation = "PASS";
+      phase = "scoped-candidate-baseline";
+      report.scopedCandidateCount = await readScopedCandidateBaseline(
+        page, approval.origin, verifiedSingleUserDevScopeId);
+      report.scopedCandidateBaseline = report.scopedCandidateCount === 0 ? "PASS" : "FAIL";
+      if (verifierRequestCount !== 1 || scopedCandidateReadRequestCount !== 1 ||
+          report.scopedCandidateCount !== 0) {
+        throw new Error("UAT_SCOPED_CANDIDATE_BASELINE_FAILED");
       }
-      if (report.servedConsole.pageErrors.length) throw new Error("UAT_UNRESOLVED_SCRIPT_ERROR");
-    }
-    const current = new URL(page.url());
-    if (current.origin !== approval.origin ||
-        current.searchParams.get("appid") !== new URL(approval.appUrl).searchParams.get("appid")) {
-      throw new Error("UAT_APP_ENTRYPOINT_MISMATCH");
-    }
-    await expect(frame.locator("#availability-submit")).toBeDisabled();
-    await expect(frame.locator("#candidate-search")).toBeVisible();
-    await expect(frame.locator("#candidate-rows")).toBeVisible();
-    await expect(frame.locator("#create-button")).toBeVisible();
-    report.candidateCoreControlsVisible = "PASS";
-    const gate = await frame.locator("body").evaluate(() => {
-      const policy = window.BsoRsCandidateConsolePolicy;
-      const button = document.getElementById("create-button");
-      const policyAvailable = Boolean(policy && typeof policy.hasSyntheticIsolation === "function");
-      const isolation = Boolean(policyAvailable && policy.hasSyntheticIsolation() === true);
-      const workflowPath = document.getElementById("workflow-path-badge")?.textContent;
-      const notice = document.getElementById("notice")?.textContent || "";
-      return {
-        policyGlobalAvailable: Boolean(policy),
-        policyAvailable,
-        isolation,
-        createEnabled: Boolean(button && !button.disabled),
-        knownIsolationBlock: workflowPath === "SYNTHETIC DATA ACCESS BLOCKED" &&
-          notice.includes("server-side synthetic data isolation")
+      report.candidateConsoleReadOnly = "NOT RUN";
+      report.createCandidateEnabled = "NOT CHECKED";
+      report.createGateReason = "READ_ONLY_CHECK_DID_NOT_OPEN_CONSOLE";
+      report.authenticationOnly = "PASS";
+    } else {
+      phase = "SRAPP_INITIALIZATION";
+      await page.goto(approval.appUrl, { waitUntil: "domcontentloaded" });
+      await page.getByRole("treeitem", { name: "Candidate Management", exact: true }).click();
+      phase = "CONSOLE_INITIALIZATION";
+      const frame = page.frameLocator('iframe[src*="candidate-console.html"]');
+      await expect(frame.getByRole("heading", { name: "Candidate Management", exact: true }))
+        .toBeVisible({ timeout: 60_000 });
+      const iframeUrl = await page.locator('iframe[src*="candidate-console.html"]').evaluate(element => element.src);
+      report.servedConsole.iframeUrl = safeConsoleUrl(iframeUrl, approval.origin);
+      report.servedConsole.scriptElementOrder = (await frame.locator("script[src]").evaluateAll(elements =>
+        elements.map(element => element.src)))
+        .map(url => safeConsoleUrl(url, approval.origin)).filter(Boolean);
+      await expect.poll(() => frame.locator("body").evaluate(() =>
+        Boolean(window.BsoRsCandidateConsoleConfiguration)), { timeout: 30_000 }).toBe(true);
+      await expect.poll(() => frame.locator("body").evaluate(() => document.readyState),
+        { timeout: 60_000 }).toBe("complete");
+      const config = await frame.locator("body").evaluate(() => {
+        const value = window.BsoRsCandidateConsoleConfiguration;
+        return { mode: value.mode, core: value.candidateCoreEnabled, synthetic: value.syntheticDataOnly,
+          fallback: value.devDirectWriteFallbackEnabled, availability: value.availabilityEnabled === true };
+      });
+      assert.deepEqual(config, { mode: "DEV", core: true, synthetic: true, fallback: false, availability: false });
+      if (resourceManifest) {
+        const bindingMatches = await frame.locator("body").evaluate((target) => {
+          const config = window.BsoRsCandidateConsoleConfiguration;
+          return config.environmentId === target.environmentId && config.organizationId === target.organizationId &&
+            config.organizationUrl === target.organizationUrl;
+        }, resourceManifest.target);
+        if (!bindingMatches) throw new Error("UAT_RESOURCE_CONFIGURATION_BINDING_MISMATCH");
+        await Promise.all(consoleResourceCaptures);
+        report.servedConsole.expectedResourceHashes =
+          verifyResourceHashes(report.servedConsole.resources, resourceManifest);
+        if (report.servedConsole.expectedResourceHashes.some(resource => resource.result !== "MATCH")) {
+          throw new Error("UAT_SERVED_RESOURCE_HASH_MISMATCH");
+        }
+        if (report.servedConsole.pageErrors.length) throw new Error("UAT_UNRESOLVED_SCRIPT_ERROR");
+      }
+      const current = new URL(page.url());
+      if (current.origin !== approval.origin ||
+          current.searchParams.get("appid") !== new URL(approval.appUrl).searchParams.get("appid")) {
+        throw new Error("UAT_APP_ENTRYPOINT_MISMATCH");
+      }
+      await expect(frame.locator("#availability-submit")).toBeDisabled();
+      await expect(frame.locator("#candidate-search")).toBeVisible();
+      await expect(frame.locator("#candidate-rows")).toBeVisible();
+      await expect(frame.locator("#create-button")).toBeVisible();
+      report.candidateCoreControlsVisible = "PASS";
+      const gate = await frame.locator("body").evaluate(() => {
+        const policy = window.BsoRsCandidateConsolePolicy;
+        const button = document.getElementById("create-button");
+        const policyAvailable = Boolean(policy && typeof policy.hasSyntheticIsolation === "function");
+        const isolation = Boolean(policyAvailable && policy.hasSyntheticIsolation() === true);
+        const workflowPath = document.getElementById("workflow-path-badge")?.textContent;
+        const notice = document.getElementById("notice")?.textContent || "";
+        return {
+          policyGlobalAvailable: Boolean(policy),
+          policyAvailable,
+          isolation,
+          createEnabled: Boolean(button && !button.disabled),
+          knownIsolationBlock: workflowPath === "SYNTHETIC DATA ACCESS BLOCKED" &&
+            notice.includes("server-side synthetic data isolation")
+        };
+      });
+      const gateResult = evaluateCreateGate(gate);
+      report.syntheticIsolation = gateResult.syntheticIsolation;
+      report.createCandidateEnabled = gateResult.createCandidateEnabled;
+      report.servedConsole.runtime = {
+        policyGlobalAvailable: gate.policyGlobalAvailable,
+        isolationMethodAvailable: gate.policyAvailable, syntheticIsolation: report.syntheticIsolation,
+        createCandidateEnabled: report.createCandidateEnabled,
+        checkCalendarDisabled: await frame.locator("#availability-submit").isDisabled()
       };
-    });
-    const gateResult = evaluateCreateGate(gate);
-    report.syntheticIsolation = gateResult.syntheticIsolation;
-    report.createCandidateEnabled = gateResult.createCandidateEnabled;
-    report.servedConsole.runtime = {
-      policyGlobalAvailable: gate.policyGlobalAvailable,
-      isolationMethodAvailable: gate.policyAvailable, syntheticIsolation: report.syntheticIsolation,
-      createCandidateEnabled: report.createCandidateEnabled,
-      checkCalendarDisabled: await frame.locator("#availability-submit").isDisabled()
-    };
-    report.createGateReason = gateResult.reason;
-    report.requestSafety = report.blockedRequests.length ? "FAIL" : "PASS";
-    if (!gateResult.passed) {
-      throw new Error("UAT_CREATE_ISOLATION_GATE_UNVERIFIED");
+      report.createGateReason = gateResult.reason;
+      if (!gateResult.passed) throw new Error("UAT_CREATE_ISOLATION_GATE_UNVERIFIED");
+      report.candidateConsoleReadOnly = "PASS";
+      report.configuration = config;
+      report.authenticationOnly = "PASS";
     }
-    report.candidateConsoleReadOnly = "PASS";
-    report.configuration = config;
-    report.authenticationOnly = "PASS";
     if (report.callbackPostsAdmitted > 0 &&
         report.callbackResponseStatuses.some(status => status >= 200 && status < 400) &&
         !report.failedRequestClasses.some(request => request.requestClass === "CRM_AUTH_CALLBACK")) {
@@ -328,6 +568,10 @@ async function main() {
     if (context) await context.close();
     report.lifecycleJournal = preservedPaths.every((file, index) => hash(file) === before[index])
       ? "PRESERVED" : "ERROR";
+    if (hash(singleUserDevAuthorizationPath) !== v4AuthorizationBefore ||
+        hash(`${singleUserDevAuthorizationPath}.attempt.jsonl`) !== v4ClaimBefore) {
+      report.singleUseAuthorization = "CHANGED";
+    }
     if (report.lifecycleJournal !== "PRESERVED") {
       report.authenticationOnly = "FAIL";
       process.exitCode = 1;

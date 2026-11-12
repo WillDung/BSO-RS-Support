@@ -137,7 +137,7 @@ test("Other pinned collectors are suppressed, not arbitrary Microsoft POSTs", ()
 test("Legitimate synthetic Microsoft callback and regional federation handoff remain authentication", () => {
   const auth = {
     resourceType: () => "document", isNavigationRequest: () => true,
-    headers: () => ({ "content-type": "application/x-www-form-urlencoded" }),
+    headers: () => ({ "content-type": "application/x-www-form-urlencoded; charset=UTF-8" }),
     frame: () => ({ url: () => "https://login.microsoftonline.com/authorize" }),
     postData: () => "code=SYNTHETIC&state=SYNTHETIC"
   };
@@ -147,8 +147,20 @@ test("Legitimate synthetic Microsoft callback and regional federation handoff re
     postData: () => "wa=wsignin1.0&wresult=SYNTHETIC&wctx=SYNTHETIC"
   }), "AUTH_NAVIGATION");
   assert.equal(classify(`${origin}/`, {
+    ...auth, frame: () => ({ url: () => `${callbackOrigin}/` }),
+    postData: () => "code=SYNTHETIC&id_token=SYNTHETIC&session_state=SYNTHETIC&state=SYNTHETIC"
+  }), "AUTH_NAVIGATION");
+  assert.equal(classify(`${origin}/`, {
     ...auth, frame: () => ({ url: () => "https://untrusted.invalid/" })
   }), "UNKNOWN_REQUEST_BLOCKED");
+  assert.equal(classify(`${origin}/`, {
+    ...auth, frame: () => ({ url: () => `${callbackOrigin}/` }),
+    postData: () => "code=SYNTHETIC&id_token=SYNTHETIC&session_state=SYNTHETIC&state=SYNTHETIC&extra=SYNTHETIC"
+  }), "UNKNOWN_REQUEST_BLOCKED");
+  assert.equal(classify(`${origin}/api/data/v9.2/os_sr_cact`, {
+    ...auth, frame: () => ({ url: () => `${callbackOrigin}/` }),
+    postData: () => "code=SYNTHETIC&id_token=SYNTHETIC&session_state=SYNTHETIC&state=SYNTHETIC"
+  }), "FORBIDDEN_BUSINESS_OR_PROVIDER_OPERATION");
   assert.equal(classify("https://login.microsoft.com/bridge", auth), "AUTH_NAVIGATION");
 });
 
@@ -164,7 +176,17 @@ test("SingleUserDev sign-in callback is limited to the approved organization ori
     ...auth, frame: () => ({ url: () => "https://evil.example.invalid/authorize" })
   }, { origin, callbackOrigin: origin }), "UNKNOWN_REQUEST_BLOCKED");
   assert.equal(classify(`${origin}/`, {
+    ...auth, frame: () => ({ url: () => `${callbackOrigin}/` }),
+    postData: () => "code=SYNTHETIC&id_token=SYNTHETIC&session_state=SYNTHETIC&state=SYNTHETIC"
+  }, { origin, callbackOrigin: origin }), "UNKNOWN_REQUEST_BLOCKED");
+  assert.equal(classify(`${origin}/`, {
     ...auth, postData: () => "code=SYNTHETIC&state=SYNTHETIC&returnUrl=https://evil.example.invalid"
+  }, { origin, callbackOrigin: origin }), "UNKNOWN_REQUEST_BLOCKED");
+  assert.equal(classify(`${origin}/`, {
+    ...auth, headers: () => ({ "content-type": "application/x-www-form-urlencoded; boundary=SYNTHETIC" })
+  }, { origin, callbackOrigin: origin }), "UNKNOWN_REQUEST_BLOCKED");
+  assert.equal(classify(`${origin}/`, {
+    ...auth, headers: () => ({ "content-type": "application/json" })
   }, { origin, callbackOrigin: origin }), "UNKNOWN_REQUEST_BLOCKED");
 });
 

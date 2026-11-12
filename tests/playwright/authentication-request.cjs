@@ -7,7 +7,8 @@ function isAuthenticationRequest(request, url, callbackOrigin, organizationOrigi
       request.method() !== "POST" || request.resourceType() !== "document" ||
       !request.isNavigationRequest()) return false;
   const headers = request.headers();
-  if (!/^application\/x-www-form-urlencoded(?:;|$)/i.test(headers["content-type"] || "")) return false;
+  if (!/^application\/x-www-form-urlencoded(?:\s*;\s*charset=[a-z0-9._-]+)?$/i
+    .test((headers["content-type"] || "").trim())) return false;
   const source = new URL(request.frame().url());
   const microsoftSource = ["login.microsoftonline.com", "login.microsoft.com"].includes(source.hostname.toLowerCase());
   const crmHandoff = url.origin === organizationOrigin && source.origin === callbackOrigin;
@@ -19,7 +20,7 @@ function isAuthenticationRequest(request, url, callbackOrigin, organizationOrigi
     [...fields.keys()].every(key => allowed.has(key));
   const federation = fields.get("wa") === "wsignin1.0" && fields.has("wresult") && fields.has("wctx") &&
     [...fields.keys()].every(key => ["wa", "wresult", "wctx"].includes(key));
-  return (microsoftSource && openId) || (crmHandoff && federation);
+  return (microsoftSource && openId) || (crmHandoff && (openId || federation));
 }
 
 module.exports = { isAuthenticationRequest };

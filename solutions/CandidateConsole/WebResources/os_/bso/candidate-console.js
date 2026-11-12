@@ -150,6 +150,18 @@
     os_sr_csh: "ReadScopedHistory",
     os_sr_intv: "ReadScopedSchedules"
   });
+  const SINGLE_USER_DEV_REFERENCE_SCOPE_KEYS = Object.freeze({
+    os_sr_pos: "positionId",
+    os_sr_csrc: "sourceId",
+    os_sr_ta: "taId",
+    os_sr_loc: "locationId"
+  });
+  const REFERENCE_OPTION_LABELS = Object.freeze({
+    os_sr_pos: "Position",
+    os_sr_csrc: "Candidate Source",
+    os_sr_ta: "TA",
+    os_sr_loc: "Location"
+  });
   const SINGLE_USER_DEV_CHOICE_ATTRIBUTES = new Set([
     "statecode", "os_sr_cand_stat", "os_sr_call_out", "os_sr_csh_prevstat",
     "os_sr_csh_newstat", "os_sr_intv_rnd", "os_sr_intv_res", "os_sr_intv_stat"
@@ -1167,37 +1179,73 @@
     select.appendChild(option);
   }
 
+  function setLookupPlaceholder(select, label) {
+    select.replaceChildren();
+    addOption(select, "", label);
+  }
+
+  function getSingleUserDevReferenceId(tableName) {
+    const key = SINGLE_USER_DEV_REFERENCE_SCOPE_KEYS[tableName];
+    const policy = window.BsoRsCandidateConsolePolicy;
+    const scope = policy && typeof policy.getSyntheticScope === "function"
+      ? policy.getSyntheticScope()
+      : null;
+    if (!key || !scope || !scope[key]) {
+      throw new Error("SINGLE_USER_DEV_REFERENCE_SCOPE_UNAVAILABLE");
+    }
+    return normalizeGuid(scope[key]);
+  }
+
   async function loadLookupOptions(tableName, selectIds, emptyLabels) {
     const ids = Array.isArray(selectIds) ? selectIds : [selectIds];
     const labels = Array.isArray(emptyLabels) ? emptyLabels : ids.map(() => emptyLabels);
     if (ids.length !== labels.length) throw new Error("REFERENCE_SELECTOR_CONFIGURATION_INVALID");
-    const metadata = await xrm().Utility.getEntityMetadata(tableName);
-    const primaryName = metadata.PrimaryNameAttribute;
-    const filter = referenceScope("statecode eq 0", primaryName);
-    const rows = await retrieveAll(tableName,
-      `?$select=${metadata.PrimaryIdAttribute},${primaryName},statecode` +
-      `&$filter=${encodeURIComponent(filter)}&$orderby=${primaryName} asc`);
-    if (environmentPolicy.syntheticDataOnly && rows.some((row) => {
-      try {
-        normalizeGuid(row[metadata.PrimaryIdAttribute]);
-        return row.statecode !== 0 || !isReferenceAllowedByDataMode(row[primaryName]);
-      } catch {
-        return true;
-      }
-    })) {
-      blockSyntheticQuery();
-      throw new Error("SYNTHETIC_REFERENCE_RESPONSE_INVALID");
-    }
     const selects = ids.map((id) => $(id));
-    selects.forEach((select, index) => {
-      select.replaceChildren();
-      addOption(select, "", labels[index]);
+    selects.forEach((select) => {
+      select.setAttribute("aria-busy", "true");
+      setLookupPlaceholder(select, "Loading options...");
     });
-    for (const row of rows) {
-      const id = row[metadata.PrimaryIdAttribute];
-      const label = row[primaryName];
-      if (!id || !isReferenceAllowedByDataMode(label)) continue;
-      selects.forEach((select) => addOption(select, id, label));
+    try {
+      const metadata = await xrm().Utility.getEntityMetadata(tableName);
+      const primaryId = metadata.PrimaryIdAttribute;
+      const primaryName = metadata.PrimaryNameAttribute;
+      if (!primaryId || !primaryName || !metadata.EntitySetName) {
+        throw new Error("CANDIDATE_REFERENCE_METADATA_INVALID");
+      }
+      const filter = referenceScope("statecode eq 0", primaryName);
+      const rows = await retrieveAll(tableName,
+        `?$select=${primaryId},${primaryName},statecode` +
+        `&$filter=${encodeURIComponent(filter)}&$orderby=${primaryName} asc`);
+      const expectedId = environmentPolicy.candidateOperationMode === "SingleUserDev"
+        ? getSingleUserDevReferenceId(tableName).toLowerCase()
+        : null;
+      const normalizedRows = rows.map((row) => {
+        const id = normalizeGuid(row && row[primaryId]).toLowerCase();
+        const label = row && row[primaryName];
+        if (row.statecode !== 0 || typeof label !== "string" || !label.trim() ||
+            !isReferenceAllowedByDataMode(label) || (expectedId && id !== expectedId)) {
+          throw new Error("CANDIDATE_REFERENCE_OPTION_INVALID");
+        }
+        return { id, label };
+      });
+      if (environmentPolicy.candidateOperationMode === "SingleUserDev" &&
+          (normalizedRows.length !== 1 || normalizedRows[0].id !== expectedId)) {
+        throw new Error("SINGLE_USER_DEV_REFERENCE_RESPONSE_INVALID");
+      }
+      selects.forEach((select, index) => {
+        setLookupPlaceholder(select, normalizedRows.length
+          ? labels[index]
+          : `No active ${REFERENCE_OPTION_LABELS[tableName] || "reference"} records found`);
+        for (const row of normalizedRows) addOption(select, row.id, row.label);
+        if (expectedId) select.value = expectedId;
+        select.removeAttribute("aria-busy");
+      });
+    } catch (error) {
+      selects.forEach((select) => {
+        setLookupPlaceholder(select, "Options unavailable; reload the Console to retry");
+        select.removeAttribute("aria-busy");
+      });
+      throw error;
     }
   }
 
@@ -2862,7 +2910,7 @@
         loadTableMetadata(TABLES.history),
         loadTableMetadata(TABLES.interview)
       ]);
-      loadStage = "Position and Candidate Source options";
+      loadStage = "Position, Candidate Source, TA, and Location options";
       await Promise.all([
         loadLookupOptions("os_sr_pos", ["candidate-position", "edit-candidate-position"],
           ["No position selected", "No position selected"]),
@@ -2880,9 +2928,13 @@
       }
       await refreshCandidates();
       setBusy(false);
-    } catch {
+    } catch (error) {
       if (environmentPolicy.syntheticDataOnly) blockSyntheticQuery();
-      showNotice(`Candidate Management could not load ${loadStage}. Confirm app access and try again.`, true);
+      logSafeFailure("CANDIDATE_MANAGEMENT_INITIALIZATION_FAILED", error);
+      const message = loadStage === "Position, Candidate Source, TA, and Location options"
+        ? "Reference options could not be loaded. Their selectors show the failure; reload the Console to retry."
+        : `Candidate Management could not load ${loadStage}. Confirm app access and try again.`;
+      showNotice(message, true);
       document.querySelectorAll("button[data-action]").forEach((button) => {
         button.disabled = true;
       });

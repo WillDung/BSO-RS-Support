@@ -1,5 +1,11 @@
 # ALM and Deployment
 
+## Candidate Console reference dropdown remediation (2026-11-12)
+
+The local Console source now pins SingleUserDev lookup options to the exact IDs returned by the 1.0.7 scoped-read contract, uses the actual server-returned names, and preselects the profile-bound Position, Candidate Source, TA, and Location references. Ordinary mode continues to query active Dataverse rows through the existing reference filters. Loading, empty, and unavailable states are explicit. This is a local implementation only: the reported live empty-dropdown cause is not yet verified because the deployed Console and component versions were not read.
+
+The affected Console JavaScript and its HTML cache token have not been deployed. Do not publish until the exact VN LMV IT environment URL is confirmed and fresh WebResource versions/ETags are read. Then conditionally update and publish only those two WebResources with WebResource-only `PublishXml`, stopping on drift or ambiguous outcomes and reconciling effective hashes. No Candidate data, backend, roles, Calendar, or other components were changed.
+
 ## SingleUserDev 1.0.7 deployed; Console status refresh pending (2026-11-12)
 
 The minimal Candidate Core 1.0.7 package and its `ScopedData` Custom API response property are deployed. Live package-bound assembly readback is 1.0.7.0; package and DLL SHA-256 values are recorded in [Current State](CURRENT_STATE.md). The existing SingleUserDev profile was updated additively, preserving the BSO root bindings and approved DEV scope. Four reviewed Console WebResources were conditionally updated and published with one WebResource-only `PublishXml`; effective hashes matched the reviewed payloads. The 1.0.5 rollback package and DLL were preserved and hash-verified. Calendar/Flow, roles, Entra objects, and global/table guards were not changed.

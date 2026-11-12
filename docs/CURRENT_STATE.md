@@ -1,5 +1,11 @@
 # Current State
 
+## Candidate Console reference dropdown remediation (2026-11-12)
+
+**Status: local source updated; live cause and deployment NOT VERIFIED.** Candidate Console now keeps ordinary reference selectors backed by active Dataverse rows and the existing synthetic-data filters. In SingleUserDev, it validates each fixed `ScopedData` reference response against the current proof's exact Position, Source, TA, or Location ID, displays the server-returned name, and preselects that exact ID. Selectors expose loading, no-active-record, and unavailable states rather than appearing silently empty. These checks do not broaden the server-side mutation scope.
+
+The prior source review confirmed that Candidate Core 1.0.7 already returns the four fixed references through `ReadScopedPositions`, `ReadScopedSources`, `ReadScopedTas`, and `ReadScopedLocations`; it did not establish why the owner's currently served dropdowns are empty. No deployed WebResource was read in this task, so stale published content, an API failure, or another live configuration issue remains unconfirmed. No tenant access, Candidate write, Playwright run, lifecycle UAT, or publication occurred. Publishing the changed Console JavaScript and matching HTML cache token is blocked until the exact VN LMV IT URL is confirmed and the current component versions/ETags are reconciled.
+
 ## Existing Candidate continuation contract (2026-11-12)
 
 **Status: offline authorization contract implemented and tested; live continuation NOT RUN.** The previously reconciled synthetic Candidate is `CAND-00001067` (`4d6001a1-cc03-4d22-a665-f4a9a791ccbf`). The prior readback confirmed its marker, references, original Create correlation, and Need Call Candidate status, with zero Calls, Schedules, and History. The Create remains business-state-confirmed, not HTTP-response-confirmed; scoped v4 reads do not expose Receipts.

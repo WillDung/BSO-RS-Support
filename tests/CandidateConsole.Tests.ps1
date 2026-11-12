@@ -179,9 +179,16 @@ Assert-Test ($script.Contains('loadLookupOptions("os_sr_ta"') -and
     $script.Contains('"candidate-assigned-ta"') -and
     $script.Contains('"scheduling-ta"') -and
     $script.Contains('loadLookupOptions("os_sr_loc", "scheduling-location"') -and
+    $script.Contains('SINGLE_USER_DEV_REFERENCE_SCOPE_KEYS') -and
+    $script.Contains('getSingleUserDevReferenceId(tableName).toLowerCase()') -and
+    $script.Contains('select.value = expectedId') -and
+    $script.Contains('readSingleUserDevRecords(tableLogicalName)') -and
+    $script.Contains('Loading options...') -and
+    $script.Contains('Options unavailable; reload the Console to retry') -and
+    $script.Contains('No active ${REFERENCE_OPTION_LABELS[tableName] || "reference"} records found') -and
     $script.Contains('isReferenceAllowedByDataMode(label)') -and
     $script.Contains('policy.allowsReference(label, environmentPolicy.syntheticDataOnly)')) `
-    'Load reference choices according to the configured synthetic-data policy'
+    'Load active reference choices, pin SingleUserDev selections to approved profile IDs, and show lookup loading/error/empty states'
 Assert-Test ($script.Contains('getActiveReference("os_sr_ta"') -and
     $script.Contains('getActiveReference("os_sr_loc"') -and
     $script.Contains('reference.statecode !== 0') -and

@@ -291,6 +291,8 @@ test("SingleUserDev reads route through fixed scoped API actions and never use d
   });
   assert.equal(ui.methods.isCandidateCoreEnabled(), true, ui.element("notice").textContent);
   assert.equal(ui.element("create-button").disabled, false);
+  assert.equal(ui.element("workflow-path-badge").textContent, "CANDIDATE CORE PATH");
+  assert.equal(ui.workflowLabel.textContent, "Candidate Core / os_sr_cact");
   assert.equal(ui.server.requests.length, 0);
   assert.equal(verifierRequests.length, 1);
   assert.ok(readRequests.some((request) => request.ActionType === "ReadScopedCandidates"));

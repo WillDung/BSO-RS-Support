@@ -2838,6 +2838,7 @@
         return;
       }
     }
+    updateWorkflowPathLabel();
     if (!isCandidateCoreEnabled()) {
       $("create-button").disabled = true;
       $("refresh-button").disabled = true;

@@ -86,7 +86,9 @@ function loadLifecycleApproval() {
     const target = { ...base, environmentId: process.env.BSO_UAT_ENVIRONMENT_ID };
     const authorization = loadIndependentAuthorization(file, target);
     return {
-      ...target, approved: true, lifecycleScope: authorization.scope,
+      ...target, authorizationBase: target, expectedUpn: authorization.scope.expectedUpn,
+      expectedActorId: authorization.scope.actorId, identityScope: "BSO_ONLY",
+      approved: true, lifecycleScope: authorization.scope,
       independentAuthorizationFile: file, independentAuthorizationHash: digest(file),
       independentAuthorizationRecord: authorization
     };
@@ -116,7 +118,7 @@ function loadLifecycleApproval() {
   return { ...base, approved: true, lifecycleScope: scope };
 }
 
-function reserveOneShot(approval, configuration) {
+function reserveOneShot(approval, configuration, proofObservation) {
   if (approval.independentAuthorizationFile ||
       Object.hasOwn(process.env, "BSO_UAT_INDEPENDENT_AUTHORIZATION_FILE")) {
     requireCondition(!process.env.BSO_UAT_RESUME_ZERO_DISPATCH &&
@@ -125,7 +127,8 @@ function reserveOneShot(approval, configuration) {
     const { claimIndependentAuthorization, digest } = require("./independent-authorization.cjs");
     requireCondition(digest(approval.independentAuthorizationFile) === approval.independentAuthorizationHash,
       "UAT_INDEPENDENT_AUTHORIZATION_CHANGED");
-    return claimIndependentAuthorization(approval.independentAuthorizationFile, approval, configuration);
+    return claimIndependentAuthorization(approval.independentAuthorizationFile,
+      approval.authorizationBase || approval, configuration, proofObservation);
   }
   const file = path.join(authDirectory, `${approval.lifecycleScope.authorizationId}.json`);
   if (process.env.BSO_UAT_RESUME_ZERO_DISPATCH === "owner-authorized-eligible-continuation") {

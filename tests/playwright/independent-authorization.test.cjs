@@ -26,6 +26,14 @@ function fixture(t) {
     organizationId: "33333333-3333-4333-8333-333333333333",
     environmentId: "44444444-4444-4444-8444-444444444444", expectedUpn: "owner@example.invalid"
   };
+  const syntheticIsolation = {
+    actorId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    scopeId: marker,
+    positionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+    sourceId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+    taId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    locationId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"
+  };
   const original = {
     authorizationId: "historical", marker,
     candidateName: `[SYNTHETIC-E2E] Playwright ${marker}`,
@@ -82,15 +90,32 @@ function fixture(t) {
     history: { journalPath, scopePath, reportPath, evidence },
     scope: {
       ...scope, authorizationId: "independent-01", environmentName: "VN LMV IT internal DEV",
+      identityScope: "BSO_ONLY", expectedUpn: "bso@example.invalid",
+      actorId: syntheticIsolation.actorId, syntheticIsolation,
       maximumInvocations: 1, retries: 0, callOutcome: "Answered",
-      readbackOnlyAfterOperations: true, expiresAt: "2030-01-02T17:00:00Z"
+      readbackOnlyAfterOperations: true, expiresAt: "2030-01-02T10:30:00Z"
     }
   };
   const file = path.join(directory, "independent-01.authorization.json");
+  let proofSequence = 0;
+  const makeProof = (at = now) => ({
+    correlationId: `12121212-1212-4121-8121-${String(++proofSequence).padStart(12, "0")}`,
+    contract: JSON.stringify({
+      version: 2, boundary: "ScopedCandidateCoreApi", nativeWritesDenied: true,
+      readback: "CallerOwnedScope", organizationId: base.organizationId,
+      environmentId: base.environmentId, actorId: syntheticIsolation.actorId,
+      scopeId: marker, candidateId: marker, positionId: syntheticIsolation.positionId,
+      sourceId: syntheticIsolation.sourceId, taId: syntheticIsolation.taId,
+      locationId: syntheticIsolation.locationId,
+      validUntil: new Date(at + 120_000).toISOString(), calendarEnabled: false
+    })
+  });
   return {
     file, request, base, original, evidence,
     create: () => createAuthorization(file, request, base, now),
-    claim: (config = configuration) => claimIndependentAuthorization(file, base, config, now)
+    makeProof,
+    claim: (config = configuration, at = now) =>
+      claimIndependentAuthorization(file, base, config, makeProof(at), at)
   };
 }
 
@@ -131,7 +156,7 @@ test("Concurrent processes cannot both acquire the authorization", async t => {
   const source = `
     const {claimIndependentAuthorization}=require(${JSON.stringify(require.resolve("./independent-authorization.cjs"))});
     try { claimIndependentAuthorization(${JSON.stringify(f.file)},${JSON.stringify(f.base)},
-      ${JSON.stringify(configuration)},${now}); process.exitCode=0; }
+      ${JSON.stringify(configuration)},${JSON.stringify(f.makeProof())},${now}); process.exitCode=0; }
     catch { process.exitCode=7; }`;
   const start = () => new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ["-e", source], { stdio: "ignore" });
@@ -156,15 +181,16 @@ test("Missing, expired, future-dated or unapproved authorizations fail closed", 
   assert.throws(f.claim, error => error.code === "ENOENT");
   f.request.scope.expiresAt = "2021-01-01T00:00:00Z";
   assert.throws(f.create, /UAT_INDEPENDENT_AUTHORIZATION_EXPIRED/);
-  f.request.scope.expiresAt = "2030-01-02T17:00:00Z";
+  f.request.scope.expiresAt = "2030-01-02T10:30:00Z";
   f.request.scope.ownerMutationApproval = false;
   assert.throws(f.create, /UAT_INDEPENDENT_SCOPE_OR_TARGET_MISMATCH/);
   f.request.scope.ownerMutationApproval = true;
   f.request.authorizedAt = "2030-01-03T00:00:00Z";
   assert.throws(f.create);
-  f.request.authorizedAt = "2030-01-02T09:00:00Z";
+  f.request.authorizedAt = "2030-01-02T09:59:00Z";
   f.create();
   assert.throws(() => claimIndependentAuthorization(f.file, f.base, configuration,
+    f.makeProof(Date.parse("2030-01-03T00:00:00Z")),
     Date.parse("2030-01-03T00:00:00Z")), /UAT_INDEPENDENT_AUTHORIZATION_EXPIRED/);
   assert.equal(fs.existsSync(`${f.file}.attempt.jsonl`), false);
 });
@@ -173,7 +199,7 @@ for (const [field, value] of [
   ["actions", [...ACTIONS].reverse()], ["callOutcome", "No Answer"], ["maximumCandidates", 2],
   ["organizationId", "55555555-5555-4555-8555-555555555555"],
   ["environmentId", "55555555-5555-4555-8555-555555555555"],
-  ["expectedUpn", "other@example.invalid"], ["appUrl", "https://other.example.invalid"],
+  ["expectedUpn", "owner@example.invalid"], ["appUrl", "https://other.example.invalid"],
   ["authenticationCallbackOrigin", "https://other.example.invalid"]
 ]) {
   test(`Scope/target mismatch rejected: ${field}`, t => {
@@ -183,6 +209,56 @@ for (const [field, value] of [
     assert.equal(fs.existsSync(f.file), false);
   });
 }
+
+test("New lifecycle scope is BSO-only and bound to the exact profile actor, marker, and references", t => {
+  for (const change of ["elevated", "actor", "profileActor", "scopeMarker", "reference"]) {
+    const f = fixture(t);
+    if (change === "elevated") f.request.scope.identityScope = "OWNER_APPROVED_ELEVATED_FUNCTIONAL_LIFECYCLE";
+    if (change === "actor") f.request.scope.actorId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+    if (change === "profileActor") {
+      f.request.scope.syntheticIsolation.actorId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+    }
+    if (change === "scopeMarker") {
+      f.request.scope.syntheticIsolation.scopeId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+    }
+    if (change === "reference") {
+      f.request.scope.syntheticIsolation.locationId = f.request.scope.syntheticIsolation.taId;
+    }
+    assert.throws(f.create, /UAT_INDEPENDENT_SCOPE_OR_TARGET_MISMATCH|UAT_SYNTHETIC_PROFILE_BINDING_MISMATCH/);
+    assert.equal(fs.existsSync(f.file), false);
+  }
+});
+
+test("Only a fresh exact v2 proof is accepted before the one-shot claim", t => {
+  for (const change of ["correlation", "version", "actor", "organization", "candidate",
+    "reference", "nativeWrites", "calendar", "expired", "tooFar", "malformed"]) {
+    const f = fixture(t);
+    f.create();
+    const observation = f.makeProof();
+    const body = JSON.parse(observation.contract);
+    if (change === "correlation") observation.correlationId = "00000000-0000-0000-0000-000000000000";
+    if (change === "version") body.version = 1;
+    if (change === "actor") body.actorId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+    if (change === "organization") body.organizationId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+    if (change === "candidate") body.candidateId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+    if (change === "reference") body.taId = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+    if (change === "nativeWrites") body.nativeWritesDenied = false;
+    if (change === "calendar") body.calendarEnabled = true;
+    if (change === "expired") body.validUntil = new Date(now + 10_000).toISOString();
+    if (change === "tooFar") body.validUntil = new Date(now + 126_000).toISOString();
+    observation.contract = change === "malformed" ? "{" : JSON.stringify(body);
+    assert.throws(() => claimIndependentAuthorization(f.file, f.base, configuration, observation, now));
+    assert.equal(fs.existsSync(`${f.file}.attempt.jsonl`), false);
+  }
+});
+
+test("Authorization execution window is bounded to two hours", t => {
+  const f = fixture(t);
+  f.request.scope.expiresAt = "2030-01-02T12:00:00Z";
+  f.request.authorizedAt = "2030-01-02T09:59:00Z";
+  assert.throws(f.create, /UAT_INDEPENDENT_AUTHORIZATION_WINDOW_INVALID/);
+  assert.equal(fs.existsSync(f.file), false);
+});
 
 test("Prior dispatch, acknowledgment, partial audit or historical evidence drift blocks creation", t => {
   for (const change of ["dispatch", "candidateId", "partial", "drift"]) {
@@ -305,9 +381,12 @@ test("Runner loader and reservation use the new authorization, never the expired
       ${JSON.stringify(require.resolve("./lifecycle-support.cjs"))});
     const approval=loadLifecycleApproval();
     assert.equal(approval.lifecycleScope.authorizationId,"independent-01");
-    const journal=reserveOneShot(approval,${JSON.stringify(configuration)});
+    assert.equal(approval.identityScope,"BSO_ONLY");
+    assert.equal(approval.expectedUpn,"bso@example.invalid");
+    assert.equal(approval.expectedActorId,"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa");
+    const journal=reserveOneShot(approval,${JSON.stringify(configuration)},${JSON.stringify(f.makeProof())});
     assert.equal(journal.record.marker,${JSON.stringify(f.original.marker)});
-    assert.throws(()=>reserveOneShot(approval,${JSON.stringify(configuration)}));
+    assert.throws(()=>reserveOneShot(approval,${JSON.stringify(configuration)},${JSON.stringify(f.makeProof())}));
   `;
   const child = spawnSync(process.execPath, ["-e", source], {
     encoding: "utf8", env: {
@@ -360,6 +439,18 @@ test("Independent lifecycle claim is deferred until all read-only and form gates
   assert.ok(referenceSelection > consoleGate && claim > referenceSelection && create > claim);
 });
 
+test("Lifecycle runner requires exact BSO identity and scoped v2 proof before claiming", () => {
+  const source = fs.readFileSync(path.join(__dirname, "candidate-lifecycle.spec.cjs"), "utf8");
+  const bsoOnlyGate = source.indexOf('requireCondition(approval.identityScope === "BSO_ONLY"');
+  const identityGate = source.indexOf("identity.userId === approval.expectedActorId.toLowerCase()");
+  const proofGate = source.indexOf("validateSyntheticIsolationProof(syntheticProofObservation");
+  const claim = source.indexOf("journal = reserveOneShot(approval", proofGate);
+  const firstDispatch = source.indexOf('await invokeOnce("CreateCandidate"', claim);
+  assert.ok(bsoOnlyGate >= 0 && identityGate > bsoOnlyGate);
+  assert.ok(proofGate > identityGate && claim > proofGate && firstDispatch > claim);
+  assert.match(source, /identity\.bsoRole && !identity\.elevated/);
+});
+
 test("Four ordered synthetic dispatch/acknowledgment pairs and persistence snapshots can be appended", t => {
   const f = fixture(t);
   f.create();
@@ -393,7 +484,7 @@ test("An explicit successor after a stopped zero-dispatch independent attempt pr
   const source = `
     const {claimIndependentAuthorization}=require(${JSON.stringify(require.resolve("./independent-authorization.cjs"))});
     const journal=claimIndependentAuthorization(${JSON.stringify(f.file)},${JSON.stringify(f.base)},
-      ${JSON.stringify(configuration)},${now});
+      ${JSON.stringify(configuration)},${JSON.stringify(f.makeProof())},${now});
     journal.record.status="STOPPED_NO_RETRY_RECONCILE_ONLY"; journal.save();`;
   const child = spawnSync(process.execPath, ["-e", source], { encoding: "utf8" });
   assert.equal(child.status, 0, child.stderr);
@@ -406,9 +497,31 @@ test("An explicit successor after a stopped zero-dispatch independent attempt pr
   assert.equal(next.predecessor.authorizationId, "independent-01");
   assert.notEqual(next.attemptId, JSON.parse(fs.readFileSync(f.file)).attemptId);
   assert.equal(next.marker, f.original.marker);
-  const journal = claimIndependentAuthorization(nextPath, f.base, configuration, now);
+  const journal = claimIndependentAuthorization(nextPath, f.base, configuration, f.makeProof(), now);
   assert.equal(journal.record.marker, f.original.marker);
   assert.deepEqual([f.file, `${f.file}.attempt.jsonl`].map(digest), before);
+});
+
+test("A fresh BSO authorization may supersede an expired unclaimed predecessor without reusing it", t => {
+  const f = fixture(t);
+  f.create();
+  const priorHash = digest(f.file);
+  const nowAfterExpiry = Date.parse("2030-01-02T11:00:00Z");
+  const request = {
+    ...f.request, previousAuthorizationFile: f.file,
+    authorizedAt: "2030-01-02T10:59:00Z",
+    ownerDecisionText: "Synthetic fixture: fresh BSO-only successor authorization.",
+    scope: { ...f.request.scope, authorizationId: "independent-02",
+      expiresAt: "2030-01-02T11:30:00Z" }
+  };
+  const nextPath = path.join(path.dirname(f.file), "independent-02.authorization.json");
+  const next = createAuthorization(nextPath, request, f.base, nowAfterExpiry);
+  assert.equal(next.predecessor.state, "EXPIRED_UNCLAIMED");
+  assert.equal(next.predecessor.authorizationId, "independent-01");
+  assert.equal(next.marker, f.original.marker);
+  assert.equal(digest(f.file), priorHash);
+  assert.equal(fs.existsSync(`${f.file}.attempt.jsonl`), false);
+  assert.equal(fs.existsSync(`${nextPath}.attempt.jsonl`), false);
 });
 
 test("Active preceding independent attempt, missing decision text and tampered authorization fail closed", t => {

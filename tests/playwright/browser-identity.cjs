@@ -1,7 +1,7 @@
 async function verifyBrowserIdentity(page, approval, timeout = 30_000) {
   await page.waitForFunction(() => Boolean(window.Xrm?.Utility?.getGlobalContext()?.userSettings?.userId),
     null, { timeout });
-  const identity = await page.evaluate(async ({ origin, organizationId, expectedUpn }) => {
+  const identity = await page.evaluate(async ({ origin, organizationId, expectedUpn, expectedActorId }) => {
     const globalContext = window.Xrm.Utility.getGlobalContext();
     const normalize = value => String(value || "").replace(/[{}]/g, "").toLowerCase();
     const whoResponse = await fetch(`${origin}/api/data/v9.2/WhoAmI`, { credentials: "same-origin" });
@@ -18,6 +18,7 @@ async function verifyBrowserIdentity(page, approval, timeout = 30_000) {
       target: globalContext.getClientUrl().replace(/\/$/, "") === origin &&
         normalize(who.OrganizationId) === normalize(organizationId),
       account: normalize(who.UserId) === normalize(globalContext.userSettings.userId) &&
+        (!expectedActorId || normalize(who.UserId) === normalize(expectedActorId)) &&
         String(user.internalemailaddress || "").toLowerCase() === expectedUpn.toLowerCase() &&
         user.isdisabled === false && user.accessmode === 0,
       bsoRole: roles.includes("BSO-RS Support - BSO"),
@@ -28,6 +29,10 @@ async function verifyBrowserIdentity(page, approval, timeout = 30_000) {
   if (!identity.target) throw new Error("UAT_ORGANIZATION_MISMATCH");
   if (!identity.account) throw new Error("UAT_BSO_IDENTITY_MISMATCH");
   if (approval.identityScope === "BSO_ONLY") {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      approval.expectedActorId || "")) {
+      throw new Error("UAT_EXPECTED_BSO_ACTOR_REQUIRED");
+    }
     if (identity.elevated) throw new Error("UAT_ELEVATED_IDENTITY_NOT_BSO_ACCEPTANCE");
     if (!identity.bsoRole) throw new Error("UAT_REQUIRED_BSO_ROLE_MISSING");
   }

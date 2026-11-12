@@ -4,6 +4,7 @@ const path = require("node:path");
 const { createHash } = require("node:crypto");
 const { authDirectory, runDirectory } = require("./local-settings.cjs");
 const { verifyBrowserIdentity } = require("./browser-identity.cjs");
+const { validateSyntheticIsolationProof } = require("./independent-authorization.cjs");
 const { classifyRequest, matchesCandidateActionResponse } = require("./request-classification.cjs");
 const {
   captureFailure, refreshFailureEvidence, sanitizeBlockedRequest
@@ -19,8 +20,10 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
   const report = {
     preparation: "READY",
     ownerMutationApproval: approval.approved ? "PRESENT" : "MISSING",
+    bsoIdentity: "NOT RUN",
+    scopedV2Proof: "NOT RUN",
     lifecycle: "NOT RUN",
-    acceptanceScope: "ELEVATED_FUNCTIONAL_ONLY_NOT_CLEAN_BSO_SECURITY",
+    acceptanceScope: "BSO_ONLY_SCOPED_V2_PROOF_REQUIRED",
     scopedReadFailure: null,
     baselineCounts: null,
     counts: null,
@@ -60,6 +63,7 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
   let references;
   let schedule;
   let evidence;
+  let syntheticProofObservation;
   const save = () => { if (journal) journal.save(); writeReport(); };
   const assertNoUnexpected = () => requireCondition(!routeFailure &&
     report.forbiddenRequestsBlocked === 0, routeFailure || "UAT_UNEXPECTED_MUTATION");
@@ -75,18 +79,13 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
   };
 
   try {
+    requireCondition(approval.identityScope === "BSO_ONLY" &&
+      approval.independentAuthorizationRecord,
+    "UAT_BSO_ONLY_INDEPENDENT_AUTHORIZATION_REQUIRED");
     requireCondition(testInfo.config.workers === 1 && testInfo.project.retries === 0 &&
       testInfo.project.repeatEach === 1 && testInfo.retry === 0 && testInfo.repeatEachIndex === 0,
     "UAT_ONE_SHOT_RUNNER_CONFIGURATION_REQUIRED");
-    if (!record) {
-      phase = "one-shot-claim-acquisition";
-      journal = reserveOneShot(approval, {
-        workers: testInfo.config.workers, retries: testInfo.project.retries,
-        repeatEach: testInfo.project.repeatEach, retry: testInfo.retry,
-        repeatEachIndex: testInfo.repeatEachIndex
-      });
-      record = journal.record;
-    }
+    requireCondition(record, "UAT_BSO_ONLY_INDEPENDENT_AUTHORIZATION_REQUIRED");
     phase = "browser-initialization";
     context = await chromium.launchPersistentContext(authDirectory, {
       headless: false, viewport: { width: 1440, height: 1000 },
@@ -120,6 +119,7 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
           const index = record.attempts.length;
           requireCondition(body.ActionType === ACTIONS[index] && body.ActionType === armed.action &&
             GUID.test(body.CorrelationId) &&
+            body.CorrelationId.toLowerCase() !== record.syntheticProof.correlationId &&
             !record.attempts.some(attempt => attempt.correlation === body.CorrelationId.toLowerCase()),
           "UAT_OPERATION_SEQUENCE_MISMATCH");
           const expected = { ...armed.inputs, ActionType: armed.action, CorrelationId: body.CorrelationId };
@@ -204,7 +204,10 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
     phase = "identity-verification";
     await page.goto(`${approval.origin}/main.aspx?pagetype=apps`, { waitUntil: "domcontentloaded" });
     const identity = await verifyBrowserIdentity(page, approval, 480_000);
-    requireCondition(identity.bsoRole && identity.elevated, "UAT_APPROVED_FUNCTIONAL_IDENTITY_MISMATCH");
+    requireCondition(identity.bsoRole && !identity.elevated &&
+      identity.userId === approval.expectedActorId.toLowerCase(),
+    "UAT_APPROVED_BSO_IDENTITY_MISMATCH");
+    report.bsoIdentity = "PASS";
     report.exactOrganizationAndAccount = "VERIFIED";
     assertNoUnexpected();
 
@@ -215,6 +218,14 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
       const rows = await readRows(page, approval.origin, query.collection, query.columns, query.filter);
       references[key] = approvedReferenceId(key, rows);
     }
+    if (approval.identityScope === "BSO_ONLY") {
+      const binding = approval.lifecycleScope.syntheticIsolation;
+      requireCondition(references.position.toLowerCase() === binding.positionId.toLowerCase() &&
+        references.source.toLowerCase() === binding.sourceId.toLowerCase() &&
+        references.ta.toLowerCase() === binding.taId.toLowerCase() &&
+        references.location.toLowerCase() === binding.locationId.toLowerCase(),
+      "UAT_APPROVED_REFERENCE_PROFILE_BINDING_MISMATCH");
+    }
 
     phase = "synthetic-baseline-readback";
     evidence = await readEvidence(page, approval.origin, record);
@@ -223,6 +234,28 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
     save();
 
     phase = "candidate-console-navigation";
+    const verifierResponse = page.waitForResponse(response => {
+      const request = response.request();
+      const url = new URL(response.url());
+      if (request.method() !== "POST" || url.origin !== approval.origin ||
+          url.pathname !== "/api/data/v9.2/os_sr_cact") return false;
+      try {
+        return request.postDataJSON().ActionType === "VerifySyntheticIsolation";
+      } catch {
+        return false;
+      }
+    }, { timeout: 30_000 }).then(async response => {
+      const requestBody = response.request().postDataJSON();
+      requireCondition(Object.keys(requestBody).sort().join(",") === "ActionType,CorrelationId" &&
+        requestBody.ActionType === "VerifySyntheticIsolation" && GUID.test(requestBody.CorrelationId),
+      "UAT_SYNTHETIC_PROOF_REQUEST_SHAPE_INVALID");
+      requireCondition(response.ok(), "UAT_SYNTHETIC_PROOF_REQUEST_FAILED");
+      const body = await response.json();
+      requireCondition(body.ResultCode === "SyntheticIsolationVerified" &&
+        typeof body.IsolationContract === "string", "UAT_SYNTHETIC_PROOF_RESPONSE_INVALID");
+      return { correlationId: requestBody.CorrelationId, contract: body.IsolationContract };
+    });
+    const observedVerifier = verifierResponse.then(proof => ({ proof }), error => ({ error }));
     await page.goto(approval.appUrl, { waitUntil: "domcontentloaded" });
     await page.getByRole("treeitem", { name: "Candidate Management", exact: true }).click();
     const frame = page.frameLocator('iframe[src*="candidate-console.html"]');
@@ -239,6 +272,12 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
     requireCondition(configuration, "UAT_UNSAFE_CONSOLE_CONFIGURATION");
     await expect(frame.locator("#availability-submit")).toBeDisabled();
     await expect(frame.locator("#create-button")).toBeEnabled();
+    const verifier = await observedVerifier;
+    requireCondition(verifier.proof && !verifier.error, "UAT_SYNTHETIC_PROOF_NOT_OBSERVED");
+    syntheticProofObservation = verifier.proof;
+    validateSyntheticIsolationProof(syntheticProofObservation,
+      approval.independentAuthorizationRecord);
+    report.scopedV2Proof = "VERIFIED";
     const tomorrow = new Date(Date.now() + 7 * 3600000);
     tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
     while ([0, 6].includes(tomorrow.getUTCDay())) tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
@@ -310,7 +349,8 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
         workers: testInfo.config.workers, retries: testInfo.project.retries,
         repeatEach: testInfo.project.repeatEach, retry: testInfo.retry,
         repeatEachIndex: testInfo.repeatEachIndex
-      });
+      }, syntheticProofObservation);
+      report.scopedV2Proof = "PASS";
       requireCondition(record.marker === journal.record.marker &&
         record.candidateName === journal.record.candidateName &&
         record.candidateEmail === journal.record.candidateEmail &&
@@ -377,6 +417,10 @@ test("One owner-approved synthetic Candidate lifecycle", async ({}, testInfo) =>
     save();
   } catch (error) {
     armed = null;
+    if (phase === "identity-verification" && report.bsoIdentity !== "PASS") {
+      report.bsoIdentity = "FAIL";
+    }
+    if (report.scopedV2Proof === "VERIFIED") report.scopedV2Proof = "FAIL";
     report.lifecycle = "FAIL";
     report.scopedReadFailure = scopedReadFailure(error);
     const primaryError = captureFailure(failureState, error, phase, report);

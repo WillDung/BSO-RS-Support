@@ -22,6 +22,7 @@ param(
     [string]$ApprovalEvidencePath,
     [string]$ManagedSolutionArtifactPath,
     [switch]$DevelopmentSourceAheadOfFrozenRelease,
+    [switch]$AssemblyOnlyPatch,
     [string]$PacPath = 'pac'
 )
 
@@ -174,6 +175,25 @@ function Assert-UpdaterInputs {
         $ExpectedHandlerTypeName -cne [string]$script:Manifest.candidateCore.customApiHandlerTypeName -or
         $ExpectedSolutionUniqueName -cne [string]$script:Manifest.solution.uniqueName) {
         Stop-PackageUpdater 'PACKAGE_ARTIFACT_VALIDATION_FAILED'
+    }
+    if ($AssemblyOnlyPatch) {
+        if ($TargetProfile -cne 'DEV' -or
+            [string]::IsNullOrWhiteSpace($ReleaseManifestPath) -or
+            -not (Test-ManifestApiNoChange) -or
+            -not $script:Manifest.PSObject.Properties['patchDeployment']) {
+            Stop-PackageUpdater 'PACKAGE_ASSEMBLY_ONLY_AUTHORIZATION_REQUIRED'
+        }
+        $patch = $script:Manifest.patchDeployment
+        $requiredPatchProperties = @('operation', 'securityMetadataWrites', 'allowedMutations', 'securityBaselineSha256')
+        if (@($requiredPatchProperties | Where-Object { -not $patch.PSObject.Properties[$_] }).Count -gt 0 -or
+            [string]$patch.operation -cne 'EXISTING_PLUGINPACKAGE_ASSEMBLY_REPLACEMENT' -or
+            [int]$patch.securityMetadataWrites -ne 0 -or
+            @($patch.allowedMutations).Count -ne 1 -or
+            [string]$patch.allowedMutations[0] -cne 'EXISTING_PLUGINPACKAGE_CONTENT' -or
+            [string]$patch.securityBaselineSha256 -cnotmatch '^[0-9a-f]{64}$' -or
+            [string]::IsNullOrWhiteSpace($RollbackArtifactPath)) {
+            Stop-PackageUpdater 'PACKAGE_ASSEMBLY_ONLY_AUTHORIZATION_REQUIRED'
+        }
     }
     if ($TargetProfile -ceq 'DEV') {
         $candidate = $script:Manifest.candidateCore
@@ -430,6 +450,14 @@ function Assert-ReconcileJournal {
     if (@($topologyProperties | Where-Object {
         -not $Journal.preflightTopology.PSObject.Properties[$_]
     }).Count -gt 0) {
+        Stop-PackageUpdater 'PACKAGE_DISPATCH_JOURNAL_NOT_RECONCILABLE'
+    }
+    $journalIsPatch = $Journal.PSObject.Properties['assemblyOnlyPatch'] -and [bool]$Journal.assemblyOnlyPatch
+    if ([bool]$AssemblyOnlyPatch -ne [bool]$journalIsPatch -or
+        ($AssemblyOnlyPatch -and
+            (-not $Journal.preflightTopology.PSObject.Properties['securityBaselineSha256'] -or
+                [string]$Journal.preflightTopology.securityBaselineSha256 -cne
+                    [string]$script:Manifest.patchDeployment.securityBaselineSha256))) {
         Stop-PackageUpdater 'PACKAGE_DISPATCH_JOURNAL_NOT_RECONCILABLE'
     }
     $fingerprints = @(
@@ -730,7 +758,7 @@ function Invoke-OneShotDispatchStateMachine {
 
 function Get-SanitizedTopologyPredicates {
     param([Parameter(Mandatory)][object]$Snapshot)
-    [ordered]@{
+    $predicates = [ordered]@{
         oneExistingPackage = [bool]$Snapshot.OneExistingPackage
         expectedPluginTypeSetExact = [bool]$Snapshot.ExpectedPluginTypeSetExact
         packageAssemblyLinked = [bool]$Snapshot.PackageAssemblyLinked
@@ -747,6 +775,11 @@ function Get-SanitizedTopologyPredicates {
         modifiedOnAdvanced = [bool]$Snapshot.ModifiedOnAdvanced
         serverPackageBytesAvailable = [bool]$Snapshot.ServerPackageBytesAvailable
     }
+    if ($AssemblyOnlyPatch) {
+        $predicates.securityBaselineUnchanged = [bool]$Snapshot.SecurityBaselineUnchanged
+        $predicates.securityBaselineSha256 = [string]$Snapshot.SecurityBaselineSha256
+    }
+    $predicates
 }
 
 function Test-SnapshotEquivalent {
@@ -794,6 +827,10 @@ function Test-SnapshotEquivalent {
         'AssemblyVersionUpdated'
     )
     $predicatesValid = @($requiredPredicates | Where-Object { -not [bool]$After.$_ }).Count -eq 0
+    if ($AssemblyOnlyPatch) {
+        $predicatesValid = $predicatesValid -and [bool]$After.SecurityBaselineUnchanged -and
+            [string]$After.SecurityBaselineSha256 -ceq [string]$Before.securityBaselineSha256
+    }
     $identityValid -and $predicatesValid
 }
 
@@ -1287,9 +1324,109 @@ function Get-DevRoleState {
         Stop-PackageUpdater 'PACKAGE_SECURITY_PREFLIGHT_FAILED'
     }
     [pscustomobject]@{
+        RoleId = [string]$roles[0].roleid
         Privileges = Get-LiveRolePrivilegeMap -RoleId ([string]$roles[0].roleid)
         UserAssignmentCount = @($roles[0].systemuserroles_association).Count
         TeamAssignmentCount = @($roles[0].teamroles_association).Count
+    }
+}
+
+function Get-UnchangedSecuritySnapshot {
+    $roles = @(
+        foreach ($name in @('BSO-RS Support - BSO', 'BSO-RS Support - Reference Admin')) {
+            $state = Get-DevRoleState -RoleName $name
+            $metadata = Invoke-DataverseGet -Path "roles($($state.RoleId))?`$select=roleid,name,modifiedon,versionnumber,ismanaged,iscustomizable,_businessunitid_value"
+            $users = @(Get-PagedRows -Path "roles($($state.RoleId))/systemuserroles_association?`$select=systemuserid")
+            $teams = @(Get-PagedRows -Path "roles($($state.RoleId))/teamroles_association?`$select=teamid")
+            [pscustomobject]@{
+                Name = $name
+                State = $state
+                Metadata = $metadata
+                UserIds = @($users | ForEach-Object { ConvertTo-CanonicalGuid $_.systemuserid } | Sort-Object -CaseSensitive)
+                TeamIds = @($teams | ForEach-Object { ConvertTo-CanonicalGuid $_.teamid } | Sort-Object -CaseSensitive)
+            }
+        }
+    )
+    $principalIds = @($roles | ForEach-Object UserIds | Sort-Object -Unique)
+    $principals = @(
+        foreach ($id in $principalIds) {
+            $direct = @(Get-PagedRows -Path "systemusers($id)/systemuserroles_association?`$select=roleid")
+            $teams = @(Get-PagedRows -Path "systemusers($id)/teammembership_association?`$select=teamid")
+            [ordered]@{
+                userId = $id
+                directRoleIds = @($direct | ForEach-Object { ConvertTo-CanonicalGuid $_.roleid } | Sort-Object -CaseSensitive)
+                teams = @(
+                    foreach ($team in @($teams | Sort-Object teamid)) {
+                        $teamId = ConvertTo-CanonicalGuid $team.teamid
+                        $teamRoles = @(Get-PagedRows -Path "teams($teamId)/teamroles_association?`$select=roleid")
+                        [ordered]@{
+                            teamId = $teamId
+                            roleIds = @($teamRoles | ForEach-Object { ConvertTo-CanonicalGuid $_.roleid } | Sort-Object -CaseSensitive)
+                        }
+                    }
+                )
+            }
+        }
+    )
+    $canonical = [ordered]@{
+        roles = @(
+            foreach ($role in $roles) {
+                [ordered]@{
+                    roleId = $role.State.RoleId
+                    name = $role.Name
+                    etag = [string]$role.Metadata.'@odata.etag'
+                    ismanaged = [bool]$role.Metadata.ismanaged
+                    iscustomizable = $role.Metadata.iscustomizable
+                    businessUnitId = [string]$role.Metadata._businessunitid_value
+                    privileges = @($role.State.Privileges.Keys | Sort-Object -CaseSensitive | ForEach-Object {
+                        '{0}|{1}' -f $_, $role.State.Privileges[$_]
+                    })
+                    userIds = $role.UserIds
+                    teamIds = $role.TeamIds
+                }
+            }
+        )
+        principals = $principals
+    }
+    [pscustomobject]@{
+        Sha256 = Get-Sha256FromBytes -Bytes ([Text.Encoding]::UTF8.GetBytes(
+            (ConvertTo-Json -InputObject $canonical -Depth 20 -Compress)))
+        Roles = $roles
+        Canonical = $canonical
+    }
+}
+
+function Assert-UnchangedPatchSecurity {
+    param([Parameter(Mandatory)][object]$Snapshot)
+    if ([string]$Snapshot.Sha256 -cne [string]$script:Manifest.patchDeployment.securityBaselineSha256) {
+        Stop-PackageUpdater 'PACKAGE_SECURITY_BASELINE_CHANGED'
+    }
+    $bso = $Snapshot.Roles[0].State.Privileges
+    $expected = Get-RolePrivilegeMapFromXml `
+        -Path (Join-Path $script:Root 'solutions\Roles\BSO-RS Support - BSO.xml') `
+        -ExpectedRoleName 'BSO-RS Support - BSO'
+    foreach ($name in @('prvCreateos_sr_avq', 'prvReados_sr_avq', 'prvAppendos_sr_avq')) {
+        $expected.Add($name, 'Basic')
+    }
+    foreach ($name in @('prvAppendToos_sr_ta', 'prvAppendToos_sr_loc')) {
+        $expected.Add($name, 'Global')
+    }
+    $referenceExpected = Get-RolePrivilegeMapFromXml `
+        -Path (Join-Path $script:Root 'solutions\Roles\BSO-RS Support - Reference Admin.xml') `
+        -ExpectedRoleName 'BSO-RS Support - Reference Admin'
+    if (-not (Test-RolePrivilegeMapEqual -Expected $expected -Actual $bso) -or
+        -not (Test-RolePrivilegeMapEqual -Expected $referenceExpected `
+            -Actual $Snapshot.Roles[1].State.Privileges)) {
+        Stop-PackageUpdater 'PACKAGE_SECURITY_PREFLIGHT_FAILED'
+    }
+    $contract = Get-Content -LiteralPath (Join-Path $script:Root 'docs\PHASE_3C_API_CONTRACT.json') -Raw |
+        ConvertFrom-Json
+    foreach ($table in $contract.protectedTables) {
+        foreach ($verb in @('Create', 'Write', 'Delete', 'Assign', 'Share')) {
+            if ($bso.ContainsKey("prv$verb$table")) {
+                Stop-PackageUpdater 'PACKAGE_SECURITY_PREFLIGHT_FAILED'
+            }
+        }
     }
 }
 
@@ -1587,33 +1724,45 @@ function Assert-DevelopmentDeploymentBaseline {
         Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED'
     }
 
-    $bsoRoleName = 'BSO-RS Support - BSO'
-    $bsoExpected = Get-RolePrivilegeMapFromXml `
-        -Path (Join-Path $script:Root 'solutions\Roles\BSO-RS Support - BSO.xml') `
-        -ExpectedRoleName $bsoRoleName
-    $bsoActual = Get-DevRoleState -RoleName $bsoRoleName
-    if (-not (Test-RolePrivilegeMapEqual -Expected $bsoExpected -Actual $bsoActual.Privileges)) {
-        Stop-PackageUpdater 'PACKAGE_SECURITY_PREFLIGHT_FAILED'
-    }
-    $protectedWritePrivileges = @(
-        foreach ($table in $contract.protectedTables) {
-            "prvCreate$([string]$table)"
-            "prvWrite$([string]$table)"
+    if ($AssemblyOnlyPatch) {
+        $security = Get-UnchangedSecuritySnapshot
+        Assert-UnchangedPatchSecurity -Snapshot $security
+        if (-not $baseline.PSObject.Properties['SecurityBaselineSha256'] -or
+            [string]$baseline.SecurityBaselineSha256 -cne [string]$security.Sha256) {
+            Stop-PackageUpdater 'PACKAGE_SECURITY_BASELINE_CHANGED'
         }
-    )
-    if (@($bsoActual.Privileges.Keys | Where-Object { $_ -cin $protectedWritePrivileges }).Count -gt 0) {
-        Stop-PackageUpdater 'PACKAGE_SECURITY_PREFLIGHT_FAILED'
-    }
-
-    $referenceRoleName = 'BSO-RS Support - Reference Admin'
-    $referenceExpected = Get-RolePrivilegeMapFromXml `
-        -Path (Join-Path $script:Root 'solutions\Roles\BSO-RS Support - Reference Admin.xml') `
-        -ExpectedRoleName $referenceRoleName
-    $referenceActual = Get-DevRoleState -RoleName $referenceRoleName
-    if (-not (Test-RolePrivilegeMapEqual -Expected $referenceExpected -Actual $referenceActual.Privileges) -or
-        $referenceActual.UserAssignmentCount -ne 0 -or
-        $referenceActual.TeamAssignmentCount -ne 0) {
-        Stop-PackageUpdater 'PACKAGE_SECURITY_PREFLIGHT_FAILED'
+        $PackageSnapshot | Add-Member -NotePropertyName SecurityBaselineSha256 -NotePropertyValue $security.Sha256 -Force
+        $PackageSnapshot | Add-Member -NotePropertyName SecurityBaselineUnchanged -NotePropertyValue $true -Force
+    } else {
+        $bsoRoleName = 'BSO-RS Support - BSO'
+        $bsoExpected = Get-RolePrivilegeMapFromXml `
+            -Path (Join-Path $script:Root 'solutions\Roles\BSO-RS Support - BSO.xml') `
+            -ExpectedRoleName $bsoRoleName
+        $bsoActual = Get-DevRoleState -RoleName $bsoRoleName
+        if (-not (Test-RolePrivilegeMapEqual -Expected $bsoExpected -Actual $bsoActual.Privileges)) {
+            Stop-PackageUpdater 'PACKAGE_SECURITY_PREFLIGHT_FAILED'
+        }
+        $contract = Get-Content -LiteralPath (Join-Path $script:Root 'docs\PHASE_3C_API_CONTRACT.json') -Raw |
+            ConvertFrom-Json
+        $protectedWritePrivileges = @(
+            foreach ($table in $contract.protectedTables) {
+                "prvCreate$([string]$table)"
+                "prvWrite$([string]$table)"
+            }
+        )
+        if (@($bsoActual.Privileges.Keys | Where-Object { $_ -cin $protectedWritePrivileges }).Count -gt 0) {
+            Stop-PackageUpdater 'PACKAGE_SECURITY_PREFLIGHT_FAILED'
+        }
+        $referenceRoleName = 'BSO-RS Support - Reference Admin'
+        $referenceExpected = Get-RolePrivilegeMapFromXml `
+            -Path (Join-Path $script:Root 'solutions\Roles\BSO-RS Support - Reference Admin.xml') `
+            -ExpectedRoleName $referenceRoleName
+        $referenceActual = Get-DevRoleState -RoleName $referenceRoleName
+        if (-not (Test-RolePrivilegeMapEqual -Expected $referenceExpected -Actual $referenceActual.Privileges) -or
+            $referenceActual.UserAssignmentCount -ne 0 -or
+            $referenceActual.TeamAssignmentCount -ne 0) {
+            Stop-PackageUpdater 'PACKAGE_SECURITY_PREFLIGHT_FAILED'
+        }
     }
 
     [pscustomobject]@{
@@ -1637,7 +1786,10 @@ function Assert-DevelopmentDeploymentBaseline {
         BsoRoleDefinitionUnchanged = $true
         BsoProtectedDirectCreateWriteAbsent = $true
         ReferenceAdminRoleDefinitionUnchanged = $true
-        ReferenceAdminRoleUnassigned = $true
+        ReferenceAdminRoleUnassigned = if ($AssemblyOnlyPatch) {
+            $security.Roles[1].UserIds.Count -eq 0 -and $security.Roles[1].TeamIds.Count -eq 0
+        } else { $true }
+        SecurityBaselineUnchanged = [bool]$AssemblyOnlyPatch
     }
 }
 
@@ -1664,6 +1816,20 @@ function Invoke-PacPluginPush {
         [Parameter(Mandatory)][string]$Executable,
         [Parameter(Mandatory)][string[]]$Arguments
     )
+    if ($AssemblyOnlyPatch) {
+        $packageId = (Get-Content -LiteralPath $ExpectedDevelopmentBaselinePath -Raw | ConvertFrom-Json).Package.pluginpackageid
+        $allowed = New-PacPluginPushArguments `
+            -NormalizedOrganizationUrl (ConvertTo-NormalizedOrganizationUrl $OrganizationUrl) `
+            -ExistingPackageId $packageId -PackageFile $ArtifactPath
+        if ($Arguments.Count -ne $allowed.Count -or
+            @(
+                for ($i = 0; $i -lt $allowed.Count; $i++) {
+                    if ($Arguments[$i] -cne $allowed[$i]) { $i }
+                }
+            ).Count -gt 0) {
+            Stop-PackageUpdater 'PACKAGE_SECURITY_METADATA_WRITE_PROHIBITED'
+        }
+    }
     $path = Get-PacExecutablePath -Executable $Executable
     $start = [Diagnostics.ProcessStartInfo]::new()
     $start.FileName = $path
@@ -1841,6 +2007,12 @@ function Invoke-PackageUpdaterMain {
             Stop-PackageUpdater 'PACKAGE_IDENTITY_AMBIGUOUS'
         }
         $snapshot = Get-TopologySnapshot -PackageRow $package -PackageCountBefore ([int]$journal.preflightTopology.PackageCount) -Before $journal.preflightTopology
+        if ($AssemblyOnlyPatch) {
+            $security = Get-UnchangedSecuritySnapshot
+            Assert-UnchangedPatchSecurity -Snapshot $security
+            $snapshot | Add-Member -NotePropertyName SecurityBaselineSha256 -NotePropertyValue $security.Sha256
+            $snapshot | Add-Member -NotePropertyName SecurityBaselineUnchanged -NotePropertyValue $true
+        }
         $predicates = Get-SanitizedTopologyPredicates -Snapshot $snapshot
         $journal.reconciliation = $predicates
         $journal.finalClassification = 'READ_ONLY_RECONCILIATION_COMPLETE_OUTCOME_STILL_AMBIGUOUS'
@@ -1882,6 +2054,17 @@ function Invoke-PackageUpdaterMain {
         packageCount = $before.PackageCount
         predicates = Get-SanitizedTopologyPredicates -Snapshot $before
     }
+    if ($AssemblyOnlyPatch) {
+        $journal.preflightTopology.securityBaselineSha256 = $before.SecurityBaselineSha256
+        $journal.assemblyOnlyPatch = $true
+        $fresh = Invoke-DataverseGet -Path "pluginpackages($($before.PackageId))?`$select=pluginpackageid,modifiedon"
+        if (-not (Test-PackageModifiedOnMatchesBaseline -CurrentModifiedOn $fresh.modifiedon `
+                -BaselineModifiedOn $before.ModifiedOn) -or
+            (Get-FileHash -LiteralPath $ArtifactPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne $artifact.Sha256) {
+            Stop-PackageUpdater 'PACKAGE_MODIFIED_SINCE_BASELINE'
+        }
+        Assert-UnchangedPatchSecurity -Snapshot (Get-UnchangedSecuritySnapshot)
+    }
 
     $arguments = New-PacPluginPushArguments `
         -NormalizedOrganizationUrl (ConvertTo-NormalizedOrganizationUrl -Value $OrganizationUrl) `
@@ -1891,7 +2074,14 @@ function Invoke-PackageUpdaterMain {
         -Reconcile {
             $afterRows = @(Get-PagedRows -Path "pluginpackages?`$select=pluginpackageid,name,uniquename,version,modifiedon&`$filter=uniquename eq '$ExpectedPackageUniqueName'")
             $afterPackage = Resolve-PackageMatch -Rows $afterRows -UniqueName $ExpectedPackageUniqueName
-            Get-TopologySnapshot -PackageRow $afterPackage -PackageCountBefore $before.PackageCount -Before $before
+            $after = Get-TopologySnapshot -PackageRow $afterPackage -PackageCountBefore $before.PackageCount -Before $before
+            if ($AssemblyOnlyPatch) {
+                $security = Get-UnchangedSecuritySnapshot
+                Assert-UnchangedPatchSecurity -Snapshot $security
+                $after | Add-Member -NotePropertyName SecurityBaselineSha256 -NotePropertyValue $security.Sha256
+                $after | Add-Member -NotePropertyName SecurityBaselineUnchanged -NotePropertyValue $true
+            }
+            $after
         }
     if ($state.Result -ceq 'DEPLOYMENT_CONFIRMED') {
         $state | Add-Member -NotePropertyName Topology -NotePropertyValue (Get-Content -LiteralPath $JournalPath -Raw | ConvertFrom-Json).reconciliation

@@ -1,8 +1,51 @@
 {
   "manifestVersion": 1,
-  "status": "VERSIONED_CANDIDATE_ARTIFACT_VALIDATED_DEPLOYMENT_BLOCKED",
+  "status": "VERSIONED_CANDIDATE_ASSEMBLY_ONLY_PATCH_DEPLOYMENT_CONFIRMED",
   "createdOn": "2026-11-12",
   "scope": "Candidate Core plug-in package update only; no Custom API, Console, guard, role, Calendar, or business-data changes.",
+  "patchDeployment": {
+    "operation": "EXISTING_PLUGINPACKAGE_ASSEMBLY_REPLACEMENT",
+    "securityMetadataWrites": 0,
+    "allowedMutations": ["EXISTING_PLUGINPACKAGE_CONTENT"],
+    "securityBaselineSha256": "1cb88bf132899c6feec4101bc1290acfbaaa25a0161d8c36a628c55efaa2e26c",
+    "securityClassification": "Unchanged shared-environment baseline, not package payload or projection-patch dependency. Runtime scope/owner checks and platform authorization remain mandatory.",
+    "bsoPrivilegeCount": 65,
+    "bsoAdditionalPrivileges": [
+      {"name": "prvCreateos_sr_avq", "depth": "Basic"},
+      {"name": "prvReados_sr_avq", "depth": "Basic"},
+      {"name": "prvAppendos_sr_avq", "depth": "Basic"},
+      {"name": "prvAppendToos_sr_ta", "depth": "Global"},
+      {"name": "prvAppendToos_sr_loc", "depth": "Global"}
+    ],
+    "additionalPrivilegeEvidence": "./P0_SLICE_2A_DEV_PROVISIONING_REPORT.md",
+    "referenceAdminPrivilegeCount": 20,
+    "referenceAdminUserAssignments": 1,
+    "referenceAdminTeamAssignments": 0,
+    "assignmentIdentityRecordedInExternalBaseline": true,
+    "ordinarySecurityPreflightUnchanged": true,
+    "atomicConditionalPushSupported": false,
+    "conflictControl": "Exact installed version/topology/baseline validation and fresh package ModifiedOn check; no claim of atomic If-Match for PAC push.",
+    "maximumDispatchCount": 1,
+    "automaticRetries": 0,
+    "deploymentVerification": {
+      "verifiedOn": "2026-11-12",
+      "classification": "DEPLOYMENT_CONFIRMED",
+      "packagePushDispatchCount": 1,
+      "retryCount": 0,
+      "installedAssemblyVersion": "1.0.8.0",
+      "registeredPackageRecordVersion": "1.0.0",
+      "componentIdentitiesUnchanged": true,
+      "customApiMetadataSha256": "642c802293f311a259f6d51879b266fdddb1ae5b0f7cd695beeb8a9133f366a5",
+      "profileFieldMaskUnchanged": true,
+      "securityBaselineUnchanged": true,
+      "securityBaselineSha256": "1cb88bf132899c6feec4101bc1290acfbaaa25a0161d8c36a628c55efaa2e26c",
+      "solutionMembershipUnchanged": true,
+      "rollbackArtifactRevalidated": true,
+      "consoleWebResourcesChanged": false,
+      "candidateBusinessWrites": 0,
+      "ownerUiTesting": "NOT_RUN"
+    }
+  },
   "solution": {
     "uniqueName": "os_sr_bso_rs_support",
     "version": "1.0.0.1",
@@ -131,8 +174,9 @@
   "releaseTooling": {
     "pacCliVersion": "2.13.1+g251dee1",
     "packageUpdater": "../scripts/Update-BsoRsCandidatePluginPackage.ps1",
-    "packageUpdaterSha256": "759e03a24289f4ae34d305abd4e782609d093219c55f3cbacc17bac263621e53",
+    "packageUpdaterSha256": "7886997e972af93a25b39800119e87b0329cf5368f44e1bae2a1683d49b03f7d",
     "focusedRegressionTest": "../tests/BsoRsCandidatePackageUpdater.Tests.ps1",
-    "focusedRegressionTestSha256": "07d13980ecf28bf81bae93ff44924af719118d644dc96f9e31940791f4130b93"
+    "focusedRegressionTestSha256": "95a74ed6c2bdbd99aa5ccd9f577a07bf8066989c0231f82e57800d6a47981346",
+    "focusedRegressionAssertionsPassed": 52
   }
 }

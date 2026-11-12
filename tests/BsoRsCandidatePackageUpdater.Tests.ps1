@@ -463,6 +463,102 @@ Assert-Test ($updaterSource.Contains("RequestedMode -eq 'Preflight' -and `$Targe
     -not $preflightBlock.Contains('Invoke-OneShotDispatchStateMachine')) `
     'DEV preflight compares exact recorded topology and roles without a 62-step gate or dispatch path'
 
+$patchManifest = Get-Content -LiteralPath (Join-Path $root 'docs\CANDIDATE_CORE_1.0.8_RELEASE_MANIFEST.json') -Raw |
+    ConvertFrom-Json
+$script:Manifest = $patchManifest
+$script:Manifest.patchDeployment.securityBaselineSha256 = 'a' * 64
+$AssemblyOnlyPatch = $true
+$patchPrivileges = [Collections.Generic.Dictionary[string, string]]::new([StringComparer]::Ordinal)
+foreach ($key in $expectedBsoPrivileges.Keys) { $patchPrivileges.Add($key, $expectedBsoPrivileges[$key]) }
+foreach ($key in @('prvCreateos_sr_avq', 'prvReados_sr_avq', 'prvAppendos_sr_avq')) {
+    $patchPrivileges.Add($key, 'Basic')
+}
+foreach ($key in @('prvAppendToos_sr_ta', 'prvAppendToos_sr_loc')) { $patchPrivileges.Add($key, 'Global') }
+$patchSecurity = [pscustomobject]@{
+    Sha256 = 'a' * 64
+    Roles = @(
+        [pscustomobject]@{ State = [pscustomobject]@{ Privileges = $patchPrivileges } },
+        [pscustomobject]@{ State = [pscustomobject]@{ Privileges = $expectedReferencePrivileges } }
+    )
+}
+Assert-UnchangedPatchSecurity -Snapshot $patchSecurity
+Assert-Test ($patchPrivileges.Count -eq 65) 'Patch admits only the exact approved Availability privilege delta'
+$patchSecurity.Sha256 = 'b' * 64
+$failure = $null
+try { Assert-UnchangedPatchSecurity -Snapshot $patchSecurity } catch { $failure = $_.Exception.Message }
+Assert-Test ($failure -ceq 'PACKAGE_SECURITY_BASELINE_CHANGED') 'Patch rejects role or principal baseline fingerprint drift'
+$patchSecurity.Sha256 = 'a' * 64
+$patchPrivileges['prvAppendToos_sr_loc'] = 'Basic'
+$failure = $null
+try { Assert-UnchangedPatchSecurity -Snapshot $patchSecurity } catch { $failure = $_.Exception.Message }
+Assert-Test ($failure -ceq 'PACKAGE_SECURITY_PREFLIGHT_FAILED') 'Patch rejects Availability privilege-depth changes'
+$patchPrivileges['prvAppendToos_sr_loc'] = 'Global'
+$patchPrivileges.Add('prvWriteos_sr_cand', 'Basic')
+$failure = $null
+try { Assert-UnchangedPatchSecurity -Snapshot $patchSecurity } catch { $failure = $_.Exception.Message }
+Assert-Test ($failure -ceq 'PACKAGE_SECURITY_PREFLIGHT_FAILED') 'Patch rejects direct Candidate writes'
+$patchPrivileges.Remove('prvWriteos_sr_cand') | Out-Null
+
+$beforeJournal | Add-Member -NotePropertyName securityBaselineSha256 -NotePropertyValue ('a' * 64)
+$after | Add-Member -NotePropertyName SecurityBaselineSha256 -NotePropertyValue ('a' * 64)
+$after | Add-Member -NotePropertyName SecurityBaselineUnchanged -NotePropertyValue $true
+Assert-Test (Test-SnapshotEquivalent -Before $beforeJournal -After $after) 'Patch reconciliation retains exact security fingerprint'
+$after.SecurityBaselineSha256 = 'b' * 64
+Assert-Test (-not (Test-SnapshotEquivalent -Before $beforeJournal -After $after)) 'Patch reconciliation rejects security assignment drift'
+$after.SecurityBaselineSha256 = 'a' * 64
+$after.SecurityBaselineUnchanged = $false
+Assert-Test (-not (Test-SnapshotEquivalent -Before $beforeJournal -After $after)) 'Patch cannot confirm without unchanged-security proof'
+$after.SecurityBaselineUnchanged = $true
+
+$script:Manifest = Get-Content -LiteralPath (Join-Path $root 'docs\RELEASE_INPUT_MANIFEST.json') -Raw | ConvertFrom-Json
+$failure = $null
+try { Assert-ReconcileJournal -Journal $savedAmbiguous } catch { $failure = $_.Exception.Message }
+Assert-Test ($failure -ceq 'PACKAGE_DISPATCH_JOURNAL_NOT_RECONCILABLE') 'Patch cannot reinterpret an ordinary dispatch journal'
+$patchJournal = $savedAmbiguous | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+$patchJournal | Add-Member -NotePropertyName assemblyOnlyPatch -NotePropertyValue $true
+$patchJournal.preflightTopology | Add-Member -NotePropertyName securityBaselineSha256 -NotePropertyValue ('a' * 64)
+$script:Manifest | Add-Member -NotePropertyName patchDeployment -NotePropertyValue $patchManifest.patchDeployment -Force
+Assert-ReconcileJournal -Journal $patchJournal
+Assert-Test ($patchJournal.dispatchCount -eq 1) 'Patch journal remains target/artifact/security bound with one dispatch'
+$AssemblyOnlyPatch = $false
+$failure = $null
+try { Assert-ReconcileJournal -Journal $patchJournal } catch { $failure = $_.Exception.Message }
+Assert-Test ($failure -ceq 'PACKAGE_DISPATCH_JOURNAL_NOT_RECONCILABLE') 'Ordinary mode cannot reinterpret a patch journal'
+
+$AssemblyOnlyPatch = $true
+$ExpectedDevelopmentBaselinePath = Join-Path $temporaryRoot 'patch-baseline.json'
+[IO.File]::WriteAllText($ExpectedDevelopmentBaselinePath, (
+    ConvertTo-Json @{ Package = @{ pluginpackageid = $packageId } }))
+$failure = $null
+try {
+    Invoke-PacPluginPush -Executable 'must-not-start' -Arguments @('admin', 'assign-user') | Out-Null
+} catch { $failure = $_.Exception.Message }
+Assert-Test ($failure -ceq 'PACKAGE_SECURITY_METADATA_WRITE_PROHIBITED') 'Patch rejects security-write PAC commands before starting a process'
+
+$TargetProfile = 'DEV'
+$DevelopmentSourceAheadOfFrozenRelease = $true
+$ExpectedEnvironmentDisplayName = 'VN LMV IT'
+$ExpectedAssemblySha256 = $manifest.candidateCore.embeddedAssemblySha256
+$ReleaseManifestPath = 'synthetic-manifest.json'
+$RollbackArtifactPath = 'synthetic-rollback.nupkg'
+$script:Manifest | Add-Member -NotePropertyName customApi -NotePropertyValue $patchManifest.customApi -Force
+Assert-UpdaterInputs -RequestedMode Plan
+Assert-Test $true 'Explicit DEV no-change manifest and rollback authorize the narrow patch path'
+$script:Manifest.patchDeployment.securityMetadataWrites = 1
+$failure = $null
+try { Assert-UpdaterInputs -RequestedMode Plan } catch { $failure = $_.Exception.Message }
+Assert-Test ($failure -ceq 'PACKAGE_ASSEMBLY_ONLY_AUTHORIZATION_REQUIRED') 'Patch manifest cannot authorize security metadata writes'
+$script:Manifest.patchDeployment.securityMetadataWrites = 0
+$script:Manifest.patchDeployment.allowedMutations = @('EXISTING_PLUGINPACKAGE_CONTENT', 'ROLE')
+$failure = $null
+try { Assert-UpdaterInputs -RequestedMode Plan } catch { $failure = $_.Exception.Message }
+Assert-Test ($failure -ceq 'PACKAGE_ASSEMBLY_ONLY_AUTHORIZATION_REQUIRED') 'Patch manifest cannot authorize additional mutation types'
+$script:Manifest.patchDeployment.allowedMutations = @('EXISTING_PLUGINPACKAGE_CONTENT')
+$RollbackArtifactPath = ''
+$failure = $null
+try { Assert-UpdaterInputs -RequestedMode Plan } catch { $failure = $_.Exception.Message }
+Assert-Test ($failure -ceq 'PACKAGE_ASSEMBLY_ONLY_AUTHORIZATION_REQUIRED') 'Patch authorization requires the rollback artifact even in Plan'
+
 "BsoRsCandidatePackageUpdater.Tests.ps1: $passed assertions passed."
 } finally {
     if (Test-Path -LiteralPath $temporaryRoot -PathType Container) {

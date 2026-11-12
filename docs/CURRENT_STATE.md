@@ -1,5 +1,13 @@
 # Current State
 
+## SingleUserDev lifecycle invocation stopped after CreateCandidate (2026-11-12)
+
+**Status: CreateCandidate committed and verified; remaining lifecycle NOT RUN.** The one-shot `singleuserdev-uat-runner-02` invocation verified the authenticated owner, organization, fresh SingleUserDev v4 proof, approved references, and an empty scoped baseline. It then reserved and forwarded exactly one `CreateCandidate` operation. The runner did not capture the operation response or HTTP status: while the attempt outcome was still unknown, it failed closed on an unclassified Microsoft telemetry `POST /OneCollector/1.0/` (`XMLHttpRequest`) and terminated with `UAT_UNKNOWN_REQUEST_BLOCKED`. The append-only journal is terminal `STOPPED_NO_RETRY_RECONCILE_ONLY`, with one reserved CreateCandidate and no retry.
+
+A fresh v4 proof and approved `ReadScopedCandidates` read resolved the Create outcome: exactly one row matched the approved synthetic name/email and Create correlation, with the expected Position, Source, and TA references. Candidate Number is `CAND-00001067`; status is Need Call Candidate. Scoped `ReadScopedCalls`, `ReadScopedSchedules`, and `ReadScopedHistory` each returned zero rows. The v4 scoped contract does not expose operation receipts; no direct receipt read was attempted. Reload persistence was not tested.
+
+No Call Answered, Proceed to Scheduling, manual Schedule, Status History, email, or Outlook operation was dispatched. Calendar remains disabled. Do not retry runner-02 or manually continue this terminal attempt. The existing successor path requires zero dispatches and does not authorize succession after this committed Create. **Remaining blocker:** a supported, explicitly approved continuation mechanism that preserves this exact synthetic scope and the already-committed Create is required before any later lifecycle mutation.
+
 ## Unified Playwright authentication routing (2026-11-12)
 
 **Status: shared callback routing implemented and both read-only browser modes passed; no Candidate writes.** The passing authentication-only runner loaded the callback origin from the protected local lifecycle descriptor. The lifecycle runner instead selected the callback from the independent authorization scope, falling back to the organization origin when the callback property was absent. Runner-02 has no scope callback property. This mismatch caused the strict CRM-to-organization handoff predicate to reject the root navigation POST before WhoAmI; it was not evidence that every root POST is an OpenID callback.

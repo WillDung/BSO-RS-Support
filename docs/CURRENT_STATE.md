@@ -1,5 +1,9 @@
 # Current State
 
+## SingleUserDev lifecycle execution attempt (2026-11-12)
+
+**Status: BLOCKED BEFORE CLAIM; zero Candidate writes.** The existing `singleuserdev-uat-runner-02` authorization was present, unclaimed, and valid through `2026-11-12T10:00:38.103Z`. The existing lifecycle runner was invoked once with its no-retry configuration. During identity verification it blocked an `UNKNOWN_REQUEST_BLOCKED` document-navigation `POST /` on the sanitized organization host. The owner identity check failed; fresh v4 proof, reference readback, scoped Candidate baseline, and authorization claim were not reached. The claim journal remains absent, and no Candidate, Call, Schedule, History, or Receipt operation was dispatched. The request evidence does not establish the POST's content type or source, so it remains unclassified. No router, backend, package, role, Calendar, or profile changes were made. Do not retry this authorization or classify/allow the request without additional safe evidence.
+
 ## SingleUserDev expired-slot reconciliation (2026-11-12)
 
 **Status: successor authorization created; Candidate lifecycle not dispatched.** Read-only reconciliation verified the exact owner and organization through browser WhoAmI and a fresh v4 proof, all four profile-bound DEV references as unique and active, and zero scoped Candidate, Call, History, or Schedule rows. The original `singleuserdev-uat-runner-01` authorization was expired, its marker-specific slot hash matched the immutable authorization, and its attempt journal was absent (unclaimed; zero dispatches and no business correlations). The prior failed Create correlation remains excluded. The bounded owner-scoped API does not expose Receipts; no direct or elevated receipt query was used.

@@ -14,6 +14,84 @@
     "targetUrl": null,
     "targetIdentityVerifiedForDeployment": false
   },
+  "readOnlyTargetReconciliation": {
+    "observedOn": "2026-11-16",
+    "targetLabel": "VN LMV IT",
+    "userSpecifiedTargetMatchedByReadOnlyIdentityCheck": true,
+    "targetUrlOrOrganizationIdRecorded": false,
+    "readOnlyEvidence": [
+      "PAC connection and Dataverse organization name matched the user-specified target.",
+      "A read-only unmanaged solution export was unpacked for metadata and Console baseline inspection.",
+      "No solution import, package push, metadata/configuration write, role change, or business-data write was performed."
+    ],
+    "liveCandidateCore": {
+      "packageUniqueName": "os_sr_cact_pkg",
+      "packageRecordVersion": "1.0.0",
+      "packageBackedAssemblyVersion": "1.0.8.0",
+      "customApiUniqueName": "os_sr_cact",
+      "handlerTypeName": "os_sr_cact.ApplyCandidateAction",
+      "handlerBindingReconciledToPackageAssembly": true,
+      "executePrivilege": "prvReados_sr_cand",
+      "currentResponseProperties": [
+        "CallLogId",
+        "CurrentStatus",
+        "IsolationContract",
+        "PreviousStatus",
+        "ResultCode",
+        "ScopedData",
+        "StatusHistoryId"
+      ],
+      "createdCandidateIdPresent": false,
+      "candidateNumberPresent": false
+    },
+    "liveConsole": {
+      "mode": "DEV",
+      "candidateCoreEnabled": true,
+      "syntheticDataOnly": true,
+      "devDirectWriteFallbackEnabled": false,
+      "diagnosticsMode": "OFF",
+      "candidateOperationMode": "SingleUserDev",
+      "normalCreateEnabled": false,
+      "resourceSha256": {
+        "candidate-console-environment.js": "21ddcd925916f2bf56b005335aa05ceaec002dba4f79690688cb14a8a67f979b",
+        "candidate-console-policy.js": "8f9308f512fde32c4059963b3559ca788b766b5895cb46989c0f48a7e983c684",
+        "candidate-console.css": "6681994a0d57e46ed1b3f0be291556fba37be262f822c8b483d31d00f1130fde",
+        "candidate-console.html": "d4f462d7b0881c54c861371b59f90e19a0ba435faec4a73571e8accab90c9120",
+        "candidate-console.js": "658e596dc027a693b77243b0ab1ab64422c5319c8e3f9a1cd961a7c9c7dd871a",
+        "candidate-console-availability.js": "97487ef0c2a6ece4185a2b1d17a76804d9b58535cbeaee3c27b0596fd4ae7921"
+      }
+    },
+    "normalCreateConfiguration": {
+      "environmentVariableSchemaName": "os_sr_ncrcfg",
+      "definitionCount": 0,
+      "activeValueCount": 0,
+      "status": "NOT_CONFIGURED_FAIL_CLOSED",
+      "releaseDefinitionComponentIncluded": false
+    },
+    "auditSettings": {
+      "organizationAuditingEnabled": false,
+      "auditRetentionPeriodDays": 30,
+      "userAccessAuditingEnabled": false,
+      "readAuditingEnabled": false,
+      "sendCuaAuditLogToPurviewEnabled": false,
+      "sqlAuditWriteDisabled": true,
+      "valuesAreObservedConfigurationNotApproval": true
+    },
+    "dlpApplicability": {
+      "policyInventoryRead": true,
+      "onlyEnvironmentsAndExceptEnvironmentsPolicyTypesObserved": true,
+      "targetPolicyApplicabilityResolved": false
+    },
+    "readOnlySolutionExport": {
+      "sha256": "21411fdc6107e9a3abe628149c886eb5e4ce45e8091aa7d0298e19006959426b",
+      "unpackedForInspection": true,
+      "pluginPackageBytesIncluded": false,
+      "releaseOrRollbackPackage": false,
+      "targetIdentifiersStoredInRepository": false
+    },
+    "candidateRecordsReadOrWritten": false,
+    "mutationOperationsPerformed": false
+  },
   "build": {
     "command": "dotnet build .\\solutions\\CandidateCorePackage\\CandidateCore.Package.csproj -c Release -t:Rebuild --no-restore",
     "packageFile": "../solutions/CandidateCorePackage/bin/Release/os_sr_cact_pkg.1.0.9.nupkg",
@@ -83,6 +161,14 @@
       }
     ]
   },
+  "apiSecurityBoundary": {
+    "sourceStatus": "PASS",
+    "liveStatus": "NOT_DEPLOYED",
+    "existingExecutePrivilegeRemains": "prvReados_sr_cand",
+    "normalCreateRequiresEffectivePrivilege": "prvCreateos_sr_cand",
+    "handlerRegistration": "The existing os_sr_cact binding resolves to the package-backed os_sr_cact.ApplyCandidateAction type. Updating os_sr_cact_pkg preserves that handler identity; no new API or plugin-step registration is required.",
+    "readPrivilegeIsNotCreateAuthorization": true
+  },
   "normalCreateAuthorization": {
     "environmentVariableSchemaName": "os_sr_ncrcfg",
     "acceptedValueFormat": "v1|enabled=<true-or-false>|organizationId=<exact-guid>",
@@ -106,16 +192,32 @@
     "allowedOnlyAfterApprovals": true,
     "sequence": [
       "Reconfirm the exact target organization and fresh component/package/handler state.",
+      "Add the platform-generated os_sr_ncrcfg String environment-variable definition to the release solution and configure a target-bound enabled=false value; no value or organization identifier belongs in the source artifact.",
       "Apply the approved Candidate Core 1.0.9 package update.",
       "Add the two Custom API response properties without changing request parameters or execute privilege.",
       "Update only the two listed Console WebResources; publish only those approved resources.",
-      "Configure os_sr_ncrcfg for the exact organization with enabled=false until all gates are independently approved.",
       "Enable NORMAL Create only through a separately authorized decision after the listed controls and least-privilege access are evidenced."
     ],
     "notPrepared": [
-      "No full solution export/import ZIP or target-specific environment configuration was created.",
-      "No environment-variable definition/value, role assignment, or permission grant was created.",
-      "No current-target ETags, resource IDs, rollback snapshot, or dispatch journal were captured for this release."
+      "No combined release/import package was built; the read-only target export is evidence only and does not include PluginPackage bytes.",
+      "The required os_sr_ncrcfg definition and target-bound disabled value are not in the release artifact.",
+      "No write ETags, dispatch journal, or tested rollback package was created."
+    ],
+    "missingComponentDelta": [
+      {
+        "kind": "EnvironmentVariableDefinition",
+        "schemaName": "os_sr_ncrcfg",
+        "type": "String",
+        "status": "NOT_INCLUDED",
+        "reason": "Must be generated through the approved environment-first solution workflow; no metadata/configuration write was authorized."
+      },
+      {
+        "kind": "EnvironmentVariableValue",
+        "schemaName": "os_sr_ncrcfg",
+        "status": "TARGET_CONFIGURATION_NOT_CREATED",
+        "requiredInitialValue": "v1|enabled=false|organizationId=<exact-target-guid>",
+        "reason": "Must be supplied by an authorized environment owner after the definition is included; the value is intentionally not stored."
+      }
     ]
   },
   "organizationalGates": [
@@ -162,7 +264,32 @@
     "packageSha256": "632840178413e40497e450a0cf9664d7d59dee83fdd7a6f836e4046f409cf739",
     "embeddedAssemblySha256": "d2ee192d55092782e582e41f2e4d618db6f8482ae19e7736e481a4e00e12557b",
     "standaloneRollbackSafe": false,
-    "limitation": "Version 1.0.8 does not contain the new NORMAL authorization gate. It must not be restored while the Custom API remains callable under the existing read-only execute privilege. Disabling os_sr_ncrcfg alone does not protect a 1.0.8 handler because that version does not read the setting. No API-access restriction or target-specific rollback procedure has been approved."
+    "status": "INCOMPLETE_SAFE_SEQUENCE_DOCUMENTED_NOT_REHEARSED",
+    "liveBaseline": {
+      "packageBackedAssemblyVersion": "1.0.8.0",
+      "customApiExecutePrivilege": "prvReados_sr_cand",
+      "customApiResponseProperties": [
+        "CallLogId",
+        "CurrentStatus",
+        "IsolationContract",
+        "PreviousStatus",
+        "ResultCode",
+        "ScopedData",
+        "StatusHistoryId"
+      ],
+      "consoleHtmlSha256": "d4f462d7b0881c54c861371b59f90e19a0ba435faec4a73571e8accab90c9120",
+      "consoleJavaScriptSha256": "658e596dc027a693b77243b0ab1ab64422c5319c8e3f9a1cd961a7c9c7dd871a",
+      "readOnlyExportSha256": "21411fdc6107e9a3abe628149c886eb5e4ce45e8091aa7d0298e19006959426b",
+      "targetPackageBytesReadBack": false
+    },
+    "safeSequence": [
+      "For a feature-only rollback after 1.0.9 deployment, set the exact organization-bound os_sr_ncrcfg value to enabled=false and restore only the pre-change Console HTML and JavaScript. Keep the 1.0.9 handler and both additive response properties so the server authorization gate remains in force.",
+      "Do not downgrade to 1.0.8 while os_sr_cact remains executable under prvReados_sr_cand.",
+      "If a 1.0.8 assembly rollback is unavoidable, first change the Custom API execute privilege to prvCreateos_sr_cand and verify the restriction before the single existing-package update. This intentionally blocks callers without effective Candidate Create from all os_sr_cact actions and may interrupt SingleUserDev access; it requires separate change approval.",
+      "Keep the API execute privilege restricted and preserve the additive response properties while 1.0.8 is active. Restore prvReados_sr_cand only after 1.0.9 is redeployed and its configuration, organization binding, and effective-Create gate are verified.",
+      "If the API restriction cannot be approved or verified, retain 1.0.9 with NORMAL Create disabled; do not restore 1.0.8."
+    ],
+    "limitation": "The local 1.0.8 package is hash-pinned and its assembly version matches target readback, but the live package bytes were not read back and no rollback bundle or runtime rehearsal exists. The read-only solution export is not a deployable rollback package."
   },
   "validation": {
     "packageRebuild": "PASS",
@@ -172,7 +299,8 @@
     "candidateCoreEngineAssertions": 253,
     "candidateConsoleRuntimeTests": 26,
     "candidateConsoleStaticChecks": 80,
-    "realDataverseOperations": 0,
+    "readOnlyTargetReconciliation": "COMPLETED_NO_WRITES",
+    "realCandidateWrites": 0,
     "candidateCreationTestExecuted": false
   },
   "reviewedSourceSha256": {

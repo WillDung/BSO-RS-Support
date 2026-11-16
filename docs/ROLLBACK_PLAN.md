@@ -2,6 +2,16 @@
 
 **Status:** `ROLLBACK_PLAN_OFFLINE_READY`; the owner explicitly approved use of the existing LMV BI DEV pre-deployment checkpoint/recovery procedure for the bounded BSO-RS-Support Test rehearsal (`TEST_RECOVERY_PROCEDURE_APPROVED_FOR_BOUNDED_REHEARSAL`). This does not establish a safe bootstrap cleanup path or authorize routine whole-environment restore. No bootstrap import has occurred.
 
+## Candidate Core NORMAL Create 1.0.9 rollback
+
+**Status:** `INCOMPLETE_NOT_DEPLOYED_NOT_REHEARSED`. The 2026-11-16 read-only baseline confirms the package-backed handler is 1.0.8.0, the Custom API execute privilege is `prvReados_sr_cand`, and the API has seven existing response properties. The baseline Console is DEV / SingleUserDev / synthetic-only; its HTML and JavaScript hashes and a read-only Solution export hash are recorded in the [1.0.9 release manifest](CANDIDATE_CORE_NORMAL_CREATE_1.0.9_RELEASE_MANIFEST.json). The export does not contain PluginPackage bytes and is not a deployable rollback package.
+
+If 1.0.9 is ever deployed, the safe feature-only rollback is to set the exact organization-bound `os_sr_ncrcfg` value to `enabled=false`, restore the baseline Console HTML and JavaScript, and retain the 1.0.9 assembly plus both additive API outputs. This leaves the server authorization gate active and fail-closed. Do not remove the response properties while the 1.0.9 handler is active.
+
+A package downgrade to 1.0.8 is not a standalone rollback: that version lacks the NORMAL authorization gate and ignores `os_sr_ncrcfg`. Before any 1.0.8 package update, an independently approved change must restrict `os_sr_cact` execution to `prvCreateos_sr_cand` and verify the restriction. This intentionally blocks callers without effective Candidate Create from all API actions and may interrupt SingleUserDev access. Keep that API restriction and the additive outputs while 1.0.8 is active; restore the read-only execute privilege only after 1.0.9 and its security gate are reinstalled and verified. If that restriction cannot be approved and verified, keep 1.0.9 installed with NORMAL Create disabled instead of downgrading.
+
+The local 1.0.8 package is hash-pinned and its assembly version matches target readback, but live package bytes were not read back, the 1.0.9 rollback sequence has not been rehearsed, and no combined rollback bundle or importable component delta has been built. Do not mark runtime rollback ready until those gaps are closed.
+
 ## Preconditions
 
 Before any Test or Production release, record the approved target, recovery window, restore point, expected data impact, and exact rollback authority. For the bounded Test rehearsal, the owner authorization covers BSO-RS-Support recovery using the existing checkpoint and the current deployment identity's existing privileges. Retain the reviewed managed Solution, package and web-resource hashes, dependency inventory, configuration policy, and a protected deployment journal outside the repository. Validate that any component-scoped recovery method is supported before use.

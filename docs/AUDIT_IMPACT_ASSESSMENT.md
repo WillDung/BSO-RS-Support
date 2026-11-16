@@ -1,6 +1,6 @@
 # Dataverse Audit Impact Assessment
 
-**Status:** Read-only assessment, 19 October 2026. No environment or auditing settings were changed. Findings distinguish verified configuration from assumptions and unknowns.
+**Status:** Read-only assessment, originally 19 October 2026 and refreshed 16 November 2026 for Candidate Core 1.0.9. No environment or auditing settings were changed. Findings distinguish verified configuration from assumptions and unknowns.
 
 ## NORMAL Create Candidate release gate (source-only)
 
@@ -12,9 +12,11 @@ Do not treat plug-in tracing or a successful package build as audit/privacy appr
 
 - The connected environment is **VN LMV IT**, Production-class and explicitly selected for internal IT development. No environment switch occurred.
 - Organization metadata reports `isauditenabled=false`, `auditretentionperiod=30`, and `isuseraccessauditenabled=false`. The 30-day value is current configuration only, not policy approval.
+- Fresh release-gate readback also reports `isreadauditenabled=false`, `issendcuaauditlogtopurviewenabled=false`, and `auditretentionperiodv2` unset. These settings remain observations, not approval or a retention decision.
 - Organization metadata includes `auditsettings` value `IsSqlAuditWriteDisabled=true`; its relationship to Dataverse auditing is **UNKNOWN** pending authoritative interpretation.
-- The BSO-RS-Support Publisher and empty unmanaged Solution exist. A read-only Solution Component query returned no rows; the five tables in the project audit scope are not deployed.
-- No audit table/history contents or business records were accessed.
+- Applicable DLP policy is **UNKNOWN**. Read-only policy inventory showed both `OnlyEnvironments` and `ExceptEnvironments` policy types, but did not expose enough environment-scope evidence to identify the policy governing VN LMV IT.
+- The fresh read-only unmanaged Solution export confirms the BSO-RS-Support solution, project tables, and Console resources are present. Table/column audit flags and their cross-solution effects remain **UNKNOWN**; the export did not include audit history or business records.
+- No audit table/history contents, Candidate rows, or other business records were accessed.
 - Log capacity allocation/consumption, existing table/column audit flags, prior audit-log existence/volume, and table-level auditing for other apps are **UNKNOWN**. The inspected PAC commands expose environment inventory, not capacity reports. Microsoft's Capacity page requires tenant admin, Power Platform admin, Dynamics 365 admin, or delegated permission.
 
 ## Impact Assessment

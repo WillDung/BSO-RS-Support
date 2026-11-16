@@ -1,0 +1,8 @@
+<customapiresponseproperty uniquename="CandidateNumber">
+  <displayname default="CandidateNumber">
+    <label description="CandidateNumber" languagecode="1033" />
+  </displayname>
+  <iscustomizable>1</iscustomizable>
+  <name>os_sr_cact.CandidateNumber</name>
+  <type>10</type>
+</customapiresponseproperty>

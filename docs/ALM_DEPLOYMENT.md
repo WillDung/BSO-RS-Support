@@ -1,5 +1,11 @@
 # ALM and Deployment
 
+## NORMAL Create Candidate 1.0.9 release preparation (not deployed)
+
+The [versioned manifest](CANDIDATE_CORE_NORMAL_CREATE_1.0.9_RELEASE_MANIFEST.json) records the exact source/artifact delta, SHA-256 pins, two additive `os_sr_cact` response properties, the `os_sr_ncrcfg` environment-variable contract, deployment sequence, organizational gates, and 1.0.8 rollback limitation. The package was rebuilt from source with `dotnet build .\solutions\CandidateCorePackage\CandidateCore.Package.csproj -c Release -t:Rebuild --no-restore`; package and embedded assembly hashes and version 1.0.9.0 were verified. The existing Custom API request shape and `prvReados_sr_cand` execute privilege remain unchanged. No full Solution ZIP or target-specific configuration was created.
+
+Deployment readiness is **NO** until an authorized decision-maker closes the audit/retention, privacy/data-minimization, DLP, operations/monitoring, exact-target configuration, least-privilege Create access, and release/change-control gates listed in the manifest. The environment variable value is intentionally absent and must bind the exact target organization; no environment value, role change, or permission grant is included. The existing 1.0.8 package is not a safe standalone rollback because it lacks the new server authorization check; disabling `os_sr_ncrcfg` would not protect a 1.0.8 handler. No package push, solution import, API metadata write, Candidate test creation, or other business-data write occurred.
+
 ## Candidate Console proof diagnostics and cache refresh (2026-11-12)
 
 The owner-reported empty selectors were caused by a genuine fail-closed SingleUserDev proof rejection, not by an empty `ScopedData` response: the verifier returned HTTP 400 `SYNTHETIC_OWNER_REJECTED`, and initialization correctly stopped before reference reads. Source validation identifies a scoped-row ownership mismatch but not the exact row/table. Do not bypass the proof or change row ownership without an authorized reconciliation path.

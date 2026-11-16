@@ -344,6 +344,7 @@ namespace os_sr_cact
         public Guid Id { get; set; }
         public int Status { get; set; }
         public string RowVersion { get; set; } = "";
+        public string CandidateNumber { get; set; } = "";
     }
 
     public sealed class InterviewScheduleState
@@ -366,6 +367,7 @@ namespace os_sr_cact
     {
         public bool Replay { get; set; }
         public Guid CandidateId { get; set; }
+        public string? CandidateNumber { get; set; }
         public int? Previous { get; set; }
         public int Current { get; set; }
         public Guid? CallId { get; set; }
@@ -386,6 +388,7 @@ namespace os_sr_cact
         Receipt? FindReceipt(Guid correlation);
         CandidateState GetCandidate(Guid id);
         Guid CreateCandidate(ActionRequest request);
+        string GetCreatedCandidateNumber(ActionRequest request, Guid id);
         void UpdateCandidate(ActionRequest request, CandidateState candidate, int status);
         Guid CreateCall(ActionRequest request, Guid candidateId);
         Guid CreateHistory(ActionRequest request, Guid candidateId, int previous, int current);
@@ -464,8 +467,12 @@ namespace os_sr_cact
                     throw new OperationError("CORRELATION_CONFLICT");
                 if (request.CandidateId.HasValue && request.CandidateId != receipt.Result.CandidateId)
                     throw new OperationError("CORRELATION_CONFLICT");
-                store.GetCandidate(receipt.Result.CandidateId);
+                var existing = store.GetCandidate(receipt.Result.CandidateId);
+                var candidateNumber = request.Action == "CreateCandidate"
+                    ? RequiredCandidateNumber(existing.CandidateNumber)
+                    : receipt.Result.CandidateNumber;
                 return new ActionResult { Replay = true, CandidateId = receipt.Result.CandidateId,
+                    CandidateNumber = candidateNumber,
                     Previous = receipt.Result.Previous, Current = receipt.Result.Current,
                     CallId = receipt.Result.CallId, HistoryId = receipt.Result.HistoryId };
             }
@@ -473,6 +480,8 @@ namespace os_sr_cact
             if (request.Action == "CreateCandidate")
             {
                 result.CandidateId = store.CreateCandidate(request);
+                result.CandidateNumber = RequiredCandidateNumber(
+                    store.GetCreatedCandidateNumber(request, result.CandidateId));
                 result.Current = ActionRequest.NeedCall;
             }
             else
@@ -543,6 +552,13 @@ namespace os_sr_cact
             }
             store.CreateReceipt(request, result);
             return result;
+        }
+
+        private static string RequiredCandidateNumber(string? candidateNumber)
+        {
+            if (candidateNumber == null || candidateNumber.Trim().Length == 0 || candidateNumber.Length > 100)
+                throw new OperationError("CANDIDATE_NUMBER_UNAVAILABLE");
+            return candidateNumber;
         }
     }
 }

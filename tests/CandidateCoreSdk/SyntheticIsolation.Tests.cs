@@ -129,9 +129,9 @@ internal static partial class Program
         unrelated.ReadProbe(unrelatedJoin);
         unrelated.ReadProbe(new QueryExpression("os_sr_cand"),
             new Entity("os_sr_cand", Guid.NewGuid()) { ["os_sr_cand_nm"] = "Unrelated synthetic fixture" });
-        RejectContains(() => unrelated.OrdinaryCreate(), "SYNTHETIC_PROFILE_REQUIRED");
+        RejectContains(() => unrelated.OrdinaryCreate(), "NORMAL_CREATE_CONFIGURATION_REJECTED");
         Check(unrelated.Writes == 0,
-            "Unscoped ordinary API writes are closed in DEV for callers without an approved profile");
+            "Unscoped NORMAL Create stays closed in DEV without an approved organization configuration");
         var metadataOnly = new IsolationHost { MissingConfiguration = true };
         metadataOnly.ReadProbe(new QueryExpression("systemuser"), new Entity("systemuser", Guid.NewGuid()));
         Check(metadataOnly.ProfileLoads == 0, "Unrelated metadata/system reads do not depend on profile availability");
@@ -238,7 +238,7 @@ internal static partial class Program
         Check(host.Writes == 2, "Forged identity cannot replay a valid receipt");
         host.Input["CandidateName"] = policy.CandidateName;
         host.Input.Remove("SyntheticScopeId");
-        RejectContains(() => host.InvokeAgain(), "SYNTHETIC_SCOPE_REQUIRED");
+        RejectContains(() => host.InvokeAgain(), "NORMAL_CREATE_CONFIGURATION_REJECTED");
         host.Input["SyntheticScopeId"] = Scope;
         host.Input["CorrelationId"] = createCorrelation;
 
@@ -299,7 +299,7 @@ internal static partial class Program
         RejectContains(() => host.InvokeAgain(), "SYNTHETIC_PROFILE_REJECTED");
         host.Input["CandidateName"] = SyntheticIsolation.Parse(IsolationXml).CandidateName;
         host.Input.Remove("SyntheticScopeId");
-        RejectContains(() => host.InvokeAgain(), "SYNTHETIC_SCOPE_REQUIRED");
+        RejectContains(() => host.InvokeAgain(), "NORMAL_CREATE_CONFIGURATION_REJECTED");
         host.Input["SyntheticScopeId"] = Scope;
         host.CallerId = Guid.NewGuid();
         RejectContains(() => host.InvokeAgain(), "SYNTHETIC_ACTOR_REJECTED");

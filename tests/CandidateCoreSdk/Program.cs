@@ -18,6 +18,8 @@ internal static partial class Program
     private static readonly Guid Candidate = Guid.Parse("00000000-0000-0000-0000-000000000002");
     private static readonly Guid Organization = Guid.Parse("00000000-0000-0000-0000-000000000003");
     private static readonly Guid SystemActor = Guid.NewGuid();
+    private static readonly Guid NormalCreatePrivilegeId = Guid.Parse("00000000-0000-0000-0000-000000000005");
+    private static readonly Guid NormalCreatePolicyId = Guid.Parse("00000000-0000-0000-0000-000000000006");
     private static readonly Dictionary<Guid, Entity> Registrations = new Dictionary<Guid, Entity>();
     private static int registrationReads;
     private static EntityReference RegisterImplementation()
@@ -339,11 +341,27 @@ internal static partial class Program
             createWithoutOptionalGuids.Calls == 0 && createWithoutOptionalGuids.Histories == 0 &&
             createWithoutOptionalGuids.Receipt != null,
             "SDK CreateCandidate omits optional GUIDs and uses server-controlled initial status");
+        Check((Guid)createWithoutOptionalGuids.Output["CreatedCandidateId"] ==
+            createWithoutOptionalGuids.CreatedCandidate!.Id &&
+            (string)createWithoutOptionalGuids.Output["CandidateNumber"] == "CAND-00000001",
+            "SDK CreateCandidate returns the verified Candidate ID and generated Candidate Number");
+        var developmentNormalCreate = CreateCandidateHost();
+        developmentNormalCreate.NormalCreatePolicyOrganizationId = DevOrganization;
+        developmentNormalCreate.MainValues["OrganizationId"] = DevOrganization;
+        new ApplyCandidateAction().Execute(developmentNormalCreate);
+        Check(developmentNormalCreate.CreatedCandidates == 1 &&
+            (Guid)developmentNormalCreate.Output["CreatedCandidateId"] ==
+                developmentNormalCreate.CreatedCandidate!.Id,
+            "DEV NORMAL Create uses its exact server authorization gate; scoped SingleUserDev remains separately tested");
         Check(createWithoutOptionalGuids.ServiceOperations.SequenceEqual(new[]
-            { "RetrieveMultiple:os_sr_oprc", "Create:os_sr_cand", "Create:os_sr_oprc" }) &&
+            { "RetrieveMultiple:environmentvariabledefinition", "RetrieveMultiple:environmentvariablevalue",
+                "RetrieveMultiple:privilege", "RetrieveMultiple:os_sr_oprc", "Create:os_sr_cand",
+                "Retrieve:os_sr_cand", "Create:os_sr_oprc" }) &&
             createWithoutOptionalGuids.TraceMessages.Where(message => message.StartsWith("CC_STAGE:", StringComparison.Ordinal))
-                .SequenceEqual(new[] { "CC_STAGE:CC_READ_RECEIPT", "CC_STAGE:CC_CREATE_CANDIDATE", "CC_STAGE:CC_CREATE_RECEIPT" }),
-            "SDK CreateCandidate service-operation sequence and stage markers are exact");
+                .SequenceEqual(new[] { "CC_STAGE:CC_READ_RECEIPT", "CC_STAGE:CC_CREATE_CANDIDATE",
+                    "CC_STAGE:CC_CHECK_PROTECTED_READ_ACCESS", "CC_STAGE:CC_READ_CANDIDATE",
+                    "CC_STAGE:CC_CREATE_RECEIPT" }),
+            "SDK CreateCandidate authorization, readback, storage sequence and stage markers are exact");
         Check(createWithoutOptionalGuids.ServiceFactorySelections.Contains(Actor) &&
             createWithoutOptionalGuids.ServiceFactorySelections.Contains(null) &&
             createWithoutOptionalGuids.CallerProtectedWriteAttempts == 0 &&
@@ -354,6 +372,47 @@ internal static partial class Program
             createWithoutOptionalGuids.CreatedCandidate!.GetAttributeValue<EntityReference>("ownerid").Id == Actor &&
             createWithoutOptionalGuids.TraceMessages.All(message => !message.StartsWith("CC_GUARD_", StringComparison.Ordinal)),
             "Least-privilege caller creates Candidate and Receipt through SYSTEM; Candidate remains caller-owned and Receipt uses default SYSTEM ownership");
+        var createWithReferences = CreateCandidateHost();
+        createWithReferences.Input["PositionId"] = Reference;
+        createWithReferences.Input["CandidateSourceId"] = Reference;
+        createWithReferences.Input["AssignedTaId"] = Reference;
+        createWithReferences.Input["CandidatePhone"] = "+15550101001";
+        createWithReferences.Input["CandidateCvUrl"] = "https://careers.example.invalid/candidate";
+        new ApplyCandidateAction().Execute(createWithReferences);
+        Check(createWithReferences.CreatedCandidate!.GetAttributeValue<EntityReference>("os_sr_cand_pos")?.Id == Reference &&
+            createWithReferences.CreatedCandidate.GetAttributeValue<EntityReference>("os_sr_cand_csrc")?.Id == Reference &&
+            createWithReferences.CreatedCandidate.GetAttributeValue<EntityReference>("os_sr_cand_ta")?.Id == Reference &&
+            createWithReferences.CreatedCandidate.GetAttributeValue<string>("os_sr_cand_phn") == "+15550101001" &&
+            createWithReferences.CreatedCandidate.GetAttributeValue<string>("os_sr_cand_cvurl") ==
+                "https://careers.example.invalid/candidate" &&
+            (Guid)createWithReferences.Output["CreatedCandidateId"] == createWithReferences.CreatedCandidate.Id,
+            "SDK CreateCandidate preserves active selected references and optional profile values through readback");
+        var invalidCreateReadback = CreateCandidateHost();
+        invalidCreateReadback.TamperCreateReadback = true;
+        Reject(() => new ApplyCandidateAction().Execute(invalidCreateReadback),
+            "CANDIDATE_CORE_OPERATION_REJECTED:CREATE_CANDIDATE:CANDIDATE_READBACK:CANDIDATE_CREATE_READBACK_INVALID");
+        Check(invalidCreateReadback.CreatedCandidates == 1 && invalidCreateReadback.Receipt == null,
+            "SDK CreateCandidate readback mismatch aborts before the idempotency Receipt");
+        foreach (var rejected in new[]
+        {
+            (Setup: (Action<Host>)(host => host.NormalCreatePolicyPresent = false),
+                Code: "NORMAL_CREATE_CONFIGURATION_REJECTED"),
+            (Setup: (Action<Host>)(host => host.NormalCreatePolicyEnabled = false),
+                Code: "NORMAL_CREATE_DISABLED"),
+            (Setup: (Action<Host>)(host => host.NormalCreatePolicyOrganizationId = Guid.NewGuid()),
+                Code: "NORMAL_CREATE_ORGANIZATION_REJECTED"),
+            (Setup: (Action<Host>)(host => host.NormalCreatePrivilege = false),
+                Code: "NORMAL_CREATE_PRIVILEGE_REQUIRED")
+        })
+        {
+            var rejectedCreate = CreateCandidateHost();
+            rejected.Setup(rejectedCreate);
+            Reject(() => new ApplyCandidateAction().Execute(rejectedCreate),
+                "CANDIDATE_CORE_OPERATION_REJECTED:CREATE_CANDIDATE:AUTHORIZATION:" + rejected.Code);
+            Check(rejectedCreate.CreatedCandidates == 0 && rejectedCreate.Receipt == null &&
+                !rejectedCreate.ServiceOperations.Any(operation => operation.StartsWith("Create:", StringComparison.Ordinal)),
+                "SDK unauthorized CreateCandidate " + rejected.Code + " performs no mutation");
+        }
         var callerOwnedReceipt = new Entity("os_sr_oprc", Guid.NewGuid())
         {
             ["ownerid"] = new EntityReference("systemuser", Actor)
@@ -370,6 +429,9 @@ internal static partial class Program
         }
         new ApplyCandidateAction().Execute(createWithoutOptionalGuids);
         Check((string)createWithoutOptionalGuids.Output["ResultCode"] == "DuplicateReplay" &&
+            (Guid)createWithoutOptionalGuids.Output["CreatedCandidateId"] ==
+                createWithoutOptionalGuids.CreatedCandidate!.Id &&
+            (string)createWithoutOptionalGuids.Output["CandidateNumber"] == "CAND-00000001" &&
             createWithoutOptionalGuids.CreatedCandidates == 1 &&
             createWithoutOptionalGuids.Receipt != null &&
             createWithoutOptionalGuids.Receipt.GetAttributeValue<EntityReference>("ownerid").Id == SystemActor,
@@ -410,7 +472,8 @@ internal static partial class Program
         var candidateFaultMessage = Reject(() => new ApplyCandidateAction().Execute(candidateCreateFault),
             "CANDIDATE_CORE_OPERATION_REJECTED:CREATE_CANDIDATE:CANDIDATE_CREATE:0x80040220");
         Check(candidateCreateFault.ServiceOperations.SequenceEqual(new[]
-            { "RetrieveMultiple:os_sr_oprc", "Create:os_sr_cand" }) &&
+            { "RetrieveMultiple:environmentvariabledefinition", "RetrieveMultiple:environmentvariablevalue",
+                "RetrieveMultiple:privilege", "RetrieveMultiple:os_sr_oprc", "Create:os_sr_cand" }) &&
             candidateCreateFault.Receipt == null,
             "Candidate Create fault terminates before Receipt Create");
         Check(candidateCreateFault.TraceMessages.Contains("CC_STAGE:CC_CREATE_CANDIDATE") &&
@@ -422,7 +485,9 @@ internal static partial class Program
         receiptReadFault.FaultMessage = "SENSITIVE_SENTINEL " + Actor.ToString("D");
         var receiptReadMessage = Reject(() => new ApplyCandidateAction().Execute(receiptReadFault),
             "CANDIDATE_CORE_OPERATION_REJECTED:CREATE_CANDIDATE:RECEIPT_READ:0x80040220");
-        Check(receiptReadFault.ServiceOperations.SequenceEqual(new[] { "RetrieveMultiple:os_sr_oprc" }) &&
+        Check(receiptReadFault.ServiceOperations.SequenceEqual(new[]
+            { "RetrieveMultiple:environmentvariabledefinition", "RetrieveMultiple:environmentvariablevalue",
+                "RetrieveMultiple:privilege", "RetrieveMultiple:os_sr_oprc" }) &&
             receiptReadFault.CreatedCandidates == 0 &&
             !receiptReadMessage.Contains("SENSITIVE_SENTINEL") &&
             !receiptReadMessage.Contains(Actor.ToString("D")),
@@ -444,7 +509,9 @@ internal static partial class Program
         var receiptFaultMessage = Reject(() => new ApplyCandidateAction().Execute(receiptCreateFault),
             "CANDIDATE_CORE_OPERATION_REJECTED:CREATE_CANDIDATE:RECEIPT_CREATE:0x80040221");
         Check(receiptCreateFault.ServiceOperations.SequenceEqual(new[]
-            { "RetrieveMultiple:os_sr_oprc", "Create:os_sr_cand", "Create:os_sr_oprc" }),
+            { "RetrieveMultiple:environmentvariabledefinition", "RetrieveMultiple:environmentvariablevalue",
+                "RetrieveMultiple:privilege", "RetrieveMultiple:os_sr_oprc", "Create:os_sr_cand",
+                "Retrieve:os_sr_cand", "Create:os_sr_oprc" }),
             "Receipt Create fault terminates after the failing final service operation");
         Check(receiptCreateFault.TraceMessages.Contains("CC_STAGE:CC_CREATE_RECEIPT") &&
             receiptCreateFault.TraceMessages.Contains("CC_SERVICE_FAULT:CC_CREATE_RECEIPT:0x80040221"),
@@ -456,7 +523,8 @@ internal static partial class Program
         var legacyGuardMessage = Reject(() => new ApplyCandidateAction().Execute(legacyGuardFault),
             "CANDIDATE_CORE_OPERATION_REJECTED:CREATE_CANDIDATE:CANDIDATE_CREATE:0x80040265");
         Check(legacyGuardFault.ServiceOperations.SequenceEqual(new[]
-            { "RetrieveMultiple:os_sr_oprc", "Create:os_sr_cand" }) &&
+            { "RetrieveMultiple:environmentvariabledefinition", "RetrieveMultiple:environmentvariablevalue",
+                "RetrieveMultiple:privilege", "RetrieveMultiple:os_sr_oprc", "Create:os_sr_cand" }) &&
             !legacyGuardMessage.Contains("DIRECT_CANDIDATE_CORE_WRITE_BLOCKED"),
             "Dataverse privilege faults use sanitized platform rejection without guard-specific authorization");
         var tamperedCreate = CreateCandidateHost();
@@ -478,7 +546,8 @@ internal static partial class Program
         var unknownFailureMessage = Reject(() => new ApplyCandidateAction().Execute(unknownFailure),
             "CANDIDATE_CORE_OPERATION_REJECTED:CREATE_CANDIDATE:CANDIDATE_CREATE:INVALID_OPERATION");
         Check(unknownFailure.ServiceOperations.SequenceEqual(new[]
-            { "RetrieveMultiple:os_sr_oprc", "Create:os_sr_cand" }) &&
+            { "RetrieveMultiple:environmentvariabledefinition", "RetrieveMultiple:environmentvariablevalue",
+                "RetrieveMultiple:privilege", "RetrieveMultiple:os_sr_oprc", "Create:os_sr_cand" }) &&
             !unknownFailureMessage.Contains("SENSITIVE_SENTINEL"),
             "Unknown service exception is categorized, sanitized, and terminates immediately");
         var invalidCreateInput = CreateCandidateHost();
@@ -1608,8 +1677,11 @@ internal static partial class Program
         public Entity? Receipt, ReceiptCreateTarget, CreatedCandidate, CreatedCall, CreatedHistory;
         public int Calls, Histories, Updates, ScheduleCreates, ScheduleUpdates, CreatedCandidates,
             OrganizationReads, CallerProtectedWriteAttempts, Status = 100010000;
-        public bool OrganizationAuditEnabled = true, TamperTarget;
+        public bool OrganizationAuditEnabled = true, TamperTarget, TamperCreateReadback;
         public bool CandidateNumberWasSupplied;
+        public bool NormalCreatePolicyPresent = true, NormalCreatePolicyEnabled = true,
+            NormalCreatePrivilege = true;
+        public Guid NormalCreatePolicyOrganizationId = Organization;
         public List<Guid?> ServiceFactorySelections = new List<Guid?>();
         public List<string> CallerReadAccessChecks = new List<string>();
         public List<string> ProtectedScheduleReadOrder = new List<string>();
@@ -1707,7 +1779,15 @@ internal static partial class Program
                 }
                 if (table == "os_sr_cand")
                 {
-                    if (CreatedCandidate != null) return CreatedCandidate;
+                    if (CreatedCandidate != null)
+                    {
+                        if (!TamperCreateReadback) return CreatedCandidate;
+                        var tampered = new Entity(table, CreatedCandidate.Id) { RowVersion = CreatedCandidate.RowVersion };
+                        foreach (var attribute in CreatedCandidate.Attributes)
+                            tampered[attribute.Key] = attribute.Value;
+                        tampered["ownerid"] = new EntityReference("systemuser", Guid.NewGuid());
+                        return tampered;
+                    }
                     return new Entity(table, Candidate)
                     {
                         RowVersion = "1",
@@ -1752,6 +1832,42 @@ internal static partial class Program
                     throw new FaultException<OrganizationServiceFault>(
                         new OrganizationServiceFault { ErrorCode = FaultErrorCode, Message = FaultMessage },
                         new FaultReason("Synthetic service fault"));
+                if (query.EntityName == "environmentvariabledefinition")
+                {
+                    if (serviceUser != null || !NormalCreatePolicyPresent ||
+                        !query.Criteria.Conditions.Any(condition =>
+                            condition.AttributeName == "schemaname" &&
+                            condition.Values.Contains("os_sr_ncrcfg")))
+                        return new EntityCollection();
+                    return new EntityCollection(new List<Entity>
+                    {
+                        new Entity(query.EntityName, NormalCreatePolicyId)
+                        { ["statecode"] = new OptionSetValue(0) }
+                    });
+                }
+                if (query.EntityName == "environmentvariablevalue")
+                {
+                    if (serviceUser != null || !NormalCreatePolicyPresent)
+                        return new EntityCollection();
+                    return new EntityCollection(new List<Entity>
+                    {
+                        new Entity(query.EntityName, Guid.NewGuid())
+                        {
+                            ["statecode"] = new OptionSetValue(0),
+                            ["value"] = "v1|enabled=" + (NormalCreatePolicyEnabled ? "true" : "false") +
+                                "|organizationId=" + NormalCreatePolicyOrganizationId.ToString("D")
+                        }
+                    });
+                }
+                if (query.EntityName == "privilege")
+                {
+                    if (serviceUser != null) throw new Exception("Privilege lookup escaped SYSTEM identity");
+                    return new EntityCollection(new List<Entity>
+                    {
+                        new Entity(query.EntityName, NormalCreatePrivilegeId)
+                        { ["name"] = "prvCreateos_sr_cand" }
+                    });
+                }
                 if (query.EntityName == "os_sr_oprc")
                     Check(serviceUser == null, "SDK SYSTEM service reads Operation Receipt");
                 else if (query.EntityName == "os_sr_intv")
@@ -1864,7 +1980,7 @@ internal static partial class Program
                 if (call.Args[0] is RetrievePrincipalAccessRequest accessRequest)
                 {
                     if (serviceUser != null ||
-                        accessRequest.Principal.Id != Actor ||
+                        accessRequest.Principal.Id != MainContext.InitiatingUserId ||
                         accessRequest.Target.LogicalName is not ("os_sr_cand" or "os_sr_intv"))
                         throw new Exception("Protected read access check escaped SYSTEM or caller identity boundary");
                     CallerReadAccessChecks.Add(accessRequest.Target.LogicalName);
@@ -1876,6 +1992,22 @@ internal static partial class Program
                         {
                             ["AccessRights"] = CallerReadDeniedTables.Contains(accessRequest.Target.LogicalName)
                                 ? AccessRights.None : AccessRights.ReadAccess
+                        }
+                    };
+                }
+                if (call.Args[0] is RetrieveUserSetOfPrivilegesByNamesRequest privilegeRequest)
+                {
+                    if (serviceUser != null || privilegeRequest.UserId != MainContext.InitiatingUserId ||
+                        !privilegeRequest.PrivilegeNames.SequenceEqual(new[] { "prvCreateos_sr_cand" }))
+                        throw new Exception("Normal Candidate Create privilege check escaped the initiating-user identity");
+                    return new RetrieveUserSetOfPrivilegesByNamesResponse
+                    {
+                        Results = new ParameterCollection
+                        {
+                            ["RolePrivileges"] = NormalCreatePrivilege
+                                ? new[] { new RolePrivilege
+                                    { PrivilegeId = NormalCreatePrivilegeId, Depth = PrivilegeDepth.Basic } }
+                                : Array.Empty<RolePrivilege>()
                         }
                     };
                 }

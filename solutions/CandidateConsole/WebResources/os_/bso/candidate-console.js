@@ -500,7 +500,7 @@
       }
       const errorMessage = result && result.error && result.error.message;
       const operationFailure = typeof errorMessage === "string"
-        ? errorMessage.match(/CANDIDATE_CORE_OPERATION_REJECTED:(?:CREATE_CANDIDATE:)?(INPUT_VALIDATION|REFERENCE_VALIDATION|RECEIPT_READ|CANDIDATE_CREATE|CANDIDATE_READBACK|RECEIPT_CREATE|RESPONSE):(0x[0-9a-f]{8}|TIMEOUT|PLUGIN_EXECUTION|INVALID_OPERATION|SERVICE_FAULT|OTHER|REFERENCE_NOT_AVAILABLE)/i)
+        ? errorMessage.match(/CANDIDATE_CORE_OPERATION_REJECTED:(?:CREATE_CANDIDATE:)?(INPUT_VALIDATION|AUTHORIZATION|REFERENCE_VALIDATION|RECEIPT_READ|CANDIDATE_CREATE|CANDIDATE_READBACK|RECEIPT_CREATE|RESPONSE):(0x[0-9a-f]{8}|TIMEOUT|PLUGIN_EXECUTION|INVALID_OPERATION|SERVICE_FAULT|OTHER|REFERENCE_NOT_AVAILABLE|NORMAL_CREATE_DISABLED|NORMAL_CREATE_ORGANIZATION_REJECTED|NORMAL_CREATE_CONFIGURATION_REJECTED|NORMAL_CREATE_PRIVILEGE_METADATA_REJECTED|NORMAL_CREATE_PRIVILEGE_REQUIRED|CANDIDATE_NUMBER_UNAVAILABLE|CANDIDATE_CREATE_READBACK_INVALID|CALLER_READ_ACCESS_REQUIRED)/i)
         : null;
       if (operationFailure) {
         const safeCode = operationFailure[2].startsWith("0x")
@@ -598,6 +598,12 @@
     const operationFailure = error && typeof error.operationFailure === "string"
       ? ` (${error.operationFailure})`
       : "";
+    if (action === "CreateCandidate" && error &&
+        typeof error.operationFailure === "string" &&
+        error.operationFailure.startsWith("AUTHORIZATION:")) {
+      showNotice("Candidate creation was rejected by server authorization. Contact an administrator; no Candidate was created.", true);
+      return;
+    }
     showNotice(`${action} failed or its outcome is uncertain${operationFailure}. Current server state was refreshed; verify it before retrying.`, true);
   }
 
@@ -2361,21 +2367,17 @@
       if (source) inputs.CandidateSourceId = source.id;
       if (assignedTa) inputs.AssignedTaId = assignedTa.id;
       coreInvoked = true;
-      await invokeCandidateCore("CreateCandidate", inputs, correlationId);
-      const candidate = await resolveCreatedCandidate(correlationId, candidateName, candidateEmail);
-      if ((candidate[c.phone] || "") !== candidatePhone ||
-          (candidate[c.cvUrl] || "") !== candidateCvUrl ||
-          !sameOptionalGuid(candidate[c.position], position && position.id) ||
-          !sameOptionalGuid(candidate[c.source], source && source.id) ||
-          !sameOptionalGuid(candidate[c.assignedTa], assignedTa && assignedTa.id)) {
-        throw new Error("CANDIDATE_CORE_CREATE_PROFILE_READBACK_INVALID");
+      const { result } = await invokeCandidateCore("CreateCandidate", inputs, correlationId);
+      candidateId = normalizeGuid(result.CreatedCandidateId);
+      if (typeof result.CandidateNumber !== "string" ||
+          !result.CandidateNumber.trim() || result.CandidateNumber.length > 100) {
+        throw new Error("CANDIDATE_CORE_CREATE_RESPONSE_INVALID");
       }
-      candidateId = normalizeGuid(candidate[c.id]);
       $("candidate-form").reset();
       $("candidate-search").value = "";
       $("candidate-status-filter").value = "";
       await refreshCoreCandidate(candidateId);
-      showNotice("Candidate created successfully through Candidate Core.");
+      showNotice(`Candidate ${result.CandidateNumber} created successfully through Candidate Core.`);
     } catch (error) {
       if (coreInvoked) {
         await reportCandidateCoreFailure("CreateCandidate", candidateId, error);

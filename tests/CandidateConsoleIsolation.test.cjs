@@ -16,6 +16,7 @@ const consoleSource = fs.readFileSync(path.join(root, "candidate-console.js"), "
     isCandidateCoreEnabled, refreshCandidates, openCandidate, getLookupName, loadLookupOptions,
     getActiveReference, resolveCreatedCandidate, renderCallHistory, renderStatusHistory,
     renderSchedulingDetails, findRound1Schedules, retrieveCandidateRecord, retrieveInterviewRecord,
+    createCandidateThroughCore,
     invokeCandidateCore
   };
   document.addEventListener("DOMContentLoaded", initialize);`);
@@ -773,6 +774,7 @@ test("explicit NORMAL mode loads non-synthetic Candidate Core and excludes inact
     mode: "PROD", syntheticDataOnly: false, dataMode: "NORMAL",
     fixtures: { os_sr_pos: [active, inactive], os_sr_cand: [candidate] }
   });
+
   assert.equal(ui.methods.isCandidateCoreEnabled(), true);
   assert.equal(ui.element("workflow-path-badge").textContent, "CANDIDATE CORE PATH");
   const response = ui.server.responses.find((entry) => entry.table === "os_sr_pos");
@@ -787,6 +789,116 @@ test("explicit NORMAL mode loads non-synthetic Candidate Core and excludes inact
   assert.equal(ui.fetchCalls.length, 1);
   assert.equal(ui.fetchCalls[0][0], "/api/data/v9.2/os_sr_cact");
   assert.equal(JSON.parse(ui.fetchCalls[0][1].body).ActionType, "RecordCall");
+});
+
+test("NORMAL Create Candidate sends selected references once and reports the server-generated number", async () => {
+  const positionId = guid("5");
+  const sourceId = guid("6");
+  const taId = guid("7");
+  const candidateId = guid("8");
+  const fixtures = {
+    os_sr_cand: [],
+    os_sr_pos: [{ os_sr_posid: positionId, os_sr_pos_ttl: "Senior Engineer", statecode: 0 }],
+    os_sr_csrc: [{ os_sr_csrcid: sourceId, os_sr_csrc_nm: "Referral", statecode: 0 }],
+    os_sr_ta: [{ os_sr_taid: taId, os_sr_ta_nm: "Recruiter One", statecode: 0 }],
+    os_sr_loc: []
+  };
+  let requestBody;
+  let finishRequest;
+  let coreCalls = 0;
+  const pendingResponse = new Promise((resolve) => { finishRequest = resolve; });
+  const ui = await createConsole({
+    mode: "PROD",
+    syntheticDataOnly: false,
+    fixtures,
+    dataMode: "NORMAL",
+    coreFetch: async (_url, request) => {
+      coreCalls += 1;
+      requestBody = JSON.parse(request.body);
+      return pendingResponse;
+    }
+  });
+  ui.element("candidate-name").value = "Normal Candidate";
+  ui.element("candidate-email").value = "candidate@example.invalid";
+  ui.element("candidate-phone").value = "+15550101001";
+  ui.element("candidate-cv-url").value = "https://careers.example.invalid/candidate";
+  ui.element("candidate-position").value = positionId;
+  ui.element("candidate-source").value = sourceId;
+  ui.element("candidate-assigned-ta").value = taId;
+
+  const submit = ui.element("candidate-form").listeners.submit;
+  const firstSubmission = submit({ preventDefault() {} });
+  while (coreCalls === 0) await new Promise((resolve) => setImmediate(resolve));
+  await submit({ preventDefault() {} });
+  assert.equal(coreCalls, 1, "The busy guard prevents a second in-flight API submission.");
+  assert.equal(requestBody.PositionId, positionId);
+  assert.equal(requestBody.CandidateSourceId, sourceId);
+  assert.equal(requestBody.AssignedTaId, taId);
+  assert.equal(requestBody.CandidatePhone, "+15550101001");
+  assert.equal(requestBody.CandidateCvUrl, "https://careers.example.invalid/candidate");
+  assert.equal(Object.hasOwn(requestBody, "SyntheticScopeId"), false);
+  assert.equal(Object.hasOwn(requestBody, "CandidateNumber"), false);
+
+  fixtures.os_sr_cand.push({
+    os_sr_candid: candidateId,
+    os_sr_cand_corid: requestBody.CorrelationId,
+    os_sr_cand_cnum: "CAND-NORMAL-0001",
+    os_sr_cand_nm: "Normal Candidate",
+    os_sr_cand_eml: "candidate@example.invalid",
+    os_sr_cand_phn: "+15550101001",
+    os_sr_cand_cvurl: "https://careers.example.invalid/candidate",
+    os_sr_cand_stat: 100010000,
+    _os_sr_cand_pos_value: positionId,
+    _os_sr_cand_csrc_value: sourceId,
+    _os_sr_cand_ta_value: taId,
+    createdon: "2026-11-12T00:00:00Z"
+  });
+  finishRequest({
+    ok: true,
+    text: async () => JSON.stringify({
+      ResultCode: "Applied",
+      CreatedCandidateId: candidateId,
+      CandidateNumber: "CAND-NORMAL-0001",
+      CurrentStatus: 100010000
+    })
+  });
+  await firstSubmission;
+
+  assert.equal(ui.element("notice").textContent,
+    "Candidate CAND-NORMAL-0001 created successfully through Candidate Core.");
+  assert.equal(ui.element("detail-panel").hidden, false);
+  assert.equal(lastResponse(ui.server, "os_sr_cand").entities[0].os_sr_candid, candidateId);
+});
+
+test("NORMAL Create Candidate explains server authorization rejection without claiming uncertainty", async () => {
+  const fixtures = {
+    os_sr_cand: [],
+    os_sr_pos: [],
+    os_sr_csrc: [],
+    os_sr_ta: [],
+    os_sr_loc: []
+  };
+  const ui = await createConsole({
+    mode: "PROD",
+    syntheticDataOnly: false,
+    fixtures,
+    dataMode: "NORMAL",
+    coreFetch: async () => ({
+      ok: false,
+      text: async () => JSON.stringify({
+        error: {
+          message: "CANDIDATE_CORE_OPERATION_REJECTED:CREATE_CANDIDATE:AUTHORIZATION:NORMAL_CREATE_PRIVILEGE_REQUIRED"
+        }
+      })
+    })
+  });
+  ui.element("candidate-name").value = "Normal Candidate";
+  ui.element("candidate-email").value = "candidate@example.invalid";
+  await ui.element("candidate-form").listeners.submit({ preventDefault() {} });
+
+  assert.match(ui.element("notice").textContent,
+    /rejected by server authorization\. Contact an administrator; no Candidate was created/);
+  assert.doesNotMatch(ui.element("notice").textContent, /outcome is uncertain/);
 });
 
 test("NORMAL reference selectors match all Active records without name-prefix exclusions", async () => {

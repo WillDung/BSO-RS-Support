@@ -731,8 +731,12 @@ static class Program
         var createStore = new MemoryStore();
         var create = Request(Input("CreateCandidate"));
         var created = createStore.Atomic(create);
-        Check(created.Current == ActionRequest.NeedCall && createStore.Histories == 0, "Creation no fabricated history");
-        Check(createStore.Atomic(create).Replay && createStore.Creates == 1, "Creation replay");
+        Check(created.Current == ActionRequest.NeedCall && created.CandidateNumber == "CAND-SYNTHETIC-0001" &&
+            createStore.Histories == 0, "Creation returns its number without fabricated history");
+        var createdReplay = createStore.Atomic(create);
+        Check(createdReplay.Replay && createdReplay.CandidateId == created.CandidateId &&
+            createdReplay.CandidateNumber == "CAND-SYNTHETIC-0001" && createStore.Creates == 1,
+            "Creation replay preserves its ID and resolves the Candidate Number without a duplicate create");
         Console.WriteLine($"PASS: {passed} synthetic Candidate operation assertions; in-memory host rollback simulation, no Dataverse calls.");
     }
 
@@ -811,9 +815,14 @@ static class Program
         {
             Events.Add("CANDIDATE_READ");
             if (!CandidateExists || id != Candidate) throw new OperationError("INVALID_CANDIDATE");
-            return new CandidateState { Id = id, Status = Status, RowVersion = Version.ToString() };
+            return new CandidateState
+            {
+                Id = id, Status = Status, RowVersion = Version.ToString(),
+                CandidateNumber = "CAND-SYNTHETIC-0001"
+            };
         }
         public Guid CreateCandidate(ActionRequest request) { Events.Add("CANDIDATE_CREATE"); Mutate(); Creates++; return Candidate; }
+        public string GetCreatedCandidateNumber(ActionRequest request, Guid id) => "CAND-SYNTHETIC-0001";
         public void UpdateCandidate(ActionRequest request, CandidateState candidate, int status)
         {
             Events.Add("CANDIDATE_UPDATE");

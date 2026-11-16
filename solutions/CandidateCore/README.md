@@ -2,6 +2,18 @@
 
 Source for Candidate Core plug-in code. Live Dataverse metadata read on 2026-11-12 links the existing `os_sr_cact` Custom API to the File Store assembly version `1.0.7.0`. This verifies the registered handler version, not byte-for-byte package contents; its current SingleUserDev verifier is blocked by `SYNTHETIC_OWNER_REJECTED`. This is authored .NET plug-in source, **not an exported/unpacked Solution**. The supported target is .NET Framework 4.6.2 with `Microsoft.CrmSdk.CoreAssemblies` pinned to 9.0.2.60; the SDK assembly is supplied by the Dataverse sandbox. No runtime dependency is merged/uploaded with the package assembly.
 
+## NORMAL Create Candidate source implementation (1.0.9; not deployed)
+
+The local 1.0.9 source adds a separate NORMAL Create authorization path. In the pinned development organization, an unscoped `CreateCandidate` request no longer inherits the BSO synthetic profile; it must pass the same server-side NORMAL gate as any non-development organization. A nonempty `SyntheticScopeId` still selects the existing synthetic/SingleUserDev path and retains its exact isolation checks.
+
+The NORMAL gate requires exactly one active definition/value for `os_sr_ncrcfg`, parses only `v1|enabled=true|organizationId=<approved-guid>` (or the same value with `enabled=false`), and compares the GUID to the executing organization. Missing, disabled, malformed, duplicate, or different-organization configuration rejects before Candidate Core storage. The initiating Dataverse user must independently have effective `prvCreateos_sr_cand`, including team-derived grants, as resolved by `RetrieveUserSetOfPrivilegesByNames`; the existing API execute privilege `prvReados_sr_cand` is not Create authorization. No role, profile, or environment value was changed or supplied by this source-only work.
+
+Create continues to require Candidate Name and Email, validate supplied Position/Source/TA records as caller-readable and Active, preserve selected references/profile values, and assign Candidate ownership to the initiating user. A post-create SYSTEM readback verifies the requested values, references, initial status, correlation, owner, and generated Candidate Number before the append-only Receipt is created. Exact receipt replay returns the persisted Candidate ID and re-reads the Candidate Number. Any readback failure aborts the transaction. The API response additions are `CreatedCandidateId` (Guid) and `CandidateNumber` (String); the existing API execute privilege and request parameters are unchanged.
+
+The Console NORMAL submit sends selected references once, consumes these response fields, reports the Candidate Number, and refreshes the list/detail. Its existing busy guard prevents a second in-flight submit. SingleUserDev remains on its separately scoped operation path. Tests exercise fake SDK services and browser fixtures only; no Candidate was created in Dataverse.
+
+The source does not establish organization-level audit, privacy, retention, DLP, operational ownership, or release approval. The environment value is deliberately absent and the NORMAL gate therefore remains closed. Deployment and the rollback limitation are recorded in [the 1.0.9 release manifest](../../docs/CANDIDATE_CORE_NORMAL_CREATE_1.0.9_RELEASE_MANIFEST.json) and [Current State](../../docs/CURRENT_STATE.md).
+
 <a id="synthetic-dev-boundary-offline-implementation-not-deployed"></a>
 
 ## Synthetic DEV boundary (scoped runtime and historical guard design)

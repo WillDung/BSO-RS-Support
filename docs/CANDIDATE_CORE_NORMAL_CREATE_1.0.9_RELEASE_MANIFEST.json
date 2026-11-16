@@ -1,0 +1,184 @@
+{
+  "manifestVersion": 1,
+  "createdOn": "2026-11-16",
+  "release": {
+    "name": "Candidate Core NORMAL Create Candidate",
+    "artifactPackageVersion": "1.0.9",
+    "assemblyVersion": "1.0.9.0",
+    "status": "SOURCE_AND_PACKAGE_PREPARED_NOT_DEPLOYED",
+    "deploymentReady": false,
+    "deployed": false,
+    "candidateBusinessWrites": 0,
+    "targetName": "VN LMV IT",
+    "targetOrganizationId": null,
+    "targetUrl": null,
+    "targetIdentityVerifiedForDeployment": false
+  },
+  "build": {
+    "command": "dotnet build .\\solutions\\CandidateCorePackage\\CandidateCore.Package.csproj -c Release -t:Rebuild --no-restore",
+    "packageFile": "../solutions/CandidateCorePackage/bin/Release/os_sr_cact_pkg.1.0.9.nupkg",
+    "packageUniqueName": "os_sr_cact_pkg",
+    "packageSha256": "5b08bcfde39207d5069ce9c55ee4e1794622d69e7d0f148277f7b8f04a89802b",
+    "embeddedAssemblyTypeName": "os_sr_cact.ApplyCandidateAction",
+    "embeddedAssemblySha256": "ea4a3cdcc6f17aff48441827eee7923dcf63df935ba55e56a02c5a84be4729bb",
+    "assemblyFileVersion": "1.0.9.0",
+    "assemblyProductVersion": "1.0.9+e08b1e9ab4b19ca6594b13d78cd1fd658118b9bc",
+    "unsigned": true,
+    "packageEntrySha256MatchesBuiltAssembly": true
+  },
+  "exactComponentDelta": [
+    {
+      "kind": "PluginPackage",
+      "uniqueName": "os_sr_cact_pkg",
+      "change": "Replace the existing package payload with version 1.0.9 containing the NORMAL authorization and Create response implementation.",
+      "artifactFile": "../solutions/CandidateCorePackage/bin/Release/os_sr_cact_pkg.1.0.9.nupkg",
+      "sha256": "5b08bcfde39207d5069ce9c55ee4e1794622d69e7d0f148277f7b8f04a89802b"
+    },
+    {
+      "kind": "CustomApiResponseProperty",
+      "uniqueName": "os_sr_cact.CreatedCandidateId",
+      "typeCode": 12,
+      "type": "Guid",
+      "sourceFile": "../solutions/customapis/os_sr_cact/customapiresponseproperties/CreatedCandidateId/customapiresponseproperty.xml",
+      "sourceSha256": "f3bbed303229182fce7c83d090cddf23bafad5cac511b9b849547ef275533e02"
+    },
+    {
+      "kind": "CustomApiResponseProperty",
+      "uniqueName": "os_sr_cact.CandidateNumber",
+      "typeCode": 10,
+      "type": "String",
+      "sourceFile": "../solutions/customapis/os_sr_cact/customapiresponseproperties/CandidateNumber/customapiresponseproperty.xml",
+      "sourceSha256": "303c93c524ba4677a8cd9bf1f8aa210553b506d8bbfbc83d71bcdb8d6ecd19a4"
+    },
+    {
+      "kind": "WebResource",
+      "uniqueName": "os_/bso/candidate-console.js",
+      "sourceFile": "../solutions/CandidateConsole/WebResources/os_/bso/candidate-console.js",
+      "sourceSha256": "1b1e28136f6ef1063a09468f338b40ff364647a3cd7649007d668462531c4a79",
+      "change": "Submit NORMAL CreateCandidate through the server operation, guard duplicate submits, consume and validate the response, report Candidate Number and errors, and refresh after success."
+    },
+    {
+      "kind": "WebResource",
+      "uniqueName": "os_/bso/candidate-console.html",
+      "sourceFile": "../solutions/CandidateConsole/WebResources/os_/bso/candidate-console.html",
+      "sourceSha256": "5bf8ab7de803044e99ff98d2e13173f3c2cc9202faa0be4e32fae7ebad72fbde",
+      "change": "Update the JavaScript cache token."
+    }
+  ],
+  "customApiContract": {
+    "uniqueName": "os_sr_cact",
+    "requestParametersChanged": false,
+    "existingExecutePrivilegeChanged": false,
+    "existingExecutePrivilege": "prvReados_sr_cand",
+    "addedResponseProperties": [
+      {
+        "name": "CreatedCandidateId",
+        "type": "Guid",
+        "typeCode": 12
+      },
+      {
+        "name": "CandidateNumber",
+        "type": "String",
+        "typeCode": 10
+      }
+    ]
+  },
+  "normalCreateAuthorization": {
+    "environmentVariableSchemaName": "os_sr_ncrcfg",
+    "acceptedValueFormat": "v1|enabled=<true-or-false>|organizationId=<exact-guid>",
+    "enabledValueMustBeSetByAuthorizedDecisionMaker": true,
+    "configurationValueIncluded": false,
+    "failClosedConditions": [
+      "Missing, duplicate, inactive, malformed, or disabled configuration",
+      "Configuration organization ID does not exactly match the executing organization",
+      "Initiating Dataverse user lacks effective prvCreateos_sr_cand"
+    ],
+    "serverChecks": [
+      "Validate caller-readable Active Position, Candidate Source, and Assigned TA references",
+      "Validate required Candidate fields server-side",
+      "Bind Candidate ownership to the initiating Dataverse user",
+      "Use the existing operation correlation and idempotent Receipt contract",
+      "Read back and verify the created Candidate and generated Candidate Number before returning success"
+    ],
+    "singleUserDev": "Requests with the existing non-empty SyntheticScopeId remain on the existing isolated SingleUserDev path."
+  },
+  "deploymentPlan": {
+    "allowedOnlyAfterApprovals": true,
+    "sequence": [
+      "Reconfirm the exact target organization and fresh component/package/handler state.",
+      "Apply the approved Candidate Core 1.0.9 package update.",
+      "Add the two Custom API response properties without changing request parameters or execute privilege.",
+      "Update only the two listed Console WebResources; publish only those approved resources.",
+      "Configure os_sr_ncrcfg for the exact organization with enabled=false until all gates are independently approved.",
+      "Enable NORMAL Create only through a separately authorized decision after the listed controls and least-privilege access are evidenced."
+    ],
+    "notPrepared": [
+      "No full solution export/import ZIP or target-specific environment configuration was created.",
+      "No environment-variable definition/value, role assignment, or permission grant was created.",
+      "No current-target ETags, resource IDs, rollback snapshot, or dispatch journal were captured for this release."
+    ]
+  },
+  "organizationalGates": [
+    {
+      "control": "Audit, retention, and audit-evidence ownership",
+      "status": "NOT_EVIDENCED",
+      "requiredDecision": "Authorized owner supplies the approved audit/retention policy, retention duration, and evidence owner."
+    },
+    {
+      "control": "Privacy and data minimization",
+      "status": "NOT_EVIDENCED",
+      "requiredDecision": "Authorized privacy decision-maker approves the Candidate fields, response exposure, and permitted data use."
+    },
+    {
+      "control": "DLP and connector governance",
+      "status": "NOT_EVIDENCED",
+      "requiredDecision": "Authorized governance owner confirms the applicable DLP policy and connector boundary."
+    },
+    {
+      "control": "Least-privilege Candidate Create access",
+      "status": "NOT_EVIDENCED",
+      "requiredDecision": "Authorized security owner approves the intended user population and verifies effective Candidate Create privilege; no role or user changes are included."
+    },
+    {
+      "control": "Operational monitoring and incident ownership",
+      "status": "NOT_EVIDENCED",
+      "requiredDecision": "Named operational owner accepts monitoring, alerting, failure reconciliation, and incident response."
+    },
+    {
+      "control": "Exact target binding and activation",
+      "status": "NOT_EVIDENCED",
+      "requiredDecision": "Authorized environment owner confirms the exact organization and controls the os_sr_ncrcfg value; no organization ID or value is embedded here."
+    },
+    {
+      "control": "Release and change approval",
+      "status": "NOT_EVIDENCED",
+      "requiredDecision": "Authorized change owner approves the exact package/resource delta, deployment window, validation, and rollback restrictions."
+    }
+  ],
+  "rollback": {
+    "artifactFile": "../solutions/CandidateCorePackage/bin/Release/os_sr_cact_pkg.1.0.8.nupkg",
+    "artifactPackageVersion": "1.0.8",
+    "assemblyVersion": "1.0.8.0",
+    "packageSha256": "632840178413e40497e450a0cf9664d7d59dee83fdd7a6f836e4046f409cf739",
+    "embeddedAssemblySha256": "d2ee192d55092782e582e41f2e4d618db6f8482ae19e7736e481a4e00e12557b",
+    "standaloneRollbackSafe": false,
+    "limitation": "Version 1.0.8 does not contain the new NORMAL authorization gate. It must not be restored while the Custom API remains callable under the existing read-only execute privilege. Disabling os_sr_ncrcfg alone does not protect a 1.0.8 handler because that version does not read the setting. No API-access restriction or target-specific rollback procedure has been approved."
+  },
+  "validation": {
+    "packageRebuild": "PASS",
+    "packageAssemblyVersionAndHash": "PASS",
+    "customApiResponsePropertyXml": "PASS",
+    "candidateCoreSdkAssertions": 961,
+    "candidateCoreEngineAssertions": 253,
+    "candidateConsoleRuntimeTests": 26,
+    "candidateConsoleStaticChecks": 80,
+    "realDataverseOperations": 0,
+    "candidateCreationTestExecuted": false
+  },
+  "reviewedSourceSha256": {
+    "../solutions/CandidateCore/DataversePlugin.cs": "7211bdd1ec7236982074d3208d6a50335fb8213b66ab0b5ffc1a81b3488ca0dd",
+    "../solutions/CandidateCore/Operation.cs": "44a7d501d2154a36e086b4693e55f11988c3328ac44ed961988939a944060af1",
+    "../solutions/CandidateCore/NormalCreateAuthorization.cs": "ab750ec692e0b3d9808274d7762ea5c2d19f1d8af06735cf044e34c7cee0b50f",
+    "../solutions/CandidateCorePackage/CandidateCore.Package.csproj": "1109e7eec46a26e44e76854cf08c54f85eefaa3505532b3274d573ab889a0ecd"
+  }
+}

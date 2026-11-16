@@ -63,10 +63,17 @@ namespace os_sr_cact
                         context.OutputParameters["IsolationContract"] = isolation.Contract();
                         return;
                     }
-                    isolation = SyntheticIsolation.LoadForGuard(controlService, context);
-                    if (isolation == null)
-                        throw new OperationError(requestedScope
-                            ? "SYNTHETIC_ACTOR_REJECTED" : "SYNTHETIC_PROFILE_REQUIRED");
+                    if (requestedAction == "CreateCandidate" && !requestedScope)
+                    {
+                        isolation = null;
+                    }
+                    else
+                    {
+                        isolation = SyntheticIsolation.LoadForGuard(controlService, context);
+                        if (isolation == null)
+                            throw new OperationError(requestedScope
+                                ? "SYNTHETIC_ACTOR_REJECTED" : "SYNTHETIC_PROFILE_REQUIRED");
+                    }
                 }
                 else if (requestedScope || isSyntheticVerifier || isSingleUserDevVerifier)
                     throw new OperationError("SYNTHETIC_ORGANIZATION_REJECTED");
@@ -97,6 +104,12 @@ namespace os_sr_cact
                 action = request.Action;
                 if (action == "CreateCandidate") createCandidateStage = "REFERENCE_VALIDATION";
                 ValidateCallerReferences(callerService, request, trace);
+                if (action == "CreateCandidate" && isolation == null)
+                {
+                    createCandidateStage = "AUTHORIZATION";
+                    NormalCreateAuthorization.Require(service: factory.CreateOrganizationService(null),
+                        organizationId: context.OrganizationId, actorId: context.InitiatingUserId);
+                }
                 var systemService = factory.CreateOrganizationService(null);
                 var store = new DataverseStore(systemService, context, trace, request.Action,
                     stage => createCandidateStage = stage, isolation);
@@ -105,6 +118,11 @@ namespace os_sr_cact
                 context.OutputParameters["ResultCode"] = result.Replay ? "DuplicateReplay" : "Applied";
                 if (result.Previous.HasValue) context.OutputParameters["PreviousStatus"] = result.Previous.Value;
                 context.OutputParameters["CurrentStatus"] = result.Current;
+                if (request.Action == "CreateCandidate")
+                {
+                    context.OutputParameters["CreatedCandidateId"] = result.CandidateId;
+                    context.OutputParameters["CandidateNumber"] = result.CandidateNumber!;
+                }
                 if (result.CallId.HasValue) context.OutputParameters["CallLogId"] = result.CallId.Value;
                 if (result.HistoryId.HasValue) context.OutputParameters["StatusHistoryId"] = result.HistoryId.Value;
                 trace.Trace("os_sr_cact result={0} action={1}", result.Replay ? "DuplicateReplay" : "Applied", request.Action);
@@ -149,7 +167,7 @@ namespace os_sr_cact
 
         private static string FormatCreateCandidateFailure(string errorMessage, string stage)
         {
-            if (stage != "INPUT_VALIDATION" && stage != "REFERENCE_VALIDATION" &&
+            if (stage != "INPUT_VALIDATION" && stage != "AUTHORIZATION" && stage != "REFERENCE_VALIDATION" &&
                 stage != "RECEIPT_READ" && stage != "CANDIDATE_CREATE" &&
                 stage != "CANDIDATE_READBACK" && stage != "RECEIPT_CREATE" && stage != "RESPONSE")
                 stage = "RESPONSE";
@@ -639,7 +657,9 @@ namespace os_sr_cact
         {
             SetCreateCandidateStage("CANDIDATE_READBACK");
             EnsureCallerReadAccess(new EntityReference("os_sr_cand", id));
-            var columns = new ColumnSet("os_sr_cand_stat", "versionnumber");
+            var columns = action == "CreateCandidate"
+                ? new ColumnSet("os_sr_cand_stat", "os_sr_cand_cnum", "versionnumber")
+                : new ColumnSet("os_sr_cand_stat", "versionnumber");
             if (isolation != null) columns.AddColumns(isolation.VerificationColumns("os_sr_cand"));
             var row = ExecuteAtStage("CC_READ_CANDIDATE",
                 () => systemService.Retrieve("os_sr_cand", id, columns));
@@ -647,7 +667,15 @@ namespace os_sr_cact
             if (!row.Contains("os_sr_cand_stat")) throw new OperationError("CANDIDATE_INTEGRITY_FAILURE");
             int status = row.GetAttributeValue<OptionSetValue>("os_sr_cand_stat").Value;
             if (status < ActionRequest.NeedCall || status > ActionRequest.Failed) throw new OperationError("INVALID_CANDIDATE_STATUS");
-            return new CandidateState { Id = id, Status = status, RowVersion = row.RowVersion };
+            return new CandidateState
+            {
+                Id = id,
+                Status = status,
+                RowVersion = row.RowVersion,
+                CandidateNumber = action == "CreateCandidate"
+                    ? row.GetAttributeValue<string>("os_sr_cand_cnum") ?? ""
+                    : ""
+            };
         }
 
         private void EnsureCallerReadAccess(EntityReference target)
@@ -751,6 +779,52 @@ namespace os_sr_cact
             row["os_sr_cand_corid"] = request.Correlation.ToString("D");
             row["ownerid"] = new EntityReference("systemuser", request.Actor);
             return Create(row, request.Action, "CANDIDATE_CREATE", "CC_CREATE_CANDIDATE");
+        }
+
+        public string GetCreatedCandidateNumber(ActionRequest request, Guid id)
+        {
+            SetCreateCandidateStage("CANDIDATE_READBACK");
+            EnsureCallerReadAccess(new EntityReference("os_sr_cand", id));
+            var columns = new ColumnSet("os_sr_cand_nm", "os_sr_cand_eml", "os_sr_cand_phn",
+                "os_sr_cand_cvurl", "os_sr_cand_pos", "os_sr_cand_csrc", "os_sr_cand_ta",
+                "os_sr_cand_stat", "os_sr_cand_corid", "os_sr_cand_cnum", "ownerid");
+            var row = ExecuteAtStage("CC_READ_CANDIDATE",
+                () => systemService.Retrieve("os_sr_cand", id, columns));
+            isolation?.ValidateRow(row);
+
+            if (row.Id != id ||
+                row.GetAttributeValue<string>("os_sr_cand_nm") != (string)request.Values["CandidateName"]! ||
+                row.GetAttributeValue<string>("os_sr_cand_eml") != (string)request.Values["CandidateEmail"]! ||
+                !SameOptionalText(row.GetAttributeValue<string>("os_sr_cand_phn"),
+                    request.Values.TryGetValue("CandidatePhone", out var phone) ? (string?)phone : null) ||
+                !SameOptionalText(row.GetAttributeValue<string>("os_sr_cand_cvurl"),
+                    request.Values.TryGetValue("CandidateCvUrl", out var cvUrl) ? (string?)cvUrl : null) ||
+                !SameOptionalReference(row, "os_sr_cand_pos", "os_sr_pos", request, "PositionId") ||
+                !SameOptionalReference(row, "os_sr_cand_csrc", "os_sr_csrc", request, "CandidateSourceId") ||
+                !SameOptionalReference(row, "os_sr_cand_ta", "os_sr_ta", request, "AssignedTaId") ||
+                row.GetAttributeValue<OptionSetValue>("os_sr_cand_stat")?.Value != ActionRequest.NeedCall ||
+                row.GetAttributeValue<string>("os_sr_cand_corid") != request.Correlation.ToString("D") ||
+                row.GetAttributeValue<EntityReference>("ownerid")?.LogicalName != "systemuser" ||
+                row.GetAttributeValue<EntityReference>("ownerid")?.Id != request.Actor)
+                throw new OperationError("CANDIDATE_CREATE_READBACK_INVALID");
+
+            var candidateNumber = row.GetAttributeValue<string>("os_sr_cand_cnum");
+            if (string.IsNullOrWhiteSpace(candidateNumber) || candidateNumber.Length > 100)
+                throw new OperationError("CANDIDATE_NUMBER_UNAVAILABLE");
+            return candidateNumber;
+        }
+
+        private static bool SameOptionalText(string? actual, string? expected) =>
+            string.Equals(actual ?? "", expected ?? "", StringComparison.Ordinal);
+
+        private static bool SameOptionalReference(
+            Entity row, string attribute, string logicalName, ActionRequest request, string inputName)
+        {
+            var actual = row.GetAttributeValue<EntityReference>(attribute);
+            var expected = request.Values.TryGetValue(inputName, out var value) && value is Guid id
+                ? (Guid?)id : null;
+            if (!expected.HasValue) return actual == null;
+            return actual?.LogicalName == logicalName && actual.Id == expected.Value;
         }
 
         public void UpdateCandidate(ActionRequest request, CandidateState candidate, int status)

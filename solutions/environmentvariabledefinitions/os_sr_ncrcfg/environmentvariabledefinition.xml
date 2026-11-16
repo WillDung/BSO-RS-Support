@@ -1,0 +1,13 @@
+<environmentvariabledefinition schemaname="os_sr_ncrcfg">
+  <description default="Server-controlled organization-bound NORMAL Create gate. Disabled until real-data controls are approved.">
+    <label description="Server-controlled organization-bound NORMAL Create gate. Disabled until real-data controls are approved." languagecode="1033" />
+  </description>
+  <displayname default="NORMAL Create Candidate configuration">
+    <label description="NORMAL Create Candidate configuration" languagecode="1033" />
+  </displayname>
+  <introducedversion>1.0.0.1</introducedversion>
+  <iscustomizable>1</iscustomizable>
+  <isrequired>0</isrequired>
+  <secretstore>0</secretstore>
+  <type>100000000</type>
+</environmentvariabledefinition>

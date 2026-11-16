@@ -2,11 +2,13 @@
 
 **Status:** Read-only assessment, originally 19 October 2026 and refreshed 16 November 2026 for Candidate Core 1.0.9. No environment or auditing settings were changed. Findings distinguish verified configuration from assumptions and unknowns.
 
-## NORMAL Create Candidate release gate (source-only)
+## NORMAL Create Candidate activation gate (technical release deployed disabled)
 
 Candidate Core 1.0.9 adds no audit setting or audit-table metadata changes. The existing organization-level audit switch remains reported off; current table/column flags, log capacity, retention approval, authorized audit readers, DSR/legal-hold handling, and monitoring ownership are not established by this release. Candidate Name, Email, Phone, CV URL, selected Position/Source/TA, operation correlation, owner, and generated Candidate Number are subject to the existing organizational privacy and audit policies. The new Candidate Number response is not written to diagnostic logs by the source.
 
 Do not treat plug-in tracing or a successful package build as audit/privacy approval. Before enabling the NORMAL server gate, an authorized IT/Compliance decision-maker must approve the project table/column audit matrix, policy/retention and historical-log effects, audit-reader access, data minimization, operational monitoring/incident response, and applicable DLP controls. No value enabling `os_sr_ncrcfg` is included in source or artifact preparation.
+
+The owner-authorized 1.0.9 disabled technical delta is now deployed and verified; its one active exact-org value is `enabled=false`. No audit/governance setting was changed and no Candidate action or business-data test was executed. Existing off/unknown observations below are reused, not another broad investigation. Audit/approved retention, applicable DLP, privacy/minimization and operational acceptance block **activation**, not the completed routine engineering. Exact target binding and technical change authorization are established; see [Current State](CURRENT_STATE.md).
 
 ## Verified Facts
 

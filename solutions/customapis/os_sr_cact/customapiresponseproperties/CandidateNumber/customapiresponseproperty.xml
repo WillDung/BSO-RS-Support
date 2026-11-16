@@ -1,4 +1,7 @@
 <customapiresponseproperty uniquename="CandidateNumber">
+  <description default="Created Candidate CandidateNumber">
+    <label description="Created Candidate CandidateNumber" languagecode="1033" />
+  </description>
   <displayname default="CandidateNumber">
     <label description="CandidateNumber" languagecode="1033" />
   </displayname>

@@ -1,5 +1,9 @@
 # Tests
 
+## NORMAL Create release tooling
+
+Run `pwsh -NoLogo -NoProfile -File .\tests\NormalCreateRelease.Tests.ps1` for the focused offline dispatch-journal, payload-path shadowing, request-origin/conditional-write and disabled-config duplicate/inactive/enabled rejection checks. The [release deployer](../scripts/Deploy-BsoRsNormalCreateRelease.ps1) performs no Candidate API invocation. These tests do not repeat the completed 1.0.9 implementation suites or constitute owner functional UAT.
+
 ## Synthetic isolation offline checks
 
 For the revocable persistent DEV profile, run `dotnet run --project .\tests\CandidateCoreSdk\CandidateCoreSdk.Tests.csproj -- --persistent-profile`. This focused harness also includes the existing verifier-contract/scoped-proof regressions. It tests enabled/no-expiry mode, explicit disabled/missing/corrupt rejection, unchanged synthetic identity/references, wrong actor/organization/scope, team-derived and native mutation privilege rejection, two-minute v2 proof TTL, immediate revocation before modeled verifier/business/receipt storage, restored proof and protection of out-of-scope records. Modeled business operations remain in-memory only; the live acceptance is read-only and must not invoke a lifecycle to test revocation.

@@ -5,14 +5,15 @@
     "name": "Candidate Core NORMAL Create Candidate",
     "artifactPackageVersion": "1.0.9",
     "assemblyVersion": "1.0.9.0",
-    "status": "SOURCE_AND_PACKAGE_PREPARED_NOT_DEPLOYED",
-    "deploymentReady": false,
-    "deployed": false,
+    "status": "DISABLED_TECHNICAL_RELEASE_DEPLOYED_VERIFIED",
+    "deploymentReady": true,
+    "deployed": true,
+    "normalCreateEnabled": false,
     "candidateBusinessWrites": 0,
     "targetName": "VN LMV IT",
     "targetOrganizationId": null,
     "targetUrl": null,
-    "targetIdentityVerifiedForDeployment": false
+    "targetIdentityVerifiedForDeployment": true
   },
   "readOnlyTargetReconciliation": {
     "observedOn": "2026-11-16",
@@ -118,7 +119,9 @@
       "typeCode": 12,
       "type": "Guid",
       "sourceFile": "../solutions/customapis/os_sr_cact/customapiresponseproperties/CreatedCandidateId/customapiresponseproperty.xml",
-      "sourceSha256": "f3bbed303229182fce7c83d090cddf23bafad5cac511b9b849547ef275533e02"
+      "sourceSha256": "4ec0905a7feaa2104a31108ea0cebc426f19c6f22e5aa30eb4f5102c9ed3ceae",
+      "solutionComponentType": 10038,
+      "platformGeneratedAndInstalled": true
     },
     {
       "kind": "CustomApiResponseProperty",
@@ -126,7 +129,9 @@
       "typeCode": 10,
       "type": "String",
       "sourceFile": "../solutions/customapis/os_sr_cact/customapiresponseproperties/CandidateNumber/customapiresponseproperty.xml",
-      "sourceSha256": "303c93c524ba4677a8cd9bf1f8aa210553b506d8bbfbc83d71bcdb8d6ecd19a4"
+      "sourceSha256": "04e96316d6532a5526fc31deb101a8de48376b08d8dbe13a11e715c2ccc55972",
+      "solutionComponentType": 10038,
+      "platformGeneratedAndInstalled": true
     },
     {
       "kind": "WebResource",
@@ -141,6 +146,24 @@
       "sourceFile": "../solutions/CandidateConsole/WebResources/os_/bso/candidate-console.html",
       "sourceSha256": "5bf8ab7de803044e99ff98d2e13173f3c2cc9202faa0be4e32fae7ebad72fbde",
       "change": "Update the JavaScript cache token."
+    },
+    {
+      "kind": "EnvironmentVariableDefinition",
+      "uniqueName": "os_sr_ncrcfg",
+      "typeCode": 100000000,
+      "type": "String",
+      "solutionComponentType": 380,
+      "sourceFile": "../solutions/environmentvariabledefinitions/os_sr_ncrcfg/environmentvariabledefinition.xml",
+      "sourceSha256": "0d71e12bc9623e35a289c87007f0dec34fa6a7403fd937cd7282d91068ade681",
+      "platformGeneratedAndInstalled": true
+    },
+    {
+      "kind": "EnvironmentVariableValue",
+      "uniqueName": "os_sr_ncrcfg",
+      "solutionComponentType": 381,
+      "installedState": "ONE_ACTIVE_EXACT_ORGANIZATION_BOUND_DISABLED_VALUE",
+      "sourceValueIncluded": false,
+      "targetBoundValueInExternalBundle": true
     }
   ],
   "customApiContract": {
@@ -163,7 +186,7 @@
   },
   "apiSecurityBoundary": {
     "sourceStatus": "PASS",
-    "liveStatus": "NOT_DEPLOYED",
+    "liveStatus": "PASS_INSTALLED_PROTECTED_GATE_DISABLED_NO_CANDIDATE_ACTION_TEST",
     "existingExecutePrivilegeRemains": "prvReados_sr_cand",
     "normalCreateRequiresEffectivePrivilege": "prvCreateos_sr_cand",
     "handlerRegistration": "The existing os_sr_cact binding resolves to the package-backed os_sr_cact.ApplyCandidateAction type. Updating os_sr_cact_pkg preserves that handler identity; no new API or plugin-step registration is required.",
@@ -174,6 +197,7 @@
     "acceptedValueFormat": "v1|enabled=<true-or-false>|organizationId=<exact-guid>",
     "enabledValueMustBeSetByAuthorizedDecisionMaker": true,
     "configurationValueIncluded": false,
+    "disabledValueInstalled": true,
     "failClosedConditions": [
       "Missing, duplicate, inactive, malformed, or disabled configuration",
       "Configuration organization ID does not exactly match the executing organization",
@@ -193,32 +217,15 @@
     "sequence": [
       "Reconfirm the exact target organization and fresh component/package/handler state.",
       "Add the platform-generated os_sr_ncrcfg String environment-variable definition to the release solution and configure a target-bound enabled=false value; no value or organization identifier belongs in the source artifact.",
-      "Apply the approved Candidate Core 1.0.9 package update.",
       "Add the two Custom API response properties without changing request parameters or execute privilege.",
+      "Apply the approved Candidate Core 1.0.9 package update.",
       "Update only the two listed Console WebResources; publish only those approved resources.",
       "Enable NORMAL Create only through a separately authorized decision after the listed controls and least-privilege access are evidenced."
     ],
-    "notPrepared": [
-      "No combined release/import package was built; the read-only target export is evidence only and does not include PluginPackage bytes.",
-      "The required os_sr_ncrcfg definition and target-bound disabled value are not in the release artifact.",
-      "No write ETags, dispatch journal, or tested rollback package was created."
-    ],
-    "missingComponentDelta": [
-      {
-        "kind": "EnvironmentVariableDefinition",
-        "schemaName": "os_sr_ncrcfg",
-        "type": "String",
-        "status": "NOT_INCLUDED",
-        "reason": "Must be generated through the approved environment-first solution workflow; no metadata/configuration write was authorized."
-      },
-      {
-        "kind": "EnvironmentVariableValue",
-        "schemaName": "os_sr_ncrcfg",
-        "status": "TARGET_CONFIGURATION_NOT_CREATED",
-        "requiredInitialValue": "v1|enabled=false|organizationId=<exact-target-guid>",
-        "reason": "Must be supplied by an authorized environment owner after the definition is included; the value is intentionally not stored."
-      }
-    ]
+    "notPrepared": [],
+    "missingComponentDelta": [],
+    "technicalDeploymentOwnerAuthorized": true,
+    "realDataControlsSatisfied": false
   },
   "organizationalGates": [
     {
@@ -238,8 +245,8 @@
     },
     {
       "control": "Least-privilege Candidate Create access",
-      "status": "NOT_EVIDENCED",
-      "requiredDecision": "Authorized security owner approves the intended user population and verifies effective Candidate Create privilege; no role or user changes are included."
+      "status": "DEPLOYMENT_IDENTITY_EFFECTIVE_CREATE_VERIFIED_NO_GRANTS_CHANGED",
+      "requiredDecision": "Before real-data activation, confirm intended operational users and least-privilege acceptance using existing effective grants; this is not a new deployment or role-change approval requirement."
     },
     {
       "control": "Operational monitoring and incident ownership",
@@ -248,23 +255,24 @@
     },
     {
       "control": "Exact target binding and activation",
-      "status": "NOT_EVIDENCED",
-      "requiredDecision": "Authorized environment owner confirms the exact organization and controls the os_sr_ncrcfg value; no organization ID or value is embedded here."
+      "status": "EXACT_TARGET_BOUND_DISABLED_VALUE_INSTALLED_ACTIVATION_NOT_APPROVED",
+      "requiredDecision": "Enable only after real-data controls are established; exact target and disabled technical deployment are already owner-authorized. No organization ID or value is embedded here."
     },
     {
       "control": "Release and change approval",
-      "status": "NOT_EVIDENCED",
-      "requiredDecision": "Authorized change owner approves the exact package/resource delta, deployment window, validation, and rollback restrictions."
+      "status": "OWNER_TECHNICAL_DELTA_AUTHORIZED_AND_DEPLOYED",
+      "requiredDecision": "No further routine engineering authorization is required; this does not establish privacy, DLP, audit-policy or real-data activation acceptance."
     }
   ],
   "rollback": {
-    "artifactFile": "../solutions/CandidateCorePackage/bin/Release/os_sr_cact_pkg.1.0.8.nupkg",
-    "artifactPackageVersion": "1.0.8",
-    "assemblyVersion": "1.0.8.0",
-    "packageSha256": "632840178413e40497e450a0cf9664d7d59dee83fdd7a6f836e4046f409cf739",
-    "embeddedAssemblySha256": "d2ee192d55092782e582e41f2e4d618db6f8482ae19e7736e481a4e00e12557b",
-    "standaloneRollbackSafe": false,
-    "status": "INCOMPLETE_SAFE_SEQUENCE_DOCUMENTED_NOT_REHEARSED",
+    "artifactFile": "../solutions/CandidateCorePackage/bin/Release/os_sr_cact_pkg.1.0.9.nupkg",
+    "artifactPackageVersion": "1.0.9",
+    "assemblyVersion": "1.0.9.0",
+    "packageSha256": "5b08bcfde39207d5069ce9c55ee4e1794622d69e7d0f148277f7b8f04a89802b",
+    "embeddedAssemblySha256": "ea4a3cdcc6f17aff48441827eee7923dcf63df935ba55e56a02c5a84be4729bb",
+    "standaloneRollbackSafe": true,
+    "strategy": "FEATURE_ROLLBACK_WITH_PROTECTED_SAME_VERSION_ASSEMBLY_RECOVERY",
+    "status": "COMPLETE_SAFE_FEATURE_ROLLBACK_PREPARED_NOT_REHEARSED",
     "liveBaseline": {
       "packageBackedAssemblyVersion": "1.0.8.0",
       "customApiExecutePrivilege": "prvReados_sr_cand",
@@ -285,11 +293,11 @@
     "safeSequence": [
       "For a feature-only rollback after 1.0.9 deployment, set the exact organization-bound os_sr_ncrcfg value to enabled=false and restore only the pre-change Console HTML and JavaScript. Keep the 1.0.9 handler and both additive response properties so the server authorization gate remains in force.",
       "Do not downgrade to 1.0.8 while os_sr_cact remains executable under prvReados_sr_cand.",
-      "If a 1.0.8 assembly rollback is unavoidable, first change the Custom API execute privilege to prvCreateos_sr_cand and verify the restriction before the single existing-package update. This intentionally blocks callers without effective Candidate Create from all os_sr_cact actions and may interrupt SingleUserDev access; it requires separate change approval.",
-      "Keep the API execute privilege restricted and preserve the additive response properties while 1.0.8 is active. Restore prvReados_sr_cand only after 1.0.9 is redeployed and its configuration, organization binding, and effective-Create gate are verified.",
-      "If the API restriction cannot be approved or verified, retain 1.0.9 with NORMAL Create disabled; do not restore 1.0.8."
+      "Use Rollback mode to conditionally restore only captured baseline Console JS/HTML and publish their two IDs; retain the protected 1.0.9 assembly, existing execute privilege and additive metadata to preserve SingleUserDev.",
+      "Use RecoverPackage only for protected 1.0.9 assembly recovery, with its own fresh one-shot journal against the existing package/handler identity. Never reuse the consumed deployment journal or push unprotected 1.0.8.",
+      "Use VerifyRollback for metadata, disabled configuration, published/current/served baseline hashes and unchanged effective security readback without Candidate operations."
     ],
-    "limitation": "The local 1.0.8 package is hash-pinned and its assembly version matches target readback, but the live package bytes were not read back and no rollback bundle or runtime rehearsal exists. The read-only solution export is not a deployable rollback package."
+    "limitation": "This is a complete prepared feature rollback, not an assembly-version downgrade or a runtime rehearsal. Live package bytes were not hash-readback; supported package acknowledgement plus exact handler/assembly identity/version were verified. The full solution export is source evidence, not the delta or rollback."
   },
   "validation": {
     "packageRebuild": "PASS",
@@ -301,7 +309,30 @@
     "candidateConsoleStaticChecks": 80,
     "readOnlyTargetReconciliation": "COMPLETED_NO_WRITES",
     "realCandidateWrites": 0,
-    "candidateCreationTestExecuted": false
+    "candidateCreationTestExecuted": false,
+    "newReleaseToolingChecks": 15,
+    "completedImplementationSuitesRepeated": false,
+    "installedAssemblyHandlerVersion": "1.0.9.0",
+    "installedOutputs": 9,
+    "unchangedRequestParameters": 22,
+    "disabledOrganizationConfiguration": "PASS",
+    "newComponentSolutionMembership": "PASS",
+    "publishedCurrentAndServedConsoleHashes": "PASS",
+    "unchangedRoleSecuritySha256": "1cb88bf132899c6feec4101bc1290acfbaaa25a0161d8c36a628c55efaa2e26c",
+    "candidateApiInvoked": false
+  },
+  "integratedRelease": {
+    "status": "READY_DEPLOYED_DISABLED",
+    "artifactName": "normal-create-1.0.9-disabled-release.zip",
+    "artifactSha256": "79489d7890484e40f8a9fa569c6feda1cfbb74435fa0871988f3dd92a1c92d73",
+    "format": "EXACT_COMPONENT_DEPLOYMENT_BUNDLE_NOT_MANAGED_SOLUTION_IMPORT",
+    "operatorScript": "../scripts/Deploy-BsoRsNormalCreateRelease.ps1",
+    "targetBoundManifestSha256": "e3c203dfad75e6d50f6cf8d23277ac07f28d96252fdfa57d1a4c2e2b148bfd01",
+    "originalDispatchManifestSha256": "48069639b1c1f0656a2a5add49b32910e31d179825398daab31a67dbd8db9dbb",
+    "originalManifestAndConsumedJournalsPreservedExternally": true,
+    "platformSourceExportSha256": "f1b0899b32bbab8fe72c3d46baa4748804778ee51aa0831c7ff1a86875398236",
+    "platformSourcePulledWithoutTargetValue": true,
+    "consoleDispatchReconciliation": "An erroneous unpublished journal-byte payload was detected before publication; a recovery PATCH was rejected HTTP 412. Fresh hash-pinned recovery with a base-row ETag and new journals installed intended bytes. No erroneous draft was published, no journal reset and no identical dispatch retry occurred."
   },
   "reviewedSourceSha256": {
     "../solutions/CandidateCore/DataversePlugin.cs": "7211bdd1ec7236982074d3208d6a50335fb8213b66ab0b5ffc1a81b3488ca0dd",

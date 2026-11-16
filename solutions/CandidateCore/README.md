@@ -2,7 +2,9 @@
 
 Source for Candidate Core plug-in code. Live Dataverse metadata read on 2026-11-12 links the existing `os_sr_cact` Custom API to the File Store assembly version `1.0.7.0`. This verifies the registered handler version, not byte-for-byte package contents; its current SingleUserDev verifier is blocked by `SYNTHETIC_OWNER_REJECTED`. This is authored .NET plug-in source, **not an exported/unpacked Solution**. The supported target is .NET Framework 4.6.2 with `Microsoft.CrmSdk.CoreAssemblies` pinned to 9.0.2.60; the SDK assembly is supplied by the Dataverse sandbox. No runtime dependency is merged/uploaded with the package assembly.
 
-## NORMAL Create Candidate source implementation (1.0.9; not deployed)
+<a id="normal-create-candidate-source-implementation-109-not-deployed"></a>
+
+## NORMAL Create Candidate (1.0.9; deployed disabled)
 
 The local 1.0.9 source adds a separate NORMAL Create authorization path. In the pinned development organization, an unscoped `CreateCandidate` request no longer inherits the BSO synthetic profile; it must pass the same server-side NORMAL gate as any non-development organization. A nonempty `SyntheticScopeId` still selects the existing synthetic/SingleUserDev path and retains its exact isolation checks.
 
@@ -12,7 +14,7 @@ Create continues to require Candidate Name and Email, validate supplied Position
 
 The Console NORMAL submit sends selected references once, consumes these response fields, reports the Candidate Number, and refreshes the list/detail. Its existing busy guard prevents a second in-flight submit. SingleUserDev remains on its separately scoped operation path. Tests exercise fake SDK services and browser fixtures only; no Candidate was created in Dataverse.
 
-The source does not establish organization-level audit, privacy, retention, DLP, operational ownership, or release approval. The environment value is deliberately absent and the NORMAL gate therefore remains closed. Deployment and the rollback limitation are recorded in [the 1.0.9 release manifest](../../docs/CANDIDATE_CORE_NORMAL_CREATE_1.0.9_RELEASE_MANIFEST.json) and [Current State](../../docs/CURRENT_STATE.md).
+The source does not establish organization-level audit, privacy, retention, DLP or operational acceptance. The owner authorized the disabled technical release on 2026-11-16: 1.0.9.0, both outputs, the platform-generated String definition and an explicit active exact-org `enabled=false` value are installed. The Console HTML/JS are published and served hashes verified; SingleUserDev configuration and roles are unchanged. The target value remains outside source. No Candidate action or lifecycle UAT was executed. Safe feature rollback restores baseline Console bytes while retaining the protected 1.0.9 backend and additive metadata; an unprotected 1.0.8 downgrade is not supported. See [the 1.0.9 release manifest](../../docs/CANDIDATE_CORE_NORMAL_CREATE_1.0.9_RELEASE_MANIFEST.json) and [Current State](../../docs/CURRENT_STATE.md).
 
 <a id="synthetic-dev-boundary-offline-implementation-not-deployed"></a>
 

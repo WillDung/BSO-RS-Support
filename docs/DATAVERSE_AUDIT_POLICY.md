@@ -1,21 +1,24 @@
 # Dataverse Audit Policy Proposal
 
-**Status:** Read-only assessment and proposal, 19 October 2026. No auditing, retention, security, or environment setting was changed. IT/Compliance policy and approval are required before activation.
+**Status:** Read-only assessment refreshed 17 November 2026. No auditing, retention, security, DLP, or environment setting was changed. IT/Compliance policy and approval are required before NORMAL Create activation.
 
 ## Verified Current Configuration
 
-The connected environment was verified as **VN LMV IT**, Production-class and explicitly selected for internal IT development. The project Solution remains empty. Configuration was read from the Dataverse Organization row; no business records or audit entries were read.
+The connected environment was verified as **VN LMV IT**, Production-class and explicitly selected for internal IT development. The BSO-RS-Support solution and Candidate Core are deployed. Configuration and entity metadata were read only; no business records or audit entries were read.
 
 | Setting | Verified value | Interpretation |
 |---|---|---|
-| Environment auditing (`isauditenabled`) | `false` | Dataverse auditing is currently off at environment level. |
-| Configured audit retention (`auditretentionperiod`) | `30` days | Current technical configuration only; it is **not** an approved BSO-RS-Support retention decision. |
-| User-access auditing (`isuseraccessauditenabled`) | `false` | User-access auditing is currently off. |
+| Environment auditing (`isauditenabled`) | `false` (PAC read 17 November) | Dataverse auditing is currently off at environment level. |
+| Configured audit retention (`auditretentionperiod`) | `30` days (PAC read 17 November) | Current technical configuration only; it is **not** an approved BSO-RS-Support retention decision. |
+| Retention v2 (`auditretentionperiodv2`) | Unset (PAC read 17 November) | No approved policy or effective v2 duration is evidenced. |
+| User-access/read auditing and Purview forwarding | All `false` (PAC read 17 November) | Environment-wide controls are off; whether required remains an IT/Compliance decision. |
 | Audit settings JSON | `IsSqlAuditWriteDisabled: true` | Value observed; its effect on Dataverse audit functionality is UNKNOWN and requires Microsoft/platform-owner interpretation. |
 | Log-capacity entitlement, allocation, and consumption | UNKNOWN | Not exposed by the read-only MCP query or PAC environment inventory used in this assessment. |
-| Table/column audit flags across existing components | UNKNOWN | MCP did not expose a read-only `EntityMetadata.IsAuditEnabled` inventory operation in the inspected tools. |
+| Required project table audit flags | Candidate, Call Log, Candidate Status History all `IsAuditEnabled=true` (live metadata read 17 November) | Table metadata meets the approved project requirement; it produces no Dataverse audit entries while organization auditing is off. |
+| Table/column audit flags across other existing components | UNKNOWN | Only the three required project tables were checked in this bounded re-read; do not infer impact to other apps. |
 | Existing historical audit-log presence, volume, and stamped retention | UNKNOWN | Audit contents and audit-log tables were intentionally not queried. |
 | Other application/table dependencies | UNKNOWN | Environment contains other organizational solutions; audit flags and dependencies for their tables were not inspected. |
+| DLP policy inventory/applicability | 12 tenant policies listed; target applicability and Dataverse connector classification UNKNOWN | A read-only detail recheck of `LEGO Global Policy` reports `ExceptEnvironments`, default `General`, and 95 Confidential / 1,676 General / 4 Blocked connectors, but returns no excluded-environment IDs or connector identities. The listed `OnlyEnvironments` policies likewise expose no scope IDs in this tool. Do not infer which policy governs VN LMV IT or the Dataverse connector's classification. |
 
 ## Proposed Configuration (Not Applied)
 
@@ -25,9 +28,9 @@ The connected environment was verified as **VN LMV IT**, Production-class and ex
 | Environment | Retention period | Follow the organization's approved IT/Compliance policy; value **UNRESOLVED**. Do not adopt the current 30-day value as policy. |
 | Environment | User Access Auditing | **PENDING IT/COMPLIANCE APPROVAL**; decide whether this is required and confirm licensing/Purview destination. |
 | Environment | Common-entity audit preset | Do not enable by default. Confirm the complete affected-table scope before any selection. |
-| Project reference tables | Table auditing | **PROPOSED ENABLED** after environment policy and audit readiness are approved. |
-| Project reference tables | Column auditing | Use the matrix below; minimize capture of personal/resource identifiers. Sensitive-field choices remain approval-gated. |
-| Future business tables | Table/column auditing | Proposed matrix below; not provisioned and not active. |
+| Candidate, Call Log, Candidate Status History | Table auditing | Required table flags are already `IsAuditEnabled=true`; organization-level auditing remains off. No environment-wide change was made. |
+| Project reference tables | Table auditing | Proposed; live flags were not part of this bounded check. |
+| Project tables | Column auditing | Use the matrix below as a proposal; live per-column settings were not checked. Minimize personal/resource identifiers and obtain approval for sensitive fields. |
 
 Dataverse record auditing requires environment auditing plus table and selected-column settings. Enabling environment auditing is a global prerequisite; the table/column flags determine which record changes generate Dataverse audit rows. User-access/activity auditing is a separate environment-level concern. Do not confuse either with the application-owned `os_sr_csh` business history table.
 
@@ -42,9 +45,9 @@ The listed fields are schema-proposal names. Audit selection is a proposal, not 
 | `os_sr_csrc` | Enabled, pending policy | `os_sr_csrc_nm`, `statecode`, `statuscode` | Preserve source normalization and retirement history. |
 | `os_sr_loc` | Enabled, pending policy | `os_sr_loc_nm`, `statecode`, `statuscode` | `os_sr_loc_rmeml` and `os_sr_loc_det` can expose operational identifiers/details; column auditing requires explicit approval and content review. |
 
-## Future Business-Table Audit Matrix (Proposed)
+## Business-Table Audit Matrix (Requirements and Proposals)
 
-These tables do not exist. The matrix is for later schema implementation only.
+Candidate, Call Log, and Candidate Status History exist and their table audit flags were read as enabled on 17 November 2026. Other rows remain future/proposed. Column selections below are proposals, not verified live settings or approval to capture their values.
 
 | Table | Table audit | Proposed column audit | Sensitive-data caveat |
 |---|---|---|---|
@@ -54,7 +57,7 @@ These tables do not exist. The matrix is for later schema implementation only.
 | `os_sr_ires` | Enabled | Result, recorded-by, recorded-at | Feedback and salary are highly sensitive. Column auditing of `os_sr_ires_fb` and `os_sr_ires_sal` requires explicit approval because audit may retain before/after values. |
 | `os_sr_edsp` | Enabled | Dispatch status, provider correlation, sent/attempt time, sanitized error | Do not column-audit To/CC, subject, or body snapshots by default; they contain sensitive communications. Verify whether create-event audit payloads include their values before enabling. Keep the protected immutable dispatch row as the full content snapshot; audit display may truncate large values. |
 
-Table creation, audit flags, key creation, and column-security profiles are all future actions requiring separate authorization. Audit matrix coverage is not permission to collect every value.
+Any new table creation, column-level audit selections, key creation, or column-security profile remains subject to its own scope and approval. Audit matrix coverage is not permission to collect every value.
 
 ## IT/Compliance Approval Request
 
@@ -72,6 +75,8 @@ Please provide an approved decision or policy reference for each item. Do not in
 | 8 | Audit-log capacity allocation, current usage, forecast owner, alert thresholds, and budget owner | **REQUIRED — UNRESOLVED** |
 | 9 | Data-minimization rules for auditing PII, salary, CV links, email snapshots, and room/resource details | **REQUIRED — UNRESOLVED** |
 | 10 | Named approval owner and required change-management/production approval procedure | **REQUIRED — UNRESOLVED** |
+
+The project records no approved personal-data processing policy/reference for real Candidate data and no assigned incident/monitoring owner. The [Production Readiness Blocker Ledger](READINESS_BLOCKER_LEDGER.md) assigns these decisions to the Privacy/DLP owner and Service owner respectively; no individual or approval evidence is recorded. Do not infer either from the technical deployment authorization.
 
 ## Technical References
 

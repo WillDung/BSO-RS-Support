@@ -1,5 +1,13 @@
 # Current State
 
+## Candidate pagination and Answered-to-scheduling 1.0.10 (source only)
+
+**Status: Candidate Core 1.0.10 and the two-resource Console delta are implemented and built locally; they are not deployed.** The current task's reported baseline is Candidate Core 1.0.9 with NORMAL Create enabled. That live baseline, handler, API metadata, and current/published/served WebResource versions were not reverified during this source/build pass.
+
+The package SHA-256 is `fa0716a401f887b28bc2c7b1fb71f5264ece4490c084fb99697a0063c9263404`; the embedded assembly SHA-256 is `569e24423aa1e3352ef227c59fd1802ca78cb9cd3d509b94384f6572e4d5832f` (1.0.10.0). The exact delta is the package, three optional `os_sr_cact` paging inputs, two scoped-read response properties, and only `candidate-console.js` / `candidate-console.html`. The existing API execute privilege and all existing parameters remain unchanged. No Calendar, role, organization configuration, or Candidate data changes are included.
+
+The [1.0.10 release manifest](CANDIDATE_CORE_PAGINATION_1.0.10_RELEASE_MANIFEST.json) records the source hashes, package, deployment order, and compatible rollback to 1.0.9. Deployment is pending target confirmation and fresh baseline reconciliation; no live read, package push, metadata write, WebResource update/publication, Candidate business write, or automated lifecycle UAT has been performed for this release. Owner manual functional testing remains the acceptance path.
+
 ## NORMAL Create Candidate 1.0.9 enabled (2026-11-17)
 
 **Status: NORMAL Create is enabled for the exact VN LMV IT organization; Candidate Core 1.0.9.0 and the owner-authorized NORMAL Console profile are live.** The app owner's decision for owner-entered real Candidate data is recorded in the [1.0.9 release manifest](CANDIDATE_CORE_NORMAL_CREATE_1.0.9_RELEASE_MANIFEST.json). This is application Go Live authorization only; it is not represented as a separate corporate privacy, audit, retention, DLP, operational, or shared-environment approval.

@@ -99,9 +99,30 @@ Assert-Test ($html.Contains('id="candidate-search"') -and
     $script.Contains('candidate[TABLES.candidate.name]') -and
     $script.Contains('candidate[TABLES.candidate.email]')) 'Search by Candidate Number, Name, and Email'
 Assert-Test ($html.Contains('id="candidate-status-filter"') -and
-    $script.Contains('String(candidate[TABLES.candidate.status]) === status')) 'Filter the list by Candidate status'
-Assert-Test ($script.Contains('&$orderby=createdon desc') -and
-    $html.Contains('id="refresh-button"')) 'Load newest Candidates first and expose Refresh'
+    $script.Contains('candidateServerFilter(searchText, statusFilter)') -and
+    $script.Contains('candidateServerFilter') -and
+    $script.Contains('STATUS.offerExtended') -and
+    $script.Contains('STATUS.candidateFailed')) 'Apply All, Active, and status filters on the server'
+Assert-Test ($script.Contains('const CANDIDATE_PAGE_SIZE = 10;') -and
+    $script.Contains('Prefer: `odata.maxpagesize=${CANDIDATE_PAGE_SIZE}`') -and
+    $script.Contains('`createdon desc,${filterAttribute(c.id)} asc`') -and
+    $script.Contains('data["@odata.nextLink"]') -and
+    $script.Contains('candidatePageRequests[candidatePageNumber - 1]')) `
+    'Request stable server-side ten-row pages and follow only server-issued cursors'
+Assert-Test ($script.Contains('CandidatePageNumber: pageNumber') -and
+    $script.Contains('CandidateSearchText: searchText') -and
+    $script.Contains('CandidateStatusFilter: statusFilter') -and
+    $script.Contains('result.ScopedHasNextPage') -and
+    $script.Contains('result.ScopedTotalCount')) `
+    'Keep SingleUserDev list search and paging inside its scoped server read'
+Assert-Test ($script.Contains('candidatePageNumber = 1;') -and
+    $script.Contains('refreshCandidates({ resetPage: true })') -and
+    $html.Contains('id="candidate-previous-page"') -and
+    $html.Contains('id="candidate-next-page"') -and
+    $html.Contains('id="candidate-page-info"')) `
+    'Reset to page one when criteria change and expose Previous/Next navigation'
+Assert-Test (-not $script.Contains('const visibleRows = rows.filter((candidate) =>') -and
+    $html.Contains('id="refresh-button"')) 'Render only the server-filtered current page and expose Refresh'
 Assert-Test ($html.Contains('<th scope="col">Position</th>') -and
     $html.Contains('<th scope="col">Candidate Source</th>') -and
     $html.Contains('<th scope="col">Assigned TA</th>') -and
@@ -125,6 +146,12 @@ Assert-Test ($script.Contains('"ProfileFieldMask"') -and
     'Declare and send the explicit changed-profile field mask through Candidate Core'
 Assert-Test ($script.Contains('row.classList.add("selected")') -and
     $style.Contains('tr.candidate-row.selected')) 'Highlight the selected Candidate row'
+Assert-Test ($script.Contains('invokeCandidateCore("RecordCall"') -and
+    $script.Contains('invokeCandidateCore("ProceedToScheduling"') -and
+    $script.Contains('newCorrelationId());') -and
+    $script.Contains('showSchedulingPanelAfterSave') -and
+    $script.Contains('The Answered Call and Candidate Answered history were saved')) `
+    'Sequence Answered call and scheduling transitions with distinct correlations and explicit partial failure'
 Assert-Test ($html.Contains('id="call-entry-panel"') -and
     $html.Contains('id="call-form"') -and
     $html.Contains('id="call-outcome"')) 'Use the visible Record Call panel'
@@ -592,6 +619,15 @@ Assert-Test ($deployment.Contains('[switch]$DevelopmentSourceAhead') -and
     -not $deployment.Contains("Invoke-DataverseRequest -Method POST -Path 'PublishAllXml'") -and
     -not $deployment.Contains('PublishXmlCount = 0')) `
     'DEV source-ahead path pins only the reviewed HTML, policy, and JavaScript with scoped publication'
+Assert-Test ($deployment.Contains('[string]$CandidatePaginationReleaseManifestPath') -and
+    $deployment.Contains('docs\CANDIDATE_CORE_PAGINATION_1.0.10_RELEASE_MANIFEST.json') -and
+    $deployment.Contains("'CANDIDATE_LIST_PAGINATION_AND_ANSWERED_TO_SCHEDULING'") -and
+    $deployment.Contains('$candidatePaginationRelease.customApiChanges -ne 5') -and
+    $deployment.Contains('CANDIDATE_PAGINATION_CONFIGURATION_NOT_PRESERVED') -and
+    $deployment.Contains('CANDIDATE_CONSOLE_PAGINATION_RELEASE_PREFLIGHT_READY') -and
+    $deployment.Contains('CANDIDATE_CONSOLE_PAGINATION_RELEASE_PUBLISHED') -and
+    $deployment.Contains('$htmlPin[0].sha256 = $generatedHtmlHash')) `
+    'Pin and publish only the two pagination Console resources while preserving the existing NORMAL configuration'
 $sourceAheadUnchangedStart = $deployment.IndexOf('$developmentSourceAheadUnchangedNames = @(')
 $sourceAheadUnchangedEnd = $deployment.IndexOf(')', $sourceAheadUnchangedStart)
 $sourceAheadUnchangedBlock = if ($sourceAheadUnchangedStart -ge 0 -and
@@ -607,31 +643,30 @@ Assert-Test ($deployment.Contains('$developmentSourceAheadUnchangedNames = @(') 
     $deployment.Contains('unchangedMembershipCount -ne 1') -and
     $deployment.Contains('CANDIDATE_CONSOLE_SOURCE_BASELINE_UNRECONCILED')) `
     'DEV source-ahead preflight proves the unselected live environment configuration before publication'
-$normalModeManifestPath = Join-Path $root 'docs\CANDIDATE_CONSOLE_NORMAL_MODE_RELEASE_MANIFEST.json'
-$normalModeManifest = Get-Content -LiteralPath $normalModeManifestPath -Raw | ConvertFrom-Json
-$normalModeResourceNames = @($normalModeManifest.resources | ForEach-Object name | Sort-Object)
-$normalModeResources = @{}
-foreach ($resource in $normalModeManifest.resources) { $normalModeResources[$resource.name] = $resource }
-$normalModeTemplateHash = (Get-FileHash -LiteralPath (
+$paginationManifestPath = Join-Path $root 'docs\CANDIDATE_CORE_PAGINATION_1.0.10_RELEASE_MANIFEST.json'
+$paginationManifest = Get-Content -LiteralPath $paginationManifestPath -Raw | ConvertFrom-Json
+$paginationResources = @($paginationManifest.exactComponentDelta | Where-Object kind -eq 'WebResource')
+$paginationResourceNames = @($paginationResources | ForEach-Object uniqueName | Sort-Object)
+$paginationResourceMap = @{}
+foreach ($resource in $paginationResources) { $paginationResourceMap[$resource.uniqueName] = $resource }
+$paginationTemplateHash = (Get-FileHash -LiteralPath (
     Join-Path $root 'solutions\CandidateConsole\WebResources\os_\bso\candidate-console.html'
 ) -Algorithm SHA256).Hash.ToLowerInvariant()
-$normalModePolicyHash = (Get-FileHash -LiteralPath $policyPath -Algorithm SHA256).Hash.ToLowerInvariant()
-$normalModeScriptHash = (Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
-Assert-Test ($normalModeManifest.scope -ceq 'NORMAL_MODE_SINGLEUSERDEV_PRESERVING' -and
-    $normalModeManifest.customApiChanges -eq 0 -and
-    $normalModeManifest.environmentConfigurationChanges -eq 1 -and
-    [string]::Join('|', $normalModeResourceNames) -ceq
-        'os_/bso/candidate-console-environment.js|os_/bso/candidate-console-policy.js|os_/bso/candidate-console.html|os_/bso/candidate-console.js' -and
-    $normalModeResources['os_/bso/candidate-console-environment.js'].sha256 -ceq 'EXTERNAL_TARGET_CONFIGURATION' -and
-    $normalModeResources['os_/bso/candidate-console.html'].sha256 -ceq 'EXTERNAL_TARGET_HTML' -and
-    $normalModeResources['os_/bso/candidate-console.html'].templateSha256 -ceq $normalModeTemplateHash -and
-    $normalModeResources['os_/bso/candidate-console-policy.js'].sha256 -ceq $normalModePolicyHash -and
-    $normalModeResources['os_/bso/candidate-console.js'].sha256 -ceq $normalModeScriptHash -and
-    @($normalModeManifest.resources | Where-Object {
-        $_.previousSha256 -notmatch '^[0-9a-f]{64}$'
-    }).Count -eq 0 -and
-    $normalModeManifest.rollback.safeSequence[0] -match 'enabled=false') `
-    'Pin the exact four-resource NORMAL delta, target-bound files, installed baselines, and disable-first rollback'
+$paginationScriptHash = (Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$paginationArtifactPath = Join-Path $root 'solutions\CandidateCorePackage\bin\Release\os_sr_cact_pkg.1.0.10.nupkg'
+$paginationArtifactHash = (Get-FileHash -LiteralPath $paginationArtifactPath -Algorithm SHA256).Hash.ToLowerInvariant()
+Assert-Test ($paginationManifest.release.artifactVersion -ceq '1.0.10' -and
+    $paginationManifest.release.assemblyVersion -ceq '1.0.10.0' -and
+    $paginationManifest.release.deployed -eq $false -and
+    $paginationManifest.release.targetIdentityVerifiedThisTurn -eq $false -and
+    [string]::Join('|', $paginationResourceNames) -ceq
+        'os_/bso/candidate-console.html|os_/bso/candidate-console.js' -and
+    $paginationResourceMap['os_/bso/candidate-console.html'].sourceSha256 -ceq $paginationTemplateHash -and
+    $paginationResourceMap['os_/bso/candidate-console.js'].sourceSha256 -ceq $paginationScriptHash -and
+    $paginationManifest.build.packageSha256 -ceq $paginationArtifactHash -and
+    $paginationManifest.customApiContract.existingExecutePrivilege -ceq 'prvReados_sr_cand' -and
+    $paginationManifest.rollback.sequence.Count -ge 4) `
+    'Pin the 1.0.10 package, exact two-resource delta, additive API contract, and compatible rollback'
 
 $hash = (Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $version = [regex]::Match($html, 'candidate-console\.js\?v=([0-9a-f]+)')

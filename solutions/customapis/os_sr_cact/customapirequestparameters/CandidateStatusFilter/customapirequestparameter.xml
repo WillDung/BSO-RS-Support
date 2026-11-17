@@ -1,0 +1,9 @@
+<customapirequestparameter uniquename="CandidateStatusFilter">
+  <displayname default="CandidateStatusFilter">
+    <label description="CandidateStatusFilter" languagecode="1033" />
+  </displayname>
+  <iscustomizable>1</iscustomizable>
+  <isoptional>1</isoptional>
+  <name>os_sr_cact.CandidateStatusFilter</name>
+  <type>10</type>
+</customapirequestparameter>

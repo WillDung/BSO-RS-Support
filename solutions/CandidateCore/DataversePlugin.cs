@@ -87,8 +87,11 @@ namespace os_sr_cact
                     isolation.VerifySingleUserDevApiScope(controlService, callerService, context);
                     var scopedReadService = factory.CreateOrganizationService(null);
                     context.OutputParameters["ResultCode"] = "ScopedRead";
-                    context.OutputParameters["ScopedData"] =
-                        isolation.ReadSingleUserDevData(requestedAction!, scopedReadService);
+                    context.OutputParameters["ScopedData"] = isolation.ReadSingleUserDevData(
+                        requestedAction!, scopedReadService, context.InputParameters,
+                        out var hasNextPage, out var totalCount);
+                    context.OutputParameters["ScopedHasNextPage"] = hasNextPage;
+                    context.OutputParameters["ScopedTotalCount"] = totalCount;
                     return;
                 }
                 var request = CandidateActionInputAdapter.Create(context.InitiatingUserId, context.InputParameters, DateTime.UtcNow);
@@ -511,6 +514,21 @@ namespace os_sr_cact
                 if (parameter.Key == "ActionType" || parameter.Key == "CorrelationId" ||
                     parameter.Key == "SyntheticScopeId")
                     continue;
+                if (parameter.Key == "CandidateSearchText" || parameter.Key == "CandidateStatusFilter" ||
+                    parameter.Key == "CandidatePageNumber")
+                {
+                    if (action != "ReadScopedCandidates") throw new OperationError("SYNTHETIC_READ_INPUT_REJECTED");
+                    if (parameter.Key == "CandidateSearchText" && parameter.Value != null &&
+                        (!(parameter.Value is string search) || search.Length > 254))
+                        throw new OperationError("SYNTHETIC_READ_INPUT_REJECTED");
+                    if (parameter.Key == "CandidateStatusFilter" && parameter.Value != null &&
+                        (!(parameter.Value is string status) || status.Length > 16))
+                        throw new OperationError("SYNTHETIC_READ_INPUT_REJECTED");
+                    if (parameter.Key == "CandidatePageNumber" && parameter.Value != null &&
+                        (!(parameter.Value is int page) || page < 0 || page > 10000))
+                        throw new OperationError("SYNTHETIC_READ_INPUT_REJECTED");
+                    continue;
+                }
                 if (!ActionRequest.IsDeclaredInputName(parameter.Key) ||
                     parameter.Value != null && !IsOptionalTransportDefault(parameter.Key, parameter.Value))
                     throw new OperationError("SYNTHETIC_READ_INPUT_REJECTED");
@@ -533,7 +551,7 @@ namespace os_sr_cact
         }
 
         private static bool IsOptionalTransportDefault(string name, object value) =>
-            name == "ExpectedStatus" || name == "CallOutcome"
+            name == "ExpectedStatus" || name == "CallOutcome" || name == "CandidatePageNumber"
                 ? value is int number && number == 0
                 : name == "StartAt" || name == "EndAt" || name == "ContactedAt"
                     ? value is DateTime date && date == DateTime.MinValue

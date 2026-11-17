@@ -1,0 +1,8 @@
+<customapiresponseproperty uniquename="ScopedTotalCount">
+  <displayname default="ScopedTotalCount">
+    <label description="ScopedTotalCount" languagecode="1033" />
+  </displayname>
+  <iscustomizable>1</iscustomizable>
+  <name>os_sr_cact.ScopedTotalCount</name>
+  <type>7</type>
+</customapiresponseproperty>

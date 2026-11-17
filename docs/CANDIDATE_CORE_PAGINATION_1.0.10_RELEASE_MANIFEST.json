@@ -1,0 +1,172 @@
+{
+  "manifestVersion": 1,
+  "release": {
+    "name": "Candidate server pagination and Answered-to-scheduling",
+    "artifactVersion": "1.0.10",
+    "assemblyVersion": "1.0.10.0",
+    "status": "SOURCE_AND_PACKAGE_READY_NOT_DEPLOYED",
+    "artifactBuilt": true,
+    "deploymentReady": false,
+    "deployed": false,
+    "targetLabel": "VN LMV IT",
+    "targetIdentityVerifiedThisTurn": false,
+    "reportedBaseline": {
+      "candidateCoreVersion": "1.0.9.0",
+      "normalCreateEnabled": true
+    }
+  },
+  "scope": "CANDIDATE_LIST_PAGINATION_AND_ANSWERED_TO_SCHEDULING",
+  "customApiChanges": 5,
+  "environmentConfigurationChanges": 0,
+  "resources": [
+    {
+      "name": "os_/bso/candidate-console.html",
+      "sha256": "EXTERNAL_TARGET_HTML",
+      "templateSha256": "048ffcc33862cd42400b147abc021ac25e595c34fd444c1783db645f46703855",
+      "previousSha256": "EXTERNAL_TARGET_BASELINE",
+      "previousTemplateSha256": "b432193ef8e6dff640847867d680fbfbd851a7e7548eee99b9281920da29e12d"
+    },
+    {
+      "name": "os_/bso/candidate-console.js",
+      "sha256": "b6a87078ca7bb840e80060b86e6891660bb98b44ad013d75c4516cc01daf9803",
+      "previousSha256": "d926e4ddc15ff33524b6cb33582d0bad527294b17eee6a58d8c27015ca9684e8"
+    }
+  ],
+  "build": {
+    "command": "dotnet build .\\solutions\\CandidateCorePackage\\CandidateCore.Package.csproj -c Release -t:Rebuild --no-restore",
+    "packageFile": "../solutions/CandidateCorePackage/bin/Release/os_sr_cact_pkg.1.0.10.nupkg",
+    "packageUniqueName": "os_sr_cact_pkg",
+    "packageSha256": "fa0716a401f887b28bc2c7b1fb71f5264ece4490c084fb99697a0063c9263404",
+    "embeddedAssemblyTypeName": "os_sr_cact.ApplyCandidateAction",
+    "embeddedAssemblySha256": "569e24423aa1e3352ef227c59fd1802ca78cb9cd3d509b94384f6572e4d5832f",
+    "assemblyFileVersion": "1.0.10.0",
+    "packageEntrySha256MatchesBuiltAssembly": true
+  },
+  "exactComponentDelta": [
+    {
+      "kind": "PluginPackage",
+      "uniqueName": "os_sr_cact_pkg",
+      "change": "Replace the existing package with version 1.0.10 containing scoped server pagination and the existing state-machine-backed Answered-to-scheduling flow.",
+      "artifactFile": "../solutions/CandidateCorePackage/bin/Release/os_sr_cact_pkg.1.0.10.nupkg",
+      "sha256": "fa0716a401f887b28bc2c7b1fb71f5264ece4490c084fb99697a0063c9263404"
+    },
+    {
+      "kind": "CustomApiRequestParameter",
+      "uniqueName": "os_sr_cact.CandidateSearchText",
+      "typeCode": 10,
+      "type": "String",
+      "optional": true,
+      "sourceFile": "../solutions/customapis/os_sr_cact/customapirequestparameters/CandidateSearchText/customapirequestparameter.xml",
+      "sourceSha256": "7125357f1fc9dcb88f7ed3209eda60b50b3354505ebfaf596159dfbab480455e"
+    },
+    {
+      "kind": "CustomApiRequestParameter",
+      "uniqueName": "os_sr_cact.CandidateStatusFilter",
+      "typeCode": 10,
+      "type": "String",
+      "optional": true,
+      "sourceFile": "../solutions/customapis/os_sr_cact/customapirequestparameters/CandidateStatusFilter/customapirequestparameter.xml",
+      "sourceSha256": "655d9b45caf74720dafccdeedd254002b770fb2f64d6d52020472a8eebd46c15"
+    },
+    {
+      "kind": "CustomApiRequestParameter",
+      "uniqueName": "os_sr_cact.CandidatePageNumber",
+      "typeCode": 7,
+      "type": "Integer",
+      "optional": true,
+      "sourceFile": "../solutions/customapis/os_sr_cact/customapirequestparameters/CandidatePageNumber/customapirequestparameter.xml",
+      "sourceSha256": "4afe7b1679b7ebb0a7a7af0c7bf5c955b51117b33cf8cc9424db154f0e1dc825"
+    },
+    {
+      "kind": "CustomApiResponseProperty",
+      "uniqueName": "os_sr_cact.ScopedHasNextPage",
+      "typeCode": 0,
+      "type": "Boolean",
+      "sourceFile": "../solutions/customapis/os_sr_cact/customapiresponseproperties/ScopedHasNextPage/customapiresponseproperty.xml",
+      "sourceSha256": "9e6208482c8537abed7356908ef77b0a3688cd1a62841ceb6d1d792fbfe3a45e"
+    },
+    {
+      "kind": "CustomApiResponseProperty",
+      "uniqueName": "os_sr_cact.ScopedTotalCount",
+      "typeCode": 7,
+      "type": "Integer",
+      "sourceFile": "../solutions/customapis/os_sr_cact/customapiresponseproperties/ScopedTotalCount/customapiresponseproperty.xml",
+      "sourceSha256": "c4e2983724ac061879643a00cd98b8b62a3170cafba1cbe932e099c21cc938c4"
+    },
+    {
+      "kind": "WebResource",
+      "uniqueName": "os_/bso/candidate-console.js",
+      "sourceFile": "../solutions/CandidateConsole/WebResources/os_/bso/candidate-console.js",
+      "sourceSha256": "b6a87078ca7bb840e80060b86e6891660bb98b44ad013d75c4516cc01daf9803",
+      "previousSourceSha256": "d926e4ddc15ff33524b6cb33582d0bad527294b17eee6a58d8c27015ca9684e8"
+    },
+    {
+      "kind": "WebResource",
+      "uniqueName": "os_/bso/candidate-console.html",
+      "sourceFile": "../solutions/CandidateConsole/WebResources/os_/bso/candidate-console.html",
+      "sourceSha256": "048ffcc33862cd42400b147abc021ac25e595c34fd444c1783db645f46703855",
+      "previousSourceSha256": "b432193ef8e6dff640847867d680fbfbd851a7e7548eee99b9281920da29e12d",
+      "change": "Refresh the JavaScript cache token."
+    }
+  ],
+  "customApiContract": {
+    "uniqueName": "os_sr_cact",
+    "addedOptionalRequestParameters": [
+      "CandidateSearchText",
+      "CandidateStatusFilter",
+      "CandidatePageNumber"
+    ],
+    "addedResponseProperties": [
+      "ScopedHasNextPage",
+      "ScopedTotalCount"
+    ],
+    "executePrivilegeChanged": false,
+    "existingExecutePrivilege": "prvReados_sr_cand",
+    "handlerRegistrationChanged": false
+  },
+  "behavior": {
+    "normalPagination": "Dataverse applies search/status filters before the 10-row page; ordering is createdon descending then Candidate ID ascending; navigation follows the same-origin server nextLink.",
+    "singleUserDevPagination": "The fixed scoped read applies the profile scope, search/status filters, ordering and page size 10 on the server. Candidate list count is reported as unavailable when Dataverse flags its 5000-row count cap.",
+    "answeredCall": "RecordCall persists the Answered call/state/history; ProceedToScheduling then uses its own supported state-machine operation. On uncertain second-operation outcome the Console refreshes state and opens Scheduling only if the Candidate is confirmed Waiting Manual Scheduling.",
+    "calendar": "No Calendar or Outlook operation is added."
+  },
+  "deployment": {
+    "status": "BLOCKED_PENDING_TARGET_CONFIRMATION_AND_FRESH_COMPONENT_BASELINE",
+    "order": [
+      "Confirm the exact environment and reconcile the existing 1.0.9 package, API handler, API metadata and two WebResource ETags/current/published/served hashes.",
+      "Add the three optional request parameters and two response properties to the existing os_sr_cact API without changing its execute privilege or existing parameters.",
+      "Install the 1.0.10 package after metadata is present so the handler's fail-closed API contract check succeeds.",
+      "Conditionally update only candidate-console.js and candidate-console.html using fresh individual-row ETags, then issue one scoped PublishXml for those exact WebResources.",
+      "Read back installed package/handler, exact API metadata, current and published resource hashes, served cache token, and unchanged SingleUserDev and security boundaries."
+    ],
+    "organizationConfigurationChanges": 0,
+    "securityRoleChanges": 0,
+    "candidateBusinessWrites": 0,
+    "automatedLifecycleUat": false
+  },
+  "rollback": {
+    "status": "COMPATIBLE_ROLLBACK_PATH_PREPARED",
+    "rollbackPackage": {
+      "version": "1.0.9",
+      "sha256": "5b08bcfde39207d5069ce9c55ee4e1794622d69e7d0f148277f7b8f04a89802b"
+    },
+    "sequence": [
+      "Capture exact current/published Console bytes, ETags, package/API baseline and target identifiers in a new external evidence journal before deployment; never reuse an old journal.",
+      "Restore the two captured pre-release Console resources with fresh ETags and publish only those two resources; verify served hashes before changing the backend package.",
+      "If full backend rollback is required, restore the pinned 1.0.9 package while leaving the five additive API metadata components installed. The 1.0.9 handler validates its required API subset and tolerates these additive components.",
+      "Only after the 1.0.9 handler and restored Console are verified, remove the three additive request parameters and two response properties conditionally. Keep the existing API execute privilege and all original metadata unchanged.",
+      "Verify 1.0.9 handler registration, original API contract and security behavior; never replace the handler with an unprotected version or change its execute privilege."
+    ],
+    "normalCreateGate": "No gate/configuration change is required for a UI-only rollback. If the new backend itself causes an authorization concern, conditionally disable the exact organization-bound NORMAL Create gate before rollback and verify readback."
+  },
+  "validation": {
+    "candidateCoreBuild": "PASS",
+    "candidateCoreSdkHarness": "PASS: 966 assertions plus 456 synthetic isolation assertions",
+    "javascriptSyntax": "PASS",
+    "customApiXmlSyntax": "PASS",
+    "candidateConsoleStaticSuite": "PASS: 86 checks",
+    "deploymentAndLiveReadback": "NOT_PERFORMED",
+    "candidateBusinessWrites": 0,
+    "ownerManualFunctionalTesting": "PENDING"
+  }
+}

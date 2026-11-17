@@ -2,6 +2,14 @@
 
 Source for Candidate Core plug-in code. Live Dataverse metadata read on 2026-11-12 links the existing `os_sr_cact` Custom API to the File Store assembly version `1.0.7.0`. This verifies the registered handler version, not byte-for-byte package contents; its current SingleUserDev verifier is blocked by `SYNTHETIC_OWNER_REJECTED`. This is authored .NET plug-in source, **not an exported/unpacked Solution**. The supported target is .NET Framework 4.6.2 with `Microsoft.CrmSdk.CoreAssemblies` pinned to 9.0.2.60; the SDK assembly is supplied by the Dataverse sandbox. No runtime dependency is merged/uploaded with the package assembly.
 
+## Candidate pagination and Answered-to-scheduling (1.0.10; source-only)
+
+The local 1.0.10 package adds a bounded 10-row server-side Candidate page to the existing scoped SingleUserDev read. Search by Candidate Number, Name, or Email and the All/Active filter are applied before page retrieval; results are ordered by Created On descending and Candidate ID ascending. A capped Dataverse total count is reported as unavailable rather than presented as exact. NORMAL mode uses the authenticated Dataverse Web API with the same server-side filter/order/page behavior and follows only same-origin server paging links. It never loads all Candidates for client-side pagination.
+
+An Answered call uses the existing `RecordCall` operation, then the supported `ProceedToScheduling` operation. The first operation persists the Call, Candidate Answered state, and Status History atomically; the second transitions to Waiting Manual Scheduling and writes its history. If the second response is uncertain, the Console refreshes the Candidate and opens Scheduling only when the persisted state confirms Waiting Manual Scheduling. No Outlook meeting is created.
+
+The existing `os_sr_cact` Custom API contract is extended only by three optional request parameters and two response properties for scoped paging. Its execute privilege and existing parameters remain unchanged. The package is built but this release is **not deployed**; the reported 1.0.9 live baseline and target resource versions must be reconciled before deployment. See the [1.0.10 release manifest](../../docs/CANDIDATE_CORE_PAGINATION_1.0.10_RELEASE_MANIFEST.json).
+
 <a id="normal-create-candidate-source-implementation-109-not-deployed"></a>
 
 ## NORMAL Create Candidate (1.0.9; deployed disabled)

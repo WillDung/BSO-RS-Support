@@ -1,0 +1,8 @@
+<customapiresponseproperty uniquename="ScopedHasNextPage">
+  <displayname default="ScopedHasNextPage">
+    <label description="ScopedHasNextPage" languagecode="1033" />
+  </displayname>
+  <iscustomizable>1</iscustomizable>
+  <name>os_sr_cact.ScopedHasNextPage</name>
+  <type>0</type>
+</customapiresponseproperty>

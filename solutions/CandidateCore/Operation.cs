@@ -61,7 +61,8 @@ namespace os_sr_cact
             "ActionType", "CorrelationId", "SyntheticScopeId", "CandidateId", "ExpectedStatus", "CandidateName",
             "CandidateEmail", "CandidatePhone", "CandidateCvUrl", "PositionId", "CandidateSourceId",
             "AssignedTaId", "ProfileFieldMask", "CallOutcome", "ContactedAt", "Notes", "Reason",
-            "InterviewerId", "LocationId", "StartAt", "EndAt", "ResultNotes"
+            "InterviewerId", "LocationId", "StartAt", "EndAt", "ResultNotes",
+            "CandidateSearchText", "CandidateStatusFilter", "CandidatePageNumber"
         };
 
         private static readonly HashSet<string> DeclaredInputNameSet =

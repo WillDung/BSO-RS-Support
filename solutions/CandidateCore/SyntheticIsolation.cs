@@ -285,8 +285,15 @@ namespace os_sr_cact
             VerifyScopedReadback(control, caller);
         }
 
-        public string ReadSingleUserDevData(string action, IOrganizationService service)
+        public string ReadSingleUserDevData(string action, IOrganizationService service) =>
+            ReadSingleUserDevData(action, service, new ParameterCollection(), out _, out _);
+
+        public string ReadSingleUserDevData(
+            string action, IOrganizationService service, ParameterCollection parameters,
+            out bool hasNextPage, out int totalCount)
         {
+            hasNextPage = false;
+            totalCount = -1;
             if (!SingleUserDev || !SingleUserDevReadTables.TryGetValue(action, out var table))
                 throw new OperationError("SINGLE_USER_DEV_READ_REJECTED");
 
@@ -297,16 +304,97 @@ namespace os_sr_cact
             var query = new QueryExpression(table)
             {
                 ColumnSet = new ColumnSet(ScopedReadColumns(table)),
-                TopCount = references.ContainsKey(table) ? 2 : 101
+                TopCount = references.ContainsKey(table) ? 2 : table == "os_sr_cand" ? null : 101
             };
             query.Criteria.AddFilter(ScopeFilter(table));
+            if (table == "os_sr_cand")
+            {
+                var page = ReadCandidatePageQuery(parameters);
+                if (page.SearchText.Length != 0)
+                {
+                    var search = query.Criteria.AddFilter(LogicalOperator.Or);
+                    var pattern = "%" + EscapeLikePattern(page.SearchText) + "%";
+                    search.AddCondition("os_sr_cand_cnum", ConditionOperator.Like, pattern);
+                    search.AddCondition("os_sr_cand_nm", ConditionOperator.Like, pattern);
+                    search.AddCondition("os_sr_cand_eml", ConditionOperator.Like, pattern);
+                }
+                if (page.Status == "active")
+                {
+                    query.Criteria.AddCondition("os_sr_cand_stat", ConditionOperator.NotEqual, ActionRequest.Passed);
+                    query.Criteria.AddCondition("os_sr_cand_stat", ConditionOperator.NotEqual, ActionRequest.Failed);
+                }
+                else if (page.StatusValue.HasValue)
+                    query.Criteria.AddCondition("os_sr_cand_stat", ConditionOperator.Equal, page.StatusValue.Value);
+
+                query.Orders.Add(new OrderExpression("createdon", OrderType.Descending));
+                query.Orders.Add(new OrderExpression("os_sr_candid", OrderType.Ascending));
+                query.PageInfo = new PagingInfo
+                {
+                    Count = 10,
+                    PageNumber = page.PageNumber,
+                    ReturnTotalRecordCount = true
+                };
+            }
             var result = service.RetrieveMultiple(query);
             if (result.MoreRecords || result.Entities.Count > (references.ContainsKey(table) ? 1 : 100))
-                throw new OperationError("SYNTHETIC_READBACK_LIMIT");
+            {
+                if (table != "os_sr_cand" || result.Entities.Count > 10)
+                    throw new OperationError("SYNTHETIC_READBACK_LIMIT");
+            }
             foreach (var row in result.Entities) ValidateRow(row);
             if (references.ContainsKey(table) && result.Entities.Count != 1)
                 throw new OperationError("SYNTHETIC_REFERENCE_REJECTED");
+            if (table == "os_sr_cand")
+            {
+                hasNextPage = result.MoreRecords;
+                totalCount = result.TotalRecordCountLimitExceeded ? -1 : result.TotalRecordCount;
+            }
             return SerializeScopedRows(result.Entities);
+        }
+
+        private static CandidatePageQuery ReadCandidatePageQuery(ParameterCollection parameters)
+        {
+            var search = parameters.TryGetValue("CandidateSearchText", out var rawSearch) && rawSearch is string text
+                ? text.Trim()
+                : "";
+            var status = parameters.TryGetValue("CandidateStatusFilter", out var rawStatus) && rawStatus is string filter
+                ? filter.Trim()
+                : "";
+            var pageNumber = parameters.TryGetValue("CandidatePageNumber", out var rawPage) && rawPage is int page
+                ? page
+                : 0;
+            if (search.Length > 254 || pageNumber < 0 || pageNumber > 10000)
+                throw new OperationError("SYNTHETIC_READ_INPUT_REJECTED");
+            if (status.Length == 0) status = "";
+            else if (!string.Equals(status, "active", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!int.TryParse(status, NumberStyles.None, CultureInfo.InvariantCulture, out var statusValue) ||
+                    statusValue < ActionRequest.NeedCall || statusValue > ActionRequest.Failed)
+                    throw new OperationError("SYNTHETIC_READ_INPUT_REJECTED");
+                return new CandidatePageQuery(search, "", pageNumber == 0 ? 1 : pageNumber, statusValue);
+            }
+            return new CandidatePageQuery(search, status.ToLowerInvariant(),
+                pageNumber == 0 ? 1 : pageNumber, null);
+        }
+
+        private static string EscapeLikePattern(string value) =>
+            value.Replace("~", "~~").Replace("%", "~%").Replace("_", "~_")
+                .Replace("[", "~[").Replace("]", "~]");
+
+        private sealed class CandidatePageQuery
+        {
+            public string SearchText { get; }
+            public string Status { get; }
+            public int PageNumber { get; }
+            public int? StatusValue { get; }
+
+            public CandidatePageQuery(string searchText, string status, int pageNumber, int? statusValue)
+            {
+                SearchText = searchText;
+                Status = status;
+                PageNumber = pageNumber;
+                StatusValue = statusValue;
+            }
         }
 
         private bool HasScopedCandidate(IOrganizationService service)
@@ -506,10 +594,17 @@ namespace os_sr_cact
             var outputs = new List<(string Table, string Name, int Type)>
             {
                 (Table: "customapirequestparameter", Name: "SyntheticScopeId", Type: 12),
+                (Table: "customapirequestparameter", Name: "CandidateSearchText", Type: 10),
+                (Table: "customapirequestparameter", Name: "CandidateStatusFilter", Type: 10),
+                (Table: "customapirequestparameter", Name: "CandidatePageNumber", Type: 7),
                 (Table: "customapiresponseproperty", Name: "IsolationContract", Type: 10)
             };
             if (requireScopedData)
+            {
                 outputs.Add(("customapiresponseproperty", "ScopedData", 10));
+                outputs.Add(("customapiresponseproperty", "ScopedHasNextPage", 0));
+                outputs.Add(("customapiresponseproperty", "ScopedTotalCount", 7));
+            }
             foreach (var metadata in outputs)
             {
                 var parameter = new QueryExpression(metadata.Table)

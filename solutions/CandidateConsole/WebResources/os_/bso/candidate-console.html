@@ -8,7 +8,7 @@
   <script src="../../ClientGlobalContext.js.aspx"></script>
   <script defer src="candidate-console-environment.js?v=21ddcd925916"></script>
   <script defer src="candidate-console-policy.js?v=fbefadd65caa"></script>
-  <script defer src="candidate-console.js?v=d926e4ddc15f"></script>
+  <script defer src="candidate-console.js?v=b6a87078ca7b"></script>
   <script defer src="candidate-console-availability.js?v=7df0706fcbe1"></script>
 </head>
 <body>
@@ -151,12 +151,13 @@
       <div class="list-filters">
         <label class="field">
           <span>Search Candidate Number, Name, or Email</span>
-          <input id="candidate-search" type="search" autocomplete="off">
+          <input id="candidate-search" type="search" maxlength="254" autocomplete="off">
         </label>
         <label class="field">
-          <span>Status</span>
+          <span>Candidate filter</span>
           <select id="candidate-status-filter">
             <option value="">All statuses</option>
+            <option value="active">Active candidates</option>
           </select>
         </label>
       </div>
@@ -182,6 +183,15 @@
           </tbody>
         </table>
       </div>
+      <nav class="section-heading" aria-label="Candidate list pages">
+        <span id="candidate-page-info" class="muted" aria-live="polite">Page 1</span>
+        <div>
+          <button id="candidate-previous-page" class="button button-secondary button-small"
+            type="button" disabled>Previous</button>
+          <button id="candidate-next-page" class="button button-secondary button-small"
+            type="button" disabled>Next</button>
+        </div>
+      </nav>
     </section>
 
     <section id="detail-panel" class="panel detail-panel" aria-labelledby="detail-heading" hidden>

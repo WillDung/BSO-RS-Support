@@ -22,6 +22,7 @@
     offerExtended: 100010004,
     candidateFailed: 100010005
   };
+  const CANDIDATE_PAGE_SIZE = 10;
   // Mirrors the Candidate Core RecordCall transition; the server remains authoritative.
   function canRecordCall(status) {
     return status === STATUS.needCall;
@@ -131,6 +132,12 @@
   let scheduleRetryBlockedCandidateId = null;
   let resultRetryBlockedCandidateId = null;
   let currentRows = [];
+  let candidatePageRequests = [null];
+  let candidatePageNumber = 1;
+  let candidateTotalCount = null;
+  let candidateHasNextPage = false;
+  let candidateListRequestId = 0;
+  let candidateSearchTimer = null;
   let busy = false;
   let syntheticQueryBlocked = false;
   let isolationExpiryTimer;
@@ -176,7 +183,8 @@
     "CandidateEmail", "CandidatePhone", "CandidateCvUrl", "PositionId", "CandidateSourceId",
     "AssignedTaId", "ProfileFieldMask", "Reason",
     "CallOutcome", "ContactedAt", "Notes", "InterviewerId", "LocationId", "StartAt",
-    "EndAt", "ResultNotes"
+    "EndAt", "ResultNotes", "CandidateSearchText", "CandidateStatusFilter",
+    "CandidatePageNumber"
   ]);
   const PROFILE_FIELD_ORDER = [
     "CandidateName", "CandidateEmail", "CandidatePhone", "PositionId",
@@ -369,6 +377,8 @@
   function setBusy(value) {
     busy = value;
     $("refresh-button").disabled = value || !isCandidateCoreEnabled();
+    $("candidate-search").disabled = value;
+    $("candidate-status-filter").disabled = value;
     $("candidate-data-mode").disabled = value || environmentPolicy.allowed !== true;
     $("refresh-references").disabled = value || environmentPolicy.allowed !== true ||
       (referenceMode !== "NORMAL" && !isCandidateCoreEnabled());
@@ -402,6 +412,7 @@
         (button.id === "confirm-cancellation" &&
           (!selectedCandidate || !canManageSchedule()));
     });
+    updateCandidatePagination();
   }
 
   function formatDate(value) {
@@ -532,9 +543,13 @@
     if (!result || result.ResultCode !== "ScopedRead" || typeof result.ScopedData !== "string") {
       throw new Error("SINGLE_USER_DEV_READ_RESPONSE_INVALID");
     }
+    return parseSingleUserDevRows(tableLogicalName, result.ScopedData);
+  }
+
+  function parseSingleUserDevRows(tableLogicalName, scopedData) {
     let rows;
     try {
-      rows = JSON.parse(result.ScopedData);
+      rows = JSON.parse(scopedData);
     } catch {
       throw new Error("SINGLE_USER_DEV_READ_RESPONSE_INVALID");
     }
@@ -555,6 +570,34 @@
       }
       return parsed;
     });
+  }
+
+  async function readSingleUserDevCandidatePage(searchText, statusFilter, pageNumber) {
+    const action = SINGLE_USER_DEV_READ_ACTIONS[TABLES.candidate.logicalName];
+    if (!action || environmentPolicy.candidateOperationMode !== "SingleUserDev") {
+      throw new Error("SINGLE_USER_DEV_READ_UNAVAILABLE");
+    }
+    const { result } = await sendCandidateCoreRequest(action, {
+      CandidateSearchText: searchText,
+      CandidateStatusFilter: statusFilter,
+      CandidatePageNumber: pageNumber
+    }, newCorrelationId());
+    if (!result || result.ResultCode !== "ScopedRead" ||
+        typeof result.ScopedData !== "string" ||
+        typeof result.ScopedHasNextPage !== "boolean" ||
+        !Number.isSafeInteger(result.ScopedTotalCount)) {
+      throw new Error("SINGLE_USER_DEV_READ_RESPONSE_INVALID");
+    }
+    const rows = parseSingleUserDevRows(TABLES.candidate.logicalName, result.ScopedData);
+    if (rows.length > CANDIDATE_PAGE_SIZE) {
+      throw new Error("SINGLE_USER_DEV_READ_RESPONSE_INVALID");
+    }
+    return {
+      rows,
+      hasNextPage: result.ScopedHasNextPage,
+      totalCount: result.ScopedTotalCount >= 0 ? result.ScopedTotalCount : null,
+      nextRequest: null
+    };
   }
 
   async function resolveCreatedCandidate(correlationId, expectedName, expectedEmail) {
@@ -585,7 +628,7 @@
     }
   }
 
-  async function reportCandidateCoreFailure(action, candidateId, error) {
+  async function reportCandidateCoreFailure(action, candidateId, error, partialFailureMessage = "") {
     logSafeFailure(`CANDIDATE_CORE_${action}_FAILED`, error);
     try {
       await refreshCandidates();
@@ -604,7 +647,9 @@
       showNotice("Candidate creation was rejected by server authorization. Contact an administrator; no Candidate was created.", true);
       return;
     }
-    showNotice(`${action} failed or its outcome is uncertain${operationFailure}. Current server state was refreshed; verify it before retrying.`, true);
+    const message = partialFailureMessage ||
+      `${action} failed or its outcome is uncertain. Current server state was refreshed; verify it before retrying.`;
+    showNotice(`${message}${operationFailure}`, true);
   }
 
   function assertCandidateCoreStatus(result, expectedStatus) {
@@ -810,28 +855,21 @@
 
   function renderCandidateRows(rows) {
     currentRows = rows;
-    const search = $("candidate-search").value.trim().toLocaleLowerCase();
-    const status = $("candidate-status-filter").value;
-    const visibleRows = rows.filter((candidate) => {
-      const searchMatches = !search || [
-        candidate[TABLES.candidate.number],
-        candidate[TABLES.candidate.name],
-        candidate[TABLES.candidate.email]
-      ].some((value) => String(value || "").toLocaleLowerCase().includes(search));
-      const statusMatches = !status || String(candidate[TABLES.candidate.status]) === status;
-      return searchMatches && statusMatches;
-    });
     const body = $("candidate-rows");
     body.replaceChildren();
-    if (!visibleRows.length) {
+    if (!rows.length) {
       const row = document.createElement("tr");
-      const cell = appendCell(row, rows.length ? "No candidates match the current search and status filter." : "No synthetic candidates found. Create one to get started.");
+      const hasCriteria = Boolean($("candidate-search").value.trim() ||
+        $("candidate-status-filter").value);
+      const cell = appendCell(row, hasCriteria
+        ? "No candidates match the current search and filter."
+        : "No candidates found. Create one to get started.");
       cell.colSpan = 11;
       cell.className = "empty";
       body.appendChild(row);
       return;
     }
-    for (const candidate of visibleRows) {
+    for (const candidate of rows) {
       const row = document.createElement("tr");
       row.className = "candidate-row";
       row.tabIndex = 0;
@@ -886,18 +924,140 @@
     }
   }
 
-  async function refreshCandidates() {
+  function candidateServerFilter(searchText, statusFilter) {
     const c = TABLES.candidate;
-    const select = `?$select=${candidateColumns().join(",")}`;
-    const syntheticFilter = environmentPolicy.syntheticDataOnly
-      ? `&$filter=${encodeURIComponent(candidateReferenceScope(candidateScope()))}`
-      : "";
-    const rows = await retrieveAll(
-      c.logicalName,
-      `${select}${syntheticFilter}&$orderby=createdon desc`
+    const filters = [];
+    if (searchText) {
+      const term = searchText.replace(/'/g, "''");
+      filters.push(`(contains(${filterAttribute(c.number)},'${term}') or ` +
+        `contains(${filterAttribute(c.name)},'${term}') or ` +
+        `contains(${filterAttribute(c.email)},'${term}'))`);
+    }
+    if (statusFilter === "active") {
+      filters.push(`${filterAttribute(c.status)} ne ${STATUS.offerExtended} and ` +
+        `${filterAttribute(c.status)} ne ${STATUS.candidateFailed}`);
+    } else if (statusFilter) {
+      if (!Object.hasOwn(STATUS_LABELS, statusFilter)) {
+        throw new Error("CANDIDATE_STATUS_FILTER_INVALID");
+      }
+      filters.push(`${filterAttribute(c.status)} eq ${Number(statusFilter)}`);
+    }
+    return filters.join(" and ");
+  }
+
+  function candidateApiUrl(candidateUrl) {
+    const clientUrl = globalContext().getClientUrl();
+    const url = new URL(candidateUrl, clientUrl);
+    const expectedPath = new RegExp(
+      `^/api/data/v9\\.[012]/${filterAttribute(TABLES.candidate.entitySetName)}$`
     );
-    requireSyntheticCandidates(rows);
-    renderCandidateRows(rows.filter(isCandidateAllowedByDataMode));
+    if (url.origin !== new URL(clientUrl).origin || !expectedPath.test(url.pathname) ||
+        url.username || url.password || url.hash) {
+      throw new Error("CANDIDATE_LIST_PAGING_RESPONSE_INVALID");
+    }
+    return url;
+  }
+
+  function initialCandidateApiUrl(searchText, statusFilter) {
+    const c = TABLES.candidate;
+    const url = candidateApiUrl(
+      `/api/data/v9.2/${filterAttribute(c.entitySetName)}`
+    );
+    const query = new URLSearchParams();
+    query.set("$select", candidateColumns().join(","));
+    query.set("$orderby", `createdon desc,${filterAttribute(c.id)} asc`);
+    query.set("$count", "true");
+    const filter = candidateServerFilter(searchText, statusFilter);
+    if (filter) query.set("$filter", filter);
+    url.search = query.toString();
+    return url;
+  }
+
+  async function readNormalCandidatePage(searchText, statusFilter, requestUrl) {
+    const url = requestUrl
+      ? candidateApiUrl(requestUrl)
+      : initialCandidateApiUrl(searchText, statusFilter);
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/json",
+        "OData-MaxVersion": "4.0",
+        "OData-Version": "4.0",
+        Prefer: `odata.maxpagesize=${CANDIDATE_PAGE_SIZE}`
+      }
+    });
+    let data;
+    try {
+      data = await response.json();
+    } catch {
+      throw new Error("CANDIDATE_LIST_RESPONSE_INVALID");
+    }
+    if (!response.ok || !data || !Array.isArray(data.value) ||
+        data.value.length > CANDIDATE_PAGE_SIZE ||
+        (data["@odata.nextLink"] != null && typeof data["@odata.nextLink"] !== "string")) {
+      throw new Error("CANDIDATE_LIST_REQUEST_REJECTED");
+    }
+    const total = data["@odata.count"] == null ? null : Number(data["@odata.count"]);
+    if (total !== null && (!Number.isSafeInteger(total) || total < 0)) {
+      throw new Error("CANDIDATE_LIST_RESPONSE_INVALID");
+    }
+    return {
+      rows: data.value,
+      totalCount: total,
+      hasNextPage: Boolean(data["@odata.nextLink"]),
+      nextRequest: data["@odata.nextLink"] || null
+    };
+  }
+
+  function updateCandidatePagination() {
+    const total = candidateTotalCount;
+    const pageCount = total == null ? null : Math.ceil(total / CANDIDATE_PAGE_SIZE);
+    $("candidate-page-info").textContent = total === 0
+      ? "0 candidates"
+      : pageCount == null
+        ? `Page ${candidatePageNumber}`
+        : `Page ${candidatePageNumber} of ${pageCount} (${total} candidates)`;
+    $("candidate-previous-page").disabled =
+      busy || candidatePageNumber <= 1 || !isCandidateCoreEnabled();
+    $("candidate-next-page").disabled =
+      busy || !candidateHasNextPage || !isCandidateCoreEnabled();
+  }
+
+  async function refreshCandidates({ resetPage = false } = {}) {
+    if (!isCandidateCoreEnabled()) throw new Error("CONSOLE_DATA_ACCESS_BLOCKED");
+    if (resetPage) {
+      candidatePageNumber = 1;
+      candidatePageRequests = [null];
+      candidateTotalCount = null;
+      candidateHasNextPage = false;
+    }
+    const requestId = ++candidateListRequestId;
+    const searchText = $("candidate-search").value.trim();
+    const statusFilter = $("candidate-status-filter").value;
+    const pageRequest = candidatePageRequests[candidatePageNumber - 1] || null;
+    updateCandidatePagination();
+    let page;
+    try {
+      page = environmentPolicy.candidateOperationMode === "SingleUserDev"
+        ? await readSingleUserDevCandidatePage(searchText, statusFilter, candidatePageNumber)
+        : await readNormalCandidatePage(searchText, statusFilter, pageRequest);
+    } catch (error) {
+      if (environmentPolicy.allowed === true && environmentPolicy.syntheticDataOnly) {
+        blockSyntheticQuery();
+      }
+      throw error;
+    }
+    if (requestId !== candidateListRequestId) return;
+    requireSyntheticCandidates(page.rows);
+    candidateHasNextPage = page.hasNextPage;
+    if (page.totalCount !== null) candidateTotalCount = page.totalCount;
+    if (environmentPolicy.candidateOperationMode !== "SingleUserDev") {
+      if (page.nextRequest) candidatePageRequests[candidatePageNumber] = page.nextRequest;
+      else candidatePageRequests.length = candidatePageNumber;
+    }
+    renderCandidateRows(page.rows.filter(isCandidateAllowedByDataMode));
+    updateCandidatePagination();
   }
 
   function addDetailItem(container, label, value) {
@@ -1389,7 +1549,7 @@
         scheduleRows.filter(isActiveSchedule).length > 0) {
       showNotice(mode === "reschedule"
         ? "Reschedule Round 1 requires exactly one active, pending Round 1 schedule."
-        : "Schedule Round 1 is available only for synthetic candidates in Waiting Manual Scheduling with no active schedule.", true);
+        : "Schedule Round 1 is available only in Waiting Manual Scheduling with no active schedule.", true);
       return;
     }
     if (scheduleRetryBlockedCandidateId === selectedCandidate[TABLES.candidate.id]) {
@@ -2673,6 +2833,7 @@
     const expectedStatus = outcome === OUTCOME.answered && currentStatus === STATUS.needCall
       ? STATUS.answered
       : currentStatus;
+    let showSchedulingPanelAfterSave = false;
     setBusy(true);
     try {
       const { result } = await invokeCandidateCore("RecordCall", {
@@ -2684,13 +2845,37 @@
       });
       assertCandidateCoreStatus(result, expectedStatus);
       $("call-form").reset();
-      await refreshCoreCandidate(candidateId);
-      showNotice("Call recorded through Candidate Core.");
+      let schedulingTransitionFailed = false;
+      if (outcome === OUTCOME.answered && currentStatus === STATUS.needCall) {
+        try {
+          const schedulingResult = await invokeCandidateCore("ProceedToScheduling", {
+            CandidateId: candidateId,
+            ExpectedStatus: STATUS.answered
+          }, newCorrelationId());
+          assertCandidateCoreStatus(schedulingResult.result, STATUS.waitingManualScheduling);
+        } catch (error) {
+          await reportCandidateCoreFailure("ProceedToScheduling", candidateId, error,
+            "The Answered Call and Candidate Answered history were saved, but moving to Waiting Manual Scheduling failed or is uncertain. If the refreshed Candidate is still Candidate Answered, use Move to Waiting Manual Scheduling.");
+          schedulingTransitionFailed = true;
+          showSchedulingPanelAfterSave =
+            selectedCandidate && selectedCandidate[c.status] === STATUS.waitingManualScheduling;
+        }
+      }
+      if (!schedulingTransitionFailed) {
+        await refreshCoreCandidate(candidateId);
+        showSchedulingPanelAfterSave = outcome === OUTCOME.answered &&
+          currentStatus === STATUS.needCall &&
+          selectedCandidate && selectedCandidate[c.status] === STATUS.waitingManualScheduling;
+        showNotice(showSchedulingPanelAfterSave
+          ? "Call recorded; Candidate moved to Waiting Manual Scheduling through Candidate Core."
+          : "Call recorded through Candidate Core.");
+      }
     } catch (error) {
       await reportCandidateCoreFailure("RecordCall", candidateId, error);
     } finally {
       setBusy(false);
     }
+    if (showSchedulingPanelAfterSave) showSchedulingPanel();
   }
 
   async function recordCall(event) {
@@ -2988,8 +3173,50 @@
     $("scheduling-form").addEventListener("submit", createSchedule);
     $("cancellation-form").addEventListener("submit", cancelRound1);
     $("interview-result-form").addEventListener("submit", recordInterviewResult);
-    $("candidate-search").addEventListener("input", () => renderCandidateRows(currentRows));
-    $("candidate-status-filter").addEventListener("change", () => renderCandidateRows(currentRows));
+    $("candidate-search").addEventListener("input", () => {
+      candidateListRequestId++;
+      candidatePageNumber = 1;
+      candidatePageRequests = [null];
+      candidateTotalCount = null;
+      candidateHasNextPage = false;
+      updateCandidatePagination();
+      if (candidateSearchTimer) clearTimeout(candidateSearchTimer);
+      candidateSearchTimer = setTimeout(() => {
+        candidateSearchTimer = null;
+        refreshCandidates({ resetPage: true }).catch((error) => {
+          logSafeFailure("CANDIDATE_LIST_SEARCH_FAILED", error);
+          showNotice("Candidate list search could not be completed.", true);
+        });
+      }, 250);
+    });
+    $("candidate-status-filter").addEventListener("change", () => {
+      candidateListRequestId++;
+      candidatePageNumber = 1;
+      candidatePageRequests = [null];
+      candidateTotalCount = null;
+      candidateHasNextPage = false;
+      updateCandidatePagination();
+      refreshCandidates({ resetPage: true }).catch((error) => {
+        logSafeFailure("CANDIDATE_LIST_FILTER_FAILED", error);
+        showNotice("Candidate list filter could not be completed.", true);
+      });
+    });
+    const changeCandidatePage = async (delta) => {
+      if (busy || (delta < 0 && candidatePageNumber <= 1) ||
+          (delta > 0 && !candidateHasNextPage)) return;
+      const previousPage = candidatePageNumber;
+      candidatePageNumber += delta;
+      try {
+        await refreshCandidates();
+      } catch (error) {
+        candidatePageNumber = previousPage;
+        updateCandidatePagination();
+        logSafeFailure("CANDIDATE_LIST_PAGE_FAILED", error);
+        showNotice("Candidate list page could not be loaded.", true);
+      }
+    };
+    $("candidate-previous-page").addEventListener("click", () => changeCandidatePage(-1));
+    $("candidate-next-page").addEventListener("click", () => changeCandidatePage(1));
     $("dev-fallback-toggle").addEventListener("change", updateWorkflowPathLabel);
     $("refresh-button").addEventListener("click", async () => {
       hideNotice();
@@ -3141,10 +3368,11 @@
       const statusFilter = $("candidate-status-filter");
       statusFilter.replaceChildren();
       addOption(statusFilter, "", "All statuses");
+      addOption(statusFilter, "active", "Active candidates");
       for (const [value, label] of Object.entries(STATUS_LABELS)) {
         addOption(statusFilter, value, label);
       }
-      await refreshCandidates();
+      await refreshCandidates({ resetPage: true });
       workspaceReady = true;
     } catch (error) {
       if (environmentPolicy.syntheticDataOnly) blockSyntheticQuery();

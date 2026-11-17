@@ -685,6 +685,10 @@ internal static partial class Program
         Reject(() => host.Invoke(SyntheticIsolation.VerifySingleUserDevAction),
             "SYNTHETIC_API_CONTRACT_REJECTED");
         host.MissingScopedDataOutput = false;
+        host.MissingCandidatePageMetadata = true;
+        Reject(() => host.Invoke(SyntheticIsolation.VerifySingleUserDevAction),
+            "SYNTHETIC_API_CONTRACT_REJECTED");
+        host.MissingCandidatePageMetadata = false;
         host.Create();
         Check(host.Rows.ContainsKey(SingleUserScope) &&
             host.Rows[SingleUserScope].GetAttributeValue<EntityReference>("ownerid")?.Id == SingleUserActor &&
@@ -762,6 +766,37 @@ internal static partial class Program
             !scopedCandidates.Contains("real@example.invalid") &&
             host.Writes == writesBeforeReads,
             "Scoped Candidate read uses the Console JSON shape, excludes unrelated rows, and performs no mutations");
+        host.Input["CandidateSearchText"] = "Playwright";
+        host.Input["CandidateStatusFilter"] = "active";
+        host.Input["CandidatePageNumber"] = 2;
+        host.InvokeAgain();
+        var pagedQuery = host.LastCandidatePageQuery!;
+        Check(pagedQuery.PageInfo.PageNumber == 2 && pagedQuery.PageInfo.Count == 10 &&
+            pagedQuery.PageInfo.ReturnTotalRecordCount &&
+            pagedQuery.Orders.Count == 2 &&
+            pagedQuery.Orders[0].AttributeName == "createdon" &&
+            pagedQuery.Orders[0].OrderType == OrderType.Descending &&
+            pagedQuery.Orders[1].AttributeName == "os_sr_candid" &&
+            pagedQuery.Orders[1].OrderType == OrderType.Ascending &&
+            HasCondition(pagedQuery.Criteria, "os_sr_cand_nm", ConditionOperator.Like) &&
+            HasCondition(pagedQuery.Criteria, "os_sr_cand_eml", ConditionOperator.Like) &&
+            HasCondition(pagedQuery.Criteria, "os_sr_cand_cnum", ConditionOperator.Like) &&
+            HasCondition(pagedQuery.Criteria, "os_sr_cand_stat", ConditionOperator.NotEqual) &&
+            !(bool)host.Output["ScopedHasNextPage"] &&
+            (int)host.Output["ScopedTotalCount"] == 1,
+            "SingleUserDev candidate filtering, stable ordering, paging, and count are server-applied");
+        host.CandidateTotalCountExceeded = true;
+        host.InvokeAgain();
+        Check((int)host.Output["ScopedTotalCount"] == -1,
+            "SingleUserDev does not report Dataverse's capped total as an exact count");
+        host.CandidateTotalCountExceeded = false;
+        host.Input["CandidatePageNumber"] = 10001;
+        Reject(() => host.InvokeAgain(), "SYNTHETIC_READ_INPUT_REJECTED");
+        Check(host.Writes == writesBeforeReads,
+            "Invalid scoped Candidate page is rejected without business writes");
+        host.Input.Remove("CandidateSearchText");
+        host.Input.Remove("CandidateStatusFilter");
+        host.Input.Remove("CandidatePageNumber");
         host.Input["Table"] = "os_sr_cand";
         Reject(() => host.InvokeAgain(), "SYNTHETIC_READ_INPUT_REJECTED");
         Check(host.Writes == writesBeforeReads,
@@ -897,6 +932,10 @@ internal static partial class Program
         return result;
     }
 
+    private static bool HasCondition(FilterExpression filter, string attribute, ConditionOperator op) =>
+        filter.Conditions.Any(condition => condition.AttributeName == attribute && condition.Operator == op) ||
+        filter.Filters.Any(child => HasCondition(child, attribute, op));
+
     private sealed class IsolationHost : IServiceProvider
     {
         public readonly ParameterCollection Input = new ParameterCollection();
@@ -913,8 +952,10 @@ internal static partial class Program
         public bool MissingConfiguration, TdsEnabled, SearchEnabled, ChangeTrackingEnabled, BypassPrivilege;
         public bool OwnerReadMissing, ReceiptReadGranted, MissingPrivilegeMetadata;
         public bool LegacyGuardVerification, ApiContractInvalid, DenyReadback;
-        public bool MissingProofOutput, MissingScopeInput, MissingScopedDataOutput, InactiveCaller,
+        public bool MissingProofOutput, MissingScopeInput, MissingScopedDataOutput,
+            MissingCandidatePageMetadata, InactiveCaller,
             GlobalBusinessRead, IncludeCreateReferences;
+        public bool CandidateTotalCountExceeded;
         public string? TeamPrivilegeName;
         public string? ProfileOverride;
         public int EffectivePrivilegeRequests;
@@ -927,6 +968,7 @@ internal static partial class Program
         public int MaxDepth, SystemReadGuardCalls, ControlReadGuardCalls, ProfileLoads;
         public int Writes;
         public QueryBase? LastReadQuery;
+        public QueryExpression? LastCandidatePageQuery;
         public IOrganizationService Service { get; }
         public IOrganizationService CallerService { get; }
         private IPluginExecutionContext Current => stack.Peek();
@@ -1148,6 +1190,8 @@ internal static partial class Program
             if (call.MethodName == "RetrieveMultiple")
             {
                 var query = (QueryExpression)call.Args[0];
+                if (query.EntityName == "os_sr_cand" && query.PageInfo != null)
+                    LastCandidatePageQuery = query;
                 if (query.EntityName == "environmentvariabledefinition")
                 {
                     ProfileLoads++;
@@ -1167,14 +1211,26 @@ internal static partial class Program
                     } });
                 if (query.EntityName == "customapirequestparameter" || query.EntityName == "customapiresponseproperty")
                 {
-                    var missing = query.EntityName == "customapirequestparameter" ? MissingScopeInput :
-                        MissingProofOutput || MissingScopedDataOutput &&
-                        query.Criteria.Conditions.Any(condition => condition.AttributeName == "uniquename" &&
-                            condition.Values.Contains("ScopedData"));
+                    var name = query.Criteria.Conditions
+                        .First(condition => condition.AttributeName == "uniquename")
+                        .Values.Cast<string>().Single();
+                    var missing = query.EntityName == "customapirequestparameter"
+                        ? MissingScopeInput && name == "SyntheticScopeId" ||
+                          MissingCandidatePageMetadata && new[] {
+                              "CandidateSearchText", "CandidateStatusFilter", "CandidatePageNumber"
+                          }.Contains(name)
+                        : MissingProofOutput && name == "IsolationContract" ||
+                          MissingScopedDataOutput && name == "ScopedData" ||
+                          MissingCandidatePageMetadata && new[] {
+                              "ScopedHasNextPage", "ScopedTotalCount"
+                          }.Contains(name);
                     if (missing)
                         return Collection(Array.Empty<Entity>());
+                    var type = name == "SyntheticScopeId" ? 12 :
+                        name == "CandidatePageNumber" || name == "ScopedTotalCount" ? 7 :
+                        name == "ScopedHasNextPage" ? 0 : 10;
                     return Collection(new[] { new Entity(query.EntityName, Reference)
-                    { ["type"] = new OptionSetValue(query.EntityName == "customapirequestparameter" ? 12 : 10),
+                    { ["type"] = new OptionSetValue(type),
                         ["isoptional"] = true } });
                 }
                 if (query.EntityName == "sdkmessageprocessingstep") return ReadResult(query.EntityName, Collection(Steps));
@@ -1202,6 +1258,11 @@ internal static partial class Program
                 var candidates = ReferenceRows.TryGetValue(query.EntityName, out var row) ?
                     new[] { row } : Rows.Values.Where(value => value.LogicalName == query.EntityName);
                 var result = Collection(candidates.Where(value => Matches(value, query.Criteria)).Select(Clone));
+                if (query.PageInfo?.ReturnTotalRecordCount == true)
+                {
+                    result.TotalRecordCount = CandidateTotalCountExceeded ? 5000 : result.Entities.Count;
+                    result.TotalRecordCountLimitExceeded = CandidateTotalCountExceeded;
+                }
                 if (stack.Count > 0) Guard("RetrieveMultiple", query.EntityName, new ParameterCollection(),
                     new ParameterCollection { ["BusinessEntityCollection"] = result }, 40);
                 return result;
@@ -1296,6 +1357,15 @@ internal static partial class Program
                 if (value is OptionSetValue option) value = option.Value;
                 if (condition.Operator == ConditionOperator.Null) return value == null;
                 if (condition.Operator == ConditionOperator.NotNull) return value != null;
+                if (condition.Operator == ConditionOperator.NotEqual) return !Equals(value, condition.Values[0]);
+                if (condition.Operator == ConditionOperator.Like)
+                {
+                    if (value == null) return false;
+                    var pattern = (string)condition.Values[0];
+                    var term = pattern.Trim('%').Replace("~~", "~").Replace("~%", "%")
+                        .Replace("~_", "_").Replace("~[", "[").Replace("~]", "]");
+                    return value.ToString()!.IndexOf(term, StringComparison.OrdinalIgnoreCase) >= 0;
+                }
                 if (condition.Operator != ConditionOperator.Equal) throw new Exception("Unmodeled fixture predicate");
                 return Equals(value, condition.Values[0]);
             }).Concat(filter.Filters.Select(child => Matches(row, child)));

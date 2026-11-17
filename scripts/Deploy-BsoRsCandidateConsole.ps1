@@ -8,6 +8,7 @@ param(
     [switch]$DevelopmentSourceAhead,
     [string]$NormalReferenceSelectorsReleaseManifestPath,
     [string]$NormalModeReleaseManifestPath,
+    [string]$CandidatePaginationReleaseManifestPath,
     [switch]$PublishOnly,
     [switch]$ReconcilePublishOnly,
     [switch]$CreateNewResources,
@@ -183,9 +184,11 @@ $developmentSourceAheadUnchangedNames = @(
 )
 $normalReferenceRelease = $null
 $normalModeRelease = $null
+$candidatePaginationRelease = $null
 $sourceAheadRelease = $null
 if (-not [string]::IsNullOrWhiteSpace($NormalReferenceSelectorsReleaseManifestPath)) {
-    if (-not [string]::IsNullOrWhiteSpace($NormalModeReleaseManifestPath)) {
+    if (-not [string]::IsNullOrWhiteSpace($NormalModeReleaseManifestPath) -or
+        -not [string]::IsNullOrWhiteSpace($CandidatePaginationReleaseManifestPath)) {
         throw 'CANDIDATE_CONSOLE_RELEASE_MANIFEST_AMBIGUOUS'
     }
     $expectedManifestPaths = @(
@@ -221,7 +224,8 @@ if (-not [string]::IsNullOrWhiteSpace($NormalModeReleaseManifestPath)) {
     $expectedManifestPath = Join-Path $repositoryRoot 'docs\CANDIDATE_CONSOLE_NORMAL_MODE_RELEASE_MANIFEST.json'
     if (-not $DevelopmentSourceAhead -or
         [IO.Path]::GetFullPath($NormalModeReleaseManifestPath) -cne $expectedManifestPath -or
-        -not [string]::IsNullOrWhiteSpace($NormalReferenceSelectorsReleaseManifestPath)) {
+        -not [string]::IsNullOrWhiteSpace($NormalReferenceSelectorsReleaseManifestPath) -or
+        -not [string]::IsNullOrWhiteSpace($CandidatePaginationReleaseManifestPath)) {
         throw 'NORMAL_MODE_RELEASE_AUTHORIZATION_REQUIRED'
     }
     $normalModeRelease = Get-Content -LiteralPath $NormalModeReleaseManifestPath -Raw | ConvertFrom-Json
@@ -264,6 +268,47 @@ if (-not [string]::IsNullOrWhiteSpace($NormalModeReleaseManifestPath)) {
     }
     $developmentSourceAheadUnchangedNames = @()
     $sourceAheadRelease = $normalModeRelease
+}
+if (-not [string]::IsNullOrWhiteSpace($CandidatePaginationReleaseManifestPath)) {
+    $expectedManifestPath = Join-Path $repositoryRoot 'docs\CANDIDATE_CORE_PAGINATION_1.0.10_RELEASE_MANIFEST.json'
+    if (-not $DevelopmentSourceAhead -or
+        [IO.Path]::GetFullPath($CandidatePaginationReleaseManifestPath) -cne $expectedManifestPath -or
+        -not [string]::IsNullOrWhiteSpace($NormalReferenceSelectorsReleaseManifestPath) -or
+        -not [string]::IsNullOrWhiteSpace($NormalModeReleaseManifestPath)) {
+        throw 'CANDIDATE_PAGINATION_RELEASE_AUTHORIZATION_REQUIRED'
+    }
+    $candidatePaginationRelease = Get-Content -LiteralPath $CandidatePaginationReleaseManifestPath -Raw | ConvertFrom-Json
+    $paginationResourceNames = @('os_/bso/candidate-console.html', 'os_/bso/candidate-console.js') |
+        Sort-Object -CaseSensitive
+    if ($candidatePaginationRelease.scope -cne 'CANDIDATE_LIST_PAGINATION_AND_ANSWERED_TO_SCHEDULING' -or
+        $candidatePaginationRelease.customApiChanges -ne 5 -or
+        $candidatePaginationRelease.environmentConfigurationChanges -ne 0 -or
+        @($candidatePaginationRelease.resources).Count -ne 2 -or
+        [string]::Join('|', @($candidatePaginationRelease.resources.name | Sort-Object -CaseSensitive)) -cne
+            [string]::Join('|', $paginationResourceNames)) {
+        throw 'CANDIDATE_PAGINATION_RELEASE_AUTHORIZATION_REQUIRED'
+    }
+    $developmentSourceAheadHashes = @{}
+    foreach ($resource in $candidatePaginationRelease.resources) {
+        if ($resource.name -ceq 'os_/bso/candidate-console.html') {
+            if ($resource.sha256 -cne 'EXTERNAL_TARGET_HTML' -or
+                $resource.templateSha256 -cnotmatch '^[0-9a-f]{64}$' -or
+                $resource.previousSha256 -cne 'EXTERNAL_TARGET_BASELINE' -or
+                $resource.previousTemplateSha256 -cnotmatch '^[0-9a-f]{64}$') {
+                throw 'CANDIDATE_PAGINATION_RELEASE_AUTHORIZATION_REQUIRED'
+            }
+            $developmentSourceAheadHashes[$resource.name] = [string]$resource.templateSha256
+        } elseif ($resource.name -ceq 'os_/bso/candidate-console.js') {
+            if ($resource.sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+                $resource.previousSha256 -cnotmatch '^[0-9a-f]{64}$') {
+                throw 'CANDIDATE_PAGINATION_RELEASE_AUTHORIZATION_REQUIRED'
+            }
+            $developmentSourceAheadHashes[$resource.name] = [string]$resource.sha256
+        } else {
+            throw 'CANDIDATE_PAGINATION_RELEASE_AUTHORIZATION_REQUIRED'
+        }
+    }
+    $sourceAheadRelease = $candidatePaginationRelease
 }
 if ($DevelopmentSourceAhead) {
     $selectedDevelopmentNames = @($RefreshResourceNames | Sort-Object -CaseSensitive)
@@ -514,6 +559,14 @@ if (-not ($PublishOnly -or $ReconcilePublishOnly) -and ($hasEnvironmentResource 
         }
         $environmentPin[0].sha256 = $configurationHash
     }
+    if ($candidatePaginationRelease -and
+        ($environmentConfiguration.normalModeEnabled -isnot [bool] -or
+         $environmentConfiguration.normalModeEnabled -ne $true -or
+         [string]$environmentConfiguration.candidateOperationMode -cne 'SingleUserDev' -or
+         $environmentConfiguration.devDirectWriteFallbackEnabled -ne $false -or
+         [string]$environmentConfiguration.diagnosticsMode -cne 'OFF')) {
+        throw 'CANDIDATE_PAGINATION_CONFIGURATION_NOT_PRESERVED'
+    }
     if ($hasEnvironmentResource) {
         $environmentResource = @($resources | Where-Object Name -CEQ 'os_/bso/candidate-console-environment.js')
         if ($environmentResource.Count -ne 1) {
@@ -548,17 +601,20 @@ if (-not ($PublishOnly -or $ReconcilePublishOnly) -and $hasHtmlResource) {
         throw 'Generated HTML differs from the checked-in source except for the verified environment cache token.'
     }
     $htmlResource[0].Path = $EnvironmentHtmlPath
-    if ($normalModeRelease) {
+    if ($normalModeRelease -or $candidatePaginationRelease) {
         $htmlResourceName = 'os_/bso/candidate-console.html'
         $generatedHtmlHash = [Convert]::ToHexString(
             [Security.Cryptography.SHA256]::HashData([IO.File]::ReadAllBytes($EnvironmentHtmlPath))
         ).ToLowerInvariant()
         $expectedCandidateConsoleHashes[$htmlResourceName] = $generatedHtmlHash
-        $htmlPin = @($normalModeRelease.resources | Where-Object name -CEQ $htmlResourceName)
+        $htmlPin = @($sourceAheadRelease.resources | Where-Object name -CEQ $htmlResourceName)
         if ($htmlPin.Count -ne 1) {
-            throw 'NORMAL_MODE_RELEASE_AUTHORIZATION_REQUIRED'
+            throw 'CANDIDATE_CONSOLE_RELEASE_AUTHORIZATION_REQUIRED'
         }
         $htmlPin[0].sha256 = $generatedHtmlHash
+        if ($candidatePaginationRelease) {
+            $developmentSourceAheadHashes[$htmlResourceName] = [string]$htmlPin[0].templateSha256
+        }
     }
 } elseif (-not ($PublishOnly -or $ReconcilePublishOnly) -and
     -not [string]::IsNullOrWhiteSpace($EnvironmentHtmlPath)) {
@@ -1474,6 +1530,8 @@ try {
                 Result = if ($DevelopmentSourceAhead) {
                     if ($normalModeRelease) {
                         'CANDIDATE_CONSOLE_NORMAL_MODE_RELEASE_PREFLIGHT_READY'
+                    } elseif ($candidatePaginationRelease) {
+                        'CANDIDATE_CONSOLE_PAGINATION_RELEASE_PREFLIGHT_READY'
                     } else {
                         'CANDIDATE_CONSOLE_DEV_SOURCE_AHEAD_PREFLIGHT_READY'
                     }
@@ -1944,6 +2002,8 @@ try {
             Result = if ($DevelopmentSourceAhead) {
                 if ($normalModeRelease) {
                     'CANDIDATE_CONSOLE_NORMAL_MODE_RELEASE_PUBLISHED'
+                } elseif ($candidatePaginationRelease) {
+                    'CANDIDATE_CONSOLE_PAGINATION_RELEASE_PUBLISHED'
                 } else {
                     'CANDIDATE_CONSOLE_DEV_SOURCE_AHEAD_REFRESHED'
                 }

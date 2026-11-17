@@ -15,6 +15,12 @@
     "targetUrl": null,
     "targetIdentityVerifiedForDeployment": true
   },
+  "ownerBusinessGoLiveDecision": {
+    "decisionDate": "2026-11-17",
+    "status": "AUTHORIZED",
+    "scope": "NORMAL CreateCandidate for real Candidate data, initially entered by the owner.",
+    "authorizationBoundary": "Business Go Live authorization only; no corporate privacy, audit, retention, DLP, operational, or shared-environment approval is inferred."
+  },
   "readOnlyTargetReconciliation": {
     "observedOn": "2026-11-16",
     "targetLabel": "VN LMV IT",

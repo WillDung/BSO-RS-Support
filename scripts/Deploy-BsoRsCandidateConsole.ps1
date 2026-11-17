@@ -22,6 +22,7 @@ param(
     [string[]]$RefreshResourceNames = @(),
     [string]$EnvironmentConfigurationPath,
     [string]$EnvironmentHtmlPath,
+    [string]$PreviousEnvironmentHtmlPath,
     [string]$BaselineSnapshotPath,
     [Parameter(Mandatory)][string]$EnvironmentName,
     [Parameter(Mandatory)][string]$OrganizationUrl,
@@ -309,6 +310,10 @@ if (-not [string]::IsNullOrWhiteSpace($CandidatePaginationReleaseManifestPath)) 
         }
     }
     $sourceAheadRelease = $candidatePaginationRelease
+    $developmentSourceAheadUnchangedNames += 'os_/bso/candidate-console-policy.js'
+}
+if (-not $candidatePaginationRelease -and -not [string]::IsNullOrWhiteSpace($PreviousEnvironmentHtmlPath)) {
+    throw 'Previous HTML evidence is accepted only for the Candidate pagination release.'
 }
 if ($DevelopmentSourceAhead) {
     $selectedDevelopmentNames = @($RefreshResourceNames | Sort-Object -CaseSensitive)
@@ -614,6 +619,24 @@ if (-not ($PublishOnly -or $ReconcilePublishOnly) -and $hasHtmlResource) {
         $htmlPin[0].sha256 = $generatedHtmlHash
         if ($candidatePaginationRelease) {
             $developmentSourceAheadHashes[$htmlResourceName] = [string]$htmlPin[0].templateSha256
+            if ([string]::IsNullOrWhiteSpace($PreviousEnvironmentHtmlPath)) {
+                throw 'CANDIDATE_PAGINATION_PREVIOUS_HTML_REQUIRED'
+            }
+            $PreviousEnvironmentHtmlPath = Assert-ExternalResourcePath -Path $PreviousEnvironmentHtmlPath
+            $previousHtml = [IO.File]::ReadAllText($PreviousEnvironmentHtmlPath)
+            $templateToken = [regex]::Match($templateHtml, $configScriptPattern).Value
+            if ([regex]::Matches($previousHtml, $configScriptPattern).Count -ne 1) {
+                throw 'CANDIDATE_PAGINATION_PREVIOUS_HTML_INVALID'
+            }
+            $previousTemplate = [regex]::Replace($previousHtml, $configScriptPattern, $templateToken)
+            $previousTemplateHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData(
+                [Text.Encoding]::UTF8.GetBytes($previousTemplate))).ToLowerInvariant()
+            if ($previousTemplateHash -cne [string]$htmlPin[0].previousTemplateSha256) {
+                throw 'CANDIDATE_PAGINATION_PREVIOUS_HTML_INVALID'
+            }
+            $htmlPin[0].previousSha256 = [Convert]::ToHexString(
+                [Security.Cryptography.SHA256]::HashData([IO.File]::ReadAllBytes($PreviousEnvironmentHtmlPath))
+            ).ToLowerInvariant()
         }
     }
 } elseif (-not ($PublishOnly -or $ReconcilePublishOnly) -and

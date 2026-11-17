@@ -600,6 +600,76 @@ catch { $failure = $_.Exception.Message }
 Assert-Test ($failure -ceq 'PACKAGE_SECURITY_BASELINE_CHANGED') `
     'Security-preserving package updates require the exact pinned role and assignment fingerprint'
 
+$metadataPath = Join-Path $root 'scripts\Deploy-BsoRsCandidatePaginationApiMetadata.ps1'
+$metadataTokens = $null
+$metadataErrors = $null
+$metadataAst = [System.Management.Automation.Language.Parser]::ParseFile(
+    $metadataPath, [ref]$metadataTokens, [ref]$metadataErrors
+)
+$malformedEntitySetVariables = @($metadataAst.FindAll({
+    param($node)
+    $node -is [System.Management.Automation.Language.VariableExpressionAst] -and
+        $node.VariablePath.UserPath -ceq 'entitySet?'
+}, $true))
+Assert-Test ($metadataErrors.Count -eq 0 -and $malformedEntitySetVariables.Count -eq 0) `
+    'Metadata duplicate checks do not interpolate the query delimiter into the entity-set variable'
+$readbackFunction = @($metadataAst.EndBlock.Statements | Where-Object {
+    $_ -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $_.Name -ceq 'Assert-WriteReadback'
+})
+Assert-Test ($readbackFunction.Count -eq 1) 'Metadata readback function is uniquely defined'
+. ([scriptblock]::Create($readbackFunction[0].Extent.Text))
+$script:Plan = [pscustomobject]@{
+    ApiId = '11111111-1111-4111-8111-111111111111'
+    SolutionId = '22222222-2222-4222-8222-222222222222'
+}
+$script:metadataReadbackPaths = [Collections.Generic.List[string]]::new()
+$script:metadataTestWrite = $null
+function Get-Rows {
+    param([string]$Path)
+    $script:metadataReadbackPaths.Add($Path)
+    $write = $script:metadataTestWrite
+    if ($Path -like 'solutioncomponents?*') {
+        return [pscustomobject]@{
+            objectid = $write.Id
+            componenttype = $write.ComponentType
+            rootcomponentbehavior = 0
+        }
+    }
+    $row = @{
+        uniquename = $write.Name
+        name = $write.Body.name
+        displayname = $write.Body.displayname
+        type = $write.Type
+        _customapiid_value = $script:Plan.ApiId
+    }
+    if ($write.Kind -ceq 'CustomApiRequestParameter') {
+        $row.customapirequestparameterid = $write.Id
+        $row.isoptional = $true
+    } else {
+        $row.customapiresponsepropertyid = $write.Id
+    }
+    [pscustomobject]$row
+}
+foreach ($kind in @('CustomApiRequestParameter', 'CustomApiResponseProperty')) {
+    $isRequest = $kind -ceq 'CustomApiRequestParameter'
+    $script:metadataTestWrite = [pscustomobject]@{
+        Kind = $kind
+        Id = '33333333-3333-4333-8333-333333333333'
+        Name = 'TestParameter'
+        UniqueName = 'os_sr_cact.TestParameter'
+        Path = if ($isRequest) { 'customapirequestparameters' } else { 'customapiresponseproperties' }
+        Type = 10
+        IsOptional = if ($isRequest) { $true } else { $null }
+        ComponentType = if ($isRequest) { 10037 } else { 10038 }
+        Body = [pscustomobject]@{ name = 'os_sr_cact.TestParameter'; displayname = 'Test' }
+    }
+    $script:metadataReadbackPaths.Clear()
+    Assert-WriteReadback -Write $script:metadataTestWrite
+    Assert-Test (($script:metadataReadbackPaths[0] -match ',isoptional,') -eq $isRequest) `
+        "$kind readback selects isoptional only where supported"
+}
+
 "BsoRsCandidatePackageUpdater.Tests.ps1: $passed assertions passed."
 } finally {
     if (Test-Path -LiteralPath $temporaryRoot -PathType Container) {

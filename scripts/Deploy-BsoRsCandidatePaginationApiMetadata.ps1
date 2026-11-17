@@ -702,7 +702,8 @@ function Assert-WriteReadback {
     $idField = if ($Write.Kind -ceq 'CustomApiRequestParameter') {
         'customapirequestparameterid'
     } else { 'customapiresponsepropertyid' }
-    $path = "$($Write.Path)?%24select=$idField,uniquename,name,displayname,type,isoptional,_customapiid_value&%24filter=_customapiid_value eq $($script:Plan.ApiId) and $idField eq $($Write.Id)&%24top=2"
+    $optionalField = if ($Write.Kind -ceq 'CustomApiRequestParameter') { ',isoptional' } else { '' }
+    $path = "$($Write.Path)?%24select=$idField,uniquename,name,displayname,type$optionalField,_customapiid_value&%24filter=_customapiid_value eq $($script:Plan.ApiId) and $idField eq $($Write.Id)&%24top=2"
     $rows = @(Get-Rows -Path $path)
     if ($rows.Count -ne 1 -or
         [string]$rows[0].$idField -ine [string]$Write.Id -or
@@ -859,7 +860,7 @@ try {
         for ($index = 0; $index -lt $script:Plan.Writes.Count; $index++) {
             $write = $script:Plan.Writes[$index]
             $entitySet = [string]$write.Path
-            $duplicates = @(Get-Rows -Path "$entitySet?%24select=uniquename&%24filter=_customapiid_value eq $($script:Plan.ApiId) and uniquename eq '$($write.Name)'&%24top=2")
+            $duplicates = @(Get-Rows -Path "${entitySet}?%24select=uniquename&%24filter=_customapiid_value eq $($script:Plan.ApiId) and uniquename eq '$($write.Name)'&%24top=2")
             if ($duplicates.Count -ne 0) { throw "Metadata appeared after preflight; stop before dispatch: $($write.UniqueName)." }
             $script:Journal.Writes[$index].State = 'DISPATCH_RESERVED'
             Save-Json -Path $EvidencePath -Value $script:Journal

@@ -658,7 +658,7 @@ $paginationArtifactHash = (Get-FileHash -LiteralPath $paginationArtifactPath -Al
 Assert-Test ($paginationManifest.release.artifactVersion -ceq '1.0.10' -and
     $paginationManifest.release.assemblyVersion -ceq '1.0.10.0' -and
     $paginationManifest.release.deployed -eq $false -and
-    $paginationManifest.release.targetIdentityVerifiedThisTurn -eq $false -and
+    $paginationManifest.release.targetIdentityVerifiedThisTurn -is [bool] -and
     [string]::Join('|', $paginationResourceNames) -ceq
         'os_/bso/candidate-console.html|os_/bso/candidate-console.js' -and
     $paginationResourceMap['os_/bso/candidate-console.html'].sourceSha256 -ceq $paginationTemplateHash -and

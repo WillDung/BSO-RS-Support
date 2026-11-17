@@ -24,6 +24,47 @@
     "authorizationBoundary": "Owner business Go Live authorization only; it is separate from the freshly observed exact-organization enabled configuration value and did not change it."
   },
   "scope": "CANDIDATE_LIST_PAGINATION_AND_ANSWERED_TO_SCHEDULING",
+  "solution": {
+    "uniqueName": "os_sr_bso_rs_support",
+    "version": "1.0.0.1"
+  },
+  "releaseTooling": {
+    "pacCliVersion": "2.13.1+g251dee1"
+  },
+  "securityPreservingUpdate": {
+    "operation": "EXISTING_PACKAGE_WITH_ADDITIVE_API_METADATA",
+    "securityMetadataWrites": 0,
+    "allowedMutations": ["CUSTOM_API_ADDITIVE_METADATA", "EXISTING_PLUGINPACKAGE_CONTENT"],
+    "securityBaselineSha256": "1cb88bf132899c6feec4101bc1290acfbaaa25a0161d8c36a628c55efaa2e26c"
+  },
+  "candidateCore": {
+    "packageFileName": "os_sr_cact_pkg.1.0.10.nupkg",
+    "packageUniqueName": "os_sr_cact_pkg",
+    "registeredPackageRecordVersion": "1.0.0",
+    "artifactPackageVersion": "1.0.10",
+    "packageSha256": "fa0716a401f887b28bc2c7b1fb71f5264ece4490c084fb99697a0063c9263404",
+    "embeddedAssemblyTypeName": "os_sr_cact.ApplyCandidateAction",
+    "embeddedAssemblySha256": "569e24423aa1e3352ef227c59fd1802ca78cb9cd3d509b94384f6572e4d5832f",
+    "assemblyVersion": "1.0.10.0",
+    "fileVersion": "1.0.10.0",
+    "publicKeyToken": null,
+    "customApiHandlerTypeName": "os_sr_cact.ApplyCandidateAction",
+    "expectedPluginTypes": [
+      "os_sr_cact.ApplyCandidateAction",
+      "os_sr_cact.ProtectCandidateCore",
+      "os_sr_cact.SyntheticIsolationGuard",
+      "os_sr_cact.SyntheticIsolationReadGuard"
+    ],
+    "rollbackArtifact": {
+      "fileName": "os_sr_cact_pkg.1.0.9.nupkg",
+      "artifactPackageVersion": "1.0.9",
+      "assemblyVersion": "1.0.9.0",
+      "fileVersion": "1.0.9.0",
+      "productVersion": "1.0.9+e08b1e9ab4b19ca6594b13d78cd1fd658118b9bc",
+      "packageSha256": "5b08bcfde39207d5069ce9c55ee4e1794622d69e7d0f148277f7b8f04a89802b",
+      "embeddedAssemblySha256": "ea4a3cdcc6f17aff48441827eee7923dcf63df935ba55e56a02c5a84be4729bb"
+    }
+  },
   "customApiChanges": 5,
   "environmentConfigurationChanges": 0,
   "resources": [

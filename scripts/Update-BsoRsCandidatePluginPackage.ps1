@@ -1871,7 +1871,7 @@ function Get-ApprovedDevelopmentApiParameterPlan {
                 AssemblyVersion = [string]$Baseline.Assembly.version
                 HandlerId = [string]$Baseline.Handler.plugintypeid
                 OrganizationId = (ConvertTo-CanonicalGuid -Value $ExpectedOrganizationId)
-                Gate = $false
+                Gate = [bool]$script:Manifest.release.reportedBaseline.normalCreateEnabled
             }) -Depth 10 -Compress)
         ))
         if ([string]$plan.BaselineSnapshotSha256 -cne $baselineSnapshotHash) {
@@ -2051,6 +2051,7 @@ function Assert-DevelopmentDeploymentBaseline {
         [string]$PackageSnapshot.ApiId -ine [string]$baseline.Api.customapiid -or
         [string]$PackageSnapshot.PackageId -ine [string]$baseline.Package.pluginpackageid -or
         [string]$PackageSnapshot.AssemblyId -ine [string]$baseline.Assembly.pluginassemblyid -or
+        [string]$PackageSnapshot.AssemblyVersion -cne [string]$baseline.Assembly.version -or
         [string]$PackageSnapshot.HandlerTypeId -ine [string]$baseline.Handler.plugintypeid -or
         [int]$PackageSnapshot.ProtectCandidateCoreStepCount -ne [int]$baseline.Guards.LegacySteps -or
         [int]$baseline.Guards.ActiveLegacySteps -ne 0 -or
@@ -2511,6 +2512,12 @@ function Invoke-PackageUpdaterMain {
     } elseif (Test-SecurityPreservingDevelopmentUpdate) {
         $journal.preflightTopology.securityBaselineSha256 = $before.SecurityBaselineSha256
         $journal.preflightTopology.normalCreateGate = [string]$before.NormalCreateGate
+        $fresh = Invoke-DataverseGet -Path "pluginpackages($($before.PackageId))?`$select=pluginpackageid,modifiedon"
+        if (-not (Test-PackageModifiedOnMatchesBaseline -CurrentModifiedOn $fresh.modifiedon `
+                -BaselineModifiedOn $before.ModifiedOn) -or
+            (Get-FileHash -LiteralPath $ArtifactPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne $artifact.Sha256) {
+            Stop-PackageUpdater 'PACKAGE_MODIFIED_SINCE_BASELINE'
+        }
         Assert-UnchangedPatchSecurity -Snapshot (Get-UnchangedSecuritySnapshot) `
             -ExpectedSha256 ([string]$script:Manifest.securityPreservingUpdate.securityBaselineSha256)
     }

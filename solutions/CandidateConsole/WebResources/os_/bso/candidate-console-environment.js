@@ -13,6 +13,7 @@
       candidateCoreEnabled: false,
       syntheticDataOnly: true,
       candidateOperationMode: "BsoSynthetic",
+      normalModeEnabled: false,
       devDirectWriteFallbackEnabled: false,
       diagnosticsMode: "OFF"
     })

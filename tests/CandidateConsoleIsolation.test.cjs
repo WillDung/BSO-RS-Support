@@ -17,7 +17,9 @@ const consoleSource = fs.readFileSync(path.join(root, "candidate-console.js"), "
     getActiveReference, resolveCreatedCandidate, renderCallHistory, renderStatusHistory,
     renderSchedulingDetails, findRound1Schedules, retrieveCandidateRecord, retrieveInterviewRecord,
     createCandidateThroughCore,
-    invokeCandidateCore
+    invokeCandidateCore, getTestState: () => JSON.parse(JSON.stringify({
+      referenceMode, workspaceReady, referencesReady, environmentPolicy
+    }))
   };
   document.addEventListener("DOMContentLoaded", initialize);`);
 
@@ -66,11 +68,15 @@ async function createConsole({ mode = "DEV", syntheticDataOnly = true, fixtures 
       const value = new Element();
       value.id = name;
       if (name === "create-button") value.disabled = true;
-      if (name === "candidate-data-mode") value.options = [{ textContent: "" }];
+      if (name === "candidate-data-mode") {
+        value.options = [{ textContent: "" }];
+        value.value = "CONFIGURED";
+      }
       elements.set(name, value);
     }
     return elements.get(name);
   };
+  if (dataMode !== "CONFIGURED") element("candidate-data-mode").value = dataMode;
   const actionButton = new Element();
   const workflowLabel = new Element();
   const document = {
@@ -88,7 +94,8 @@ async function createConsole({ mode = "DEV", syntheticDataOnly = true, fixtures 
     clearTimeout() {},
     BsoRsCandidateConsoleConfiguration: {
       mode, syntheticDataOnly, environmentId: id, organizationId: orgId, organizationUrl: orgUrl,
-      candidateCoreEnabled: true, devDirectWriteFallbackEnabled: true, diagnosticsMode: "OFF",
+      candidateCoreEnabled: true, normalModeEnabled: false,
+      devDirectWriteFallbackEnabled: true, diagnosticsMode: "OFF",
       ...configuration
     },
     Xrm: {
@@ -122,10 +129,6 @@ async function createConsole({ mode = "DEV", syntheticDataOnly = true, fixtures 
   vm.runInContext(consoleSource, context);
   if (beforeInitialize) beforeInitialize({ element, server });
   await document.listeners.DOMContentLoaded();
-  if (dataMode !== "CONFIGURED") {
-    element("candidate-data-mode").value = dataMode;
-    await element("candidate-data-mode").listeners.change();
-  }
   return { server, element, actionButton, workflowLabel, fetchCalls, methods: window.__testConsole,
     expireProof: () => expiryCallback() };
 }
@@ -771,11 +774,19 @@ test("explicit NORMAL mode loads non-synthetic Candidate Core and excludes inact
     os_sr_cand_eml: "sample@example.invalid", os_sr_cand_stat: 100010000
   };
   const ui = await createConsole({
-    mode: "PROD", syntheticDataOnly: false, dataMode: "NORMAL",
+    mode: "DEV",
+    syntheticDataOnly: true,
+    configuration: {
+      candidateOperationMode: "SingleUserDev",
+      normalModeEnabled: true,
+      devDirectWriteFallbackEnabled: false
+    },
+    dataMode: "NORMAL",
     fixtures: { os_sr_pos: [active, inactive], os_sr_cand: [candidate] }
   });
 
   assert.equal(ui.methods.isCandidateCoreEnabled(), true);
+  assert.deepEqual(ui.fetchCalls, []);
   assert.equal(ui.element("workflow-path-badge").textContent, "CANDIDATE CORE PATH");
   const response = ui.server.responses.find((entry) => entry.table === "os_sr_pos");
   assert.ok(response);
@@ -808,8 +819,13 @@ test("NORMAL Create Candidate sends selected references once and reports the ser
   let coreCalls = 0;
   const pendingResponse = new Promise((resolve) => { finishRequest = resolve; });
   const ui = await createConsole({
-    mode: "PROD",
-    syntheticDataOnly: false,
+    mode: "DEV",
+    syntheticDataOnly: true,
+    configuration: {
+      candidateOperationMode: "SingleUserDev",
+      normalModeEnabled: true,
+      devDirectWriteFallbackEnabled: false
+    },
     fixtures,
     dataMode: "NORMAL",
     coreFetch: async (_url, request) => {
@@ -825,10 +841,21 @@ test("NORMAL Create Candidate sends selected references once and reports the ser
   ui.element("candidate-position").value = positionId;
   ui.element("candidate-source").value = sourceId;
   ui.element("candidate-assigned-ta").value = taId;
+  const state = ui.methods.getTestState();
+  assert.equal(state.referenceMode, "NORMAL");
+  assert.equal(state.workspaceReady, true,
+    `${ui.element("notice").textContent}; ${JSON.stringify(ui.server.requests)}`);
+  assert.equal(state.referencesReady, true);
+  assert.equal(state.environmentPolicy.mode, "PROD");
+  assert.equal(state.environmentPolicy.syntheticDataOnly, false);
+  assert.equal(ui.methods.isCandidateCoreEnabled(), true);
 
   const submit = ui.element("candidate-form").listeners.submit;
   const firstSubmission = submit({ preventDefault() {} });
-  while (coreCalls === 0) await new Promise((resolve) => setImmediate(resolve));
+  for (let attempt = 0; attempt < 100 && coreCalls === 0; attempt++) {
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+  assert.equal(coreCalls, 1, ui.element("notice").textContent);
   await submit({ preventDefault() {} });
   assert.equal(coreCalls, 1, "The busy guard prevents a second in-flight API submission.");
   assert.equal(requestBody.PositionId, positionId);
@@ -838,6 +865,7 @@ test("NORMAL Create Candidate sends selected references once and reports the ser
   assert.equal(requestBody.CandidateCvUrl, "https://careers.example.invalid/candidate");
   assert.equal(Object.hasOwn(requestBody, "SyntheticScopeId"), false);
   assert.equal(Object.hasOwn(requestBody, "CandidateNumber"), false);
+  assert.equal(ui.fetchCalls.length, 1, "NORMAL mode does not request synthetic isolation proof.");
 
   fixtures.os_sr_cand.push({
     os_sr_candid: candidateId,
@@ -879,8 +907,13 @@ test("NORMAL Create Candidate explains server authorization rejection without cl
     os_sr_loc: []
   };
   const ui = await createConsole({
-    mode: "PROD",
-    syntheticDataOnly: false,
+    mode: "DEV",
+    syntheticDataOnly: true,
+    configuration: {
+      candidateOperationMode: "SingleUserDev",
+      normalModeEnabled: true,
+      devDirectWriteFallbackEnabled: false
+    },
     fixtures,
     dataMode: "NORMAL",
     coreFetch: async () => ({
@@ -905,10 +938,79 @@ test("NORMAL reference selectors match all Active records without name-prefix ex
   const lower = { os_sr_taid: id, os_sr_ta_nm: "[dev] synthetic reference", statecode: 0 };
   const upper = { os_sr_taid: orgId, os_sr_ta_nm: "[DEV] synthetic reference", statecode: 0 };
   const ui = await createConsole({
-    mode: "PROD", syntheticDataOnly: false, dataMode: "NORMAL", fixtures: { os_sr_ta: [lower, upper] }
+    mode: "DEV",
+    syntheticDataOnly: true,
+    configuration: {
+      candidateOperationMode: "SingleUserDev",
+      normalModeEnabled: true,
+      devDirectWriteFallbackEnabled: false
+    },
+    dataMode: "NORMAL",
+    fixtures: { os_sr_ta: [lower, upper] }
   });
   const labels = ui.element("candidate-assigned-ta").children.map((option) => option.textContent);
   assert.ok(labels.includes(lower.os_sr_ta_nm));
   assert.equal(labels.includes(upper.os_sr_ta_nm), true);
   assert.ok(lastResponse(ui.server, "os_sr_ta").entities.some((row) => row.os_sr_taid === id));
+});
+
+test("a disabled NORMAL mode keeps reference browsing but blocks Candidate access and writes", async () => {
+  const candidate = {
+    os_sr_candid: id, os_sr_cand_cnum: "CAND-001", os_sr_cand_nm: "Real candidate",
+    os_sr_cand_eml: "candidate@example.invalid", os_sr_cand_stat: 100010000
+  };
+  const ui = await createConsole({
+    mode: "DEV",
+    syntheticDataOnly: true,
+    configuration: {
+      candidateOperationMode: "SingleUserDev",
+      normalModeEnabled: false,
+      devDirectWriteFallbackEnabled: false
+    },
+    dataMode: "NORMAL",
+    fixtures: {
+      os_sr_cand: [candidate],
+      os_sr_pos: [{ os_sr_posid: id, os_sr_pos_ttl: "Active position", statecode: 0 }],
+      os_sr_csrc: [{ os_sr_csrcid: orgId, os_sr_csrc_nm: "Active source", statecode: 0 }],
+      os_sr_ta: [{ os_sr_taid: guid("3"), os_sr_ta_nm: "Active TA", statecode: 0 }]
+    }
+  });
+
+  assert.equal(ui.methods.isCandidateCoreEnabled(), false);
+  assert.equal(ui.element("create-button").disabled, true);
+  assert.equal(ui.server.requests.some((request) =>
+    request.table === "os_sr_cand" && request.operation === "retrieveMultipleRecords"), false);
+  assert.deepEqual(ui.fetchCalls, []);
+  assert.match(ui.element("reference-mode-status").textContent, /Candidate reads and writes remain blocked/);
+});
+
+test("switching from NORMAL back to configured mode re-applies SingleUserDev isolation", async () => {
+  const candidate = {
+    os_sr_candid: id, os_sr_cand_cnum: "CAND-001", os_sr_cand_nm: "Real candidate",
+    os_sr_cand_eml: "candidate@example.invalid", os_sr_cand_stat: 100010000
+  };
+  const ui = await createConsole({
+    mode: "DEV",
+    syntheticDataOnly: true,
+    configuration: {
+      candidateOperationMode: "SingleUserDev",
+      normalModeEnabled: true,
+      devDirectWriteFallbackEnabled: false
+    },
+    dataMode: "NORMAL",
+    fixtures: { os_sr_cand: [candidate] }
+  });
+  const normalCandidateReads = ui.server.requests.filter((request) =>
+    request.table === "os_sr_cand" && request.operation === "retrieveMultipleRecords").length;
+  assert.equal(normalCandidateReads, 1);
+  assert.equal(ui.methods.isCandidateCoreEnabled(), true);
+
+  ui.element("candidate-data-mode").value = "CONFIGURED";
+  await ui.element("candidate-data-mode").listeners.change();
+
+  assert.equal(ui.methods.isCandidateCoreEnabled(), false);
+  assert.equal(ui.element("create-button").disabled, true);
+  assert.equal(ui.server.requests.filter((request) =>
+    request.table === "os_sr_cand" && request.operation === "retrieveMultipleRecords").length,
+  normalCandidateReads);
 });

@@ -1,13 +1,19 @@
 #requires -Version 7.4
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Prepare', 'Metadata', 'Package', 'RecoverPackage', 'Console', 'ConsoleRecovery', 'Verify', 'VerifyRollback', 'Rollback')][string]$Mode,
+    [Parameter(Mandatory)][ValidateSet('Prepare', 'Metadata', 'Package', 'RecoverPackage', 'Console', 'ConsoleRecovery', 'Verify', 'VerifyRollback', 'Rollback', 'Activate', 'Deactivate', 'VerifyEnabled')][string]$Mode,
     [Parameter(Mandatory)][string]$OrganizationUrl,
     [Parameter(Mandatory)][guid]$ExpectedOrganizationId,
     [Parameter(Mandatory)][guid]$ExpectedEnvironmentId,
     [Parameter(Mandatory)][string]$BundlePath,
     [string]$ExpectedBundleManifestSha256,
     [string]$ExpectedUnpublishedRecoverySha256,
+    [switch]$Apply,
+    [switch]$AuthorizeOwnerGoLive,
+    [string]$NormalModeReleaseManifestPath,
+    [string]$EnvironmentConfigurationPath,
+    [string]$EnvironmentHtmlPath,
+    [string]$ActivationEvidencePath,
     [ValidatePattern('^[a-z][a-z0-9-]{3,60}$')][string]$RecoveryJournalPrefix
 )
 
@@ -21,9 +27,75 @@ if ($OrganizationUrl -notmatch '^https://[^/]+$' -or
     $bundle.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) {
     throw 'NORMAL_RELEASE_EXTERNAL_TARGET_AND_BUNDLE_REQUIRED'
 }
+if ($Mode -notin 'Activate', 'Deactivate', 'VerifyEnabled' -and
+    (-not [string]::IsNullOrWhiteSpace($ActivationEvidencePath) -or
+     $Apply -or $AuthorizeOwnerGoLive -or
+     -not [string]::IsNullOrWhiteSpace($NormalModeReleaseManifestPath) -or
+     -not [string]::IsNullOrWhiteSpace($EnvironmentConfigurationPath) -or
+     -not [string]::IsNullOrWhiteSpace($EnvironmentHtmlPath))) {
+    throw 'NORMAL_RELEASE_ACTIVATION_ARGUMENTS_REJECTED'
+}
+if ($Mode -eq 'Activate' -and
+    (-not $AuthorizeOwnerGoLive -or
+     [string]::IsNullOrWhiteSpace($NormalModeReleaseManifestPath) -or
+     [string]::IsNullOrWhiteSpace($EnvironmentConfigurationPath) -or
+     [string]::IsNullOrWhiteSpace($EnvironmentHtmlPath) -or
+     $Apply -and [string]::IsNullOrWhiteSpace($ActivationEvidencePath))) {
+    throw 'NORMAL_RELEASE_OWNER_AUTHORIZATION_AND_CONSOLE_EVIDENCE_REQUIRED'
+}
+if ($Mode -eq 'Deactivate' -and
+    (-not $Apply -and -not [string]::IsNullOrWhiteSpace($ActivationEvidencePath) -or
+     $Apply -and [string]::IsNullOrWhiteSpace($ActivationEvidencePath) -or
+     $AuthorizeOwnerGoLive -or
+     -not [string]::IsNullOrWhiteSpace($NormalModeReleaseManifestPath) -or
+     -not [string]::IsNullOrWhiteSpace($EnvironmentConfigurationPath) -or
+     -not [string]::IsNullOrWhiteSpace($EnvironmentHtmlPath))) {
+    throw 'NORMAL_RELEASE_DEACTIVATION_ARGUMENTS_REJECTED'
+}
+if ($Mode -eq 'VerifyEnabled' -and
+    ($Apply -or $AuthorizeOwnerGoLive -or
+     [string]::IsNullOrWhiteSpace($ActivationEvidencePath) -or
+     [string]::IsNullOrWhiteSpace($NormalModeReleaseManifestPath) -or
+     [string]::IsNullOrWhiteSpace($EnvironmentConfigurationPath) -or
+     [string]::IsNullOrWhiteSpace($EnvironmentHtmlPath))) {
+    throw 'NORMAL_RELEASE_ENABLED_READBACK_ARGUMENTS_REQUIRED'
+}
+if ($Mode -in 'Activate', 'Deactivate' -and $Apply) {
+    if (-not [IO.Path]::IsPathFullyQualified($ActivationEvidencePath)) {
+        throw 'NORMAL_RELEASE_ACTIVATION_EVIDENCE_PATH_REQUIRED'
+    }
+    $evidencePath = [IO.Path]::GetFullPath($ActivationEvidencePath)
+    $relativeEvidencePath = [IO.Path]::GetRelativePath($root, $evidencePath)
+    if ($relativeEvidencePath -eq '.' -or
+        (-not [IO.Path]::IsPathRooted($relativeEvidencePath) -and
+         $relativeEvidencePath -notmatch '^\.\.(\\|$)') -or
+        (Test-Path -LiteralPath $evidencePath) -or
+        -not (Test-Path -LiteralPath (Split-Path -Parent $evidencePath) -PathType Container)) {
+        throw 'NORMAL_RELEASE_ACTIVATION_EVIDENCE_PATH_REJECTED'
+    }
+    $ActivationEvidencePath = $evidencePath
+}
+if ($Mode -eq 'VerifyEnabled') {
+    if (-not [IO.Path]::IsPathFullyQualified($ActivationEvidencePath)) {
+        throw 'NORMAL_RELEASE_ACTIVATION_EVIDENCE_PATH_REQUIRED'
+    }
+    $evidencePath = [IO.Path]::GetFullPath($ActivationEvidencePath)
+    $relativeEvidencePath = [IO.Path]::GetRelativePath($root, $evidencePath)
+    if ($relativeEvidencePath -eq '.' -or
+        (-not [IO.Path]::IsPathRooted($relativeEvidencePath) -and
+         $relativeEvidencePath -notmatch '^\.\.(\\|$)') -or
+        -not (Test-Path -LiteralPath $evidencePath -PathType Leaf)) {
+        throw 'NORMAL_RELEASE_ACTIVATION_EVIDENCE_PATH_REJECTED'
+    }
+    $ActivationEvidencePath = $evidencePath
+}
 $script:ApiRoot = "$OrganizationUrl/api/data/v9.2/"
 $script:ReadRequestCount = 0
 $script:DispatchCount = 0
+$script:ActivationValueId = $null
+$script:ActivationExpectedEtag = $null
+$script:ActivationExpectedValue = $null
+$script:ActivationWriteAllowed = $false
 $AssemblyOnlyPatch = $false
 
 $helperPath = Join-Path $PSScriptRoot 'Update-BsoRsCandidatePluginPackage.ps1'
@@ -101,6 +173,30 @@ function Request {
                     throw 'NORMAL_RELEASE_PUBLICATION_WRITE_REJECTED'
                 }
             }
+        } elseif (-not [string]::IsNullOrWhiteSpace([string]$script:ActivationValueId)) {
+            $activationPath = [regex]::Match(
+                $Path,
+                '^environmentvariablevalues\((?<id>[0-9a-f-]{36})\)$',
+                [Text.RegularExpressions.RegexOptions]::IgnoreCase
+            )
+            $bodyKeys = [System.Collections.Generic.List[string]]::new()
+            if ($Body -is [System.Collections.IDictionary]) {
+                foreach ($key in $Body.Keys) { $bodyKeys.Add([string]$key) }
+            }
+            if (-not $script:ActivationWriteAllowed) { throw 'NORMAL_RELEASE_CONFIGURATION_WRITE_REJECTED:DISPATCH_NOT_AUTHORIZED' }
+            if (-not $activationPath.Success) { throw 'NORMAL_RELEASE_CONFIGURATION_WRITE_REJECTED:ROW_PATH_INVALID' }
+            if ($activationPath.Groups['id'].Value -ine [string]$script:ActivationValueId) {
+                throw 'NORMAL_RELEASE_CONFIGURATION_WRITE_REJECTED:ROW_ID_MISMATCH'
+            }
+            if ($ETag -cne [string]$script:ActivationExpectedEtag -or $ETag -eq '*') {
+                throw 'NORMAL_RELEASE_CONFIGURATION_WRITE_REJECTED:ETAG_MISMATCH'
+            }
+            if ($bodyKeys.Count -ne 1 -or $bodyKeys[0] -cne 'value') {
+                throw 'NORMAL_RELEASE_CONFIGURATION_WRITE_REJECTED:BODY_SHAPE_MISMATCH'
+            }
+            if ([string]$Body.value -cne [string]$script:ActivationExpectedValue) {
+                throw 'NORMAL_RELEASE_CONFIGURATION_WRITE_REJECTED:VALUE_MISMATCH'
+            }
         } else {
             $allowedPaths = @($plan.baseline.resources | Where-Object name -in 'candidate-console.js', 'candidate-console.html' |
                 ForEach-Object { "webresourceset($($_.row.webresourceid))" })
@@ -169,12 +265,34 @@ function Assert-Core {
     $current
 }
 function Assert-Disabled {
+    $null = Get-NormalConfiguration -Enabled $false
+}
+function Assert-Enabled {
+    Get-NormalConfiguration -Enabled $true
+}
+function Get-NormalConfiguration {
+    param([Parameter(Mandatory)][bool]$Enabled)
     $definition = One @(Get-PagedRows "environmentvariabledefinitions?`$select=environmentvariabledefinitionid,schemaname,type,statecode&`$filter=schemaname eq 'os_sr_ncrcfg'") 'CONFIG_DEFINITION'
-    $values = @(Get-PagedRows "environmentvariablevalues?`$select=environmentvariablevalueid,value,statecode&`$filter=_environmentvariabledefinitionid_value eq $($definition.environmentvariabledefinitionid)")
+    $values = @(Get-PagedRows "environmentvariablevalues?`$select=environmentvariablevalueid,value,statecode,_environmentvariabledefinitionid_value&`$filter=_environmentvariabledefinitionid_value eq $($definition.environmentvariabledefinitionid)")
     $value = One $values 'CONFIG_VALUE'
+    $expectedValue = if ($Enabled) { $plan.enabledConfiguration } else { $plan.disabledConfiguration }
     if ($definition.type -ne 100000000 -or $definition.statecode -ne 0 -or
-        $value.statecode -ne 0 -or $value.value -cne $plan.disabledConfiguration) {
-        throw 'NORMAL_RELEASE_CONFIGURATION_NOT_DISABLED'
+        $value.statecode -ne 0 -or
+        $value._environmentvariabledefinitionid_value -ine $definition.environmentvariabledefinitionid -or
+        $value.value -cne $expectedValue) {
+        $state = if ($Enabled) { 'ENABLED' } else { 'DISABLED' }
+        throw "NORMAL_RELEASE_CONFIGURATION_NOT_$state"
+    }
+    $row = Request "environmentvariablevalues($($value.environmentvariablevalueid))?`$select=environmentvariablevalueid,value,statecode,_environmentvariabledefinitionid_value"
+    if ($row.environmentvariablevalueid -ine $value.environmentvariablevalueid -or
+        $row._environmentvariabledefinitionid_value -ine $definition.environmentvariabledefinitionid -or
+        $row.statecode -ne 0 -or $row.value -cne $expectedValue) {
+        throw 'NORMAL_RELEASE_CONFIGURATION_READBACK_CHANGED'
+    }
+    [pscustomobject]@{
+        Definition = $definition
+        Value = $row
+        ETag = [string]$row.'@odata.etag'
     }
 }
 function Assert-Security {
@@ -183,17 +301,177 @@ function Assert-Security {
     }
 }
 function Write-Step {
-    param([string]$Name, [scriptblock]$Action)
-    $journalPath = Join-Path $bundle "journals\$Name.json"
-    Save-Json $journalPath ([ordered]@{
+    param([string]$Name, [scriptblock]$Action, [string]$EvidencePath, [scriptblock]$Verify)
+    $journalPath = if ([string]::IsNullOrWhiteSpace($EvidencePath)) {
+        Join-Path $bundle "journals\$Name.json"
+    } else {
+        $EvidencePath
+    }
+    $entry = [ordered]@{
         step = $Name; manifestSha256 = $ExpectedBundleManifestSha256
         state = 'DISPATCH_RESERVED'; retryCount = 0; utc = [DateTime]::UtcNow.ToString('o')
-    }) -New
+    }
+    Save-Json $journalPath $entry -New
     try {
         & $Action
-        Save-Json $journalPath ([ordered]@{ step = $Name; manifestSha256 = $ExpectedBundleManifestSha256; state = 'ACKNOWLEDGED'; retryCount = 0 })
+        if ($Verify) { & $Verify }
+        $entry.state = if ($Verify) { 'VERIFIED' } else { 'ACKNOWLEDGED' }
+        $entry.verifiedUtc = [DateTime]::UtcNow.ToString('o')
+        Save-Json $journalPath $entry
     } catch {
         throw "NORMAL_RELEASE_STOP_WITHOUT_RETRY:$Name`:$($_.Exception.Message)"
+    }
+}
+function Assert-EffectiveCreatePrivilege {
+    $privilege = One @(Get-PagedRows "privileges?`$select=privilegeid,name&`$filter=name eq 'prvCreateos_sr_cand'") 'CREATE_PRIVILEGE'
+    $effective = Request "systemusers($($who.UserId))/Microsoft.Dynamics.CRM.RetrieveUserSetOfPrivilegesByNames(PrivilegeNames=@names,ExcludeTeamBasic=false)?@names=%5B%22prvCreateos_sr_cand%22%5D"
+    $hasCreate = @($effective.RolePrivileges | Where-Object PrivilegeId -eq $privilege.privilegeid).Count -gt 0
+    if (-not $hasCreate) { throw 'NORMAL_RELEASE_EFFECTIVE_CREATE_PRIVILEGE_MISSING' }
+    $true
+}
+function Assert-ApiContract {
+    param([Parameter(Mandatory)][object]$Current)
+    $outputs = @(Get-PagedRows "customapiresponseproperties?`$select=uniquename,type&`$filter=_customapiid_value eq $($Current.Api.customapiid)")
+    if ($outputs.Count -ne 9) { throw 'NORMAL_RELEASE_OUTPUT_COUNT_FAILED' }
+    foreach ($baselineOutput in $plan.baseline.outputs) {
+        $row = One @($outputs | Where-Object uniquename -eq $baselineOutput.uniquename) 'COMPATIBLE_OUTPUT'
+        if ($row.type -ne $baselineOutput.type) { throw 'NORMAL_RELEASE_EXISTING_OUTPUT_CHANGED' }
+    }
+    foreach ($output in @(@('CreatedCandidateId', 12), @('CandidateNumber', 10))) {
+        $row = One @($outputs | Where-Object uniquename -eq $output[0]) 'OUTPUT'
+        if ($row.type -ne $output[1]) { throw 'NORMAL_RELEASE_OUTPUT_TYPE_FAILED' }
+    }
+    $inputs = @(Get-PagedRows "customapirequestparameters?`$select=uniquename,type,isoptional&`$filter=_customapiid_value eq $($Current.Api.customapiid)" |
+        Select-Object uniquename,type,isoptional | Sort-Object uniquename)
+    if ((ConvertTo-Json -InputObject $inputs -Compress) -cne
+        (ConvertTo-Json -InputObject $plan.baseline.inputs -Compress)) {
+        throw 'NORMAL_RELEASE_EXISTING_INPUT_CHANGED'
+    }
+    [pscustomobject]@{ OutputCount = $outputs.Count; InputCount = $inputs.Count }
+}
+function Assert-NormalModeConsoleReady {
+    param(
+        [Parameter(Mandatory)][string]$ReleaseManifestPath,
+        [Parameter(Mandatory)][string]$ConfigurationPath,
+        [Parameter(Mandatory)][string]$HtmlPath
+    )
+    $expectedManifestPath = [IO.Path]::GetFullPath(
+        (Join-Path $root 'docs\CANDIDATE_CONSOLE_NORMAL_MODE_RELEASE_MANIFEST.json')
+    )
+    if ([IO.Path]::GetFullPath($ReleaseManifestPath) -cne $expectedManifestPath) {
+        throw 'NORMAL_RELEASE_CONSOLE_MANIFEST_PATH_REJECTED'
+    }
+    foreach ($path in @($ConfigurationPath, $HtmlPath)) {
+        $fullPath = [IO.Path]::GetFullPath($path)
+        $relativePath = [IO.Path]::GetRelativePath($root, $fullPath)
+        if ($relativePath -eq '.' -or
+            (-not [IO.Path]::IsPathRooted($relativePath) -and $relativePath -notmatch '^\.\.(\\|$)') -or
+            -not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
+            throw 'NORMAL_RELEASE_CONSOLE_EVIDENCE_PATH_REJECTED'
+        }
+    }
+    $release = Get-Content -LiteralPath $ReleaseManifestPath -Raw | ConvertFrom-Json
+    $resourceNames = @(
+        'os_/bso/candidate-console-environment.js',
+        'os_/bso/candidate-console.html',
+        'os_/bso/candidate-console-policy.js',
+        'os_/bso/candidate-console.js'
+    ) | Sort-Object -CaseSensitive
+    if ($release.scope -cne 'NORMAL_MODE_SINGLEUSERDEV_PRESERVING' -or
+        $release.customApiChanges -ne 0 -or $release.environmentConfigurationChanges -ne 1 -or
+        @($release.resources).Count -ne 4 -or
+        [string]::Join('|', @($release.resources.name | Sort-Object -CaseSensitive)) -cne
+            [string]::Join('|', $resourceNames)) {
+        throw 'NORMAL_RELEASE_CONSOLE_DELTA_REJECTED'
+    }
+    $ownerManifest = Get-Content -LiteralPath (
+        Join-Path $root 'docs\CANDIDATE_CORE_NORMAL_CREATE_1.0.9_RELEASE_MANIFEST.json'
+    ) -Raw | ConvertFrom-Json
+    if ($ownerManifest.ownerBusinessGoLiveDecision.status -cne 'AUTHORIZED' -or
+        $ownerManifest.ownerBusinessGoLiveDecision.scope -cne
+            'NORMAL CreateCandidate for real Candidate data, initially entered by the owner.') {
+        throw 'NORMAL_RELEASE_OWNER_DECISION_NOT_RECORDED'
+    }
+    $configurationSource = [IO.File]::ReadAllText($ConfigurationPath)
+    $configurationMatch = [regex]::Match($configurationSource, '(?s)const configuration = (?<json>\{.*?\});')
+    if (-not $configurationMatch.Success) { throw 'NORMAL_RELEASE_CONSOLE_CONFIGURATION_INVALID' }
+    try { $configuration = $configurationMatch.Groups['json'].Value | ConvertFrom-Json }
+    catch { throw 'NORMAL_RELEASE_CONSOLE_CONFIGURATION_INVALID' }
+    if ([string]$configuration.mode -cne 'DEV' -or
+        [string]$configuration.environmentId -ine $ExpectedEnvironmentId.ToString('D') -or
+        [string]$configuration.organizationId -ine $ExpectedOrganizationId.ToString('D') -or
+        [string]$configuration.organizationUrl.TrimEnd('/') -cne $OrganizationUrl -or
+        $configuration.candidateCoreEnabled -ne $true -or
+        $configuration.syntheticDataOnly -ne $true -or
+        $configuration.normalModeEnabled -isnot [bool] -or
+        $configuration.normalModeEnabled -ne $true -or
+        [string]$configuration.candidateOperationMode -cne 'SingleUserDev' -or
+        $configuration.devDirectWriteFallbackEnabled -ne $false -or
+        [string]$configuration.diagnosticsMode -cne 'OFF' -or
+        ($null -ne $configuration.PSObject.Properties['availabilityEnabled'] -and
+         ($configuration.PSObject.Properties['availabilityEnabled'].Value -isnot [bool] -or
+          $configuration.PSObject.Properties['availabilityEnabled'].Value))) {
+        throw 'NORMAL_RELEASE_CONSOLE_CONFIGURATION_REJECTED'
+    }
+    $configurationHash = Hash-File $ConfigurationPath
+    $sourceHtmlPath = Join-Path $root 'solutions\CandidateConsole\WebResources\os_\bso\candidate-console.html'
+    $sourcePolicyPath = Join-Path $root 'solutions\CandidateConsole\WebResources\os_\bso\candidate-console-policy.js'
+    $sourceScriptPath = Join-Path $root 'solutions\CandidateConsole\WebResources\os_\bso\candidate-console.js'
+    $sourceHashes = @{
+        'os_/bso/candidate-console-policy.js' = Hash-File $sourcePolicyPath
+        'os_/bso/candidate-console.js' = Hash-File $sourceScriptPath
+    }
+    $htmlTemplateHash = Hash-File $sourceHtmlPath
+    $htmlTemplate = [IO.File]::ReadAllText($sourceHtmlPath)
+    $cachePattern = 'candidate-console-environment\.js\?v=[0-9a-f]+'
+    if ([regex]::Matches($htmlTemplate, $cachePattern).Count -ne 1 -or
+        $htmlTemplateHash -cne [string](@($release.resources | Where-Object name -CEQ 'os_/bso/candidate-console.html')[0].templateSha256)) {
+        throw 'NORMAL_RELEASE_CONSOLE_HTML_TEMPLATE_REJECTED'
+    }
+    $expectedHtml = [regex]::Replace(
+        $htmlTemplate, $cachePattern, "candidate-console-environment.js?v=$($configurationHash.Substring(0, 12))"
+    )
+    $htmlContent = [IO.File]::ReadAllText($HtmlPath)
+    if ($htmlContent -cne $expectedHtml) { throw 'NORMAL_RELEASE_CONSOLE_HTML_CACHE_TOKEN_REJECTED' }
+    $htmlHash = Hash-File $HtmlPath
+    $expectedHashes = @{
+        'os_/bso/candidate-console-environment.js' = $configurationHash
+        'os_/bso/candidate-console.html' = $htmlHash
+        'os_/bso/candidate-console-policy.js' = $sourceHashes['os_/bso/candidate-console-policy.js']
+        'os_/bso/candidate-console.js' = $sourceHashes['os_/bso/candidate-console.js']
+    }
+    foreach ($item in $release.resources) {
+        if ($item.previousSha256 -cnotmatch '^[0-9a-f]{64}$' -or
+            ($item.name -notin 'os_/bso/candidate-console-environment.js', 'os_/bso/candidate-console.html' -and
+             $item.sha256 -cne $expectedHashes[$item.name])) {
+            throw "NORMAL_RELEASE_CONSOLE_SOURCE_HASH_REJECTED:$($item.name)"
+        }
+    }
+    $readback = [System.Collections.Generic.List[object]]::new()
+    foreach ($name in $resourceNames) {
+        $published = Resource $name
+        $current = Resource $name -Current
+        $expectedHash = $expectedHashes[$name]
+        if ((Resource-Hash $published) -cne $expectedHash -or
+            (Resource-Hash $current) -cne $expectedHash) {
+            throw "NORMAL_RELEASE_CONSOLE_PUBLISHED_HASH_MISMATCH:$name"
+        }
+        $served = Invoke-WebRequest -Uri (
+            "$OrganizationUrl/WebResources/$name`?activation=$($expectedHash.Substring(0, 12))"
+        ) -Headers @{ Authorization = "Bearer $script:AccessToken"; 'Cache-Control' = 'no-cache' } `
+            -MaximumRetryCount 0 -MaximumRedirection 0
+        if ((Bytes-Hash $served.RawContentStream.ToArray()) -cne $expectedHash) {
+            throw "NORMAL_RELEASE_CONSOLE_SERVED_HASH_MISMATCH:$name"
+        }
+        $readback.Add([pscustomobject]@{
+            Name = $name; Sha256 = $expectedHash; CurrentMatches = $true
+            PublishedMatches = $true; ServedMatches = $true
+        })
+    }
+    [pscustomobject]@{
+        ConfigurationSha256 = $configurationHash
+        HtmlSha256 = $htmlHash
+        Resources = $readback.ToArray()
     }
 }
 
@@ -304,13 +582,18 @@ try {
     }
     if (-not $ExpectedBundleManifestSha256 -or (Hash-File $manifestPath) -cne $ExpectedBundleManifestSha256) { throw 'NORMAL_RELEASE_MANIFEST_PIN_REQUIRED' }
     $plan = Get-Content $manifestPath -Raw | ConvertFrom-Json
+    $enabledConfiguration = "v1|enabled=true|organizationId=$($ExpectedOrganizationId.ToString('D'))"
+    if ($null -eq $plan.PSObject.Properties['enabledConfiguration']) {
+        $plan | Add-Member -NotePropertyName enabledConfiguration -NotePropertyValue $enabledConfiguration
+    }
     if ($plan.organizationUrl -cne $OrganizationUrl -or $plan.organizationId -ne $ExpectedOrganizationId -or
         $plan.environmentId -ne $ExpectedEnvironmentId -or $plan.realDataActivationAllowed -or
-        $plan.disabledConfiguration -cne "v1|enabled=false|organizationId=$($ExpectedOrganizationId.ToString('D'))") {
+        $plan.disabledConfiguration -cne "v1|enabled=false|organizationId=$($ExpectedOrganizationId.ToString('D'))" -or
+        $plan.enabledConfiguration -cne $enabledConfiguration) {
         throw 'NORMAL_RELEASE_TARGET_OR_ACTIVATION_REJECTED'
     }
     if ((Hash-File (Join-Path $bundle 'payloads\os_sr_cact_pkg.1.0.9.nupkg')) -cne $plan.packageSha256) { throw 'NORMAL_RELEASE_PACKAGE_DRIFT' }
-    Assert-Security
+    if ($Mode -ne 'Deactivate') { Assert-Security }
     if ($Mode -eq 'Metadata') {
         $null = Assert-Core '1.0.8.0'
         foreach ($write in $plan.metadataWrites) {
@@ -386,6 +669,126 @@ try {
         }) -join ''
         $publishDispatch = if ($Mode -eq 'ConsoleRecovery') { "$RecoveryJournalPrefix-publish" } else { "$Mode-publish" }
         Write-Step $publishDispatch { $null = Request 'PublishXml' 'POST' @{ ParameterXml = "<importexportxml><webresources>$ids</webresources></importexportxml>" } }
+    } elseif ($Mode -in 'Activate', 'Deactivate', 'VerifyEnabled') {
+        $consoleReadback = $null
+        $hasCreate = $null
+        $core = $null
+        $apiContract = $null
+        if ($Mode -eq 'Activate') {
+            $core = Assert-Core '1.0.9.0'
+            $apiContract = Assert-ApiContract $core
+            $hasCreate = Assert-EffectiveCreatePrivilege
+            Assert-Disabled
+            $consoleReadback = Assert-NormalModeConsoleReady `
+                -ReleaseManifestPath $NormalModeReleaseManifestPath `
+                -ConfigurationPath $EnvironmentConfigurationPath `
+                -HtmlPath $EnvironmentHtmlPath
+            $configuration = Get-NormalConfiguration -Enabled $false
+        } elseif ($Mode -eq 'VerifyEnabled') {
+            $configuration = Get-NormalConfiguration -Enabled $true
+            $core = Assert-Core '1.0.9.0'
+            $apiContract = Assert-ApiContract $core
+            $hasCreate = Assert-EffectiveCreatePrivilege
+            $consoleReadback = Assert-NormalModeConsoleReady `
+                -ReleaseManifestPath $NormalModeReleaseManifestPath `
+                -ConfigurationPath $EnvironmentConfigurationPath `
+                -HtmlPath $EnvironmentHtmlPath
+            Assert-Security
+        } else {
+            $configuration = Get-NormalConfiguration -Enabled $true
+        }
+        $expectedValue = if ($Mode -in 'Activate', 'VerifyEnabled') { $plan.enabledConfiguration } else {
+            $plan.disabledConfiguration
+        }
+        if ($Mode -ne 'VerifyEnabled' -and
+            ([string]::IsNullOrWhiteSpace($configuration.ETag) -or $configuration.ETag -eq '*')) {
+            throw 'NORMAL_RELEASE_CONFIGURATION_ETAG_UNAVAILABLE'
+        }
+        if ($Mode -eq 'VerifyEnabled') {
+            $evidence = Get-Content -LiteralPath $ActivationEvidencePath -Raw | ConvertFrom-Json
+            if ($evidence.step -cne 'Activate-NORMAL-Create' -or
+                $evidence.state -cne 'VERIFIED' -or
+                $evidence.manifestSha256 -cne $ExpectedBundleManifestSha256) {
+                throw 'NORMAL_RELEASE_ENABLED_EVIDENCE_STATE_REJECTED'
+            }
+            $evidence | Add-Member -NotePropertyName result -NotePropertyValue 'NORMAL_CREATE_ENABLED_READBACK_VERIFIED' -Force
+            $evidence | Add-Member -NotePropertyName gateReadback -NotePropertyValue 'v1|enabled=true|organizationId=<exact-target>' -Force
+            $evidence | Add-Member -NotePropertyName ownerGoLiveDecisionRecorded -NotePropertyValue $true -Force
+            $evidence | Add-Member -NotePropertyName handlerVersion -NotePropertyValue $core.Assembly.version -Force
+            $evidence | Add-Member -NotePropertyName effectiveCandidateCreate -NotePropertyValue $hasCreate -Force
+            $evidence | Add-Member -NotePropertyName apiOutputCount -NotePropertyValue $apiContract.OutputCount -Force
+            $evidence | Add-Member -NotePropertyName consoleReadback -NotePropertyValue $consoleReadback -Force
+            $evidence | Add-Member -NotePropertyName candidateActionInvoked -NotePropertyValue $false -Force
+            $evidence | Add-Member -NotePropertyName postActivationVerifiedUtc -NotePropertyValue ([DateTime]::UtcNow.ToString('o')) -Force
+            Save-Json $ActivationEvidencePath $evidence
+            $result = 'NORMAL_CREATE_ENABLED_READBACK_VERIFIED'
+        } elseif ($Apply) {
+            $script:ActivationValueId = [string]$configuration.Value.environmentvariablevalueid
+            $script:ActivationExpectedEtag = [string]$configuration.ETag
+            $script:ActivationExpectedValue = $expectedValue
+            $script:ActivationWriteAllowed = $true
+            $operationName = if ($Mode -eq 'Activate') { 'Activate-NORMAL-Create' } else { 'Deactivate-NORMAL-Create' }
+            $targetState = $Mode -eq 'Activate'
+            Write-Step -Name $operationName -EvidencePath $ActivationEvidencePath -Action {
+                $null = Request -Path "environmentvariablevalues($script:ActivationValueId)" `
+                    -Method 'PATCH' -Body @{ value = $script:ActivationExpectedValue } `
+                    -ETag $script:ActivationExpectedEtag
+            } -Verify {
+                $verifiedConfiguration = Get-NormalConfiguration -Enabled $targetState
+                if ($verifiedConfiguration.Value.environmentvariablevalueid -ine $script:ActivationValueId -or
+                    $verifiedConfiguration.Value.value -cne $script:ActivationExpectedValue) {
+                    throw 'NORMAL_RELEASE_CONFIGURATION_WRITE_READBACK_FAILED'
+                }
+                $script:activationConfiguration = $verifiedConfiguration
+                if ($Mode -eq 'Activate') {
+                    $script:activationCore = Assert-Core '1.0.9.0'
+                    $script:activationApiContract = Assert-ApiContract $script:activationCore
+                    $script:activationHasCreate = Assert-EffectiveCreatePrivilege
+                    $script:activationConsoleReadback = Assert-NormalModeConsoleReady `
+                        -ReleaseManifestPath $NormalModeReleaseManifestPath `
+                        -ConfigurationPath $EnvironmentConfigurationPath `
+                        -HtmlPath $EnvironmentHtmlPath
+                    Assert-Security
+                }
+            }
+            if ($Mode -eq 'Activate') {
+                $configuration = $script:activationConfiguration
+                $core = $script:activationCore
+                $apiContract = $script:activationApiContract
+                $hasCreate = $script:activationHasCreate
+                $consoleReadback = $script:activationConsoleReadback
+            } else {
+                $configuration = $script:activationConfiguration
+            }
+            $script:ActivationWriteAllowed = $false
+            $evidence = Get-Content -LiteralPath $ActivationEvidencePath -Raw | ConvertFrom-Json
+            $evidenceResult = if ($targetState) { 'NORMAL_CREATE_ENABLED' } else { 'NORMAL_CREATE_DISABLED' }
+            $evidenceGateReadback = if ($targetState) {
+                'v1|enabled=true|organizationId=<exact-target>'
+            } else {
+                'v1|enabled=false|organizationId=<exact-target>'
+            }
+            $evidenceHandlerVersion = if ($null -ne $core) { $core.Assembly.version } else { $null }
+            $evidenceOutputCount = if ($null -ne $apiContract) { $apiContract.OutputCount } else { $null }
+            $evidence | Add-Member -NotePropertyName result -NotePropertyValue $evidenceResult -Force
+            $evidence | Add-Member -NotePropertyName gateReadback -NotePropertyValue $evidenceGateReadback -Force
+            $evidence | Add-Member -NotePropertyName ownerGoLiveDecisionRecorded -NotePropertyValue ($Mode -eq 'Activate') -Force
+            $evidence | Add-Member -NotePropertyName handlerVersion -NotePropertyValue $evidenceHandlerVersion -Force
+            $evidence | Add-Member -NotePropertyName effectiveCandidateCreate -NotePropertyValue $hasCreate -Force
+            $evidence | Add-Member -NotePropertyName apiOutputCount -NotePropertyValue $evidenceOutputCount -Force
+            $evidence | Add-Member -NotePropertyName consoleReadback -NotePropertyValue $consoleReadback -Force
+            $evidence | Add-Member -NotePropertyName candidateActionInvoked -NotePropertyValue $false -Force
+            Save-Json $ActivationEvidencePath $evidence
+        } else {
+            if ($Mode -eq 'Activate') {
+                $result = 'NORMAL_CREATE_ACTIVATION_PREFLIGHT_READY'
+            } else {
+                $result = 'NORMAL_CREATE_DEACTIVATION_PREFLIGHT_READY'
+            }
+        }
+        if ($Mode -ne 'VerifyEnabled' -and $Apply) {
+            $result = if ($Mode -eq 'Activate') { 'NORMAL_CREATE_ACTIVATED' } else { 'NORMAL_CREATE_DEACTIVATED' }
+        }
     } elseif ($Mode -in 'Verify', 'VerifyRollback') {
         $current = Assert-Core '1.0.9.0'
         Assert-Disabled
@@ -434,8 +837,27 @@ try {
             manualTestUrl = $plan.manualTestUrl
         })
     }
-    Assert-Security
-    [pscustomobject]@{ Result = "DISABLED_RELEASE_${Mode}_VERIFIED"; NormalCreateEnabled = $false }
+    if ($Mode -notin 'Activate', 'Deactivate', 'VerifyEnabled') {
+        Assert-Security
+        $result = "DISABLED_RELEASE_${Mode}_VERIFIED"
+    }
+    [pscustomobject]@{
+        Result = $result
+        NormalCreateEnabled = if ($Mode -eq 'Activate') {
+            [bool]$Apply
+        } elseif ($Mode -eq 'Deactivate') {
+            -not [bool]$Apply
+        } else {
+            $Mode -eq 'VerifyEnabled'
+        }
+        GateReadback = if ($Mode -eq 'Activate') {
+            if ($Apply) { 'true' } else { 'false' }
+        } elseif ($Mode -eq 'Deactivate') {
+            if ($Apply) { 'false' } else { 'true' }
+        } elseif ($Mode -eq 'VerifyEnabled') {
+            'true'
+        } else { 'unchanged' }
+    }
 } finally {
     $script:AccessToken = $null
 }

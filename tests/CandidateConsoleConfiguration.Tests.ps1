@@ -39,6 +39,7 @@ try {
         $configuration.organizationUrl -ceq 'https://dev.example.invalid' -and
         $configuration.candidateCoreEnabled -eq $true -and
         $configuration.syntheticDataOnly -eq $true -and
+        $configuration.normalModeEnabled -eq $false -and
         $configuration.devDirectWriteFallbackEnabled -eq $true -and
         $configuration.diagnosticsMode -ceq 'OFF') 'Serialize only the requested environment policy'
     Assert-Test (-not ($configuration.PSObject.Properties.Name -contains 'candidateOperationMode')) `
@@ -74,11 +75,37 @@ try {
         $singleUserConfiguration.mode -ceq 'DEV' -and
         $singleUserConfiguration.syntheticDataOnly -eq $true -and
         $singleUserConfiguration.candidateCoreEnabled -eq $true -and
+        $singleUserConfiguration.normalModeEnabled -eq $false -and
         $singleUserConfiguration.devDirectWriteFallbackEnabled -eq $false -and
         $singleUserConfiguration.candidateOperationMode -ceq 'SingleUserDev' -and
         -not ($singleUserConfiguration.PSObject.Properties.Name -contains 'availabilityEnabled')) `
         'Generate explicit SingleUserDev only for server-enforced synthetic DEV without Calendar'
     Remove-Item -LiteralPath $singleUserOutputPath, $singleUserHtmlPath
+
+    $normalOutputPath = Join-Path ([IO.Path]::GetTempPath()) "normal-mode-$tempName.js"
+    $normalHtmlPath = Join-Path ([IO.Path]::GetTempPath()) "normal-mode-$tempName.html"
+    & $generatorPath `
+        -Mode DEV `
+        -OrganizationUrl 'https://dev.example.invalid' `
+        -EnvironmentId '11111111-1111-4111-8111-111111111111' `
+        -OrganizationId '22222222-2222-4222-8222-222222222222' `
+        -OutputConfigurationPath $normalOutputPath `
+        -OutputHtmlPath $normalHtmlPath `
+        -CandidateOperationMode SingleUserDev `
+        -NormalModeEnabled | Out-Null
+    $normalText = [IO.File]::ReadAllText($normalOutputPath)
+    $normalMatch = [regex]::Match($normalText, '(?s)const configuration = (?<json>\{.*?\});')
+    $normalConfiguration = $normalMatch.Groups['json'].Value | ConvertFrom-Json
+    Assert-Test ($normalMatch.Success -and
+        $normalConfiguration.mode -ceq 'DEV' -and
+        $normalConfiguration.syntheticDataOnly -eq $true -and
+        $normalConfiguration.candidateOperationMode -ceq 'SingleUserDev' -and
+        $normalConfiguration.normalModeEnabled -eq $true -and
+        $normalConfiguration.devDirectWriteFallbackEnabled -eq $false -and
+        $normalConfiguration.diagnosticsMode -ceq 'OFF' -and
+        -not $normalConfiguration.availabilityEnabled) `
+        'Generate NORMAL opt-in without weakening the configured SingleUserDev profile'
+    Remove-Item -LiteralPath $normalOutputPath, $normalHtmlPath
 
     $singleUserRejectedOutputPath = Join-Path ([IO.Path]::GetTempPath()) "single-user-rejected-$tempName.js"
     $singleUserRejectedHtmlPath = Join-Path ([IO.Path]::GetTempPath()) "single-user-rejected-$tempName.html"
@@ -118,6 +145,24 @@ try {
         -not (Test-Path -LiteralPath $singleUserRejectedOutputPath) -and
         -not (Test-Path -LiteralPath $singleUserRejectedHtmlPath)) `
         'Reject Calendar availability in SingleUserDev configuration'
+    $singleUserRejected = $false
+    try {
+        & $generatorPath `
+            -Mode DEV `
+            -OrganizationUrl 'https://dev.example.invalid' `
+            -EnvironmentId '11111111-1111-4111-8111-111111111111' `
+            -OrganizationId '22222222-2222-4222-8222-222222222222' `
+            -OutputConfigurationPath $singleUserRejectedOutputPath `
+            -OutputHtmlPath $singleUserRejectedHtmlPath `
+            -CandidateOperationMode BsoSynthetic `
+            -NormalModeEnabled
+    } catch {
+        $singleUserRejected = $true
+    }
+    Assert-Test ($singleUserRejected -and
+        -not (Test-Path -LiteralPath $singleUserRejectedOutputPath) -and
+        -not (Test-Path -LiteralPath $singleUserRejectedHtmlPath)) `
+        'Reject NORMAL opt-in outside SingleUserDev'
     $rejectedName = "candidate-console-config-$([Guid]::NewGuid().ToString('N'))"
     $rejectedOutputPath = Join-Path ([IO.Path]::GetTempPath()) "$rejectedName.js"
     $rejectedHtmlPath = Join-Path ([IO.Path]::GetTempPath()) "$rejectedName.html"
@@ -187,6 +232,7 @@ try {
         $releaseNeutralConfiguration.organizationUrl -ceq '' -and
         $releaseNeutralConfiguration.candidateCoreEnabled -eq $false -and
         $releaseNeutralConfiguration.syntheticDataOnly -eq $true -and
+        $releaseNeutralConfiguration.normalModeEnabled -eq $false -and
         $releaseNeutralConfiguration.devDirectWriteFallbackEnabled -eq $false -and
         $releaseNeutralConfiguration.diagnosticsMode -ceq 'OFF' -and
         $releaseNeutralHtml.Contains("candidate-console-environment.js?v=$($releaseNeutralHash.Substring(0, 12))")) `
@@ -331,7 +377,8 @@ try {
             -not (Test-Path -LiteralPath $rejectedHtmlPath)) "Reject availability enablement for $($case.Name)"
     }
 } finally {
-    foreach ($path in @($outputPath, $htmlOutputPath, $rejectedOutputPath, $rejectedHtmlPath,
+    foreach ($path in @($outputPath, $htmlOutputPath, $normalOutputPath, $normalHtmlPath,
+        $rejectedOutputPath, $rejectedHtmlPath,
         $releaseNeutralOutputPath, $releaseNeutralHtmlPath,
         $releaseOutputPath, $releaseHtmlPath, $devReleaseOutputPath, $devReleaseHtmlPath,
         $availabilityOutputPath, $availabilityHtmlPath)) {

@@ -5,10 +5,10 @@
     "name": "Candidate Core NORMAL Create Candidate",
     "artifactPackageVersion": "1.0.9",
     "assemblyVersion": "1.0.9.0",
-    "status": "DISABLED_TECHNICAL_RELEASE_DEPLOYED_VERIFIED",
+    "status": "NORMAL_CREATE_ENABLED_LIVE_VERIFIED",
     "deploymentReady": true,
     "deployed": true,
-    "normalCreateEnabled": false,
+    "normalCreateEnabled": true,
     "candidateBusinessWrites": 0,
     "targetName": "VN LMV IT",
     "targetOrganizationId": null,
@@ -34,7 +34,7 @@
     "liveCandidateCore": {
       "packageUniqueName": "os_sr_cact_pkg",
       "packageRecordVersion": "1.0.0",
-      "packageBackedAssemblyVersion": "1.0.8.0",
+      "packageBackedAssemblyVersion": "1.0.9.0",
       "customApiUniqueName": "os_sr_cact",
       "handlerTypeName": "os_sr_cact.ApplyCandidateAction",
       "handlerBindingReconciledToPackageAssembly": true,
@@ -46,10 +46,12 @@
         "PreviousStatus",
         "ResultCode",
         "ScopedData",
-        "StatusHistoryId"
+        "StatusHistoryId",
+        "CreatedCandidateId",
+        "CandidateNumber"
       ],
-      "createdCandidateIdPresent": false,
-      "candidateNumberPresent": false
+      "createdCandidateIdPresent": true,
+      "candidateNumberPresent": true
     },
     "liveConsole": {
       "mode": "DEV",
@@ -58,22 +60,21 @@
       "devDirectWriteFallbackEnabled": false,
       "diagnosticsMode": "OFF",
       "candidateOperationMode": "SingleUserDev",
-      "normalCreateEnabled": false,
+      "normalCreateEnabled": true,
       "resourceSha256": {
-        "candidate-console-environment.js": "21ddcd925916f2bf56b005335aa05ceaec002dba4f79690688cb14a8a67f979b",
-        "candidate-console-policy.js": "8f9308f512fde32c4059963b3559ca788b766b5895cb46989c0f48a7e983c684",
         "candidate-console.css": "6681994a0d57e46ed1b3f0be291556fba37be262f822c8b483d31d00f1130fde",
-        "candidate-console.html": "d4f462d7b0881c54c861371b59f90e19a0ba435faec4a73571e8accab90c9120",
-        "candidate-console.js": "658e596dc027a693b77243b0ab1ab64422c5319c8e3f9a1cd961a7c9c7dd871a",
+        "candidate-console-policy.js": "fbefadd65caa40f2e7f50aaeeb06be2b499822a0e7bc8522ebd131c14f61c0fd",
+        "candidate-console.js": "d926e4ddc15ff33524b6cb33582d0bad527294b17eee6a58d8c27015ca9684e8",
         "candidate-console-availability.js": "97487ef0c2a6ece4185a2b1d17a76804d9b58535cbeaee3c27b0596fd4ae7921"
-      }
+      },
+      "targetConfigurationAndHtmlHashes": "Verified current/published/served and retained only in external deployment evidence."
     },
     "normalCreateConfiguration": {
       "environmentVariableSchemaName": "os_sr_ncrcfg",
-      "definitionCount": 0,
-      "activeValueCount": 0,
-      "status": "NOT_CONFIGURED_FAIL_CLOSED",
-      "releaseDefinitionComponentIncluded": false
+      "definitionCount": 1,
+      "activeValueCount": 1,
+      "status": "ENABLED_EXACT_ORGANIZATION_BOUND",
+      "releaseDefinitionComponentIncluded": true
     },
     "auditSettings": {
       "organizationAuditingEnabled": false,
@@ -97,7 +98,8 @@
       "targetIdentifiersStoredInRepository": false
     },
     "candidateRecordsReadOrWritten": false,
-    "mutationOperationsPerformed": false
+    "candidateBusinessMutationsPerformed": false,
+    "deploymentConfigurationAndConsoleWritesPerformed": true
   },
   "build": {
     "command": "dotnet build .\\solutions\\CandidateCorePackage\\CandidateCore.Package.csproj -c Release -t:Rebuild --no-restore",
@@ -167,7 +169,7 @@
       "kind": "EnvironmentVariableValue",
       "uniqueName": "os_sr_ncrcfg",
       "solutionComponentType": 381,
-      "installedState": "ONE_ACTIVE_EXACT_ORGANIZATION_BOUND_DISABLED_VALUE",
+      "installedState": "ONE_ACTIVE_EXACT_ORGANIZATION_BOUND_VALUE_ENABLED_BY_SEPARATE_OWNER_AUTHORIZED_UPDATE",
       "sourceValueIncluded": false,
       "targetBoundValueInExternalBundle": true
     }
@@ -192,7 +194,7 @@
   },
   "apiSecurityBoundary": {
     "sourceStatus": "PASS",
-    "liveStatus": "PASS_INSTALLED_PROTECTED_GATE_DISABLED_NO_CANDIDATE_ACTION_TEST",
+    "liveStatus": "PASS_INSTALLED_PROTECTED_GATE_ENABLED_NO_CANDIDATE_ACTION_TEST",
     "existingExecutePrivilegeRemains": "prvReados_sr_cand",
     "normalCreateRequiresEffectivePrivilege": "prvCreateos_sr_cand",
     "handlerRegistration": "The existing os_sr_cact binding resolves to the package-backed os_sr_cact.ApplyCandidateAction type. Updating os_sr_cact_pkg preserves that handler identity; no new API or plugin-step registration is required.",
@@ -203,7 +205,8 @@
     "acceptedValueFormat": "v1|enabled=<true-or-false>|organizationId=<exact-guid>",
     "enabledValueMustBeSetByAuthorizedDecisionMaker": true,
     "configurationValueIncluded": false,
-    "disabledValueInstalled": true,
+    "disabledValueInstalledAtInitialDeployment": true,
+    "currentValueReadback": "ENABLED_TRUE_EXACT_ORGANIZATION_BINDING_VERIFIED",
     "failClosedConditions": [
       "Missing, duplicate, inactive, malformed, or disabled configuration",
       "Configuration organization ID does not exactly match the executing organization",
@@ -219,55 +222,57 @@
     "singleUserDev": "Requests with the existing non-empty SyntheticScopeId remain on the existing isolated SingleUserDev path."
   },
   "deploymentPlan": {
-    "allowedOnlyAfterApprovals": true,
+    "approvalGate": "Application owner Go Live authorization is recorded; no independent approval gate is inferred without a specific applicable documented requirement.",
+    "activationBasis": "The owner application Go Live decision is recorded and platform runtime gates passed. No separate applicable corporate approval requirement was identified in the reviewed project evidence; this is not a claim of policy compliance.",
     "sequence": [
       "Reconfirm the exact target organization and fresh component/package/handler state.",
       "Add the platform-generated os_sr_ncrcfg String environment-variable definition to the release solution and configure a target-bound enabled=false value; no value or organization identifier belongs in the source artifact.",
       "Add the two Custom API response properties without changing request parameters or execute privilege.",
       "Apply the approved Candidate Core 1.0.9 package update.",
-      "Update only the two listed Console WebResources; publish only those approved resources.",
-      "Enable NORMAL Create only through a separately authorized decision after the listed controls and least-privilege access are evidenced."
+      "Publish the four reviewed NORMAL Console WebResources with fresh ETags and scoped PublishXml.",
+      "Conditionally enable the exact-org gate after the owner Go Live decision and runtime checks; read back the enabled value, handler, effective Create privilege, and served Console."
     ],
     "notPrepared": [],
     "missingComponentDelta": [],
     "technicalDeploymentOwnerAuthorized": true,
-    "realDataControlsSatisfied": false
+    "separateCorporateApprovalRequirementIdentifiedInReviewedProjectEvidence": false,
+    "externalPolicyComplianceClaimed": false
   },
   "organizationalGates": [
     {
       "control": "Audit, retention, and audit-evidence ownership",
-      "status": "NOT_EVIDENCED",
-      "requiredDecision": "Authorized owner supplies the approved audit/retention policy, retention duration, and evidence owner."
+      "status": "UNVERIFIED_NOT_SHOWN_TO_BE_AN_ACTIVATION_GATE",
+      "requiredDecision": "No specific applicable requirement was identified in reviewed project evidence. The observed environment setting is not policy approval; follow any applicable documented policy if its owner identifies one."
     },
     {
       "control": "Privacy and data minimization",
-      "status": "NOT_EVIDENCED",
-      "requiredDecision": "Authorized privacy decision-maker approves the Candidate fields, response exposure, and permitted data use."
+      "status": "UNVERIFIED_NOT_SHOWN_TO_BE_AN_ACTIVATION_GATE",
+      "requiredDecision": "No separate approval requirement was established by the runtime code or reviewed project evidence. This does not claim that broader corporate policies are satisfied."
     },
     {
       "control": "DLP and connector governance",
-      "status": "NOT_EVIDENCED",
-      "requiredDecision": "Authorized governance owner confirms the applicable DLP policy and connector boundary."
+      "status": "UNVERIFIED_NOT_SHOWN_TO_BE_AN_ACTIVATION_GATE",
+      "requiredDecision": "The applicable DLP scope was not resolved, and no specific conflict was evidenced. Do not infer either policy compliance or a deployment blocker."
     },
     {
       "control": "Least-privilege Candidate Create access",
-      "status": "DEPLOYMENT_IDENTITY_EFFECTIVE_CREATE_VERIFIED_NO_GRANTS_CHANGED",
-      "requiredDecision": "Before real-data activation, confirm intended operational users and least-privilege acceptance using existing effective grants; this is not a new deployment or role-change approval requirement."
+      "status": "VERIFIED_DEPLOYMENT_IDENTITY_EFFECTIVE_CREATE_NO_GRANTS_CHANGED",
+      "requiredDecision": "The server independently checks effective Candidate Create for each initiating user. No role or team changes were made."
     },
     {
       "control": "Operational monitoring and incident ownership",
-      "status": "NOT_EVIDENCED",
-      "requiredDecision": "Named operational owner accepts monitoring, alerting, failure reconciliation, and incident response."
+      "status": "UNVERIFIED_NOT_SHOWN_TO_BE_AN_ACTIVATION_GATE",
+      "requiredDecision": "No specific runtime dependency on a named monitoring or incident owner was identified. Existing operating processes were not asserted or changed."
     },
     {
       "control": "Exact target binding and activation",
-      "status": "EXACT_TARGET_BOUND_DISABLED_VALUE_INSTALLED_ACTIVATION_NOT_APPROVED",
-      "requiredDecision": "Enable only after real-data controls are established; exact target and disabled technical deployment are already owner-authorized. No organization ID or value is embedded here."
+      "status": "EXACT_TARGET_BOUND_ENABLED_VALUE_READ_BACK_VERIFIED",
+      "requiredDecision": "The owner-authorized application-level gate update was conditional and read back for the exact target. No organization ID or configuration value is embedded here."
     },
     {
       "control": "Release and change approval",
-      "status": "OWNER_TECHNICAL_DELTA_AUTHORIZED_AND_DEPLOYED",
-      "requiredDecision": "No further routine engineering authorization is required; this does not establish privacy, DLP, audit-policy or real-data activation acceptance."
+      "status": "OWNER_BUSINESS_GO_LIVE_AND_TECHNICAL_CHANGE_AUTHORIZED",
+      "requiredDecision": "Owner Go Live authorization is recorded; it is not represented as an unrelated corporate policy approval."
     }
   ],
   "rollback": {
@@ -277,8 +282,8 @@
     "packageSha256": "5b08bcfde39207d5069ce9c55ee4e1794622d69e7d0f148277f7b8f04a89802b",
     "embeddedAssemblySha256": "ea4a3cdcc6f17aff48441827eee7923dcf63df935ba55e56a02c5a84be4729bb",
     "standaloneRollbackSafe": true,
-    "strategy": "FEATURE_ROLLBACK_WITH_PROTECTED_SAME_VERSION_ASSEMBLY_RECOVERY",
-    "status": "COMPLETE_SAFE_FEATURE_ROLLBACK_PREPARED_NOT_REHEARSED",
+    "strategy": "SERVER_GATE_DISABLE_WITH_PROTECTED_SAME_VERSION_ASSEMBLY_RECOVERY",
+    "status": "SERVER_GATE_DISABLE_READY_UI_RESTORE_NOT_REHEARSED",
     "liveBaseline": {
       "packageBackedAssemblyVersion": "1.0.8.0",
       "customApiExecutePrivilege": "prvReados_sr_cand",
@@ -297,13 +302,12 @@
       "targetPackageBytesReadBack": false
     },
     "safeSequence": [
-      "For a feature-only rollback after 1.0.9 deployment, set the exact organization-bound os_sr_ncrcfg value to enabled=false and restore only the pre-change Console HTML and JavaScript. Keep the 1.0.9 handler and both additive response properties so the server authorization gate remains in force.",
+      "Immediately stop NORMAL mutations with the deployer's Deactivate mode: conditionally set the exact organization-bound os_sr_ncrcfg value to enabled=false using a fresh ETag, then verify readback. This retains the protected 1.0.9 handler, additive response properties and SingleUserDev.",
+      "Do not use the deployer's older Rollback mode as a post-activation four-resource UI restore; it targets the prior 1.0.8 Console pair. The exact four-resource pre-NORMAL 1.0.9 UI restore is a separate change, not automated or rehearsed, and is not required to disable server-side mutations.",
       "Do not downgrade to 1.0.8 while os_sr_cact remains executable under prvReados_sr_cand.",
-      "Use Rollback mode to conditionally restore only captured baseline Console JS/HTML and publish their two IDs; retain the protected 1.0.9 assembly, existing execute privilege and additive metadata to preserve SingleUserDev.",
-      "Use RecoverPackage only for protected 1.0.9 assembly recovery, with its own fresh one-shot journal against the existing package/handler identity. Never reuse the consumed deployment journal or push unprotected 1.0.8.",
-      "Use VerifyRollback for metadata, disabled configuration, published/current/served baseline hashes and unchanged effective security readback without Candidate operations."
+      "Use RecoverPackage only for protected 1.0.9 assembly recovery, with its own fresh one-shot journal against the existing package/handler identity. Never reuse the consumed deployment journal or push unprotected 1.0.8."
     ],
-    "limitation": "This is a complete prepared feature rollback, not an assembly-version downgrade or a runtime rehearsal. Live package bytes were not hash-readback; supported package acknowledgement plus exact handler/assembly identity/version were verified. The full solution export is source evidence, not the delta or rollback."
+    "limitation": "The server-side disable path and protected 1.0.9 assembly recovery are prepared, not runtime-rehearsed. A full four-resource NORMAL UI restore is not automated. Live package bytes were not hash-readback; supported package acknowledgement plus exact handler/assembly identity/version were verified. The full solution export is source evidence, not the delta or rollback."
   },
   "validation": {
     "packageRebuild": "PASS",
@@ -316,19 +320,23 @@
     "readOnlyTargetReconciliation": "COMPLETED_NO_WRITES",
     "realCandidateWrites": 0,
     "candidateCreationTestExecuted": false,
-    "newReleaseToolingChecks": 15,
+    "newReleaseToolingChecks": 20,
     "completedImplementationSuitesRepeated": false,
     "installedAssemblyHandlerVersion": "1.0.9.0",
     "installedOutputs": 9,
     "unchangedRequestParameters": 22,
-    "disabledOrganizationConfiguration": "PASS",
+    "initialDisabledOrganizationConfiguration": "PASS",
+    "enabledOrganizationConfiguration": "PASS_EXACT_ORGANIZATION_BINDING_READBACK",
     "newComponentSolutionMembership": "PASS",
     "publishedCurrentAndServedConsoleHashes": "PASS",
     "unchangedRoleSecuritySha256": "1cb88bf132899c6feec4101bc1290acfbaaa25a0161d8c36a628c55efaa2e26c",
-    "candidateApiInvoked": false
+    "candidateApiInvoked": false,
+    "normalModeConsolePublishedAndServed": "PASS_FOUR_RESOURCES",
+    "organizationAuditDlpAndPrivacySettingsChanged": false,
+    "candidateBusinessWriteCount": 0
   },
   "integratedRelease": {
-    "status": "READY_DEPLOYED_DISABLED",
+    "status": "DEPLOYED_FROM_DISABLED_BUNDLE_GATE_ACTIVATED_SEPARATELY",
     "artifactName": "normal-create-1.0.9-disabled-release.zip",
     "artifactSha256": "79489d7890484e40f8a9fa569c6feda1cfbb74435fa0871988f3dd92a1c92d73",
     "format": "EXACT_COMPONENT_DEPLOYMENT_BUNDLE_NOT_MANAGED_SOLUTION_IMPORT",

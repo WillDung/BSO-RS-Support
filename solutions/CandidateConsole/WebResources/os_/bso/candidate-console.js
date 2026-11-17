@@ -211,7 +211,7 @@
     notice.hidden = false;
   }
 
-  function resolveEnvironmentPolicy() {
+  function resolveEnvironmentPolicy(selectedMode = referenceMode) {
     try {
       const context = globalContext();
       const policy = window.BsoRsCandidateConsolePolicy;
@@ -221,7 +221,7 @@
       return policy.resolve(window.BsoRsCandidateConsoleConfiguration, {
         organizationUrl: context.getClientUrl(),
         organizationId: context.organizationSettings.organizationId
-      });
+      }, selectedMode);
     } catch {
       return Object.freeze({ allowed: false, reason: "CONFIGURATION_CONTEXT_UNAVAILABLE" });
     }
@@ -286,7 +286,7 @@
         label.textContent = "Normal Candidate operations are not authorized in this synthetic environment";
       });
     }
-    const configuredModeLabel = environmentPolicy.candidateOperationMode === "SingleUserDev"
+    const configuredModeLabel = environmentPolicy.configuredOperationMode === "SingleUserDev"
       ? "SingleUserDev" : "Configured synthetic workflow";
     $("candidate-data-mode").options[0].textContent = configuredModeLabel;
     $("reference-mode-status").textContent = referenceMode === "NORMAL"
@@ -2915,6 +2915,7 @@
         return;
       }
       referenceMode = selectedMode;
+      environmentPolicy = resolveEnvironmentPolicy(selectedMode);
       referenceGeneration++;
       referencesReady = false;
       syntheticQueryBlocked = false;
@@ -3058,7 +3059,10 @@
   async function initialize() {
     $("create-button").disabled = true;
     bindEvents();
-    environmentPolicy = resolveEnvironmentPolicy();
+    const selectedMode = $("candidate-data-mode").value;
+    referenceMode = ["CONFIGURED", "NORMAL"].includes(selectedMode)
+      ? selectedMode : "CONFIGURED";
+    environmentPolicy = resolveEnvironmentPolicy(referenceMode);
     await loadWorkspace();
   }
 

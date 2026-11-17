@@ -1,6 +1,6 @@
 # Dataverse Audit Policy Proposal
 
-**Status:** Read-only assessment refreshed 17 November 2026. No auditing, retention, security, DLP, or environment setting was changed. IT/Compliance policy and approval are required before NORMAL Create activation.
+**Status:** Read-only assessment refreshed 17 November 2026. No auditing, retention, security, DLP, or environment setting was changed. This is a project assessment, not an organizational policy. An OFF organization-audit setting is factual evidence that Dataverse audit entries are not produced; it is not, by itself, a platform/runtime requirement or activation blocker. Follow an applicable documented organizational policy if one is identified; do not infer one from this assessment.
 
 ## Verified Current Configuration
 
@@ -8,7 +8,7 @@ The connected environment was verified as **VN LMV IT**, Production-class and ex
 
 | Setting | Verified value | Interpretation |
 |---|---|---|
-| Environment auditing (`isauditenabled`) | `false` (PAC read 17 November) | Dataverse auditing is currently off at environment level. |
+| Environment auditing (`isauditenabled`) | `false` (PAC read 17 November) | Dataverse audit entries are not produced. Whether an organizational policy requires environment auditing for this application is not established by the available evidence. |
 | Configured audit retention (`auditretentionperiod`) | `30` days (PAC read 17 November) | Current technical configuration only; it is **not** an approved BSO-RS-Support retention decision. |
 | Retention v2 (`auditretentionperiodv2`) | Unset (PAC read 17 November) | No approved policy or effective v2 duration is evidenced. |
 | User-access/read auditing and Purview forwarding | All `false` (PAC read 17 November) | Environment-wide controls are off; whether required remains an IT/Compliance decision. |
@@ -24,9 +24,9 @@ The connected environment was verified as **VN LMV IT**, Production-class and ex
 
 | Scope | Proposed setting | Status |
 |---|---|---|
-| Environment | Start Auditing | **PENDING IT/COMPLIANCE APPROVAL** |
+| Environment | Start Auditing | No change proposed for this release. Enable only if an applicable documented organizational policy requires it and the shared-environment impact is authorized. |
 | Environment | Retention period | Follow the organization's approved IT/Compliance policy; value **UNRESOLVED**. Do not adopt the current 30-day value as policy. |
-| Environment | User Access Auditing | **PENDING IT/COMPLIANCE APPROVAL**; decide whether this is required and confirm licensing/Purview destination. |
+| Environment | User Access Auditing | No change proposed. Applicability, licensing and destination were not established; not a Candidate Core runtime gate. |
 | Environment | Common-entity audit preset | Do not enable by default. Confirm the complete affected-table scope before any selection. |
 | Candidate, Call Log, Candidate Status History | Table auditing | Required table flags are already `IsAuditEnabled=true`; organization-level auditing remains off. No environment-wide change was made. |
 | Project reference tables | Table auditing | Proposed; live flags were not part of this bounded check. |
@@ -59,24 +59,11 @@ Candidate, Call Log, and Candidate Status History exist and their table audit fl
 
 Any new table creation, column-level audit selections, key creation, or column-security profile remains subject to its own scope and approval. Audit matrix coverage is not permission to collect every value.
 
-## IT/Compliance Approval Request
+## Control classification
 
-Please provide an approved decision or policy reference for each item. Do not infer defaults from the current environment setting.
+The project has no evidence in this repository identifying a specific corporate policy that makes environment-wide auditing, a particular retention duration, user-access auditing, Purview forwarding, a named incident owner, or a separate privacy approval a prerequisite for this app's NORMAL Create runtime. Their status is **not established**, not "satisfied"; this assessment does not claim policy compliance or approval. The owner has authorized the application Go Live decision only. If an applicable policy or an authorized governance decision later requires a shared setting or additional control, follow it before that control is changed; do not change global settings based on this proposal.
 
-| # | Decision required | IT/Compliance response |
-|---|---|---|
-| 1 | Required Dataverse audit retention period and governing policy/reference | **REQUIRED — UNRESOLVED** |
-| 2 | Whether retention differs by data category/table, including HR/candidate data and email content | **REQUIRED — UNRESOLVED** |
-| 3 | Whether a retention change applies only to future logs or also existing logs; approve the exact supported change path | **REQUIRED — UNRESOLVED** |
-| 4 | Authorized users/roles for record Audit History and environment Audit Summary | **REQUIRED — UNRESOLVED** |
-| 5 | Required audit export, Purview integration, archival, preservation, and evidence procedures | **REQUIRED — UNRESOLVED** |
-| 6 | Legal-hold, investigation, and DSR/deletion requirements | **REQUIRED — UNRESOLVED** |
-| 7 | Whether user-access auditing is required; scope, license prerequisites, and Purview destination | **REQUIRED — UNRESOLVED** |
-| 8 | Audit-log capacity allocation, current usage, forecast owner, alert thresholds, and budget owner | **REQUIRED — UNRESOLVED** |
-| 9 | Data-minimization rules for auditing PII, salary, CV links, email snapshots, and room/resource details | **REQUIRED — UNRESOLVED** |
-| 10 | Named approval owner and required change-management/production approval procedure | **REQUIRED — UNRESOLVED** |
-
-The project records no approved personal-data processing policy/reference for real Candidate data and no assigned incident/monitoring owner. The [Production Readiness Blocker Ledger](READINESS_BLOCKER_LEDGER.md) assigns these decisions to the Privacy/DLP owner and Service owner respectively; no individual or approval evidence is recorded. Do not infer either from the technical deployment authorization.
+The project requirement that Candidate, Call Log, and Candidate Status History table audit metadata is enabled is met. Because organization auditing is OFF, those metadata flags do not currently produce Dataverse audit rows. Application-owned Status History and Receipt evidence remain required independently.
 
 ## Technical References
 

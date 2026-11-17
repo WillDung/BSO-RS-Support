@@ -566,10 +566,19 @@ Assert-Test ($deployment.Contains('if (-not $Continue -and -not $CreateNewResour
     -not $deployment.Contains('-Path "PublishAllXml"')) `
     'Refresh selected WebResources only, with no app/sitemap publication, global publish, or retry'
 Assert-Test ($deployment.Contains('[switch]$DevelopmentSourceAhead') -and
-    $deployment.Contains("'os_/bso/candidate-console.html' = 'fdd9fc9ee3fec019b21806e9beb9bc1c5ee21777b47bcfcd8eeac4d827228bcb'") -and
-    $deployment.Contains("'os_/bso/candidate-console-policy.js' = '8f9308f512fde32c4059963b3559ca788b766b5895cb46989c0f48a7e983c684'") -and
-    $deployment.Contains("'os_/bso/candidate-console.js' = '672292a5acb0011dec256df536f42087c8e5eff1a42a226318fedbfdf5a9bcae'") -and
-    $deployment.Contains('Development source-ahead refresh requires the exact reviewed HTML/policy/JavaScript set and matching external DEV configuration.') -and
+    $deployment.Contains("'os_/bso/candidate-console.html' = 'b432193ef8e6dff640847867d680fbfbd851a7e7548eee99b9281920da29e12d'") -and
+    $deployment.Contains("'os_/bso/candidate-console-policy.js' = 'fbefadd65caa40f2e7f50aaeeb06be2b499822a0e7bc8522ebd131c14f61c0fd'") -and
+    $deployment.Contains("'os_/bso/candidate-console.js' = 'd926e4ddc15ff33524b6cb33582d0bad527294b17eee6a58d8c27015ca9684e8'") -and
+    $deployment.Contains('[string]$NormalModeReleaseManifestPath') -and
+    $deployment.Contains("'NORMAL_MODE_SINGLEUSERDEV_PRESERVING'") -and
+    $deployment.Contains("'EXTERNAL_TARGET_CONFIGURATION'") -and
+    $deployment.Contains("'EXTERNAL_TARGET_HTML'") -and
+    $deployment.Contains('Development source-ahead refresh requires the exact reviewed resource set and matching external DEV configuration.') -and
+    $deployment.Contains('CANDIDATE_CONSOLE_NORMAL_MODE_RELEASE_PREFLIGHT_READY') -and
+    $deployment.Contains('CANDIDATE_CONSOLE_NORMAL_MODE_RELEASE_PUBLISHED') -and
+    $deployment.Contains('NORMAL_MODE_RELEASE_AUTHORIZATION_REQUIRED') -and
+    $deployment.Contains('$environmentConfiguration.normalModeEnabled -ne $true') -and
+    $deployment.Contains('SourceAheadReleaseScope = [string]$sourceAheadRelease.scope') -and
     $deployment.Contains('[string]::IsNullOrWhiteSpace($EnvironmentConfigurationPath)') -and
     $deployment.Contains('[string]::IsNullOrWhiteSpace($EnvironmentHtmlPath)') -and
     $deployment.Contains('$null -ne $environmentConfiguration.PSObject.Properties[''availabilityEnabled'']') -and
@@ -598,6 +607,31 @@ Assert-Test ($deployment.Contains('$developmentSourceAheadUnchangedNames = @(') 
     $deployment.Contains('unchangedMembershipCount -ne 1') -and
     $deployment.Contains('CANDIDATE_CONSOLE_SOURCE_BASELINE_UNRECONCILED')) `
     'DEV source-ahead preflight proves the unselected live environment configuration before publication'
+$normalModeManifestPath = Join-Path $root 'docs\CANDIDATE_CONSOLE_NORMAL_MODE_RELEASE_MANIFEST.json'
+$normalModeManifest = Get-Content -LiteralPath $normalModeManifestPath -Raw | ConvertFrom-Json
+$normalModeResourceNames = @($normalModeManifest.resources | ForEach-Object name | Sort-Object)
+$normalModeResources = @{}
+foreach ($resource in $normalModeManifest.resources) { $normalModeResources[$resource.name] = $resource }
+$normalModeTemplateHash = (Get-FileHash -LiteralPath (
+    Join-Path $root 'solutions\CandidateConsole\WebResources\os_\bso\candidate-console.html'
+) -Algorithm SHA256).Hash.ToLowerInvariant()
+$normalModePolicyHash = (Get-FileHash -LiteralPath $policyPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$normalModeScriptHash = (Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
+Assert-Test ($normalModeManifest.scope -ceq 'NORMAL_MODE_SINGLEUSERDEV_PRESERVING' -and
+    $normalModeManifest.customApiChanges -eq 0 -and
+    $normalModeManifest.environmentConfigurationChanges -eq 1 -and
+    [string]::Join('|', $normalModeResourceNames) -ceq
+        'os_/bso/candidate-console-environment.js|os_/bso/candidate-console-policy.js|os_/bso/candidate-console.html|os_/bso/candidate-console.js' -and
+    $normalModeResources['os_/bso/candidate-console-environment.js'].sha256 -ceq 'EXTERNAL_TARGET_CONFIGURATION' -and
+    $normalModeResources['os_/bso/candidate-console.html'].sha256 -ceq 'EXTERNAL_TARGET_HTML' -and
+    $normalModeResources['os_/bso/candidate-console.html'].templateSha256 -ceq $normalModeTemplateHash -and
+    $normalModeResources['os_/bso/candidate-console-policy.js'].sha256 -ceq $normalModePolicyHash -and
+    $normalModeResources['os_/bso/candidate-console.js'].sha256 -ceq $normalModeScriptHash -and
+    @($normalModeManifest.resources | Where-Object {
+        $_.previousSha256 -notmatch '^[0-9a-f]{64}$'
+    }).Count -eq 0 -and
+    $normalModeManifest.rollback.safeSequence[0] -match 'enabled=false') `
+    'Pin the exact four-resource NORMAL delta, target-bound files, installed baselines, and disable-first rollback'
 
 $hash = (Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $version = [regex]::Match($html, 'candidate-console\.js\?v=([0-9a-f]+)')

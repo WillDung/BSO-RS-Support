@@ -1,0 +1,86 @@
+{
+  "manifestVersion": 1,
+  "scope": "NORMAL_MODE_SINGLEUSERDEV_PRESERVING",
+  "status": "DEPLOYED_ENABLED_READBACK_VERIFIED",
+  "customApiChanges": 0,
+  "environmentConfigurationChanges": 1,
+  "targetConfiguration": "Generated externally for the exact authorized DEV organization; no organization identifiers or target configuration values are stored in this manifest.",
+  "ownerDecision": "Application owner authorized NORMAL mode for owner-entered real Candidate data on 2026-11-17. This is not corporate policy approval.",
+  "unchanged": [
+    "Candidate Core 1.0.9.0, os_sr_cact handler and API metadata",
+    "os_sr_ncrcfg backend gate except for its separately journaled exact-org activation",
+    "SingleUserDev synthetic proof, scoped read/write path and profile",
+    "Calendar, security roles, teams, organization audit settings and other applications"
+  ],
+  "resources": [
+    {
+      "name": "os_/bso/candidate-console-environment.js",
+      "sha256": "EXTERNAL_TARGET_CONFIGURATION",
+      "previousSha256": "21ddcd925916f2bf56b005335aa05ceaec002dba4f79690688cb14a8a67f979b"
+    },
+    {
+      "name": "os_/bso/candidate-console.html",
+      "sha256": "EXTERNAL_TARGET_HTML",
+      "templateSha256": "b432193ef8e6dff640847867d680fbfbd851a7e7548eee99b9281920da29e12d",
+      "previousSha256": "5bf8ab7de803044e99ff98d2e13173f3c2cc9202faa0be4e32fae7ebad72fbde"
+    },
+    {
+      "name": "os_/bso/candidate-console-policy.js",
+      "sha256": "fbefadd65caa40f2e7f50aaeeb06be2b499822a0e7bc8522ebd131c14f61c0fd",
+      "previousSha256": "8f9308f512fde32c4059963b3559ca788b766b5895cb46989c0f48a7e983c684"
+    },
+    {
+      "name": "os_/bso/candidate-console.js",
+      "sha256": "d926e4ddc15ff33524b6cb33582d0bad527294b17eee6a58d8c27015ca9684e8",
+      "previousSha256": "1b1e28136f6ef1063a09468f338b40ff364647a3cd7649007d668462531c4a79"
+    }
+  ],
+  "rollback": {
+    "status": "SERVER_GATE_DISABLE_READY_UI_RESTORE_NOT_REHEARSED",
+    "journal": "Use a new external evidence journal for every deactivation or resource restore; do not reuse or reset any previous journal.",
+    "safeSequence": [
+      "Use the guarded Deactivate mode to conditionally set the exact-org os_sr_ncrcfg value to enabled=false with a fresh row ETag and verify readback. This is sufficient to stop NORMAL server-side mutations.",
+      "A full four-resource pre-NORMAL 1.0.9 Console restore is optional for mutation containment and is not automated or rehearsed. If separately authorized, restore hash-pinned baseline payloads with fresh individual-row ETags and one scoped WebResource-only PublishXml.",
+      "Verify Candidate Core remains protected on 1.0.9.0 and SingleUserDev configuration/API compatibility remain unchanged. Do not claim UI restoration unless current, published, and served bytes are verified.",
+      "Never downgrade the handler to 1.0.8 while the existing API execute privilege is Read."
+    ],
+    "requiredCapturedResources": 4,
+    "candidateBusinessWrites": 0
+  },
+  "deployment": {
+    "requiredPreconditions": [
+      "Verify exact target organization and fresh existing-resource identity, version, current/published bytes and ETags.",
+      "Verify Candidate Core 1.0.9.0 handler and exact-org os_sr_ncrcfg state before any future change.",
+      "Generate the target-bound external configuration with normalModeEnabled=true, candidateOperationMode=SingleUserDev, syntheticDataOnly=true, fallback=false, diagnostics=OFF and Calendar disabled.",
+      "Preserve exact source integrity and publish only these four existing WebResources."
+    ],
+    "publishXmlScope": "Exactly the four listed WebResources; no Publish All, sitemap, app, backend/API, role, audit, DLP, or Calendar changes.",
+    "candidateBusinessWrites": 0,
+    "functionalUat": "Owner manual testing only; not run by this release.",
+    "observedOn": "2026-11-17",
+    "targetLabel": "VN LMV IT",
+    "writes": {
+      "webResourceConditionalUpdates": 4,
+      "scopedPublishXml": 1,
+      "configurationConditionalUpdates": 1,
+      "configurationTransition": "enabled=false to enabled=true, exact organization-bound row"
+    },
+    "currentPublishedServedHashReadback": "PASS_FOR_ALL_FOUR_RESOURCES",
+    "backendConfigurationReadback": "ENABLED_EXACT_ORGANIZATION_BINDING_VERIFIED",
+    "candidateCoreVersion": "1.0.9.0",
+    "effectiveCandidateCreate": "VERIFIED_FOR_DEPLOYMENT_IDENTITY",
+    "ownerBusinessGoLiveDecisionRecorded": true,
+    "organizationAuditDlpAndPrivacySettingsChanged": false,
+    "candidateBusinessOperationsInvoked": 0
+  },
+  "validation": {
+    "sourceCacheTokensMatch": true,
+    "livePreflight": "PASS_ZERO_WRITES_EXACT_FOUR_RESOURCE_BASELINE",
+    "publication": "PASS_SCOPED_FOUR_RESOURCE_PUBLISHXML",
+    "servedHashReadback": "PASS_CURRENT_PUBLISHED_AND_SERVED",
+    "normalModeRuntimeReadiness": "ENABLED_EXACT_ORGANIZATION_BOUND",
+    "singleUserDevConfigurationPreserved": true,
+    "candidateBusinessWrites": 0,
+    "ownerManualFunctionalAcceptance": "PENDING"
+  }
+}

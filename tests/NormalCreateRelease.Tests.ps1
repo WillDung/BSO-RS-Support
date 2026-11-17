@@ -7,7 +7,8 @@ $errors = $null
 $ast = [Management.Automation.Language.Parser]::ParseFile(
     (Join-Path $root 'scripts\Deploy-BsoRsNormalCreateRelease.ps1'), [ref]$tokens, [ref]$errors)
 if ($errors.Count) { throw 'Deployment script syntax errors.' }
-foreach ($name in @('Save-Json', 'Write-Step', 'Request', 'One', 'Assert-Disabled', 'Core')) {
+foreach ($name in @('Save-Json', 'Write-Step', 'Request', 'One', 'Assert-Disabled',
+    'Assert-Enabled', 'Get-NormalConfiguration', 'Core')) {
     $function = $ast.EndBlock.Statements | Where-Object {
         $_ -is [Management.Automation.Language.FunctionDefinitionAst] -and $_.Name -ceq $name
     }
@@ -57,20 +58,93 @@ try {
     Remove-Item -LiteralPath (Join-Path $bundle 'journals')
     Remove-Item -LiteralPath $bundle
 }
-$plan = @{ disabledConfiguration = 'v1|enabled=false|organizationId=00000000-0000-0000-0000-000000000001' }
-$script:configValues = @(@{ environmentvariablevalueid = 'synthetic'; value = $plan.disabledConfiguration; statecode = 0 })
+$plan = @{
+    disabledConfiguration = 'v1|enabled=false|organizationId=00000000-0000-0000-0000-000000000001'
+    enabledConfiguration = 'v1|enabled=true|organizationId=00000000-0000-0000-0000-000000000001'
+}
+$ExpectedOrganizationId = [guid]'00000000-0000-0000-0000-000000000001'
+$script:configValues = @(@{
+    environmentvariablevalueid = '00000000-0000-0000-0000-000000000002'
+    value = $plan.disabledConfiguration
+    statecode = 0
+    _environmentvariabledefinitionid_value = 'synthetic-definition-id'
+})
+$script:configRow = [ordered]@{
+    environmentvariablevalueid = '00000000-0000-0000-0000-000000000002'
+    value = $plan.disabledConfiguration
+    statecode = 0
+    _environmentvariabledefinitionid_value = 'synthetic-definition-id'
+    '@odata.etag' = 'W/"synthetic"'
+}
 function Get-PagedRows {
     param([string]$Path)
     if ($Path.StartsWith('environmentvariabledefinitions')) {
-        @{ environmentvariabledefinitionid = 'synthetic'; type = 100000000; statecode = 0 }
+        @{ environmentvariabledefinitionid = 'synthetic-definition-id'; schemaname = 'os_sr_ncrcfg'; type = 100000000; statecode = 0 }
     } else { $script:configValues }
+}
+function Invoke-WebRequest {
+    param($Uri, $Method, $Headers, $Body, $ContentType, $TimeoutSec,
+        $MaximumRetryCount, $MaximumRedirection, $SkipHttpErrorCheck)
+    $script:httpCalls++
+    if ($Method -eq 'GET') {
+        return [pscustomobject]@{ StatusCode = 200; Content = ConvertTo-Json $script:configRow -Compress }
+    }
+    $script:capturedRequest = [pscustomobject]@{
+        Uri = [string]$Uri; Method = $Method; Headers = $Headers; Body = $Body
+    }
+    [pscustomobject]@{ StatusCode = 204; Content = '' }
 }
 Assert-Disabled
 $checks++
 $script:configValues += $script:configValues[0]
 Rejects { Assert-Disabled } 'AMBIGUOUS:CONFIG_VALUE'
-$script:configValues = @(@{ value = $plan.disabledConfiguration.Replace('false', 'true'); statecode = 0 })
+$script:configValues = @(@{
+    environmentvariablevalueid = '00000000-0000-0000-0000-000000000002'
+    value = $plan.enabledConfiguration
+    statecode = 0
+    _environmentvariabledefinitionid_value = 'synthetic-definition-id'
+})
+$script:configRow.value = $plan.enabledConfiguration
+$null = Assert-Enabled
+$checks++
 Rejects { Assert-Disabled } 'CONFIGURATION_NOT_DISABLED'
-$script:configValues = @(@{ value = $plan.disabledConfiguration; statecode = 1 })
+$script:configValues = @(@{
+    environmentvariablevalueid = '00000000-0000-0000-0000-000000000002'
+    value = $plan.disabledConfiguration
+    statecode = 1
+    _environmentvariabledefinitionid_value = 'synthetic-definition-id'
+})
+$script:configRow.value = $plan.disabledConfiguration
+$script:configRow.statecode = 1
 Rejects { Assert-Disabled } 'CONFIGURATION_NOT_DISABLED'
+$script:configValues[0].statecode = 0
+$script:configRow.statecode = 0
+$script:Mode = 'Activate'
+$script:ActivationWriteAllowed = $true
+$script:ActivationValueId = '00000000-0000-0000-0000-000000000002'
+$script:ActivationExpectedEtag = 'W/"synthetic"'
+$script:ActivationExpectedValue = $plan.enabledConfiguration
+$beforeRejectedPatches = $script:httpCalls
+Rejects {
+    Request -Path 'environmentvariablevalues(00000000-0000-0000-0000-000000000003)' `
+        -Method 'PATCH' -Body @{ value = $script:ActivationExpectedValue } -ETag $script:ActivationExpectedEtag
+} 'CONFIGURATION_WRITE_REJECTED'
+Rejects {
+    Request -Path "environmentvariablevalues($script:ActivationValueId)" -Method 'PATCH' `
+        -Body @{ value = $plan.disabledConfiguration } -ETag $script:ActivationExpectedEtag
+} 'CONFIGURATION_WRITE_REJECTED'
+Rejects {
+    Request -Path "environmentvariablevalues($script:ActivationValueId)" -Method 'PATCH' `
+        -Body @{ value = $script:ActivationExpectedValue } -ETag 'W/"stale"'
+} 'CONFIGURATION_WRITE_REJECTED'
+if ($script:httpCalls -ne $beforeRejectedPatches) { throw 'A rejected gate write reached HTTP.' }
+Request -Path "environmentvariablevalues($script:ActivationValueId)" -Method 'PATCH' `
+    -Body @{ value = $script:ActivationExpectedValue } -ETag $script:ActivationExpectedEtag
+if ($script:httpCalls -ne $beforeRejectedPatches + 1 -or
+    $script:capturedRequest.Method -cne 'PATCH' -or
+    $script:capturedRequest.Headers['If-Match'] -cne 'W/"synthetic"' -or
+    ($script:capturedRequest.Body | ConvertFrom-Json).value -cne $plan.enabledConfiguration) {
+    throw 'The authorized gate patch was not a single exact ETag-conditional update.'
+}
+$checks++
 "NORMAL Create release tooling checks passed: $checks"

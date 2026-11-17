@@ -39,6 +39,7 @@ function configuration(overrides = {}) {
     candidateCoreEnabled: true,
     syntheticDataOnly: true,
     candidateOperationMode: "BsoSynthetic",
+    normalModeEnabled: false,
     devDirectWriteFallbackEnabled: true,
     diagnosticsMode: "OFF",
     ...overrides
@@ -62,6 +63,7 @@ test("the checked-in environment template is disabled and unconfigured", () => {
   assert.equal(value.candidateCoreEnabled, false);
   assert.equal(value.syntheticDataOnly, true);
   assert.equal(value.candidateOperationMode, "BsoSynthetic");
+  assert.equal(value.normalModeEnabled, false);
   assert.equal(value.devDirectWriteFallbackEnabled, false);
   assert.equal(value.diagnosticsMode, "OFF");
 });
@@ -189,6 +191,51 @@ test("SingleUserDev rejects fallback-enabled or non-DEV configuration", () => {
     candidateOperationMode: "SingleUserDev",
     devDirectWriteFallbackEnabled: false
   }), runtime()).allowed, false);
+});
+
+test("NORMAL on synthetic DEV is reference-only until explicitly enabled for SingleUserDev", () => {
+  const policy = createPolicy();
+  const configured = configuration({
+    candidateOperationMode: "SingleUserDev",
+    devDirectWriteFallbackEnabled: false
+  });
+  const referenceOnly = policy.resolve(configured, runtime(), "NORMAL");
+  assert.equal(referenceOnly.allowed, true);
+  assert.equal(referenceOnly.mode, "DEV");
+  assert.equal(referenceOnly.syntheticDataOnly, true);
+  assert.equal(referenceOnly.normalModeEnabled, false);
+
+  const enabledConfiguration = { ...configured, normalModeEnabled: true };
+  const configuredMode = policy.resolve(enabledConfiguration, runtime());
+  const normalMode = policy.resolve(enabledConfiguration, runtime(), "NORMAL");
+  assert.equal(configuredMode.allowed, true);
+  assert.equal(configuredMode.mode, "DEV");
+  assert.equal(configuredMode.syntheticDataOnly, true);
+  assert.equal(normalMode.allowed, true);
+  assert.equal(normalMode.mode, "PROD");
+  assert.equal(normalMode.syntheticDataOnly, false);
+  assert.equal(normalMode.normalModeEnabled, true);
+  assert.equal(normalMode.candidateOperationMode, "BsoSynthetic");
+  assert.equal(normalMode.configuredOperationMode, "SingleUserDev");
+  assert.equal(normalMode.directWriteFallbackAvailable, false);
+});
+
+test("NORMAL configuration fails closed when its DEV SingleUserDev invariants are not met", () => {
+  const policy = createPolicy();
+  const invalidConfigurations = [
+    { candidateOperationMode: "BsoSynthetic", normalModeEnabled: true },
+    { candidateOperationMode: "SingleUserDev", normalModeEnabled: true,
+      devDirectWriteFallbackEnabled: true },
+    { candidateOperationMode: "SingleUserDev", normalModeEnabled: true,
+      diagnosticsMode: "SAFE" },
+    { candidateOperationMode: "SingleUserDev", normalModeEnabled: true,
+      availabilityEnabled: true },
+    { candidateOperationMode: "SingleUserDev", normalModeEnabled: "true" }
+  ];
+  for (const invalid of invalidConfigurations) {
+    assert.equal(policy.resolve(configuration(invalid), runtime()).allowed, false);
+    assert.equal(policy.resolve(configuration(invalid), runtime(), "NORMAL").allowed, false);
+  }
 });
 
 test("unavailable or invalid verifier UUID generation fails closed before dispatch", async () => {

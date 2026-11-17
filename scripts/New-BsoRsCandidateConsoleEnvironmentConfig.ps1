@@ -12,6 +12,7 @@ param(
     [bool]$SyntheticDataOnly = $true,
     [switch]$AvailabilityEnabled,
     [switch]$DevDirectWriteFallbackEnabled,
+    [switch]$NormalModeEnabled,
     [ValidateSet('BsoSynthetic', 'SingleUserDev')][string]$CandidateOperationMode = 'BsoSynthetic',
     [ValidateSet('OFF', 'SAFE')][string]$DiagnosticsMode = 'OFF'
 )
@@ -36,6 +37,13 @@ if ($CandidateOperationMode -ceq 'SingleUserDev' -and
      $DevDirectWriteFallbackEnabled -or $DiagnosticsMode -cne 'OFF' -or
      $ReleaseProfile -or $AvailabilityEnabled)) {
     throw 'SingleUserDev requires bound synthetic-only DEV, Candidate Core enabled, fallback disabled, diagnostics Off, no release profile, and Calendar disabled.'
+}
+if ($NormalModeEnabled -and
+    ($Mode -cne 'DEV' -or $CandidateOperationMode -cne 'SingleUserDev' -or
+     -not $CandidateCoreEnabled -or -not $SyntheticDataOnly -or
+     $DevDirectWriteFallbackEnabled -or $DiagnosticsMode -cne 'OFF' -or
+     $ReleaseProfile -or $AvailabilityEnabled)) {
+    throw 'NORMAL mode requires explicit DEV SingleUserDev configuration, synthetic configured mode, Candidate Core enabled, fallback disabled, diagnostics Off, and Calendar disabled.'
 }
 if ($releaseNeutral -and
     (-not [string]::IsNullOrWhiteSpace($OrganizationUrl) -or
@@ -114,6 +122,7 @@ $configuration = [ordered]@{
     organizationUrl = $organizationUrlValue
     candidateCoreEnabled = $CandidateCoreEnabled
     syntheticDataOnly = $SyntheticDataOnly
+    normalModeEnabled = [bool]$NormalModeEnabled
     devDirectWriteFallbackEnabled = [bool]$DevDirectWriteFallbackEnabled
     diagnosticsMode = $DiagnosticsMode
 }

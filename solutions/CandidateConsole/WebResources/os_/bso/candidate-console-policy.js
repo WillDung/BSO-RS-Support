@@ -16,9 +16,12 @@
     return GUID_PATTERN.test(normalized) ? normalized.toLowerCase() : "";
   }
 
-  function resolve(configuration, runtime) {
+  function resolve(configuration, runtime, requestedMode = "CONFIGURED") {
     if (!configuration || typeof configuration !== "object" || !runtime || typeof runtime !== "object") {
       return blocked("CONFIGURATION_MISSING");
+    }
+    if (!["CONFIGURED", "NORMAL"].includes(requestedMode)) {
+      return blocked("CONFIGURATION_INVALID");
     }
 
     const mode = typeof configuration.mode === "string" ? configuration.mode.toUpperCase() : "";
@@ -30,7 +33,9 @@
         configuration.candidateCoreEnabled !== true ||
         typeof configuration.syntheticDataOnly !== "boolean" ||
         typeof configuration.devDirectWriteFallbackEnabled !== "boolean" ||
-        !["OFF", "SAFE"].includes(configuration.diagnosticsMode)) {
+        !["OFF", "SAFE"].includes(configuration.diagnosticsMode) ||
+        configuration.normalModeEnabled !== undefined &&
+          typeof configuration.normalModeEnabled !== "boolean") {
       return blocked("CONFIGURATION_INVALID");
     }
 
@@ -44,6 +49,16 @@
 
     if (mode !== "PROD" && configuration.syntheticDataOnly !== true) {
       return blocked("CONFIGURATION_INVALID");
+    }
+
+    const normalModeEnabled = configuration.normalModeEnabled === true;
+    if (normalModeEnabled &&
+        (mode !== "DEV" || candidateOperationMode !== "SingleUserDev" ||
+         configuration.syntheticDataOnly !== true ||
+         configuration.devDirectWriteFallbackEnabled !== false ||
+         configuration.diagnosticsMode !== "OFF" ||
+         configuration.availabilityEnabled === true)) {
+      return blocked("NORMAL_MODE_CONFIGURATION_INVALID");
     }
 
     let expectedUrl;
@@ -68,13 +83,18 @@
       return blocked("ENVIRONMENT_IDENTITY_MISMATCH");
     }
 
+    const normalRuntime = requestedMode === "NORMAL" &&
+      (mode === "PROD" && configuration.syntheticDataOnly === false ||
+       normalModeEnabled && candidateOperationMode === "SingleUserDev");
     return Object.freeze({
       allowed: true,
-      mode,
-      candidateOperationMode,
-      syntheticDataOnly: configuration.syntheticDataOnly,
+      mode: normalRuntime ? "PROD" : mode,
+      candidateOperationMode: normalRuntime ? "BsoSynthetic" : candidateOperationMode,
+      configuredOperationMode: candidateOperationMode,
+      syntheticDataOnly: normalRuntime ? false : configuration.syntheticDataOnly,
+      normalModeEnabled: normalRuntime,
       directWriteFallbackAvailable: candidateOperationMode !== "SingleUserDev" &&
-        mode === "DEV" && configuration.devDirectWriteFallbackEnabled,
+        mode === "DEV" && configuration.devDirectWriteFallbackEnabled && !normalRuntime,
       diagnosticsMode: configuration.diagnosticsMode
     });
   }

@@ -101,6 +101,13 @@ function Test-ManifestApiNoChange {
         [string]$script:Manifest.customApi.changeDecision.action -ceq 'NO_CHANGE'
 }
 
+function Test-SecurityPreservingDevelopmentUpdate {
+    $script:Manifest.PSObject.Properties['securityPreservingUpdate'] -and
+        $script:Manifest.securityPreservingUpdate.PSObject.Properties['operation'] -and
+        [string]$script:Manifest.securityPreservingUpdate.operation -ceq
+            'EXISTING_PACKAGE_WITH_ADDITIVE_API_METADATA'
+}
+
 function Get-Sha256FromBytes {
     param([Parameter(Mandatory)][byte[]]$Bytes)
     [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($Bytes)).ToLowerInvariant()
@@ -192,6 +199,20 @@ function Assert-UpdaterInputs {
             [string]$patch.allowedMutations[0] -cne 'EXISTING_PLUGINPACKAGE_CONTENT' -or
             [string]$patch.securityBaselineSha256 -cnotmatch '^[0-9a-f]{64}$' -or
             [string]::IsNullOrWhiteSpace($RollbackArtifactPath)) {
+            Stop-PackageUpdater 'PACKAGE_ASSEMBLY_ONLY_AUTHORIZATION_REQUIRED'
+        }
+    }
+    if (Test-SecurityPreservingDevelopmentUpdate) {
+        $securityUpdate = $script:Manifest.securityPreservingUpdate
+        $allowedMutations = @($securityUpdate.allowedMutations | ForEach-Object { [string]$_ } |
+            Sort-Object -CaseSensitive)
+        if ($TargetProfile -cne 'DEV' -or
+            [string]$script:Manifest.customApi.changeDecision.action -cne
+                'APPROVED_ADDITIVE_METADATA' -or
+            [int]$securityUpdate.securityMetadataWrites -ne 0 -or
+            [string]$securityUpdate.securityBaselineSha256 -cnotmatch '^[0-9a-f]{64}$' -or
+            [string]::Join('|', $allowedMutations) -cne
+                'CUSTOM_API_ADDITIVE_METADATA|EXISTING_PLUGINPACKAGE_CONTENT') {
             Stop-PackageUpdater 'PACKAGE_ASSEMBLY_ONLY_AUTHORIZATION_REQUIRED'
         }
     }
@@ -429,6 +450,16 @@ function Get-TargetIdentityFingerprint {
     Get-Sha256FromBytes -Bytes ([Text.Encoding]::UTF8.GetBytes($canonical))
 }
 
+function Get-ExpectedNormalCreateGateValue {
+    if (-not $script:Manifest.PSObject.Properties['release'] -or
+        -not $script:Manifest.release.PSObject.Properties['reportedBaseline'] -or
+        $script:Manifest.release.reportedBaseline.normalCreateEnabled -isnot [bool]) {
+        Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED'
+    }
+    $enabled = [string]([bool]$script:Manifest.release.reportedBaseline.normalCreateEnabled).ToString().ToLowerInvariant()
+    "v1|enabled=$enabled|organizationId=$ExpectedOrganizationId"
+}
+
 function Assert-ReconcileJournal {
     param([Parameter(Mandatory)][object]$Journal)
     if ($null -eq $Journal) { Stop-PackageUpdater 'PACKAGE_DISPATCH_JOURNAL_NOT_RECONCILABLE' }
@@ -453,11 +484,24 @@ function Assert-ReconcileJournal {
         Stop-PackageUpdater 'PACKAGE_DISPATCH_JOURNAL_NOT_RECONCILABLE'
     }
     $journalIsPatch = $Journal.PSObject.Properties['assemblyOnlyPatch'] -and [bool]$Journal.assemblyOnlyPatch
+    $journalIsSecurityPreserving = $Journal.PSObject.Properties['securityPreservingUpdate'] -and
+        [bool]$Journal.securityPreservingUpdate
+    $securityPreservingUpdate = [bool](Test-SecurityPreservingDevelopmentUpdate)
+    $expectedSecurityHash = if ($securityPreservingUpdate) {
+        [string]$script:Manifest.securityPreservingUpdate.securityBaselineSha256
+    } elseif ($AssemblyOnlyPatch -and $script:Manifest.PSObject.Properties['patchDeployment']) {
+        [string]$script:Manifest.patchDeployment.securityBaselineSha256
+    } else { '' }
+    $securityBaselineMismatch = ($AssemblyOnlyPatch -or $securityPreservingUpdate) -and
+        (-not $Journal.preflightTopology.PSObject.Properties['securityBaselineSha256'] -or
+            [string]$Journal.preflightTopology.securityBaselineSha256 -cne $expectedSecurityHash)
+    $normalCreateGateMismatch = $securityPreservingUpdate -and
+        (-not $Journal.preflightTopology.PSObject.Properties['normalCreateGate'] -or
+            [string]$Journal.preflightTopology.normalCreateGate -cne
+                (Get-ExpectedNormalCreateGateValue))
     if ([bool]$AssemblyOnlyPatch -ne [bool]$journalIsPatch -or
-        ($AssemblyOnlyPatch -and
-            (-not $Journal.preflightTopology.PSObject.Properties['securityBaselineSha256'] -or
-                [string]$Journal.preflightTopology.securityBaselineSha256 -cne
-                    [string]$script:Manifest.patchDeployment.securityBaselineSha256))) {
+        $securityPreservingUpdate -ne [bool]$journalIsSecurityPreserving -or
+        $securityBaselineMismatch -or $normalCreateGateMismatch) {
         Stop-PackageUpdater 'PACKAGE_DISPATCH_JOURNAL_NOT_RECONCILABLE'
     }
     $fingerprints = @(
@@ -519,6 +563,7 @@ function New-PackageUpdaterJournal {
         runId = [Guid]::NewGuid().ToString('D')
         targetProfile = $Profile
         developmentSourceAheadOfFrozenRelease = $DevelopmentSourceAheadOfFrozenRelease
+        securityPreservingUpdate = [bool](Test-SecurityPreservingDevelopmentUpdate)
         targetEnvironmentIdentitySha256 = Get-TargetIdentityFingerprint -Identifier $EnvironmentId
         targetOrganizationIdentitySha256 = Get-TargetIdentityFingerprint -Identifier $OrganizationId
         packageIdentity = 'EXISTING_PLUGINPACKAGE_UNIQUE_MATCH'
@@ -775,9 +820,13 @@ function Get-SanitizedTopologyPredicates {
         modifiedOnAdvanced = [bool]$Snapshot.ModifiedOnAdvanced
         serverPackageBytesAvailable = [bool]$Snapshot.ServerPackageBytesAvailable
     }
-    if ($AssemblyOnlyPatch) {
+    if ($AssemblyOnlyPatch -or (Test-SecurityPreservingDevelopmentUpdate)) {
         $predicates.securityBaselineUnchanged = [bool]$Snapshot.SecurityBaselineUnchanged
         $predicates.securityBaselineSha256 = [string]$Snapshot.SecurityBaselineSha256
+    }
+    if (Test-SecurityPreservingDevelopmentUpdate) {
+        $predicates.normalCreateGateUnchanged = [string]$Snapshot.NormalCreateGate -ceq
+            (Get-ExpectedNormalCreateGateValue)
     }
     $predicates
 }
@@ -827,9 +876,15 @@ function Test-SnapshotEquivalent {
         'AssemblyVersionUpdated'
     )
     $predicatesValid = @($requiredPredicates | Where-Object { -not [bool]$After.$_ }).Count -eq 0
-    if ($AssemblyOnlyPatch) {
+    if ($AssemblyOnlyPatch -or (Test-SecurityPreservingDevelopmentUpdate)) {
         $predicatesValid = $predicatesValid -and [bool]$After.SecurityBaselineUnchanged -and
             [string]$After.SecurityBaselineSha256 -ceq [string]$Before.securityBaselineSha256
+    }
+    if (Test-SecurityPreservingDevelopmentUpdate) {
+        $predicatesValid = $predicatesValid -and
+            [string]$Before.NormalCreateGate -ceq
+                (Get-ExpectedNormalCreateGateValue) -and
+            [string]$After.NormalCreateGate -ceq [string]$Before.NormalCreateGate
     }
     $identityValid -and $predicatesValid
 }
@@ -995,6 +1050,19 @@ function Get-PagedRows {
     Get-DataverseRows -Path $Path
 }
 
+function Get-ExactNormalCreateGate {
+    $definitions = @(Get-PagedRows -Path "environmentvariabledefinitions?`$select=environmentvariabledefinitionid,schemaname,statecode&`$filter=schemaname eq 'os_sr_ncrcfg'")
+    if ($definitions.Count -ne 1 -or [int]$definitions[0].statecode -ne 0) {
+        Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED'
+    }
+    $values = @(Get-PagedRows -Path "environmentvariablevalues?`$select=value,statecode,_environmentvariabledefinitionid_value&`$filter=_environmentvariabledefinitionid_value eq $($definitions[0].environmentvariabledefinitionid) and statecode eq 0")
+    $expected = Get-ExpectedNormalCreateGateValue
+    if ($values.Count -ne 1 -or [string]$values[0].value -cne $expected) {
+        Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED'
+    }
+    [string]$values[0].value
+}
+
 function Get-ApiMetadataSnapshot {
     param([Parameter(Mandatory)][string]$UniqueName)
     $apis = @(Get-PagedRows -Path "customapis?`$select=customapiid,uniquename,name,displayname,description,executeprivilegename,bindingtype,isfunction,isprivate,allowedcustomprocessingsteptype,_plugintypeid_value&`$filter=uniquename eq '$UniqueName'")
@@ -1135,6 +1203,9 @@ function Get-TopologySnapshot {
         [int]$organization.plugintracelogsetting -eq 0
 
     $apiSnapshot = Get-ApiMetadataSnapshot -UniqueName 'os_sr_cact'
+    $normalCreateGate = if (Test-SecurityPreservingDevelopmentUpdate) {
+        Get-ExactNormalCreateGate
+    } else { $null }
     $packageTypesExact = $types.Count -eq $expectedPluginTypes.Count -and
         [string]::Join('|', $actualPluginTypes) -ceq [string]::Join('|', $expectedPluginTypes) -and
         @($types | Where-Object typename -CEQ $guardName).Count -eq 1 -and
@@ -1201,6 +1272,7 @@ function Get-TopologySnapshot {
         ApiInputDetails = @($apiSnapshot.InputDetails)
         ApiOutputNames = @($apiSnapshot.OutputNames)
         ApiOutputDetails = @($apiSnapshot.OutputDetails)
+        NormalCreateGate = $normalCreateGate
         LegacyAssemblyId = [string]$legacyAssembly.pluginassemblyid
         LegacyAssemblySha256 = $legacyContentHash
         PackageCount = $allPackageRows.Count
@@ -1397,8 +1469,18 @@ function Get-UnchangedSecuritySnapshot {
 }
 
 function Assert-UnchangedPatchSecurity {
-    param([Parameter(Mandatory)][object]$Snapshot)
-    if ([string]$Snapshot.Sha256 -cne [string]$script:Manifest.patchDeployment.securityBaselineSha256) {
+    param(
+        [Parameter(Mandatory)][object]$Snapshot,
+        [string]$ExpectedSha256
+    )
+    if ([string]::IsNullOrWhiteSpace($ExpectedSha256)) {
+        $ExpectedSha256 = if (Test-SecurityPreservingDevelopmentUpdate) {
+            [string]$script:Manifest.securityPreservingUpdate.securityBaselineSha256
+        } else {
+            [string]$script:Manifest.patchDeployment.securityBaselineSha256
+        }
+    }
+    if ([string]$Snapshot.Sha256 -cne $ExpectedSha256) {
         Stop-PackageUpdater 'PACKAGE_SECURITY_BASELINE_CHANGED'
     }
     $bso = $Snapshot.Roles[0].State.Privileges
@@ -1493,6 +1575,141 @@ function Test-ApiContractMatchesReleaseManifest {
         [bool]$maskInputs[0].IsOptional
 }
 
+function Get-ApprovedPaginationApiMetadataDelta {
+    $components = @($script:Manifest.exactComponentDelta | Where-Object {
+        [string]$_.kind -in @('CustomApiRequestParameter', 'CustomApiResponseProperty')
+    })
+    if ($components.Count -ne 5 -or
+        [int]$script:Manifest.customApi.changeDecision.metadataWrites -ne 5 -or
+        [string]$script:Manifest.customApi.changeDecision.action -cne 'APPROVED_ADDITIVE_METADATA') {
+        Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED'
+    }
+    $validated = [Collections.Generic.List[object]]::new()
+    foreach ($component in $components) {
+        if ([string]$component.parentApiUniqueName -cne 'os_sr_cact') {
+            Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED'
+        }
+        $sourcePath = [IO.Path]::GetFullPath((Join-Path (Split-Path $script:ManifestPath -Parent) `
+            ([string]$component.sourceFile)))
+        $apiSourceRoot = [IO.Path]::GetFullPath((Join-Path $script:Root 'solutions\customapis\os_sr_cact'))
+        if (-not $sourcePath.StartsWith($apiSourceRoot + [IO.Path]::DirectorySeparatorChar,
+                [StringComparison]::OrdinalIgnoreCase) -or
+            (Get-FileHash -LiteralPath $sourcePath -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+                [string]$component.sourceSha256) {
+            Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED'
+        }
+        $settings = [Xml.XmlReaderSettings]::new()
+        $settings.DtdProcessing = [Xml.DtdProcessing]::Prohibit
+        $settings.XmlResolver = $null
+        $reader = [Xml.XmlReader]::Create($sourcePath, $settings)
+        $document = [Xml.XmlDocument]::new()
+        $document.XmlResolver = $null
+        try { $document.Load($reader) } catch { Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED' }
+        finally { $reader.Dispose() }
+        $isRequest = [string]$component.kind -ceq 'CustomApiRequestParameter'
+        $rootName = if ($isRequest) { 'customapirequestparameter' } else { 'customapiresponseproperty' }
+        $name = [string]$component.uniqueName -replace '^os_sr_cact\.', ''
+        $root = $document.DocumentElement
+        $nameNode = $document.SelectSingleNode("/$rootName/name")
+        $displayNode = $document.SelectSingleNode("/$rootName/displayname")
+        $typeNode = $document.SelectSingleNode("/$rootName/type")
+        $optionalNode = $document.SelectSingleNode("/$rootName/isoptional")
+        if ($root.LocalName -cne $rootName -or $root.GetAttribute('uniquename') -cne $name -or
+            $null -eq $nameNode -or [string]$nameNode.InnerText -cne [string]$component.uniqueName -or
+            $null -eq $displayNode -or
+            [string]::IsNullOrWhiteSpace([string]$displayNode.GetAttribute('default')) -or
+            $null -eq $typeNode -or [int]$typeNode.InnerText -ne [int]$component.typeCode -or
+            ($isRequest -and ([bool]$component.optional -ne $true -or
+                $null -eq $optionalNode -or [string]$optionalNode.InnerText -cne '1')) -or
+            (-not $isRequest -and ($component.PSObject.Properties['optional'] -or $null -ne $optionalNode))) {
+            Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED'
+        }
+        $validated.Add([pscustomobject]@{
+            Kind = [string]$component.kind
+            Name = $name
+            UniqueName = [string]$component.uniqueName
+            DisplayName = [string]$displayNode.GetAttribute('default')
+            Type = [int]$component.typeCode
+            IsOptional = if ($isRequest) { $true } else { $null }
+            SourceSha256 = [string]$component.sourceSha256
+        })
+    }
+    $requests = @($validated | Where-Object Kind -ceq 'CustomApiRequestParameter')
+    $responses = @($validated | Where-Object Kind -ceq 'CustomApiResponseProperty')
+    if ($requests.Count -ne 3 -or $responses.Count -ne 2 -or
+        [string]::Join('|', @($requests | ForEach-Object Name | Sort-Object -CaseSensitive)) -cne
+            'CandidatePageNumber|CandidateSearchText|CandidateStatusFilter' -or
+        [string]::Join('|', @($responses | ForEach-Object Name | Sort-Object -CaseSensitive)) -cne
+            'ScopedHasNextPage|ScopedTotalCount') {
+        Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED'
+    }
+    @($validated)
+}
+
+function Get-ExpectedPaginationBaselineApiContract {
+    $prior = Get-Content -LiteralPath (Join-Path $script:Root 'docs\CANDIDATE_CORE_1.0.8_RELEASE_MANIFEST.json') -Raw |
+        ConvertFrom-Json
+    $normalRelease = Get-Content -LiteralPath (
+        Join-Path $script:Root 'docs\CANDIDATE_CORE_NORMAL_CREATE_1.0.9_RELEASE_MANIFEST.json'
+    ) -Raw | ConvertFrom-Json
+    $requests = @($prior.customApi.requestParameters | ForEach-Object {
+        '{0}|{1}|{2}' -f [string]$_.name, [int]$_.type, [bool]$_.isOptional
+    } | Sort-Object -CaseSensitive)
+    $responses = [Collections.Generic.List[string]]::new()
+    foreach ($item in @($prior.customApi.responseProperties)) {
+        $responses.Add(('{0}|{1}' -f [string]$item.name, [int]$item.type))
+    }
+    foreach ($component in @($normalRelease.exactComponentDelta | Where-Object {
+        [string]$_.kind -ceq 'CustomApiResponseProperty'
+    })) {
+        $path = [IO.Path]::GetFullPath((Join-Path $script:Root (
+            [string]$component.sourceFile -replace '^\.\./', ''
+        )))
+        if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+            [string]$component.sourceSha256) {
+            Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED'
+        }
+        $settings = [Xml.XmlReaderSettings]::new()
+        $settings.DtdProcessing = [Xml.DtdProcessing]::Prohibit
+        $settings.XmlResolver = $null
+        $reader = [Xml.XmlReader]::Create($path, $settings)
+        $document = [Xml.XmlDocument]::new()
+        $document.XmlResolver = $null
+        try { $document.Load($reader) } catch { Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED' }
+        finally { $reader.Dispose() }
+        $responses.Add(('{0}|{1}' -f
+            ([string]$component.uniqueName -replace '^os_sr_cact\.', ''),
+            [int]$document.DocumentElement.SelectSingleNode('type').InnerText))
+    }
+    if ($requests.Count -ne 22 -or $responses.Count -ne 9) {
+        Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED'
+    }
+    [pscustomobject]@{ Requests = @($requests); Responses = @($responses | Sort-Object -CaseSensitive) }
+}
+
+function Get-ApiMetadataNavigationProperty {
+    param([Parameter(Mandatory)][string]$LogicalName)
+    $rows = @(Get-PagedRows -Path "EntityDefinitions(LogicalName='$LogicalName')/ManyToOneRelationships?%24select=ReferencingAttribute,ReferencedEntity,ReferencingEntityNavigationPropertyName" |
+        Where-Object {
+            [string]$_.ReferencingAttribute -ceq 'customapiid' -and
+            [string]$_.ReferencedEntity -ceq 'customapi'
+        })
+    if ($rows.Count -ne 1 -or
+        [string]::IsNullOrWhiteSpace([string]$rows[0].ReferencingEntityNavigationPropertyName)) {
+        Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED'
+    }
+    [string]$rows[0].ReferencingEntityNavigationPropertyName
+}
+
+function Get-ApiMetadataObjectTypeCode {
+    param([Parameter(Mandatory)][string]$LogicalName)
+    $metadata = Invoke-DataverseGet -Path "EntityDefinitions(LogicalName='$LogicalName')?%24select=ObjectTypeCode"
+    if ($null -eq $metadata -or [int]$metadata.ObjectTypeCode -le 0) {
+        Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED'
+    }
+    [int]$metadata.ObjectTypeCode
+}
+
 function Get-ApprovedDevelopmentApiParameterPlan {
     param([Parameter(Mandatory)][object]$Baseline)
     if (Test-ManifestApiNoChange) {
@@ -1506,6 +1723,174 @@ function Get-ApprovedDevelopmentApiParameterPlan {
             AutomaticRetries = 0
             MaximumPostDispatches = 0
             Writes = @()
+        }
+    }
+    if ($script:Manifest.PSObject.Properties['customApi'] -and
+        $script:Manifest.customApi.PSObject.Properties['changeDecision'] -and
+        [string]$script:Manifest.customApi.changeDecision.action -ceq 'APPROVED_ADDITIVE_METADATA') {
+        if (-not (Test-Path -LiteralPath $ExpectedDevelopmentApiPlanPath -PathType Leaf) -or
+            (Get-FileHash -LiteralPath $ExpectedDevelopmentApiPlanPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+                $ExpectedDevelopmentApiPlanSha256) {
+            Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED'
+        }
+        try {
+            $plan = Get-Content -LiteralPath $ExpectedDevelopmentApiPlanPath -Raw | ConvertFrom-Json
+        } catch { Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED' }
+        $delta = @(Get-ApprovedPaginationApiMetadataDelta)
+        $baseContract = Get-ExpectedPaginationBaselineApiContract
+        $writes = @($plan.Writes)
+        $requestBinding = Get-ApiMetadataNavigationProperty -LogicalName 'customapirequestparameter'
+        $responseBinding = Get-ApiMetadataNavigationProperty -LogicalName 'customapiresponseproperty'
+        $requestTypeCode = Get-ApiMetadataObjectTypeCode -LogicalName 'customapirequestparameter'
+        $responseTypeCode = Get-ApiMetadataObjectTypeCode -LogicalName 'customapiresponseproperty'
+        if ($null -eq $plan -or $writes.Count -ne 5 -or
+            [string]$plan.EnvironmentName -cne 'VN LMV IT' -or
+            (ConvertTo-NormalizedOrganizationUrl -Value ([string]$plan.OrganizationUrl)) -cne
+                (ConvertTo-NormalizedOrganizationUrl -Value $OrganizationUrl) -or
+            (ConvertTo-CanonicalGuid -Value ([string]$plan.ExpectedEnvironmentId)) -cne
+                (ConvertTo-CanonicalGuid -Value $ExpectedEnvironmentId) -or
+            (ConvertTo-CanonicalGuid -Value ([string]$plan.ExpectedOrganizationId)) -cne
+                (ConvertTo-CanonicalGuid -Value $ExpectedOrganizationId) -or
+            [string]$plan.SolutionUniqueName -cne [string]$script:Manifest.solution.uniqueName -or
+            [string]$plan.ApiUniqueName -cne 'os_sr_cact' -or
+            [string]$plan.ReleaseManifestSha256 -cne
+                (Get-FileHash -LiteralPath $script:ManifestPath -Algorithm SHA256).Hash.ToLowerInvariant() -or
+            [string]$plan.ApiId -ine [string]$Baseline.Api.customapiid -or
+            [string]$plan.BaselineApiMetadataSha256 -cne [string]$Baseline.ApiMetadataSha256 -or
+            [string]$plan.ExpectedApiMetadataSha256 -cne [string]$script:Manifest.customApi.metadataSha256 -or
+            [int]$plan.AutomaticRetries -ne 0 -or [int]$plan.MaximumPostDispatches -ne 5 -or
+            [string]::Join('|', @($plan.ExpectedMissingNames | Sort-Object -CaseSensitive)) -cne
+                [string]::Join('|', @($delta | ForEach-Object UniqueName | Sort-Object -CaseSensitive)) -or
+            [string]::Join('|', @($plan.BaselineRequestParameters | ForEach-Object {
+                '{0}|{1}|{2}' -f [string]$_.name, [int]$_.type, [bool]$_.isOptional
+            } | Sort-Object -CaseSensitive)) -cne [string]::Join('|', $baseContract.Requests) -or
+            [string]::Join('|', @($plan.BaselineResponseProperties | ForEach-Object {
+                '{0}|{1}' -f [string]$_.name, [int]$_.type
+            } | Sort-Object -CaseSensitive)) -cne [string]::Join('|', $baseContract.Responses) -or
+            [string]$plan.BaselineApiMetadataSha256 -cne [string]$Baseline.ApiMetadataSha256) {
+            Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED'
+        }
+        foreach ($component in $delta) {
+            $matches = @($writes | Where-Object {
+                [string]$_.UniqueName -ceq [string]$component.UniqueName -and
+                [string]$_.Kind -ceq [string]$component.Kind
+            })
+            if ($matches.Count -ne 1) { Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED' }
+            $write = $matches[0]
+            $isRequest = [string]$component.Kind -ceq 'CustomApiRequestParameter'
+            $binding = if ($isRequest) { $requestBinding } else { $responseBinding }
+            $entityType = if ($isRequest) { $requestTypeCode } else { $responseTypeCode }
+            $idField = if ($isRequest) { 'customapirequestparameterid' } else { 'customapiresponsepropertyid' }
+            $expectedPath = if ($isRequest) { 'customapirequestparameters' } else { 'customapiresponseproperties' }
+            $expectedBodyKeys = if ($isRequest) {
+                @($idField, 'uniquename', 'name', 'displayname', 'type', 'isoptional', "$binding@odata.bind")
+            } else {
+                @($idField, 'uniquename', 'name', 'displayname', 'type', "$binding@odata.bind")
+            }
+            $writeId = $null
+            try { $writeId = ConvertTo-CanonicalGuid -Value ([string]$write.Id) } catch {
+                Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED'
+            }
+            $bodyKeys = @($write.Body.PSObject.Properties.Name | Sort-Object -CaseSensitive)
+            $expectedKeys = @($expectedBodyKeys | Sort-Object -CaseSensitive)
+            $bindingValue = [string]$write.Body."$binding@odata.bind"
+            $payloadHash = Get-Sha256FromBytes -Bytes ([Text.Encoding]::UTF8.GetBytes(
+                (ConvertTo-Json -InputObject $write.Body -Depth 20 -Compress)
+            ))
+            $membershipLine = '{0}|{1}|0' -f $entityType, $writeId
+            if ([string]$write.Name -cne [string]$component.Name -or
+                [int]$write.Type -ne [int]$component.Type -or
+                [string]$write.Path -cne $expectedPath -or
+                [int]$write.ComponentType -ne $entityType -or
+                [string]$write.BindingProperty -cne $binding -or
+                [string]$write.UniqueName -cne [string]$component.UniqueName -or
+                [string]$write.Body.$idField -ine $writeId -or
+                [string]$write.Body.uniquename -cne [string]$component.Name -or
+                [string]$write.Body.name -cne [string]$component.UniqueName -or
+                [string]$write.Body.displayname -cne [string]$component.DisplayName -or
+                [int]$write.Body.type -ne [int]$component.Type -or
+                [string]$write.Body."$binding@odata.bind" -cne "/customapis($($plan.ApiId))" -or
+                [string]$bindingValue -cne "/customapis($($plan.ApiId))" -or
+                [string]::Join('|', $bodyKeys) -cne [string]::Join('|', $expectedKeys) -or
+                ($isRequest -and
+                    ([bool]$write.IsOptional -ne $true -or [bool]$write.Body.isoptional -ne $true)) -or
+                (-not $isRequest -and $null -ne $write.IsOptional) -or
+                [string]$write.PayloadSha256 -cne $payloadHash -or
+                $membershipLine -notin @($plan.ExpectedAddedMembershipLines)) {
+                Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED'
+            }
+        }
+        $expectedRequests = @(
+            @($baseContract.Requests) + @($delta | Where-Object {
+                $_.Kind -ceq 'CustomApiRequestParameter'
+            } | ForEach-Object { '{0}|{1}|True' -f $_.Name, [int]$_.Type })
+        ) | Sort-Object -CaseSensitive
+        $expectedResponses = @(
+            @($baseContract.Responses) + @($delta | Where-Object {
+                $_.Kind -ceq 'CustomApiResponseProperty'
+            } | ForEach-Object { '{0}|{1}' -f $_.Name, [int]$_.Type })
+        ) | Sort-Object -CaseSensitive
+        $actualPlanRequests = @($plan.ExpectedRequestParameters | ForEach-Object {
+            '{0}|{1}|{2}' -f [string]$_.name, [int]$_.type, [bool]$_.isOptional
+        } | Sort-Object -CaseSensitive)
+        $actualPlanResponses = @($plan.ExpectedResponseProperties | ForEach-Object {
+            '{0}|{1}' -f [string]$_.name, [int]$_.type
+        } | Sort-Object -CaseSensitive)
+        if ([string]::Join('|', $actualPlanRequests) -cne [string]::Join('|', $expectedRequests) -or
+            [string]::Join('|', $actualPlanResponses) -cne [string]::Join('|', $expectedResponses) -or
+            [string]::Join('|', @($plan.ExpectedAddedMembershipLines | Sort-Object -CaseSensitive)) -cne
+                [string]::Join('|', @($writes | ForEach-Object {
+                    '{0}|{1}|0' -f [int]$_.ComponentType,
+                        (ConvertTo-CanonicalGuid -Value ([string]$_.Id))
+                } | Sort-Object -CaseSensitive))) {
+            Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED'
+        }
+        $baselineLines = @($plan.BaselineMembershipLines | Sort-Object -CaseSensitive)
+        $addedLines = @($plan.ExpectedAddedMembershipLines | Sort-Object -CaseSensitive)
+        $expectedMembershipLines = @($baselineLines + $addedLines | Sort-Object -CaseSensitive)
+        $expectedMembershipHash = Get-Sha256FromBytes -Bytes ([Text.Encoding]::UTF8.GetBytes(
+            [string]::Join("`n", $expectedMembershipLines)
+        ))
+        $baselineMembershipHash = Get-Sha256FromBytes -Bytes ([Text.Encoding]::UTF8.GetBytes(
+            [string]::Join("`n", $baselineLines)
+        ))
+        if ($baselineLines.Count -ne @($plan.BaselineMembershipLines).Count -or
+            $addedLines.Count -ne 5 -or
+            $addedLines.Count -ne @($addedLines | Sort-Object -Unique -CaseSensitive).Count -or
+            [string]$plan.BaselineMembershipSha256 -cne $baselineMembershipHash -or
+            [string]$plan.ExpectedMembershipSha256 -cne $expectedMembershipHash) {
+            Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED'
+        }
+        $baselineSnapshotHash = Get-Sha256FromBytes -Bytes ([Text.Encoding]::UTF8.GetBytes(
+            (ConvertTo-Json -InputObject ([ordered]@{
+                ApiMetadataSha256 = [string]$plan.BaselineApiMetadataSha256
+                MembershipSha256 = [string]$plan.BaselineMembershipSha256
+                PackageId = [string]$Baseline.Package.pluginpackageid
+                PackageModifiedOn = [string]$Baseline.Package.modifiedon
+                AssemblyId = [string]$Baseline.Assembly.pluginassemblyid
+                AssemblyVersion = [string]$Baseline.Assembly.version
+                HandlerId = [string]$Baseline.Handler.plugintypeid
+                OrganizationId = (ConvertTo-CanonicalGuid -Value $ExpectedOrganizationId)
+                Gate = $false
+            }) -Depth 10 -Compress)
+        ))
+        if ([string]$plan.BaselineSnapshotSha256 -cne $baselineSnapshotHash) {
+            Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED'
+        }
+        return [pscustomobject]@{
+            Action = 'PAGINATION_METADATA_PRESENT'
+            ApiId = [string]$plan.ApiId
+            Writes = $writes
+            ExpectedRequestParameters = @($plan.ExpectedRequestParameters)
+            ExpectedResponseProperties = @($plan.ExpectedResponseProperties)
+            BaselineMembershipLines = @($plan.BaselineMembershipLines)
+            BaselineMembershipSha256 = [string]$plan.BaselineMembershipSha256
+            ExpectedAddedMembershipLines = @($plan.ExpectedAddedMembershipLines)
+            ExpectedMembershipSha256 = [string]$plan.ExpectedMembershipSha256
+            BaselineApiMetadataSha256 = [string]$plan.BaselineApiMetadataSha256
+            ExpectedApiMetadataSha256 = [string]$plan.ExpectedApiMetadataSha256
+            AutomaticRetries = 0
+            MaximumPostDispatches = 5
         }
     }
     if (-not (Test-Path -LiteralPath $ExpectedDevelopmentApiPlanPath -PathType Leaf) -or
@@ -1593,8 +1978,9 @@ function Test-ApprovedDevelopmentMembershipDelta {
     param(
         [Parameter(Mandatory)][string[]]$BaselineLines,
         [Parameter(Mandatory)][string[]]$CurrentLines,
-        [Parameter(Mandatory)][string]$ApiParameterId,
-        [Parameter(Mandatory)][bool]$ApiParameterPresent
+        [string]$ApiParameterId,
+        [bool]$ApiParameterPresent,
+        [string[]]$ExpectedAddedLines
     )
     $baselineSet = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     $currentSet = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
@@ -1607,6 +1993,14 @@ function Test-ApprovedDevelopmentMembershipDelta {
     $missing = @($BaselineLines | Where-Object { -not $currentSet.Contains($_) })
     $extra = @($CurrentLines | Where-Object { -not $baselineSet.Contains($_) })
     if ($missing.Count -ne 0) { return $false }
+    if ($PSBoundParameters.ContainsKey('ExpectedAddedLines')) {
+        $expectedSet = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        foreach ($line in $ExpectedAddedLines) {
+            if (-not $expectedSet.Add($line)) { return $false }
+        }
+        if ($extra.Count -ne $expectedSet.Count) { return $false }
+        return @($extra | Where-Object { -not $expectedSet.Contains($_) }).Count -eq 0
+    }
     if (-not $ApiParameterPresent) { return $extra.Count -eq 0 }
     if ($extra.Count -ne 1) { return $false }
     $parts = $extra[0].Split('|')
@@ -1633,6 +2027,13 @@ function Assert-DevelopmentDeploymentBaseline {
         (ConvertTo-CanonicalGuid -Value ([string]$baseline.OrganizationId)) -cne
             (ConvertTo-CanonicalGuid -Value $ExpectedOrganizationId)) {
         Stop-PackageUpdater 'PACKAGE_TARGET_IDENTITY_MISMATCH'
+    }
+    if (Test-SecurityPreservingDevelopmentUpdate) {
+        $expectedGate = Get-ExpectedNormalCreateGateValue
+        if ([string]$baseline.NormalCreateGate -cne $expectedGate -or
+            [string]$PackageSnapshot.NormalCreateGate -cne $expectedGate) {
+            Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED'
+        }
     }
 
     $solutionName = [string]$script:Manifest.solution.uniqueName
@@ -1678,6 +2079,11 @@ function Assert-DevelopmentDeploymentBaseline {
         $membershipMatchesApprovedPlan =
             [string]::Join("`n", $baselineMembershipLines) -ceq
                 [string]::Join("`n", @($membership.Lines | Sort-Object -CaseSensitive))
+    } elseif ($apiPlan.Action -ceq 'PAGINATION_METADATA_PRESENT') {
+        $expectedBaselineMetadataMemberships = @($apiPlan.ExpectedAddedMembershipLines)
+        $membershipMatchesApprovedPlan = Test-ApprovedDevelopmentMembershipDelta `
+            -BaselineLines $baselineMembershipLines -CurrentLines $membership.Lines `
+            -ExpectedAddedLines $expectedBaselineMetadataMemberships
     } else {
         $membershipMatchesApprovedPlan = Test-ApprovedDevelopmentMembershipDelta `
             -BaselineLines $baselineMembershipLines -CurrentLines $membership.Lines `
@@ -1698,6 +2104,33 @@ function Assert-DevelopmentDeploymentBaseline {
                 [string]$baseline.ApiMetadataSha256) {
             Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED'
         }
+    } elseif ($apiPlan.Action -ceq 'PAGINATION_METADATA_PRESENT') {
+        $actualInputs = @($PackageSnapshot.ApiInputDetails | ForEach-Object {
+            '{0}|{1}|{2}' -f [string]$_.Name, [int]$_.Type, [bool]$_.IsOptional
+        } | Sort-Object -CaseSensitive)
+        $expectedInputs = @($apiPlan.ExpectedRequestParameters | ForEach-Object {
+            '{0}|{1}|{2}' -f [string]$_.name, [int]$_.type, [bool]$_.isOptional
+        } | Sort-Object -CaseSensitive)
+        $actualOutputs = @($PackageSnapshot.ApiOutputDetails | ForEach-Object {
+            '{0}|{1}' -f [string]$_.Name, [int]$_.Type
+        } | Sort-Object -CaseSensitive)
+        $expectedOutputs = @($apiPlan.ExpectedResponseProperties | ForEach-Object {
+            '{0}|{1}' -f [string]$_.name, [int]$_.type
+        } | Sort-Object -CaseSensitive)
+        $baselineLinesFromPlan = @($apiPlan.BaselineMembershipLines | Sort-Object -CaseSensitive)
+        if ($PackageSnapshot.ApiInputCount -ne 25 -or
+            $PackageSnapshot.ApiOutputCount -ne 11 -or
+            [string]::Join('|', $actualInputs) -cne [string]::Join('|', $expectedInputs) -or
+            [string]::Join('|', $actualOutputs) -cne [string]::Join('|', $expectedOutputs) -or
+            [string]::Join('|', $baselineLinesFromPlan) -cne
+                [string]::Join('|', $baselineMembershipLines) -or
+            [string]$baseline.ApiMetadataSha256 -cne [string]$apiPlan.BaselineApiMetadataSha256 -or
+            [string]$PackageSnapshot.ApiMetadataSha256 -cne
+                [string]$apiPlan.ExpectedApiMetadataSha256 -or
+            [string]$apiPlan.ExpectedApiMetadataSha256 -cne
+                [string]$script:Manifest.customApi.metadataSha256) {
+            Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED'
+        }
     } else {
         $contract = Get-Content -LiteralPath (Join-Path $script:Root 'docs\PHASE_3C_API_CONTRACT.json') -Raw |
             ConvertFrom-Json
@@ -1716,7 +2149,8 @@ function Assert-DevelopmentDeploymentBaseline {
             Stop-PackageUpdater 'PACKAGE_TOPOLOGY_PREFLIGHT_FAILED'
         }
     }
-    if ($apiPlan.Action -cne 'NO_CHANGE' -and $maskPresent -and
+    if ($apiPlan.Action -cne 'NO_CHANGE' -and
+        $apiPlan.Action -cne 'PAGINATION_METADATA_PRESENT' -and $maskPresent -and
         ([string]$maskInputs[0].Id -ine [string]$apiPlan.Writes[0].Id -or
             [string]$maskInputs[0].ApiId -ine [string]$apiPlan.ApiId -or
             [int]$maskInputs[0].Type -ne [int]$apiPlan.Writes[0].Type -or
@@ -1731,6 +2165,12 @@ function Assert-DevelopmentDeploymentBaseline {
             [string]$baseline.SecurityBaselineSha256 -cne [string]$security.Sha256) {
             Stop-PackageUpdater 'PACKAGE_SECURITY_BASELINE_CHANGED'
         }
+        $PackageSnapshot | Add-Member -NotePropertyName SecurityBaselineSha256 -NotePropertyValue $security.Sha256 -Force
+        $PackageSnapshot | Add-Member -NotePropertyName SecurityBaselineUnchanged -NotePropertyValue $true -Force
+    } elseif (Test-SecurityPreservingDevelopmentUpdate) {
+        $security = Get-UnchangedSecuritySnapshot
+        Assert-UnchangedPatchSecurity -Snapshot $security `
+            -ExpectedSha256 ([string]$script:Manifest.securityPreservingUpdate.securityBaselineSha256)
         $PackageSnapshot | Add-Member -NotePropertyName SecurityBaselineSha256 -NotePropertyValue $security.Sha256 -Force
         $PackageSnapshot | Add-Member -NotePropertyName SecurityBaselineUnchanged -NotePropertyValue $true -Force
     } else {
@@ -1774,12 +2214,16 @@ function Assert-DevelopmentDeploymentBaseline {
         ApiInputCount = $PackageSnapshot.ApiInputCount
         ProfileFieldMaskParameterReconciled = $maskPresent
         ApiOutputCount = $PackageSnapshot.ApiOutputCount
-        CustomApiMetadataDecision = if ($apiPlan.Action -ceq 'NO_CHANGE') {
-            'NO_CHANGE'
-        } else {
-            'APPROVED_PARAMETER_PLAN'
+        CustomApiMetadataDecision = switch ($apiPlan.Action) {
+            'NO_CHANGE' { 'NO_CHANGE' }
+            'PAGINATION_METADATA_PRESENT' { 'EXACT_ADDITIVE_PAGINATION_METADATA' }
+            default { 'APPROVED_PARAMETER_PLAN' }
         }
-        CustomApiMetadataWrites = if ($apiPlan.Action -ceq 'NO_CHANGE') { 0 } else { 1 }
+        CustomApiMetadataWrites = switch ($apiPlan.Action) {
+            'NO_CHANGE' { 0 }
+            'PAGINATION_METADATA_PRESENT' { 5 }
+            default { 1 }
+        }
         ProtectCandidateCoreStepCount = $PackageSnapshot.ProtectCandidateCoreStepCount
         AllProtectCandidateCoreStepsInactive = [bool]$PackageSnapshot.AllProtectCandidateCoreStepsInactive
         NoActiveLegacyHandlers = [bool]$PackageSnapshot.NoActiveLegacyHandlers
@@ -2007,7 +2451,7 @@ function Invoke-PackageUpdaterMain {
             Stop-PackageUpdater 'PACKAGE_IDENTITY_AMBIGUOUS'
         }
         $snapshot = Get-TopologySnapshot -PackageRow $package -PackageCountBefore ([int]$journal.preflightTopology.PackageCount) -Before $journal.preflightTopology
-        if ($AssemblyOnlyPatch) {
+        if ($AssemblyOnlyPatch -or (Test-SecurityPreservingDevelopmentUpdate)) {
             $security = Get-UnchangedSecuritySnapshot
             Assert-UnchangedPatchSecurity -Snapshot $security
             $snapshot | Add-Member -NotePropertyName SecurityBaselineSha256 -NotePropertyValue $security.Sha256
@@ -2064,6 +2508,11 @@ function Invoke-PackageUpdaterMain {
             Stop-PackageUpdater 'PACKAGE_MODIFIED_SINCE_BASELINE'
         }
         Assert-UnchangedPatchSecurity -Snapshot (Get-UnchangedSecuritySnapshot)
+    } elseif (Test-SecurityPreservingDevelopmentUpdate) {
+        $journal.preflightTopology.securityBaselineSha256 = $before.SecurityBaselineSha256
+        $journal.preflightTopology.normalCreateGate = [string]$before.NormalCreateGate
+        Assert-UnchangedPatchSecurity -Snapshot (Get-UnchangedSecuritySnapshot) `
+            -ExpectedSha256 ([string]$script:Manifest.securityPreservingUpdate.securityBaselineSha256)
     }
 
     $arguments = New-PacPluginPushArguments `
@@ -2075,7 +2524,7 @@ function Invoke-PackageUpdaterMain {
             $afterRows = @(Get-PagedRows -Path "pluginpackages?`$select=pluginpackageid,name,uniquename,version,modifiedon&`$filter=uniquename eq '$ExpectedPackageUniqueName'")
             $afterPackage = Resolve-PackageMatch -Rows $afterRows -UniqueName $ExpectedPackageUniqueName
             $after = Get-TopologySnapshot -PackageRow $afterPackage -PackageCountBefore $before.PackageCount -Before $before
-            if ($AssemblyOnlyPatch) {
+            if ($AssemblyOnlyPatch -or (Test-SecurityPreservingDevelopmentUpdate)) {
                 $security = Get-UnchangedSecuritySnapshot
                 Assert-UnchangedPatchSecurity -Snapshot $security
                 $after | Add-Member -NotePropertyName SecurityBaselineSha256 -NotePropertyValue $security.Sha256

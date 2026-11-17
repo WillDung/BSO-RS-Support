@@ -559,6 +559,47 @@ $failure = $null
 try { Assert-UpdaterInputs -RequestedMode Plan } catch { $failure = $_.Exception.Message }
 Assert-Test ($failure -ceq 'PACKAGE_ASSEMBLY_ONLY_AUTHORIZATION_REQUIRED') 'Patch authorization requires the rollback artifact even in Plan'
 
+$expectedPaginationMembership = @(
+    '10036|33333333-3333-4333-8333-333333333333|0',
+    '10036|44444444-4444-4444-8444-444444444444|0',
+    '10036|55555555-5555-4555-8555-555555555555|0',
+    '10038|66666666-6666-4666-8666-666666666666|0',
+    '10038|77777777-7777-4777-8777-777777777777|0'
+)
+Assert-Test (Test-ApprovedDevelopmentMembershipDelta `
+    -BaselineLines $baselineMembershipLines `
+    -CurrentLines @($baselineMembershipLines + $expectedPaginationMembership) `
+    -ExpectedAddedLines $expectedPaginationMembership) `
+    'Pagination deployment accepts only the exact pinned five-component membership delta'
+Assert-Test (-not (Test-ApprovedDevelopmentMembershipDelta `
+    -BaselineLines $baselineMembershipLines `
+    -CurrentLines @($baselineMembershipLines + $expectedPaginationMembership + '10036|88888888-8888-4888-8888-888888888888|0') `
+    -ExpectedAddedLines $expectedPaginationMembership) -and
+    -not (Test-ApprovedDevelopmentMembershipDelta `
+        -BaselineLines $baselineMembershipLines `
+        -CurrentLines @($baselineMembershipLines + $expectedPaginationMembership[0..3]) `
+        -ExpectedAddedLines $expectedPaginationMembership)) `
+    'Pagination deployment rejects extra and missing planned memberships'
+
+$script:Manifest | Add-Member -NotePropertyName securityPreservingUpdate -NotePropertyValue (
+    [pscustomobject]@{
+        operation = 'EXISTING_PACKAGE_WITH_ADDITIVE_API_METADATA'
+        securityBaselineSha256 = 'a' * 64
+    }
+) -Force
+Assert-Test (Test-SecurityPreservingDevelopmentUpdate) `
+    'Pinned additive metadata release selects the unchanged-security verification path'
+$script:Manifest.securityPreservingUpdate.operation = 'UNAPPROVED_OPERATION'
+Assert-Test (-not (Test-SecurityPreservingDevelopmentUpdate)) `
+    'Unknown release security-preserving operation fails closed'
+$script:Manifest.securityPreservingUpdate.operation = 'EXISTING_PACKAGE_WITH_ADDITIVE_API_METADATA'
+Assert-UnchangedPatchSecurity -Snapshot $patchSecurity -ExpectedSha256 ('a' * 64)
+$failure = $null
+try { Assert-UnchangedPatchSecurity -Snapshot $patchSecurity -ExpectedSha256 ('c' * 64) }
+catch { $failure = $_.Exception.Message }
+Assert-Test ($failure -ceq 'PACKAGE_SECURITY_BASELINE_CHANGED') `
+    'Security-preserving package updates require the exact pinned role and assignment fingerprint'
+
 "BsoRsCandidatePackageUpdater.Tests.ps1: $passed assertions passed."
 } finally {
     if (Test-Path -LiteralPath $temporaryRoot -PathType Container) {

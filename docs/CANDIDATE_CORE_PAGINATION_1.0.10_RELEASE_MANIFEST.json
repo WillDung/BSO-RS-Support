@@ -9,11 +9,19 @@
     "deploymentReady": false,
     "deployed": false,
     "targetLabel": "VN LMV IT",
-    "targetIdentityVerifiedThisTurn": false,
+    "targetIdentityVerifiedThisTurn": true,
     "reportedBaseline": {
       "candidateCoreVersion": "1.0.9.0",
-      "normalCreateEnabled": true
+      "normalCreateEnabled": true,
+      "customApiRequestParameterCount": 22,
+      "customApiResponsePropertyCount": 9,
+      "customApiExecutePrivilege": "prvReados_sr_cand"
     }
+  },
+  "ownerBusinessGoLiveDecision": {
+    "status": "RECORDED_IN_PRIOR_RELEASE_MANIFEST",
+    "sourceManifest": "CANDIDATE_CORE_NORMAL_CREATE_1.0.9_RELEASE_MANIFEST.json",
+    "authorizationBoundary": "Owner business Go Live authorization only; it is separate from the freshly observed exact-organization enabled configuration value and did not change it."
   },
   "scope": "CANDIDATE_LIST_PAGINATION_AND_ANSWERED_TO_SCHEDULING",
   "customApiChanges": 5,
@@ -53,6 +61,7 @@
     {
       "kind": "CustomApiRequestParameter",
       "uniqueName": "os_sr_cact.CandidateSearchText",
+      "parentApiUniqueName": "os_sr_cact",
       "typeCode": 10,
       "type": "String",
       "optional": true,
@@ -62,6 +71,7 @@
     {
       "kind": "CustomApiRequestParameter",
       "uniqueName": "os_sr_cact.CandidateStatusFilter",
+      "parentApiUniqueName": "os_sr_cact",
       "typeCode": 10,
       "type": "String",
       "optional": true,
@@ -71,6 +81,7 @@
     {
       "kind": "CustomApiRequestParameter",
       "uniqueName": "os_sr_cact.CandidatePageNumber",
+      "parentApiUniqueName": "os_sr_cact",
       "typeCode": 7,
       "type": "Integer",
       "optional": true,
@@ -80,6 +91,7 @@
     {
       "kind": "CustomApiResponseProperty",
       "uniqueName": "os_sr_cact.ScopedHasNextPage",
+      "parentApiUniqueName": "os_sr_cact",
       "typeCode": 0,
       "type": "Boolean",
       "sourceFile": "../solutions/customapis/os_sr_cact/customapiresponseproperties/ScopedHasNextPage/customapiresponseproperty.xml",
@@ -88,6 +100,7 @@
     {
       "kind": "CustomApiResponseProperty",
       "uniqueName": "os_sr_cact.ScopedTotalCount",
+      "parentApiUniqueName": "os_sr_cact",
       "typeCode": 7,
       "type": "Integer",
       "sourceFile": "../solutions/customapis/os_sr_cact/customapiresponseproperties/ScopedTotalCount/customapiresponseproperty.xml",
@@ -120,9 +133,63 @@
       "ScopedHasNextPage",
       "ScopedTotalCount"
     ],
+    "baselineRequestParameterCount": 22,
+    "baselineResponsePropertyCount": 9,
+    "expectedRequestParameterCount": 25,
+    "expectedResponsePropertyCount": 11,
+    "additiveMetadataWriteCount": 5,
     "executePrivilegeChanged": false,
     "existingExecutePrivilege": "prvReados_sr_cand",
     "handlerRegistrationChanged": false
+  },
+  "customApi": {
+    "uniqueName": "os_sr_cact",
+    "metadataSha256": "1a941478d04b335e6eb4aa6ea89fac813e233225f847713cd99231661db23fc1",
+    "requestParameters": [
+      { "name": "ProfileFieldMask", "type": 10, "isOptional": true },
+      { "name": "CandidateSearchText", "type": 10, "isOptional": true },
+      { "name": "ActionType", "type": 10, "isOptional": false },
+      { "name": "ContactedAt", "type": 1, "isOptional": true },
+      { "name": "CandidateEmail", "type": 10, "isOptional": true },
+      { "name": "AssignedTaId", "type": 12, "isOptional": true },
+      { "name": "CandidatePhone", "type": 10, "isOptional": true },
+      { "name": "CorrelationId", "type": 12, "isOptional": false },
+      { "name": "CandidateCvUrl", "type": 10, "isOptional": true },
+      { "name": "EndAt", "type": 1, "isOptional": true },
+      { "name": "LocationId", "type": 12, "isOptional": true },
+      { "name": "CandidateStatusFilter", "type": 10, "isOptional": true },
+      { "name": "PositionId", "type": 12, "isOptional": true },
+      { "name": "CallOutcome", "type": 7, "isOptional": true },
+      { "name": "InterviewerId", "type": 12, "isOptional": true },
+      { "name": "Notes", "type": 10, "isOptional": true },
+      { "name": "SyntheticScopeId", "type": 12, "isOptional": true },
+      { "name": "ResultNotes", "type": 10, "isOptional": true },
+      { "name": "CandidateName", "type": 10, "isOptional": true },
+      { "name": "ExpectedStatus", "type": 7, "isOptional": true },
+      { "name": "CandidateSourceId", "type": 12, "isOptional": true },
+      { "name": "CandidateId", "type": 12, "isOptional": true },
+      { "name": "StartAt", "type": 1, "isOptional": true },
+      { "name": "Reason", "type": 10, "isOptional": true },
+      { "name": "CandidatePageNumber", "type": 7, "isOptional": true }
+    ],
+    "responseProperties": [
+      { "name": "IsolationContract", "type": 10 },
+      { "name": "PreviousStatus", "type": 7 },
+      { "name": "CallLogId", "type": 12 },
+      { "name": "CurrentStatus", "type": 7 },
+      { "name": "ResultCode", "type": 10 },
+      { "name": "StatusHistoryId", "type": 12 },
+      { "name": "ScopedData", "type": 10 },
+      { "name": "CandidateNumber", "type": 10 },
+      { "name": "CreatedCandidateId", "type": 12 },
+      { "name": "ScopedHasNextPage", "type": 0 },
+      { "name": "ScopedTotalCount", "type": 7 }
+    ],
+    "changeDecision": {
+      "action": "APPROVED_ADDITIVE_METADATA",
+      "metadataWrites": 5,
+      "reason": "Add only the three source-pinned optional pagination inputs and two scoped-read response properties; preserve the 1.0.9 execute privilege and all existing metadata."
+    }
   },
   "behavior": {
     "normalPagination": "Dataverse applies search/status filters before the 10-row page; ordering is createdon descending then Candidate ID ascending; navigation follows the same-origin server nextLink.",
@@ -131,9 +198,9 @@
     "calendar": "No Calendar or Outlook operation is added."
   },
   "deployment": {
-    "status": "BLOCKED_PENDING_TARGET_CONFIRMATION_AND_FRESH_COMPONENT_BASELINE",
+    "status": "BLOCKED_PENDING_FRESH_COMPONENT_BASELINE",
     "order": [
-      "Confirm the exact environment and reconcile the existing 1.0.9 package, API handler, API metadata and two WebResource ETags/current/published/served hashes.",
+      "The exact environment identity was confirmed by pac org who. Reconcile the existing 1.0.9 package, API handler, API metadata and two WebResource ETags/current/published/served hashes.",
       "Add the three optional request parameters and two response properties to the existing os_sr_cact API without changing its execute privilege or existing parameters.",
       "Install the 1.0.10 package after metadata is present so the handler's fail-closed API contract check succeeds.",
       "Conditionally update only candidate-console.js and candidate-console.html using fresh individual-row ETags, then issue one scoped PublishXml for those exact WebResources.",
@@ -142,7 +209,9 @@
     "organizationConfigurationChanges": 0,
     "securityRoleChanges": 0,
     "candidateBusinessWrites": 0,
-    "automatedLifecycleUat": false
+    "automatedLifecycleUat": false,
+    "normalCreateGatePreserved": true,
+    "normalCreateGateObservedState": "ENABLED_TRUE_EXACT_ORGANIZATION_BINDING_VERIFIED"
   },
   "rollback": {
     "status": "COMPATIBLE_ROLLBACK_PATH_PREPARED",

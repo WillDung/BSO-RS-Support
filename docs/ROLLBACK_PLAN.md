@@ -2,6 +2,23 @@
 
 **Status:** `ROLLBACK_PLAN_OFFLINE_READY`; the owner explicitly approved use of the existing LMV BI DEV pre-deployment checkpoint/recovery procedure for the bounded BSO-RS-Support Test rehearsal (`TEST_RECOVERY_PROCEDURE_APPROVED_FOR_BOUNDED_REHEARSAL`). This does not establish a safe bootstrap cleanup path or authorize routine whole-environment restore. No bootstrap import has occurred.
 
+## Round 1 engine 1.0.12 rollback
+
+**Status (2026-11-18):** `PROTECTED_PACKAGE_AND_PRIOR_PROVIDER_BLOCKED_CONSOLE_CAPTURED_RECOVERY_NOT_EXECUTED`. The [1.0.12 manifest](CANDIDATE_ROUND1_1.0.12_RELEASE_MANIFEST.json) pins protected 1.0.11 rollback package SHA-256 `a65c179d3acc0cf4f548dcd204dfa820250ba95aee29c3e7c7245de04fc41cd6`, embedded DLL `a70290ea20a791a19fd150f3d366642c9454497781f1394566facac769277cf2`. A fresh external baseline captures the immediately prior provider-blocked target HTML (`9ada3e7127645952eb7a237f2f82d14ac034fee10c7f07b8e7da38e5016b11ae`) and JavaScript (`111da41ba1b63b040c9274b630fe2577a4be9b66905c91b36551de66277df848`) bytes.
+
+1. Reconcile any uncertain submissions and obtain a new exact-component recovery instruction/baseline/journal. Never reset/replay the completed apply journal.
+2. Restore the captured provider-blocked Console pair with fresh individual-row ETags and scoped two-resource `PublishXml`; verify current/published/served hashes and cache token.
+3. If backend rollback is required, restore only the pinned protected 1.0.11 existing package through the guarded updater. Its unscoped NORMAL `MarkRound1Scheduled` route fails closed; neither version exposes a weaker callable schedule write. NORMAL Create and Record Call protections remain.
+4. Preserve the unchanged 25/11 API metadata, handler identity, exact-org gate, environment/policy resources, Calendar Flow/connections, roles/teams, Candidate/history/receipt data and prior evidence. No metadata removal or result-table cleanup is required.
+
+Neither rollback rehearsal nor provider/functional acceptance is claimed. The exact resources and source/build state are recorded in [Current State](CURRENT_STATE.md#round-1-engine-and-complete-fail-closed-console-developed-2026-11-18).
+
+## Room and TA scheduling UI rollback
+
+**Status (2026-11-18):** `PRIOR_CONSOLE_BYTES_CAPTURED_RECOVERY_NOT_EXECUTED`. The [provider-blocked UI manifest](CANDIDATE_SCHEDULING_UI_RELEASE_MANIFEST.json) changes only HTML/JavaScript. Its immutable external baseline and deployment journal retain the exact prior 1.0.11 payloads: target HTML SHA-256 `7bd6eeac190b7c79005d454e36cb30083aada6c27065ba0308e502eae06631b7`; JavaScript `ae973d67820a6c8ab9a5ce3bb52442a6aaee635f8086d80e6c46f82799b7dfac`.
+
+Obtain an exact-component recovery instruction and fresh baseline/journal, then restore only that captured pair with fresh individual-row ETags and scoped two-resource `PublishXml`. Verify current/published/served hashes and the prior JavaScript cache token. Do not reuse the completed apply journal, reset prior evidence, restore the backend package, or change API/configuration/Flow/security. The existing backend continues rejecting unscoped NORMAL `MarkRound1Scheduled`; restoring the old manual form does not establish trusted availability or authorize that server operation. SingleUserDev's existing manual path is unchanged by either pair.
+
 ## Record Call 1.0.11 rollback
 
 **Status (2026-11-18):** `PACKAGE_AND_CONSOLE_BYTES_VERIFIED_ROLLBACK_NOT_EXECUTED`. The [1.0.11 manifest](CANDIDATE_CORE_RECORD_CALL_1.0.11_RELEASE_MANIFEST.json) pins the protected 1.0.10 package: SHA-256 `fa0716a401f887b28bc2c7b1fb71f5264ece4490c084fb99697a0063c9263404`, embedded assembly `569e24423aa1e3352ef227c59fd1802ca78cb9cd3d509b94384f6572e4d5832f`. The fresh external Console journal retains the exact prior HTML/JavaScript bytes; decoded current/published rollback payloads were verified against HTML `377d9996c2518d2c5b45b307cf44c2ed21362e1457c128a09c38fdd7ab2e95c3` and JavaScript `b6a87078ca7bb840e80060b86e6891660bb98b44ad013d75c4516cc01daf9803`.

@@ -1,0 +1,75 @@
+{
+  "manifestVersion": 1,
+  "scope": "ROOM_TA_SCHEDULING_UI_PROVIDER_BLOCKED",
+  "release": {
+    "name": "Room and TA scheduling controls with explicit unavailable-provider state",
+    "status": "SOURCE_READY_PROVIDER_INTEGRATION_BLOCKED",
+    "candidateCoreVersion": "1.0.11.0"
+  },
+  "customApiChanges": 0,
+  "environmentConfigurationChanges": 0,
+  "backendPackageChanges": 0,
+  "flowChanges": 0,
+  "securityMetadataChanges": 0,
+  "normalScheduling": {
+    "providerTrust": "BLOCKED",
+    "availabilityRequestsEnabled": false,
+    "scheduleSaveEnabled": false,
+    "slotDurationMinutes": 30,
+    "slotsGenerated": false,
+    "blockers": [
+      "The current configured provider-result writer has effective Calendar Create/Write and both plugin-bypass privileges; an administrator-owned connection is not an accepted trusted restricted provider-result boundary.",
+      "The installed request guard authorizes a different fixed requester and fixed TA/room, not the current NORMAL session and arbitrary authorized Active references.",
+      "The existing Find meeting times suggestion filter is not an exhaustive 30-minute Room/TA Free/Busy grid. No actual provider execution or complete intersection is established.",
+      "NORMAL scheduling still requires a server-authorized operation binding current trusted availability evidence to the exact caller, Candidate, TA, room and interval before saving."
+    ]
+  },
+  "resources": [
+    {
+      "name": "os_/bso/candidate-console.html",
+      "sha256": "EXTERNAL_TARGET_HTML",
+      "templateSha256": "f5be01ed8c8e71afb10b0b9755c4906a8ec60e2cea0946a2998279e5f38c66f9",
+      "previousSha256": "EXTERNAL_TARGET_BASELINE",
+      "previousTemplateSha256": "1ab36c9af984c46374bf0fdf5667bc3c66cdf0ba6fbdb6df111b61a91c92adf7"
+    },
+    {
+      "name": "os_/bso/candidate-console.js",
+      "sha256": "111da41ba1b63b040c9274b630fe2577a4be9b66905c91b36551de66277df848",
+      "previousSha256": "ae973d67820a6c8ab9a5ce3bb52442a6aaee635f8086d80e6c46f82799b7dfac"
+    }
+  ],
+  "preserved": [
+    "Candidate Core 1.0.11.0, unchanged 25-input/11-output API, NORMAL Create gate and record-level Call authorization",
+    "Candidate pagination, Call comments, confirmed-success notification and Answered-to-Waiting transition",
+    "SingleUserDev scope and existing manual scheduling path",
+    "Existing Flow, Outlook connection, Calendar guards and exact request/result configuration",
+    "All Candidate data, history, roles, teams, configuration and policy resources"
+  ],
+  "deployment": {
+    "order": [
+      "Fresh exact-target PAC/WhoAmI, package/handler/API/security/gate, membership and current/published resource readback; retain immutable baseline.",
+      "Capture exact prior target HTML/JavaScript bytes and pins; verify both are current and published with no draft conflict.",
+      "Use the existing guarded Console runner to conditionally update only HTML and JavaScript and scope PublishXml to those two resources.",
+      "Verify current/published/authenticated served bytes and cache token; recheck unchanged backend, API, gate, security, membership and Flow."
+    ],
+    "candidateBusinessReads": 0,
+    "candidateBusinessWrites": 0,
+    "availabilityRequestsCreated": 0,
+    "providerRequests": 0,
+    "automatedLifecycleUat": false,
+    "ownerManualAcceptance": "PENDING"
+  },
+  "rollback": {
+    "resources": "Capture and hash-verify the exact prior 1.0.11 target HTML/JavaScript pair before applying. Restore only that pair with fresh individual-row ETags and scoped PublishXml under a new recovery instruction/journal.",
+    "safety": "No backend, API, Flow, security or gate delta exists. The existing backend continues rejecting unscoped NORMAL MarkRound1Scheduled; restoring the prior manual form cannot establish trusted availability or enable that server operation.",
+    "journals": "Never reset, overwrite or replay consumed evidence."
+  },
+  "validation": {
+    "focusedConsoleTests": 4,
+    "referenceRuntimeChecks": 31,
+    "recordCallPreservationTests": 4,
+    "javascriptSyntax": "PASS",
+    "deploymentScriptSyntax": "PASS",
+    "liveProviderAndFunctionalTesting": "NOT_EXECUTED"
+  }
+}

@@ -6,12 +6,12 @@
     <AssemblyName>os_sr_cact</AssemblyName>
     <RootNamespace>os_sr_cact</RootNamespace>
     <PackageId>os_sr_cact_pkg</PackageId>
-    <Version>1.0.11</Version>
+    <Version>1.0.12</Version>
     <Authors>BSO-RS-Support</Authors>
     <Company>BSO-RS-Support</Company>
     <Description>Candidate Core Dataverse plug-in package.</Description>
-    <AssemblyVersion>1.0.11.0</AssemblyVersion>
-    <FileVersion>1.0.11.0</FileVersion>
+    <AssemblyVersion>1.0.12.0</AssemblyVersion>
+    <FileVersion>1.0.12.0</FileVersion>
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
     <SignAssembly>false</SignAssembly>
@@ -22,6 +22,7 @@
     <Compile Include="..\CandidateCore\Operation.cs" Link="Operation.cs" />
     <Compile Include="..\CandidateCore\SyntheticIsolation.cs" Link="SyntheticIsolation.cs" />
     <Compile Include="..\CandidateCore\NormalCreateAuthorization.cs" Link="NormalCreateAuthorization.cs" />
+    <Compile Include="..\CandidateCore\Round1Availability.cs" Link="Round1Availability.cs" />
     <PackageReference Include="Microsoft.CrmSdk.CoreAssemblies" Version="9.0.2.60" PrivateAssets="All" />
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="All" />
     <PackageReference Include="Microsoft.PowerApps.MSBuild.Plugin" Version="1.52.1" PrivateAssets="All" />

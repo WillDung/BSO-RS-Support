@@ -8,7 +8,7 @@ param(
     [switch]$DevelopmentSourceAhead,
     [string]$NormalReferenceSelectorsReleaseManifestPath,
     [string]$NormalModeReleaseManifestPath,
-    [Alias('RecordCallReleaseManifestPath')][string]$CandidatePaginationReleaseManifestPath,
+    [Alias('RecordCallReleaseManifestPath', 'SchedulingUiReleaseManifestPath', 'Round1SchedulingReleaseManifestPath')][string]$CandidatePaginationReleaseManifestPath,
     [switch]$PublishOnly,
     [switch]$ReconcilePublishOnly,
     [switch]$CreateNewResources,
@@ -273,9 +273,13 @@ if (-not [string]::IsNullOrWhiteSpace($NormalModeReleaseManifestPath)) {
 if (-not [string]::IsNullOrWhiteSpace($CandidatePaginationReleaseManifestPath)) {
     $expectedManifestPath = Join-Path $repositoryRoot 'docs\CANDIDATE_CORE_PAGINATION_1.0.10_RELEASE_MANIFEST.json'
     $recordCallManifestPath = Join-Path $repositoryRoot 'docs\CANDIDATE_CORE_RECORD_CALL_1.0.11_RELEASE_MANIFEST.json'
+    $schedulingUiManifestPath = Join-Path $repositoryRoot 'docs\CANDIDATE_SCHEDULING_UI_RELEASE_MANIFEST.json'
+    $schedulingEngineManifestPath = Join-Path $repositoryRoot 'docs\CANDIDATE_ROUND1_1.0.12_RELEASE_MANIFEST.json'
     $recordCallPatch = [IO.Path]::GetFullPath($CandidatePaginationReleaseManifestPath) -ceq $recordCallManifestPath
+    $schedulingUiPatch = [IO.Path]::GetFullPath($CandidatePaginationReleaseManifestPath) -ceq $schedulingUiManifestPath
+    $schedulingEnginePatch = [IO.Path]::GetFullPath($CandidatePaginationReleaseManifestPath) -ceq $schedulingEngineManifestPath
     if (-not $DevelopmentSourceAhead -or
-        (-not $recordCallPatch -and
+        (-not $recordCallPatch -and -not $schedulingUiPatch -and -not $schedulingEnginePatch -and
             [IO.Path]::GetFullPath($CandidatePaginationReleaseManifestPath) -cne $expectedManifestPath) -or
         -not [string]::IsNullOrWhiteSpace($NormalReferenceSelectorsReleaseManifestPath) -or
         -not [string]::IsNullOrWhiteSpace($NormalModeReleaseManifestPath)) {
@@ -284,10 +288,12 @@ if (-not [string]::IsNullOrWhiteSpace($CandidatePaginationReleaseManifestPath)) 
     $candidatePaginationRelease = Get-Content -LiteralPath $CandidatePaginationReleaseManifestPath -Raw | ConvertFrom-Json
     $paginationResourceNames = @('os_/bso/candidate-console.html', 'os_/bso/candidate-console.js') |
         Sort-Object -CaseSensitive
-    $expectedScope = if ($recordCallPatch) { 'RECORD_CALL_CORRECTION_1.0.11' } else {
+    $expectedScope = if ($schedulingEnginePatch) { 'ROUND1_ENGINE_AND_UI_PROVIDER_BLOCKED_1.0.12' } elseif ($schedulingUiPatch) { 'ROOM_TA_SCHEDULING_UI_PROVIDER_BLOCKED' } elseif ($recordCallPatch) {
+        'RECORD_CALL_CORRECTION_1.0.11'
+    } else {
         'CANDIDATE_LIST_PAGINATION_AND_ANSWERED_TO_SCHEDULING'
     }
-    $expectedApiChanges = if ($recordCallPatch) { 0 } else { 5 }
+    $expectedApiChanges = if ($recordCallPatch -or $schedulingUiPatch -or $schedulingEnginePatch) { 0 } else { 5 }
     if ($candidatePaginationRelease.scope -cne $expectedScope -or
         $candidatePaginationRelease.customApiChanges -ne $expectedApiChanges -or
         $candidatePaginationRelease.environmentConfigurationChanges -ne 0 -or
@@ -295,6 +301,14 @@ if (-not [string]::IsNullOrWhiteSpace($CandidatePaginationReleaseManifestPath)) 
         [string]::Join('|', @($candidatePaginationRelease.resources.name | Sort-Object -CaseSensitive)) -cne
             [string]::Join('|', $paginationResourceNames)) {
         throw 'CANDIDATE_PAGINATION_RELEASE_AUTHORIZATION_REQUIRED'
+    }
+    if (($schedulingUiPatch -or $schedulingEnginePatch) -and
+        ($candidatePaginationRelease.normalScheduling.providerTrust -cne 'BLOCKED' -or
+            $candidatePaginationRelease.normalScheduling.availabilityRequestsEnabled -isnot [bool] -or
+            $candidatePaginationRelease.normalScheduling.availabilityRequestsEnabled -ne $false -or
+            $candidatePaginationRelease.normalScheduling.scheduleSaveEnabled -isnot [bool] -or
+            $candidatePaginationRelease.normalScheduling.scheduleSaveEnabled -ne $false)) {
+        throw 'SCHEDULING_PROVIDER_BLOCKED_RELEASE_REQUIRED'
     }
     $developmentSourceAheadHashes = @{}
     foreach ($resource in $candidatePaginationRelease.resources) {

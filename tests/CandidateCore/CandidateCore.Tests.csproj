@@ -8,5 +8,6 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="..\..\solutions\CandidateCore\Operation.cs" Link="Operation.cs" />
+    <Compile Include="..\..\solutions\CandidateCore\Round1Availability.cs" Link="Round1Availability.cs" />
   </ItemGroup>
 </Project>

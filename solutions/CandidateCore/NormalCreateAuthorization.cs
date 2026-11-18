@@ -42,6 +42,14 @@ namespace os_sr_cact
 
         public static void RequireCall(IOrganizationService service, Guid organizationId,
             Guid actorId, Guid candidateId)
+            => RequireCandidateWrite(service, organizationId, actorId, candidateId, "NORMAL_CALL_WRITE_ACCESS_REQUIRED");
+
+        public static void RequireScheduling(IOrganizationService service, Guid organizationId,
+            Guid actorId, Guid candidateId)
+            => RequireCandidateWrite(service, organizationId, actorId, candidateId, "NORMAL_SCHEDULE_WRITE_ACCESS_REQUIRED");
+
+        private static void RequireCandidateWrite(IOrganizationService service, Guid organizationId,
+            Guid actorId, Guid candidateId, string rejection)
         {
             RequireEnabledPolicy(service, organizationId);
             var access = (RetrievePrincipalAccessResponse)service.Execute(new RetrievePrincipalAccessRequest
@@ -51,7 +59,7 @@ namespace os_sr_cact
             });
             var required = AccessRights.ReadAccess | AccessRights.WriteAccess;
             if ((access.AccessRights & required) != required)
-                throw new OperationError("NORMAL_CALL_WRITE_ACCESS_REQUIRED");
+                throw new OperationError(rejection);
         }
 
         private static void RequireEnabledPolicy(IOrganizationService service, Guid organizationId)

@@ -809,8 +809,8 @@ internal static partial class Program
         host.Input["ExpectedStatus"] = ActionRequest.NeedCall;
         host.Input["CallOutcome"] = ActionRequest.NeedCall;
         host.Input["ContactedAt"] = DateTime.UtcNow.AddSeconds(-1);
-        Reject(() => host.InvokeAgain(), "SYNTHETIC_SCOPE_REQUIRED");
-        Check(host.Writes == writesBeforeReplay, "Unscoped DEV API mutation is rejected before storage");
+        Reject(() => host.InvokeAgain(), "NORMAL_CREATE_CONFIGURATION_REJECTED");
+        Check(host.Writes == writesBeforeReplay, "Unscoped Call cannot bypass isolation through an unconfigured NORMAL boundary");
 
         Reject(() => host.Direct("Create", new Entity("os_sr_cand", Guid.NewGuid())),
             "SYNTHETIC_DIRECT_WRITE_REJECTED");

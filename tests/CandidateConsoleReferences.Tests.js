@@ -35,7 +35,8 @@ const metadata = {
 const metadataByTable = {
   os_sr_pos: metadata,
   os_sr_csrc: { PrimaryIdAttribute: "os_sr_csrcid", PrimaryNameAttribute: "os_sr_csrc_nm", EntitySetName: "os_sr_csrcs" },
-  os_sr_ta: { PrimaryIdAttribute: "os_sr_taid", PrimaryNameAttribute: "os_sr_ta_nm", EntitySetName: "os_sr_tas" }
+  os_sr_ta: { PrimaryIdAttribute: "os_sr_taid", PrimaryNameAttribute: "os_sr_ta_nm", EntitySetName: "os_sr_tas" },
+  os_sr_loc: { PrimaryIdAttribute: "os_sr_locid", PrimaryNameAttribute: "os_sr_loc_nm", EntitySetName: "os_sr_locs" }
 };
 const calls = [];
 const requests = [];
@@ -113,6 +114,12 @@ function check(condition) { assert.ok(condition); passed++; }
     element("candidate-rows").children.length === 1);
   check(["candidate-position", "candidate-source", "candidate-assigned-ta"].every((id) =>
     element(id).children.length === 2 && element(id).children[1].value === ids[0]));
+  api.setMode("NORMAL", false);
+  await api.loadLookupOptions("os_sr_loc", "scheduling-location", "Select meeting room");
+  check(decodeURIComponent(calls.at(-1).query).includes("statecode eq 0 and os_sr_loc_rmeml ne null"));
+  check(!calls.at(-1).query.split("&")[0].includes("os_sr_loc_rmeml") &&
+    element("scheduling-location").children.length === 2);
+  api.setMode("NORMAL", true);
   calls.length = 0;
   retrieve = async () => ({
     entities: [row(ids[0], "[DEV] Synthetic reference"), row(ids[1], "<Active position>")],

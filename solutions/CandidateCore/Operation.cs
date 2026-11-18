@@ -77,7 +77,7 @@ namespace os_sr_cact
         public static bool IsSupportedAction(string action) =>
             new[] { "CreateCandidate", "UpdateCandidate", "RecordCall", "ProceedToScheduling",
                 "MarkRound1Scheduled", "RecordPass", "RecordFail", "RequestReschedule",
-                "CancelRound1" }.Contains(action);
+                "CancelRound1", Round1Availability.QueryAction, Round1Availability.CapabilitiesAction }.Contains(action);
 
         public static IEnumerable<string> ApplicableInputNames(string action)
         {
@@ -94,6 +94,10 @@ namespace os_sr_cact
             if (action == "MarkRound1Scheduled" || action == "RequestReschedule")
                 return common.Concat(new[] { "CandidateId", "ExpectedStatus", "InterviewerId", "LocationId",
                     "StartAt", "EndAt", "Notes" }).Concat(action == "RequestReschedule" ? new[] { "Reason" } : Array.Empty<string>());
+            if (action == Round1Availability.QueryAction)
+                return common.Concat(new[] { "CandidateId", "ExpectedStatus", "InterviewerId", "LocationId", "StartAt", "EndAt" });
+            if (action == Round1Availability.CapabilitiesAction)
+                return common.Concat(new[] { "CandidateId", "ExpectedStatus" });
             if (action == "CancelRound1")
                 return common.Concat(new[] { "CandidateId", "ExpectedStatus", "Reason" });
             if (action == "RecordPass" || action == "RecordFail")
@@ -244,7 +248,7 @@ namespace os_sr_cact
             {
                 if (!values.ContainsKey("Reason")) throw new OperationError("REASON_REQUIRED");
             }
-            if (Action == "MarkRound1Scheduled" || Action == "RequestReschedule")
+            if (Action == "MarkRound1Scheduled" || Action == "RequestReschedule" || Action == Round1Availability.QueryAction)
             {
                 var interviewer = Required<Guid>(values, "InterviewerId");
                 var location = Required<Guid>(values, "LocationId");
@@ -253,7 +257,7 @@ namespace os_sr_cact
                 if (interviewer == Guid.Empty || location == Guid.Empty)
                     throw new OperationError("INVALID_SCHEDULE_REFERENCE");
                 if (start.Kind != DateTimeKind.Utc || end.Kind != DateTimeKind.Utc ||
-                    start <= utcNow || end <= start || start.Date != end.Date)
+                    (Action != Round1Availability.QueryAction && start <= utcNow) || end <= start || start.Date != end.Date)
                     throw new OperationError("INVALID_SCHEDULE_TIME");
             }
             ProfilePatch = new ReadOnlyDictionary<string, ProfileFieldPatch>(profilePatch);

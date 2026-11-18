@@ -176,6 +176,13 @@ internal static partial class Program
 
     private static void Main(string[] args)
     {
+        if (args.Length == 1 && args[0] == "--round1-availability")
+        {
+            TestRound1Availability();
+            TestSingleUserDevScope();
+            Console.WriteLine("Round 1 availability SDK checks passed: " + passed);
+            return;
+        }
         if (args.Length == 1 && args[0] == "--record-call")
         {
             TestNormalRecordCall();
@@ -591,7 +598,7 @@ internal static partial class Program
         var inaccessibleCandidate = new Host(100010000);
         inaccessibleCandidate.CallerReadDeniedTables.Add("os_sr_cand");
         Reject(() => new ApplyCandidateAction().Execute(inaccessibleCandidate),
-            "CALLER_READ_ACCESS_REQUIRED");
+            "NORMAL_CALL_WRITE_ACCESS_REQUIRED");
         Check(inaccessibleCandidate.CallerReadAccessChecks.SequenceEqual(new[] { "os_sr_cand" }) &&
             !inaccessibleCandidate.ServiceOperations.Contains("Retrieve:os_sr_cand") &&
             !inaccessibleCandidate.ServiceOperations.Any(operation => operation.StartsWith("Create:", StringComparison.Ordinal) ||
@@ -856,44 +863,24 @@ internal static partial class Program
         }
         var scheduleHost = new Host(-1) { Status = ActionRequest.Waiting };
         SetScheduleAction(scheduleHost, "MarkRound1Scheduled", ActionRequest.Waiting);
+        scheduleHost.Input["EndAt"] = ((DateTime)scheduleHost.Input["StartAt"]).AddMinutes(30);
         scheduleHost.MainValues = Context(scheduleHost.Input, scheduleHost.Shared, scheduleHost.Output);
         scheduleHost.MainContext = Execution(scheduleHost.MainValues);
-        new ApplyCandidateAction().Execute(scheduleHost);
-        Check(scheduleHost.ScheduleCreates == 1 && scheduleHost.ScheduleUpdates == 0 &&
-            scheduleHost.Round1Schedule?.GetAttributeValue<OptionSetValue>("os_sr_intv_stat")?.Value ==
-                ActionRequest.ScheduleActive &&
-            scheduleHost.Round1Schedule.GetAttributeValue<OptionSetValue>("os_sr_intv_res")?.Value ==
-                ActionRequest.ResultPending &&
-            scheduleHost.Status == ActionRequest.Scheduled && scheduleHost.Histories == 1 &&
-            scheduleHost.Receipt != null,
-            "SDK schedule creates and reads back Interview Schedule before Candidate, History, Receipt");
-        Check(scheduleHost.ServiceOperations.SequenceEqual(new[]
-            {
-                "Retrieve:os_sr_ta", "Retrieve:os_sr_loc",
-                "RetrieveMultiple:os_sr_oprc", "Retrieve:os_sr_cand",
-                "RetrieveMultiple:os_sr_intv", "RetrieveMultiple:os_sr_intv",
-                "Create:os_sr_intv", "Retrieve:os_sr_intv",
-                "Execute:Update:os_sr_cand", "Create:os_sr_csh", "Create:os_sr_oprc"
-            }) && scheduleHost.ServiceFactorySelections.Contains(null) &&
-            scheduleHost.CallerReadAccessChecks.Contains("os_sr_cand") &&
-            scheduleHost.CallerReadAccessChecks.Contains("os_sr_intv"),
-            "SDK scheduling uses fixed SYSTEM storage with explicit caller read-access checks: " +
-            string.Join(",", scheduleHost.ServiceOperations));
-        Check(scheduleHost.Receipt!.GetAttributeValue<string>("os_sr_oprc_cact") == "MarkRound1Scheduled",
-            "SDK schedule operation records idempotency Receipt");
+        Reject(() => new ApplyCandidateAction().Execute(scheduleHost), "AVAILABILITY_PROVIDER_UNAVAILABLE");
+        Check(scheduleHost.ScheduleCreates == 0 && scheduleHost.Updates == 0 &&
+            scheduleHost.Histories == 0 && scheduleHost.Receipt == null,
+            "SDK NORMAL scheduling cannot write before current trusted provider evidence");
 
         var confirmScheduleHost = new Host(-1) { Status = ActionRequest.Waiting };
         SetScheduleAction(confirmScheduleHost, "MarkRound1Scheduled", ActionRequest.Waiting);
+        confirmScheduleHost.Input["EndAt"] = ((DateTime)confirmScheduleHost.Input["StartAt"]).AddMinutes(30);
         confirmScheduleHost.ProposedRound1Schedule = ScheduleEntity(ActionRequest.ScheduleProposed);
         confirmScheduleHost.MainValues = Context(confirmScheduleHost.Input, confirmScheduleHost.Shared, confirmScheduleHost.Output);
         confirmScheduleHost.MainContext = Execution(confirmScheduleHost.MainValues);
-        new ApplyCandidateAction().Execute(confirmScheduleHost);
-        Check(confirmScheduleHost.ScheduleCreates == 0 && confirmScheduleHost.ScheduleUpdates == 1 &&
-            confirmScheduleHost.Round1Schedule?.GetAttributeValue<OptionSetValue>("os_sr_intv_stat")?.Value ==
-                ActionRequest.ScheduleActive &&
-            confirmScheduleHost.ProposedRound1Schedule == null &&
-            confirmScheduleHost.Status == ActionRequest.Scheduled,
-            "SDK Schedule Round 1 promotes one persisted Proposed row without creating a duplicate");
+        Reject(() => new ApplyCandidateAction().Execute(confirmScheduleHost), "AVAILABILITY_PROVIDER_UNAVAILABLE");
+        Check(confirmScheduleHost.ScheduleCreates == 0 && confirmScheduleHost.ScheduleUpdates == 0 &&
+            confirmScheduleHost.ProposedRound1Schedule != null && confirmScheduleHost.Status == ActionRequest.Waiting,
+            "SDK NORMAL Proposed schedule cannot be promoted without fresh trusted provider evidence");
 
         var rescheduleHost = new Host(-1) { Status = ActionRequest.Scheduled };
         SetScheduleAction(rescheduleHost, "RequestReschedule", ActionRequest.Scheduled);
@@ -1817,7 +1804,11 @@ internal static partial class Program
                 var referenceTable = table == "os_sr_pos" || table == "os_sr_csrc" ||
                     table == "os_sr_ta" || table == "os_sr_loc";
                 var devSlice = MainContext.MessageName == "os_sr_devcs";
-                if ((protectedTable && serviceUser != (devSlice ? Actor : null)) ||
+                var availabilityRead = table == "os_sr_cand" && serviceUser == Actor &&
+                    Round1Availability.IsReadAction(Input["ActionType"] as string) &&
+                    (Guid)call.Args[1] == Candidate &&
+                    ((ColumnSet)call.Args[2]).Columns.SequenceEqual(new[] { "os_sr_cand_stat" });
+                if ((protectedTable && serviceUser != (devSlice ? Actor : null) && !availabilityRead) ||
                     (referenceTable && serviceUser != Actor) ||
                     (table != "organization" && !protectedTable && !referenceTable))
                     throw new Exception("Unexpected read identity or table");

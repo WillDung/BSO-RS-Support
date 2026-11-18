@@ -1,0 +1,141 @@
+{
+  "manifestVersion": 1,
+  "scope": "ROUND1_ENGINE_AND_UI_PROVIDER_BLOCKED_1.0.12",
+  "release": {
+    "name": "Exact Round 1 intersection engine and fail-closed scheduling experience",
+    "artifactVersion": "1.0.12",
+    "assemblyVersion": "1.0.12.0",
+    "status": "SOURCE_AND_PACKAGE_READY_PROVIDER_TRANSPORT_BLOCKED",
+    "reportedBaseline": { "candidateCoreVersion": "1.0.11.0", "normalCreateEnabled": true }
+  },
+  "solution": { "uniqueName": "os_sr_bso_rs_support", "version": "1.0.0.1" },
+  "releaseTooling": { "pacCliVersion": "2.13.1+g251dee1" },
+  "patchDeployment": {
+    "operation": "EXISTING_PLUGINPACKAGE_ASSEMBLY_REPLACEMENT",
+    "securityMetadataWrites": 0,
+    "allowedMutations": ["EXISTING_PLUGINPACKAGE_CONTENT"],
+    "securityBaselineSha256": "1cb88bf132899c6feec4101bc1290acfbaaa25a0161d8c36a628c55efaa2e26c"
+  },
+  "candidateCore": {
+    "packageFileName": "os_sr_cact_pkg.1.0.12.nupkg",
+    "packageUniqueName": "os_sr_cact_pkg",
+    "registeredPackageRecordVersion": "1.0.0",
+    "artifactPackageVersion": "1.0.12",
+    "packageSha256": "340e875749148ded13b44aa3a22a8a6b117bf46f700d155c404c26931666eaa6",
+    "embeddedAssemblyTypeName": "os_sr_cact.ApplyCandidateAction",
+    "embeddedAssemblySha256": "51125c7eba67cba936e39384496c0bfdbfd3810ef18cf8646eb615b59bc65f23",
+    "assemblyVersion": "1.0.12.0",
+    "fileVersion": "1.0.12.0",
+    "productVersion": "1.0.12+5bbac1db3728f3db8b274d981c3aff4d98069d9c",
+    "publicKeyToken": null,
+    "customApiHandlerTypeName": "os_sr_cact.ApplyCandidateAction",
+    "expectedPluginTypes": [
+      "os_sr_cact.ApplyCandidateAction", "os_sr_cact.ProtectCandidateCore",
+      "os_sr_cact.SyntheticIsolationGuard", "os_sr_cact.SyntheticIsolationReadGuard"
+    ],
+    "rollbackArtifact": {
+      "fileName": "os_sr_cact_pkg.1.0.11.nupkg",
+      "artifactPackageVersion": "1.0.11",
+      "assemblyVersion": "1.0.11.0",
+      "fileVersion": "1.0.11.0",
+      "productVersion": "1.0.11+5199642233927a749b489880ec99a2bfd285a1a6",
+      "packageSha256": "a65c179d3acc0cf4f548dcd204dfa820250ba95aee29c3e7c7245de04fc41cd6",
+      "embeddedAssemblySha256": "a70290ea20a791a19fd150f3d366642c9454497781f1394566facac769277cf2"
+    }
+  },
+  "customApiChanges": 0,
+  "environmentConfigurationChanges": 0,
+  "flowChanges": 0,
+  "securityMetadataChanges": 0,
+  "customApi": {
+    "uniqueName": "os_sr_cact",
+    "metadataSha256": "1a941478d04b335e6eb4aa6ea89fac813e233225f847713cd99231661db23fc1",
+    "changeDecision": {
+      "action": "NO_CHANGE", "metadataWrites": 0,
+      "reason": "Two additive read-only ActionType values reuse existing typed inputs and ScopedData. No client provider-result parameter, handler change or execute-privilege change."
+    },
+    "requestParameters": [
+      { "name": "ProfileFieldMask", "type": 10, "isOptional": true },
+      { "name": "CandidateSearchText", "type": 10, "isOptional": true },
+      { "name": "ActionType", "type": 10, "isOptional": false },
+      { "name": "ContactedAt", "type": 1, "isOptional": true },
+      { "name": "CandidateEmail", "type": 10, "isOptional": true },
+      { "name": "AssignedTaId", "type": 12, "isOptional": true },
+      { "name": "CandidatePhone", "type": 10, "isOptional": true },
+      { "name": "CorrelationId", "type": 12, "isOptional": false },
+      { "name": "CandidateCvUrl", "type": 10, "isOptional": true },
+      { "name": "EndAt", "type": 1, "isOptional": true },
+      { "name": "LocationId", "type": 12, "isOptional": true },
+      { "name": "CandidateStatusFilter", "type": 10, "isOptional": true },
+      { "name": "PositionId", "type": 12, "isOptional": true },
+      { "name": "CallOutcome", "type": 7, "isOptional": true },
+      { "name": "InterviewerId", "type": 12, "isOptional": true },
+      { "name": "Notes", "type": 10, "isOptional": true },
+      { "name": "SyntheticScopeId", "type": 12, "isOptional": true },
+      { "name": "ResultNotes", "type": 10, "isOptional": true },
+      { "name": "CandidateName", "type": 10, "isOptional": true },
+      { "name": "ExpectedStatus", "type": 7, "isOptional": true },
+      { "name": "CandidateSourceId", "type": 12, "isOptional": true },
+      { "name": "CandidateId", "type": 12, "isOptional": true },
+      { "name": "StartAt", "type": 1, "isOptional": true },
+      { "name": "Reason", "type": 10, "isOptional": true },
+      { "name": "CandidatePageNumber", "type": 7, "isOptional": true }
+    ],
+    "responseProperties": [
+      { "name": "IsolationContract", "type": 10 }, { "name": "PreviousStatus", "type": 7 },
+      { "name": "CallLogId", "type": 12 }, { "name": "CurrentStatus", "type": 7 },
+      { "name": "ResultCode", "type": 10 }, { "name": "StatusHistoryId", "type": 12 },
+      { "name": "ScopedData", "type": 10 }, { "name": "CandidateNumber", "type": 10 },
+      { "name": "CreatedCandidateId", "type": 12 }, { "name": "ScopedHasNextPage", "type": 0 },
+      { "name": "ScopedTotalCount", "type": 7 }
+    ]
+  },
+  "resources": [
+    {
+      "name": "os_/bso/candidate-console.html", "sha256": "EXTERNAL_TARGET_HTML",
+      "templateSha256": "186175c2d361edca57b18c39da4ea6b1742d904c5c9bacce490178a18595f344",
+      "previousSha256": "EXTERNAL_TARGET_BASELINE",
+      "previousTemplateSha256": "f5be01ed8c8e71afb10b0b9755c4906a8ec60e2cea0946a2998279e5f38c66f9"
+    },
+    {
+      "name": "os_/bso/candidate-console.js",
+      "sha256": "27bed7fb1c04d736d34b1c99721f5bbd06d740ec410684664a149c409be1ef5c",
+      "previousSha256": "111da41ba1b63b040c9274b630fe2577a4be9b66905c91b36551de66277df848"
+    }
+  ],
+  "normalScheduling": {
+    "providerTrust": "BLOCKED",
+    "availabilityRequestsEnabled": false,
+    "scheduleSaveEnabled": false,
+    "capabilityReadEnabled": true,
+    "slotDurationMinutes": 30,
+    "timezone": "SE Asia Standard Time",
+    "businessHours": "Monday-Friday 09:00-17:00",
+    "maximumEvidenceAgeSeconds": 120,
+    "calculation": "Complete explicit nonoverlapping coverage for both resources; every overlapping interval must be Free for the entire 30-minute grid slot. Unknown, unsupported statuses, missing/gapped/overlapping coverage, stale/future/expired or mismatched evidence cannot enable a slot.",
+    "saveBoundary": "NORMAL exact-organization enabled policy plus initiating-user effective Candidate Read/Write and active caller-visible references. The server fetches fresh provider evidence after receipt lookup and before both new schedule creation and proposed promotion. Evidence binds actor, Candidate, Room, TA, local date, business window, slot, expiry and operation correlation. Browser Free/Busy flags are never inputs. SingleUserDev retains scoped manual scheduling.",
+    "console": "Authenticated capability discovery, loading/empty/error states, strict bound slot envelope, late-response rejection, invalidation on Room/Date/TA/Candidate change, expiry/past-slot invalidation, derived UTC save times, Notes readback and exactly one native success dialog after confirmed persistence.",
+    "technicalDependency": "Implement and verify an authenticated runtime invocation/server-provider adapter using existing authorized resources, returning complete Room and TA provider coverage for selected references without an elevated writable Calendar-result boundary. Existing connector connections do not supply that inbound token/delegation path. No SAS/Anyone endpoint is permitted or prepared."
+  },
+  "deployment": {
+    "order": [
+      "Capture fresh exact-target 1.0.11 baseline, security/gate/API/membership/Flow pins and prior Console bytes.",
+      "Guarded existing-package replacement to pinned 1.0.12 with unique immutable journal and protected 1.0.11 rollback.",
+      "Conditional HTML/JavaScript updates and two-resource-only PublishXml using fresh ETags.",
+      "Verify installed assembly/handler, unchanged API/security/gate/membership/Flow and current/published/authenticated served bytes; export/unpack package for exact hash reconciliation."
+    ],
+    "candidateBusinessReads": 0, "candidateBusinessWrites": 0,
+    "providerInvocations": 0, "automatedLifecycleUat": false,
+    "outlookMeetingsOrInvitations": 0, "ownerManualAcceptance": "PENDING"
+  },
+  "rollback": {
+    "backend": "Restore only the pinned protected 1.0.11 existing package using a fresh guarded baseline/journal. Its NORMAL MarkRound1Scheduled routing fails closed.",
+    "console": "Restore the immediately prior provider-blocked target HTML/JavaScript pair captured externally, with fresh ETags and scoped PublishXml. Do not remove unchanged API metadata.",
+    "journals": "Never overwrite, reset or replay consumed journals; reconcile ambiguous outcomes before any separate recovery."
+  },
+  "validation": {
+    "releaseBuild": "PASS_ZERO_WARNINGS_ZERO_ERRORS", "focusedAvailabilityAndIsolationSdkChecks": 105,
+    "recordCallSdkChecks": 17, "focusedNodeTests": 15, "referenceRuntimeChecks": 31,
+    "javascriptAndDeploymentSyntax": "PASS", "liveFunctionalAndProviderAcceptance": "NOT_EXECUTED"
+  }
+}

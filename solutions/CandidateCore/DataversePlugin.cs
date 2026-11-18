@@ -41,6 +41,8 @@ namespace os_sr_cact
                     scopeInput is Guid scopeId && scopeId != Guid.Empty;
                 var normalCall = !requestedScope &&
                     (requestedAction == "RecordCall" || requestedAction == "ProceedToScheduling");
+                var normalScheduling = !requestedScope &&
+                    (requestedAction == "MarkRound1Scheduled" || Round1Availability.IsReadAction(requestedAction));
                 var isSyntheticVerifier = requestedAction == SyntheticIsolation.VerifyAction;
                 var isSingleUserDevVerifier = requestedAction == SyntheticIsolation.VerifySingleUserDevAction;
                 var developmentOrganization = context.OrganizationId == DevCandidateSlice.DevelopmentOrganizationId;
@@ -65,7 +67,7 @@ namespace os_sr_cact
                         context.OutputParameters["IsolationContract"] = isolation.Contract();
                         return;
                     }
-                    if ((requestedAction == "CreateCandidate" && !requestedScope) || normalCall)
+                    if ((requestedAction == "CreateCandidate" && !requestedScope) || normalCall || normalScheduling)
                     {
                         isolation = null;
                     }
@@ -118,6 +120,32 @@ namespace os_sr_cact
                 if (normalCall)
                     NormalCreateAuthorization.RequireCall(factory.CreateOrganizationService(null),
                         context.OrganizationId, context.InitiatingUserId, request.CandidateId!.Value);
+                if (normalScheduling)
+                    NormalCreateAuthorization.RequireScheduling(factory.CreateOrganizationService(null),
+                        context.OrganizationId, context.InitiatingUserId, request.CandidateId!.Value);
+                if (Round1Availability.IsReadAction(request.Action))
+                {
+                    if (!normalScheduling) throw new OperationError("AVAILABILITY_NORMAL_CONTEXT_REQUIRED");
+                    var candidate = callerService.Retrieve("os_sr_cand", request.CandidateId!.Value,
+                        new ColumnSet("os_sr_cand_stat"));
+                    if (request.ExpectedStatus != ActionRequest.Waiting ||
+                        candidate.GetAttributeValue<OptionSetValue>("os_sr_cand_stat")?.Value != ActionRequest.Waiting)
+                        throw new OperationError("STALE_EXPECTED_STATUS");
+                    if (request.Action == Round1Availability.CapabilitiesAction)
+                        context.OutputParameters["ScopedData"] = "{\"schemaVersion\":1,\"providerOperational\":" +
+                            (Round1Availability.Provider.IsOperational ? "true" : "false") + "}";
+                    else
+                    {
+                        var selection = Round1Availability.FromRequest(request);
+                        var evidence = Round1Availability.Provider.Query(selection, DateTime.UtcNow);
+                        context.OutputParameters["ScopedData"] =
+                            Round1Availability.Calculate(selection, evidence, DateTime.UtcNow).ToJson();
+                    }
+                    context.OutputParameters["ResultCode"] = "AvailabilityRead";
+                    trace.Trace("os_sr_cact availability action={0} providerOperational={1}",
+                        action, Round1Availability.Provider.IsOperational);
+                    return;
+                }
                 var systemService = factory.CreateOrganizationService(null);
                 var store = new DataverseStore(systemService, context, trace, request.Action,
                     stage => createCandidateStage = stage, isolation);
@@ -982,6 +1010,7 @@ namespace os_sr_cact
             if (scheduleStatus != ActionRequest.ScheduleActive &&
                 !(request.Action == "RequestReschedule" && scheduleStatus == ActionRequest.ScheduleProposed))
                 throw new OperationError("UNSUPPORTED_SCHEDULE_STATE");
+            ValidateNormalScheduleAvailability(request);
 
             var row = new Entity("os_sr_intv");
             SetScheduleInputs(row, request, candidateId);
@@ -1006,6 +1035,7 @@ namespace os_sr_cact
                 schedule.Status == ActionRequest.ScheduleProposed &&
                 scheduleStatus == ActionRequest.ScheduleActive)
             {
+                ValidateNormalScheduleAvailability(request);
                 SetScheduleInputs(row, request, schedule.CandidateId);
             }
             else if (request.Action == "RequestReschedule" &&
@@ -1032,6 +1062,14 @@ namespace os_sr_cact
                     ConcurrencyBehavior = ConcurrencyBehavior.IfRowVersionMatches
                 }));
             return ReadBackSchedule(request, schedule.Id, schedule.CandidateId, scheduleStatus);
+        }
+
+        private void ValidateNormalScheduleAvailability(ActionRequest request)
+        {
+            if (isolation != null || request.Action != "MarkRound1Scheduled") return;
+            Round1Availability.ValidateSave(Round1Availability.FromRequest(request),
+                (DateTime)request.Values["StartAt"]!, (DateTime)request.Values["EndAt"]!,
+                Round1Availability.Provider, () => DateTime.UtcNow);
         }
 
         private static void SetScheduleInputs(Entity row, ActionRequest request, Guid candidateId)

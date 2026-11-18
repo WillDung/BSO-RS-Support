@@ -8,7 +8,7 @@
   <script src="../../ClientGlobalContext.js.aspx"></script>
   <script defer src="candidate-console-environment.js?v=21ddcd925916"></script>
   <script defer src="candidate-console-policy.js?v=fbefadd65caa"></script>
-  <script defer src="candidate-console.js?v=ae973d67820a"></script>
+  <script defer src="candidate-console.js?v=27bed7fb1c04"></script>
   <script defer src="candidate-console-availability.js?v=7df0706fcbe1"></script>
 </head>
 <body>
@@ -338,9 +338,9 @@
             <input id="scheduling-candidate" readonly>
           </label>
           <label class="field">
-            <span>Interviewer / TA <b aria-hidden="true">*</b></span>
-            <select id="scheduling-ta" required>
-              <option value="">Select interviewer</option>
+            <span><span id="scheduling-location-label">Location</span> <b aria-hidden="true">*</b></span>
+            <select id="scheduling-location" required>
+              <option value="">Select location</option>
             </select>
           </label>
           <label class="field">
@@ -348,17 +348,31 @@
             <input id="scheduling-date" type="date" required>
           </label>
           <label class="field">
+            <span>Interviewer / TA <b aria-hidden="true">*</b></span>
+            <select id="scheduling-ta" required>
+              <option value="">Select interviewer</option>
+            </select>
+          </label>
+          <label id="scheduling-time-field" class="field">
             <span>Start Time <b aria-hidden="true">*</b></span>
             <input id="scheduling-time" type="time" required>
           </label>
-          <label class="field">
+          <label id="scheduling-end-time-field" class="field">
             <span>End Time <b aria-hidden="true">*</b></span>
             <input id="scheduling-end-time" type="time" required>
           </label>
-          <label class="field">
-            <span>Location <b aria-hidden="true">*</b></span>
-            <select id="scheduling-location" required>
-              <option value="">Select location</option>
+          <div id="scheduling-availability" class="field field-wide" hidden>
+            <p>30-minute slots, Monday-Friday 09:00-17:00, SE Asia Standard Time (UTC+07:00).</p>
+            <button id="scheduling-check-availability" class="button button-secondary" type="button"
+              aria-describedby="scheduling-availability-status" disabled>Check Room + TA availability</button>
+            <p id="scheduling-availability-status" class="storage-warning" role="status" aria-live="polite">
+              Outlook availability is unavailable. No verified slots can be selected.
+            </p>
+          </div>
+          <label id="scheduling-slot-field" class="field field-wide" hidden>
+            <span>Available 30-minute slot <b aria-hidden="true">*</b></span>
+            <select id="scheduling-slot" aria-describedby="scheduling-availability-status" disabled>
+              <option value="">Availability unavailable - no verified slots</option>
             </select>
           </label>
           <label class="field">

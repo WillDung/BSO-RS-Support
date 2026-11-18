@@ -34,9 +34,10 @@ Assert-Test (-not $html.Contains('REAL-DATA MODE') -and -not $script.Contains('R
     $script.Contains('? environmentPolicy.mode') -and
     $script.Contains('"PRODUCTION CONFIGURATION"') -and
     $script.Contains('"SYNTHETIC DATA ONLY"')) 'Label the environment mode neutrally without implying real-data authorization'
-Assert-Test ($html.Contains('id="dev-fallback-toggle"') -and
-    $html.Contains('Enable DEV direct-write fallback for this browser session') -and
-    -not $html.Contains('id="dev-fallback-toggle" type="checkbox" checked')) 'Keep direct writes behind an explicit unchecked session switch'
+Assert-Test (-not $html.Contains('id="dev-fallback-control"') -and
+    -not $html.Contains('id="dev-fallback-toggle"') -and
+    $script -match 'function isDevFallbackEnabled\(\) \{\r?\n\s+return false;\r?\n\s+\}') `
+    'Keep DEV direct writes unavailable from the owner-facing Console'
 Assert-Test ($script -match 'function isDevConfiguration\(\) \{\r?\n\s+return isCandidateCoreEnabled\(\) && environmentPolicy\.mode === "DEV";\r?\n\s+\}\r?\n\r?\n\s+function isDevFallbackEnabled\(\)') `
     'Keep workflow path selection in the outer console scope'
 Assert-Test ($configuration.Contains('mode: "UNCONFIGURED"') -and
@@ -218,17 +219,20 @@ Assert-Test ($script.Contains('loadLookupOptions("os_sr_ta"') -and
     $script.Contains('isReferenceAllowedByDataMode(label)') -and
     $script.Contains('policy.allowsReference(label, environmentPolicy.syntheticDataOnly)')) `
     'Load active reference choices, pin SingleUserDev selections to approved profile IDs, and show lookup loading/error/empty states'
-Assert-Test ($html.Contains('id="candidate-data-mode"') -and
-    $html.Contains('value="NORMAL"') -and
+Assert-Test (-not $html.Contains('id="candidate-data-mode"') -and
+    -not $html.Contains('id="reference-mode-status"') -and
+    -not $script.Contains('candidate-data-mode') -and
+    -not $script.Contains('dev-fallback-toggle') -and
     $html.Contains('id="refresh-references"') -and
-    $script.Contains('let referenceMode = "CONFIGURED";') -and
+    $script.Contains('let referenceMode = "NORMAL";') -and
+    $script.Contains('referenceMode = "NORMAL";') -and
     $script.Contains('NORMAL_CANDIDATE_OPERATION_NOT_AUTHORIZED') -and
     $script.Contains('CANDIDATE_WORKSPACE_NOT_READY') -and
     $script.Contains('async function readNormalReferenceRecords') -and
     $script.Contains('referenceMode === "NORMAL") return filter;') -and
     $script.Contains('Promise.allSettled') -and
     $script.Contains('previousValues[index]')) `
-    'Keep normal references explicitly selected, native permission-bound, refreshable and isolated from unauthorized Candidate operations'
+    'Default to permission-bound NORMAL references, refresh them explicitly, and isolate unauthorized Candidate operations'
 Assert-Test ($script.Contains('getActiveReference("os_sr_ta"') -and
     $script.Contains('getActiveReference("os_sr_loc"') -and
     $script.Contains('reference.statecode !== 0') -and
@@ -621,6 +625,37 @@ Assert-Test ($deployment.Contains('[switch]$DevelopmentSourceAhead') -and
     -not $deployment.Contains("Invoke-DataverseRequest -Method POST -Path 'PublishAllXml'") -and
     -not $deployment.Contains('PublishXmlCount = 0')) `
     'DEV source-ahead path pins only the reviewed HTML, policy, and JavaScript with scoped publication'
+$normalOnlyManifestPath = Join-Path $root 'docs\CANDIDATE_CONSOLE_NORMAL_ONLY_RELEASE_MANIFEST.json'
+$normalOnlyManifest = Get-Content -LiteralPath $normalOnlyManifestPath -Raw | ConvertFrom-Json
+$normalOnlyHtmlPin = @($normalOnlyManifest.resources | Where-Object name -CEQ 'os_/bso/candidate-console.html')
+$normalOnlyScriptPin = @($normalOnlyManifest.resources | Where-Object name -CEQ 'os_/bso/candidate-console.js')
+$normalOnlyResourceNames = @($normalOnlyManifest.resources.name | Sort-Object -CaseSensitive)
+$currentScriptHash = (Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
+Assert-Test ($deployment.Contains('docs\CANDIDATE_CONSOLE_NORMAL_ONLY_RELEASE_MANIFEST.json') -and
+    $deployment.Contains("'NORMAL_ONLY_OWNER_UI'") -and
+    $deployment.Contains('NORMAL_ONLY_UI_RELEASE_AUTHORIZATION_REQUIRED') -and
+    $deployment.Contains('CANDIDATE_CONSOLE_NORMAL_ONLY_RELEASE_PREFLIGHT_READY') -and
+    $deployment.Contains('CANDIDATE_CONSOLE_NORMAL_ONLY_RELEASE_PUBLISHED') -and
+    $normalOnlyManifest.scope -ceq 'NORMAL_ONLY_OWNER_UI' -and
+    $normalOnlyManifest.customApiChanges -eq 0 -and
+    $normalOnlyManifest.environmentConfigurationChanges -eq 0 -and
+    @($normalOnlyManifest.resources).Count -eq 2 -and
+    [string]::Join('|', $normalOnlyResourceNames) -ceq
+        'os_/bso/candidate-console.html|os_/bso/candidate-console.js' -and
+    $normalOnlyHtmlPin.Count -eq 1 -and
+    $normalOnlyHtmlPin[0].sha256 -ceq 'EXTERNAL_TARGET_HTML' -and
+    $normalOnlyHtmlPin[0].templateSha256 -ceq
+        (Get-FileHash -LiteralPath $htmlPath -Algorithm SHA256).Hash.ToLowerInvariant() -and
+    $normalOnlyScriptPin.Count -eq 1 -and
+    $normalOnlyScriptPin[0].sha256 -ceq $currentScriptHash -and
+    $normalOnlyManifest.uiContract.dataModeSelectorRemoved -eq $true -and
+    $normalOnlyManifest.uiContract.defaultReferenceMode -ceq 'NORMAL' -and
+    $normalOnlyManifest.uiContract.devDirectWriteFallbackEnabled -eq $false -and
+    $normalOnlyManifest.outlookAvailability.providerTrust -ceq 'BLOCKED' -and
+    $normalOnlyManifest.outlookAvailability.availabilityRequestsEnabled -eq $false -and
+    $normalOnlyManifest.outlookAvailability.automaticScheduleSaveEnabled -eq $false -and
+    $html.Contains("candidate-console.js?v=$($currentScriptHash.Substring(0, 12))")) `
+    'Pin the NORMAL-only two-resource release, preserve blocked availability, and cache-bust the changed Console script'
 Assert-Test ($deployment.Contains('[string]$CandidatePaginationReleaseManifestPath') -and
     $deployment.Contains('docs\CANDIDATE_CORE_PAGINATION_1.0.10_RELEASE_MANIFEST.json') -and
     $deployment.Contains("'CANDIDATE_LIST_PAGINATION_AND_ANSWERED_TO_SCHEDULING'") -and

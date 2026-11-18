@@ -11,9 +11,11 @@ const { createServer, matchesFilter } = require(".\\CandidateConsoleServerFixtur
 const root = path.join(__dirname, "..", "solutions", "CandidateConsole", "WebResources", "os_", "bso");
 const policySource = fs.readFileSync(path.join(root, "candidate-console-policy.js"), "utf8");
 const consoleSource = fs.readFileSync(path.join(root, "candidate-console.js"), "utf8")
+  .replace(/    referenceMode = "NORMAL";\r?\n    environmentPolicy = resolveEnvironmentPolicy\(referenceMode\);/,
+    '    referenceMode = window.__testReferenceMode || "NORMAL";\n    environmentPolicy = resolveEnvironmentPolicy(referenceMode);')
   .replace('  document.addEventListener("DOMContentLoaded", initialize);', `
   window.__testConsole = {
-    isCandidateCoreEnabled, refreshCandidates, openCandidate, getLookupName, loadLookupOptions,
+    isCandidateCoreEnabled, isDevFallbackEnabled, refreshCandidates, openCandidate, getLookupName, loadLookupOptions,
     getActiveReference, resolveCreatedCandidate, renderCallHistory, renderStatusHistory,
     renderSchedulingDetails, findRound1Schedules, retrieveCandidateRecord, retrieveInterviewRecord,
     createCandidateThroughCore,
@@ -60,7 +62,7 @@ class Element {
 
 async function createConsole({ mode = "DEV", syntheticDataOnly = true, fixtures = {},
   configuration = {}, serverOptions = {}, simulatedIsolation = false, verifier,
-  coreFetch, missingPolicy = false, beforeInitialize, dataMode = "CONFIGURED" } = {}) {
+  coreFetch, missingPolicy = false, beforeInitialize, testReferenceMode = "CONFIGURED" } = {}) {
   const server = createServer(fixtures, serverOptions);
   const elements = new Map();
   const element = (name) => {
@@ -68,15 +70,10 @@ async function createConsole({ mode = "DEV", syntheticDataOnly = true, fixtures 
       const value = new Element();
       value.id = name;
       if (name === "create-button") value.disabled = true;
-      if (name === "candidate-data-mode") {
-        value.options = [{ textContent: "" }];
-        value.value = "CONFIGURED";
-      }
       elements.set(name, value);
     }
     return elements.get(name);
   };
-  if (dataMode !== "CONFIGURED") element("candidate-data-mode").value = dataMode;
   const actionButton = new Element();
   const workflowLabel = new Element();
   const document = {
@@ -114,6 +111,7 @@ async function createConsole({ mode = "DEV", syntheticDataOnly = true, fixtures 
       }
     }
   };
+  if (testReferenceMode !== null) window.__testReferenceMode = testReferenceMode;
   const fetchCalls = [];
   if (verifier) window.fetch = verifier;
   const context = vm.createContext({
@@ -129,7 +127,7 @@ async function createConsole({ mode = "DEV", syntheticDataOnly = true, fixtures 
   vm.runInContext(consoleSource, context);
   if (beforeInitialize) beforeInitialize({ element, server });
   await document.listeners.DOMContentLoaded();
-  return { server, element, actionButton, workflowLabel, fetchCalls, methods: window.__testConsole,
+  return { server, element, hasElement: (name) => elements.has(name), actionButton, workflowLabel, fetchCalls, methods: window.__testConsole,
     expireProof: () => expiryCallback() };
 }
 
@@ -742,11 +740,12 @@ for (const mode of ["DEV", "TEST"]) {
     assert.equal(ui.methods.isCandidateCoreEnabled(), false);
     assert.equal(ui.element("create-button").disabled, true);
     assert.equal(ui.element("refresh-button").disabled, true);
-    assert.equal(ui.element("dev-fallback-control").hidden, true);
+    assert.equal(ui.hasElement("dev-fallback-control"), false);
+    assert.equal(ui.hasElement("dev-fallback-toggle"), false);
+    assert.equal(ui.methods.isDevFallbackEnabled(), false);
     assert.equal(ui.actionButton.disabled, true);
     assert.match(ui.element("notice").textContent, /server-side synthetic data isolation/);
 
-    ui.element("dev-fallback-toggle").checked = true;
     await ui.element("refresh-button").listeners.click();
     assert.equal(await ui.methods.openCandidate(id), false);
     for (const invoke of [
@@ -781,7 +780,7 @@ test("explicit NORMAL mode loads non-synthetic Candidate Core and excludes inact
       normalModeEnabled: true,
       devDirectWriteFallbackEnabled: false
     },
-    dataMode: "NORMAL",
+    testReferenceMode: "NORMAL",
     fixtures: { os_sr_pos: [active, inactive], os_sr_cand: [candidate] }
   });
 
@@ -827,7 +826,7 @@ test("NORMAL Create Candidate sends selected references once and reports the ser
       devDirectWriteFallbackEnabled: false
     },
     fixtures,
-    dataMode: "NORMAL",
+    testReferenceMode: "NORMAL",
     coreFetch: async (_url, request) => {
       coreCalls += 1;
       requestBody = JSON.parse(request.body);
@@ -915,7 +914,7 @@ test("NORMAL Create Candidate explains server authorization rejection without cl
       devDirectWriteFallbackEnabled: false
     },
     fixtures,
-    dataMode: "NORMAL",
+    testReferenceMode: "NORMAL",
     coreFetch: async () => ({
       ok: false,
       text: async () => JSON.stringify({
@@ -945,7 +944,7 @@ test("NORMAL reference selectors match all Active records without name-prefix ex
       normalModeEnabled: true,
       devDirectWriteFallbackEnabled: false
     },
-    dataMode: "NORMAL",
+    testReferenceMode: "NORMAL",
     fixtures: { os_sr_ta: [lower, upper] }
   });
   const labels = ui.element("candidate-assigned-ta").children.map((option) => option.textContent);
@@ -967,7 +966,7 @@ test("a disabled NORMAL mode keeps reference browsing but blocks Candidate acces
       normalModeEnabled: false,
       devDirectWriteFallbackEnabled: false
     },
-    dataMode: "NORMAL",
+    testReferenceMode: "NORMAL",
     fixtures: {
       os_sr_cand: [candidate],
       os_sr_pos: [{ os_sr_posid: id, os_sr_pos_ttl: "Active position", statecode: 0 }],
@@ -981,13 +980,16 @@ test("a disabled NORMAL mode keeps reference browsing but blocks Candidate acces
   assert.equal(ui.server.requests.some((request) =>
     request.table === "os_sr_cand" && request.operation === "retrieveMultipleRecords"), false);
   assert.deepEqual(ui.fetchCalls, []);
-  assert.match(ui.element("reference-mode-status").textContent, /Candidate reads and writes remain blocked/);
+  assert.match(ui.element("notice").textContent, /Candidate reads and writes remain blocked/);
 });
 
-test("switching from NORMAL back to configured mode re-applies SingleUserDev isolation", async () => {
-  const candidate = {
-    os_sr_candid: id, os_sr_cand_cnum: "CAND-001", os_sr_cand_nm: "Real candidate",
-    os_sr_cand_eml: "candidate@example.invalid", os_sr_cand_stat: 100010000
+test("owner-facing Console defaults to NORMAL, hides data-mode controls and loads Active references", async () => {
+  const activePosition = { os_sr_posid: id, os_sr_pos_ttl: "Synthetic position A", statecode: 0 };
+  const inactivePosition = { os_sr_posid: orgId, os_sr_pos_ttl: "Inactive position", statecode: 1 };
+  const activeSource = { os_sr_csrcid: guid("5"), os_sr_csrc_nm: "Synthetic source", statecode: 0 };
+  const activeTa = { os_sr_taid: guid("6"), os_sr_ta_nm: "Synthetic TA", statecode: 0 };
+  const activeRoom = {
+    os_sr_locid: guid("7"), os_sr_loc_nm: "Synthetic room", os_sr_loc_rmeml: "room@example.invalid", statecode: 0
   };
   const ui = await createConsole({
     mode: "DEV",
@@ -997,20 +999,33 @@ test("switching from NORMAL back to configured mode re-applies SingleUserDev iso
       normalModeEnabled: true,
       devDirectWriteFallbackEnabled: false
     },
-    dataMode: "NORMAL",
-    fixtures: { os_sr_cand: [candidate] }
+    testReferenceMode: null,
+    fixtures: {
+      os_sr_pos: [activePosition, inactivePosition],
+      os_sr_csrc: [activeSource],
+      os_sr_ta: [activeTa],
+      os_sr_loc: [activeRoom]
+    }
   });
-  const normalCandidateReads = ui.server.requests.filter((request) =>
-    request.table === "os_sr_cand" && request.operation === "retrieveMultipleRecords").length;
-  assert.equal(normalCandidateReads, 1);
+  assert.equal(ui.methods.getTestState().referenceMode, "NORMAL");
   assert.equal(ui.methods.isCandidateCoreEnabled(), true);
-
-  ui.element("candidate-data-mode").value = "CONFIGURED";
-  await ui.element("candidate-data-mode").listeners.change();
-
-  assert.equal(ui.methods.isCandidateCoreEnabled(), false);
-  assert.equal(ui.element("create-button").disabled, true);
-  assert.equal(ui.server.requests.filter((request) =>
-    request.table === "os_sr_cand" && request.operation === "retrieveMultipleRecords").length,
-  normalCandidateReads);
+  assert.equal(ui.methods.isDevFallbackEnabled(), false);
+  assert.equal(ui.hasElement("candidate-data-mode"), false);
+  assert.equal(ui.hasElement("reference-mode-status"), false);
+  assert.equal(ui.hasElement("dev-fallback-control"), false);
+  assert.equal(ui.hasElement("dev-fallback-toggle"), false);
+  assert.equal(ui.element("candidate-position").children.some((option) =>
+    option.textContent === activePosition.os_sr_pos_ttl), true);
+  assert.equal(ui.element("candidate-position").children.some((option) =>
+    option.textContent === inactivePosition.os_sr_pos_ttl), false);
+  assert.equal(ui.element("candidate-source").children.some((option) =>
+    option.textContent === activeSource.os_sr_csrc_nm), true);
+  assert.equal(ui.element("candidate-assigned-ta").children.some((option) =>
+    option.textContent === activeTa.os_sr_ta_nm), true);
+  for (const table of ["os_sr_pos", "os_sr_csrc", "os_sr_ta", "os_sr_loc"]) {
+    const request = ui.server.requests.find((item) =>
+      item.table === table && item.operation === "retrieveMultipleRecords");
+    assert.ok(request, `Expected NORMAL reference read for ${table}`);
+    assert.match(new URLSearchParams(request.query.slice(1)).get("$filter"), /statecode eq 0/);
+  }
 });

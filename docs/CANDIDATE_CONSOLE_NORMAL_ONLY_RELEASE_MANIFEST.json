@@ -1,0 +1,57 @@
+{
+  "manifestVersion": 1,
+  "status": "DEPLOYED_PUBLISHED_READBACK_VERIFIED",
+  "scope": "NORMAL_ONLY_OWNER_UI",
+  "customApiChanges": 0,
+  "environmentConfigurationChanges": 0,
+  "flowChanges": 0,
+  "backendChanges": 0,
+  "securityMetadataChanges": 0,
+  "uiContract": {
+    "dataModeSelectorRemoved": true,
+    "defaultReferenceMode": "NORMAL",
+    "devDirectWriteFallbackEnabled": false
+  },
+  "outlookAvailability": {
+    "providerTrust": "BLOCKED",
+    "availabilityRequestsEnabled": false,
+    "automaticScheduleSaveEnabled": false
+  },
+  "resources": [
+    {
+      "name": "os_/bso/candidate-console.html",
+      "sha256": "EXTERNAL_TARGET_HTML",
+      "templateSha256": "f34010688d14f556a277775622efed4c0271a2c04e95719b17e98eebcce117c1",
+      "previousSha256": "8d81e201bc9367d71555f07cc95b0ef6c32b7db78bac38bc39329e17441009aa",
+      "deployedSha256": "92d73e7071f9952477c87ed5eeb4efe17f1b1ee22f627947f405a6adc84fd27d",
+      "deployedVersionNumber": 15439673
+    },
+    {
+      "name": "os_/bso/candidate-console.js",
+      "sha256": "e75debd7bf87847dc0d96df3e9a16290a9c7915fd1480d18242ac70759114bae",
+      "previousSha256": "5beb8f216ae4e17cebd902932ad078a31519119b9ccd0948c8957c58b609ae89",
+      "deployedSha256": "e75debd7bf87847dc0d96df3e9a16290a9c7915fd1480d18242ac70759114bae",
+      "deployedVersionNumber": 15439668
+    }
+  ],
+  "unchangedComponents": [
+    "Candidate Core and all Custom APIs",
+    "Candidate Console environment configuration, policy, styles and Availability resources",
+    "os_sr_avchk Flow and Outlook connection",
+    "Security roles, assignments and teams",
+    "Manual Scheduling and Status History behavior"
+  ],
+  "deployment": {
+    "result": "CANDIDATE_CONSOLE_NORMAL_ONLY_RELEASE_PUBLISHED",
+    "target": "VN LMV IT",
+    "publishedReadback": "GET_RECONCILED",
+    "allowedWrites": "Exactly two conditional WebResource content updates and one two-resource WebResource-only PublishXml.",
+    "sitemapChanges": 0,
+    "publishAllXml": 0,
+    "automaticRetries": 0,
+    "candidateOrScheduleTestWrites": 0,
+    "automatedLifecycleUat": false,
+    "rollbackSnapshot": "Retained in the external deployment journal.",
+    "ownerFunctionalUat": "PENDING"
+  }
+}

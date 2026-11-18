@@ -1,5 +1,13 @@
 # ALM and Deployment
 
+## NORMAL-only owner-facing Candidate Console (2026-11-18)
+
+The [NORMAL-only release manifest](CANDIDATE_CONSOLE_NORMAL_ONLY_RELEASE_MANIFEST.json) records the owner request to remove the Candidate data-mode selector and DEV direct-write fallback, initialize the Console in NORMAL mode, and preserve the existing server authorization boundary.
+
+**Deployment completed:** the guarded source-ahead procedure updated only `os_/bso/candidate-console.html` and `os_/bso/candidate-console.js`. Two conditional WebResource PATCHes and one scoped WebResource-only `PublishXml` returned HTTP 204; no sitemap or Publish All operation occurred. Current and published readbacks match: HTML version `15439673`, SHA-256 `92d73e7071f9952477c87ed5eeb4efe17f1b1ee22f627947f405a6adc84fd27d`; JavaScript version `15439668`, SHA-256 `e75debd7bf87847dc0d96df3e9a16290a9c7915fd1480d18242ac70759114bae`. Environment configuration and policy were unchanged. The external journal retains the exact pre-publication HTML/JavaScript bytes and records zero automatic retries.
+
+The release did not change Candidate Core, Custom APIs, the Outlook Flow, Availability resource, roles, security assignments or Manual Scheduling implementation. It made no Candidate/Schedule test writes and did not run Playwright or lifecycle UAT. Focused NORMAL-only Console validation passed 3 tests and the scheduling/Manual Save regression suite passed 22 tests. The broader Console isolation/static suites remain red on baseline failures; see [Current State](CURRENT_STATE.md). Owner functional testing remains pending. Real Room/TA Free/Busy, common slots and automatic Save remain BLOCKED by unverified trusted Flow-result provenance.
+
 ## NORMAL Create Candidate 1.0.9 disabled technical deployment
 
 On 2026-11-16 the owner authorized the independently safe disabled technical delta into the existing VN LMV IT environment/solution. The [versioned manifest](CANDIDATE_CORE_NORMAL_CREATE_1.0.9_RELEASE_MANIFEST.json) records exact pins and activation gaps. The integrated artifact is an exact-component deployment bundle, **not a managed/importable Solution ZIP**: it combines the existing 1.0.9 NuGet package, platform-generated metadata/solution-aware requests, exact-org disabled value, Console payloads, baseline rollback bytes and the [guarded deployer](../scripts/Deploy-BsoRsNormalCreateRelease.ps1). No unrelated solution components are imported.

@@ -8,7 +8,7 @@
   <script src="../../ClientGlobalContext.js.aspx"></script>
   <script defer src="candidate-console-environment.js?v=21ddcd925916"></script>
   <script defer src="candidate-console-policy.js?v=fbefadd65caa"></script>
-  <script defer src="candidate-console.js?v=5beb8f216ae4"></script>
+  <script defer src="candidate-console.js?v=e75debd7bf87"></script>
   <script defer src="candidate-console-availability.js?v=7df0706fcbe1"></script>
 </head>
 <body>
@@ -24,23 +24,6 @@
         <span id="real-data-badge" class="dev-badge">SYNTHETIC DATA ONLY</span>
       </div>
     </header>
-    <section class="panel" aria-labelledby="reference-mode-heading">
-      <h2 id="reference-mode-heading">Candidate data mode</h2>
-      <label class="field">
-        <span>Mode</span>
-        <select id="candidate-data-mode">
-          <option value="CONFIGURED">Configured synthetic workflow</option>
-          <option value="NORMAL">NORMAL - accessible Active references</option>
-        </select>
-      </label>
-      <p id="reference-mode-status" class="muted" role="status" aria-live="polite"></p>
-      <button id="refresh-references" class="button button-secondary" type="button">Refresh reference options</button>
-    </section>
-    <label id="dev-fallback-control" class="muted workflow-switch">
-      <input id="dev-fallback-toggle" type="checkbox">
-      Enable DEV direct-write fallback for this browser session
-    </label>
-
     <p id="notice" class="notice" role="status" aria-live="polite" hidden></p>
 
     <section class="panel" aria-labelledby="availability-heading">
@@ -97,6 +80,7 @@
           <p class="eyebrow" data-workflow-label>Candidate Core / os_sr_cact</p>
           <h2 id="create-heading">New Candidate</h2>
         </div>
+        <button id="refresh-references" class="button button-secondary" type="button">Refresh reference options</button>
       </div>
       <form id="candidate-form" class="form-grid">
         <label class="field field-wide">
@@ -135,7 +119,7 @@
         </label>
         <div class="form-actions field-wide">
           <button id="create-button" class="button button-primary" type="submit" data-action disabled>Create Candidate</button>
-          <span id="create-help" class="muted">Use environment-approved data. DEV direct writes are available only when explicitly enabled.</span>
+          <span id="create-help" class="muted">Candidate Core enforces server-side authorization for Candidate operations.</span>
         </div>
       </form>
     </section>

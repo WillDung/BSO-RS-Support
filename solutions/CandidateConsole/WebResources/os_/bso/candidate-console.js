@@ -146,7 +146,7 @@
   let syntheticQueryBlocked = false;
   let isolationExpiryTimer;
   let isolationVerificationPromise;
-  let referenceMode = "CONFIGURED";
+  let referenceMode = "NORMAL";
   let referenceGeneration = 0;
   const round1Availability = {
     generation: 0, capabilityGeneration: 0, providerOperational: false, manualSchedulingOperational: false,
@@ -263,21 +263,17 @@
   }
 
   function isDevFallbackEnabled() {
-    return isCandidateCoreEnabled() && environmentPolicy.directWriteFallbackAvailable === true &&
-      $("dev-fallback-toggle").checked;
+    return false;
   }
 
   function updateWorkflowPathLabel() {
     const supportedEnvironment = isCandidateCoreEnabled();
-    const fallback = isDevFallbackEnabled();
     $("workflow-path-badge").textContent = !supportedEnvironment
       ? environmentPolicy.allowed === true && environmentPolicy.syntheticDataOnly
         ? syntheticQueryBlocked ? "SYNTHETIC QUERY BLOCKED" : "SYNTHETIC DATA ACCESS BLOCKED"
         : environmentPolicy.reason === "BLOCK_UNRECOGNIZED_ENVIRONMENT"
           ? "BLOCK_UNRECOGNIZED_ENVIRONMENT"
           : "CONFIGURATION BLOCKED"
-      : fallback
-      ? "DEV DIRECT-WRITE FALLBACK"
       : "CANDIDATE CORE PATH";
     $("environment-mode-badge").textContent = environmentPolicy.allowed === true
       ? environmentPolicy.mode
@@ -290,12 +286,8 @@
         ? environmentPolicy.allowed === true && environmentPolicy.syntheticDataOnly
           ? "Unavailable until synthetic data isolation is established"
           : "Unavailable until environment configuration is valid"
-        : fallback ? "DEV direct-write fallback" : "Candidate Core / os_sr_cact";
+        : "Candidate Core / os_sr_cact";
     });
-    $("dev-fallback-control").hidden = !supportedEnvironment ||
-      environmentPolicy.directWriteFallbackAvailable !== true;
-    $("dev-fallback-toggle").disabled = !supportedEnvironment || busy ||
-      environmentPolicy.directWriteFallbackAvailable !== true;
     if (referenceMode === "NORMAL" && environmentPolicy.syntheticDataOnly) {
       $("workflow-path-badge").textContent = "NORMAL REFERENCES ONLY";
       $("real-data-badge").textContent = "CANDIDATE OPERATIONS BLOCKED";
@@ -303,14 +295,6 @@
         label.textContent = "Normal Candidate operations are not authorized in this synthetic environment";
       });
     }
-    const configuredModeLabel = environmentPolicy.configuredOperationMode === "SingleUserDev"
-      ? "SingleUserDev" : "Configured synthetic workflow";
-    $("candidate-data-mode").options[0].textContent = configuredModeLabel;
-    $("reference-mode-status").textContent = referenceMode === "NORMAL"
-      ? environmentPolicy.syntheticDataOnly
-        ? "NORMAL: all Active references accessible to your Dataverse account. Candidate reads and writes remain blocked in this synthetic environment."
-        : "NORMAL: authenticated Active references; Candidate operations use the normal Candidate Core API and its server-side authorization."
-      : `${configuredModeLabel}: server proof and DEV reference restrictions remain required.`;
   }
 
   function currentUserId() {
@@ -388,11 +372,7 @@
     $("refresh-button").disabled = value || !isCandidateCoreEnabled();
     $("candidate-search").disabled = value;
     $("candidate-status-filter").disabled = value;
-    $("candidate-data-mode").disabled = value || environmentPolicy.allowed !== true;
-    $("refresh-references").disabled = value || environmentPolicy.allowed !== true ||
-      (referenceMode !== "NORMAL" && !isCandidateCoreEnabled());
-    $("dev-fallback-toggle").disabled =
-      value || !isCandidateCoreEnabled() || environmentPolicy.directWriteFallbackAvailable !== true;
+    $("refresh-references").disabled = value || environmentPolicy.allowed !== true;
     document.querySelectorAll("button[data-action]").forEach((button) => {
       button.disabled = value || !referencesReady || !workspaceReady || !isCandidateCoreEnabled() ||
         (button.id === "submit-call" &&
@@ -3653,56 +3633,11 @@
   }
 
   function bindEvents() {
-    $("candidate-data-mode").addEventListener("change", async () => {
-      if (busy) return;
-      const selectedMode = $("candidate-data-mode").value;
-      if (!["CONFIGURED", "NORMAL"].includes(selectedMode)) {
-        showNotice("Candidate data mode is invalid. Reload the Console.", true);
-        return;
-      }
-      referenceMode = selectedMode;
-      environmentPolicy = resolveEnvironmentPolicy(selectedMode);
-      referenceGeneration++;
-      referencesReady = false;
-      syntheticQueryBlocked = false;
-      invalidateRound1Availability(true);
-      window.clearTimeout(isolationExpiryTimer);
-      selectedCandidate = null;
-      selectedSchedule = null;
-      proposedSchedule = null;
-      scheduleRows = [];
-      currentRows = [];
-      scheduleRetryBlockedCandidateId = null;
-      resultRetryBlockedCandidateId = null;
-      $("dev-fallback-toggle").checked = false;
-      for (const id of ["candidate-form", "edit-candidate-form", "call-form",
-        "scheduling-form", "cancellation-form", "interview-result-form"]) {
-        $(id).reset();
-      }
-      for (const id of ["detail-panel", "call-entry-panel", "edit-candidate-panel",
-        "scheduling-panel", "cancellation-panel", "interview-result-panel"]) {
-        $(id).hidden = true;
-      }
-      for (const id of ["candidate-position", "edit-candidate-position", "candidate-source",
-        "edit-candidate-source", "candidate-assigned-ta", "edit-candidate-assigned-ta",
-        "scheduling-ta", "scheduling-location"]) {
-        setLookupPlaceholder($(id), "Select a reference");
-        $(id).disabled = true;
-      }
-      $("candidate-rows").replaceChildren();
-      hideNotice();
-      await loadWorkspace();
-    });
     $("refresh-references").addEventListener("click", async () => {
       if (busy) return;
       setBusy(true);
       hideNotice();
       try {
-        if (referenceMode !== "NORMAL" && environmentPolicy.syntheticDataOnly) {
-          await verifyServerIsolation();
-          syntheticQueryBlocked = false;
-          if (!TABLES.candidate.id) throw new Error("CANDIDATE_WORKSPACE_RELOAD_REQUIRED");
-        }
         await refreshReferenceOptions();
         showNotice("Active reference options refreshed.");
       } catch (error) {
@@ -3789,7 +3724,6 @@
     };
     $("candidate-previous-page").addEventListener("click", () => changeCandidatePage(-1));
     $("candidate-next-page").addEventListener("click", () => changeCandidatePage(1));
-    $("dev-fallback-toggle").addEventListener("change", updateWorkflowPathLabel);
     $("refresh-button").addEventListener("click", async () => {
       hideNotice();
       try {
@@ -3858,9 +3792,7 @@
   async function initialize() {
     $("create-button").disabled = true;
     bindEvents();
-    const selectedMode = $("candidate-data-mode").value;
-    referenceMode = ["CONFIGURED", "NORMAL"].includes(selectedMode)
-      ? selectedMode : "CONFIGURED";
+    referenceMode = "NORMAL";
     environmentPolicy = resolveEnvironmentPolicy(referenceMode);
     await loadWorkspace();
   }
@@ -3876,10 +3808,10 @@
           environmentPolicy.syntheticDataOnly) {
         await refreshReferenceOptions();
         const row = document.createElement("tr");
-        const cell = appendCell(row, "Candidate operations are blocked in NORMAL mode in this synthetic environment.");
+        const cell = appendCell(row, "Candidate operations are blocked by the current environment policy.");
         cell.colSpan = 11;
         $("candidate-rows").replaceChildren(row);
-        showNotice("NORMAL Active references loaded. Candidate reads and writes remain blocked; use the configured synthetic workflow for DEV testing.");
+        showNotice("NORMAL Active references loaded. Candidate reads and writes remain blocked by the current environment policy.");
         return;
       }
       await loadCandidateWorkspace();

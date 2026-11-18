@@ -424,6 +424,12 @@ Assert-Test (Test-PackageModifiedOnMatchesBaseline `
 Assert-Test (-not (Test-PackageModifiedOnMatchesBaseline `
     -CurrentModifiedOn $laterModifiedOn -BaselineModifiedOn $utcModifiedOn)) `
     'Package timestamp baseline still detects a genuinely advanced timestamp'
+Assert-Test (Test-PackageModifiedOnMatchesBaseline -CurrentModifiedOn $utcModifiedOn `
+    -BaselineModifiedOn '11/04/2026 05:44:07' -SerializedUtcBaseline) `
+    'Pinned pagination baseline interprets its legacy serialized Dataverse timestamp as UTC'
+Assert-Test (-not (Test-PackageModifiedOnMatchesBaseline -CurrentModifiedOn $laterModifiedOn `
+    -BaselineModifiedOn '11/04/2026 05:44:07' -SerializedUtcBaseline)) `
+    'Legacy UTC serialization support does not admit a genuinely changed package timestamp'
 
  $updaterSource = Get-Content -LiteralPath $updaterPath -Raw
 Assert-Test ($updaterSource.Contains('$start.ArgumentList.Add($argument)') -and
@@ -625,6 +631,7 @@ $script:Plan = [pscustomobject]@{
 }
 $script:metadataReadbackPaths = [Collections.Generic.List[string]]::new()
 $script:metadataTestWrite = $null
+$script:metadataReadbackMutation = ''
 function Get-Rows {
     param([string]$Path)
     $script:metadataReadbackPaths.Add($Path)
@@ -649,6 +656,17 @@ function Get-Rows {
     } else {
         $row.customapiresponsepropertyid = $write.Id
     }
+    switch ($script:metadataReadbackMutation) {
+        'id' {
+            $idField = if ($write.Kind -ceq 'CustomApiRequestParameter') {
+                'customapirequestparameterid'
+            } else { 'customapiresponsepropertyid' }
+            $row[$idField] = [Guid]::NewGuid().ToString('D')
+        }
+        'type' { $row.type = 7 }
+        'binding' { $row._customapiid_value = [Guid]::NewGuid().ToString('D') }
+        'required' { $row.isoptional = $false }
+    }
     [pscustomobject]$row
 }
 foreach ($kind in @('CustomApiRequestParameter', 'CustomApiResponseProperty')) {
@@ -668,7 +686,121 @@ foreach ($kind in @('CustomApiRequestParameter', 'CustomApiResponseProperty')) {
     Assert-WriteReadback -Write $script:metadataTestWrite
     Assert-Test (($script:metadataReadbackPaths[0] -match ',isoptional,') -eq $isRequest) `
         "$kind readback selects isoptional only where supported"
+    $mutations = @('id', 'type', 'binding')
+    if ($isRequest) { $mutations += 'required' }
+    foreach ($mutation in $mutations) {
+        $script:metadataReadbackMutation = $mutation
+        $failure = $null
+        try { Assert-WriteReadback -Write $script:metadataTestWrite }
+        catch { $failure = $_.Exception.Message }
+        Assert-Test ([bool]$failure) "$kind readback fails closed on changed $mutation"
+    }
+    $script:metadataReadbackMutation = ''
 }
+
+foreach ($functionName in @('Assert-PartialJournal', 'Assert-PreservedComponentVersions', 'Get-Sha256', 'Get-Api', 'Save-Json')) {
+    $definition = @($metadataAst.EndBlock.Statements | Where-Object {
+        $_ -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $_.Name -ceq $functionName
+    })
+    . ([scriptblock]::Create($definition[0].Extent.Text))
+}
+$ExpectedPlanSha256 = 'a' * 64
+$names = @('CandidateSearchText', 'CandidateStatusFilter', 'CandidatePageNumber', 'ScopedHasNextPage', 'ScopedTotalCount')
+$script:Plan = [pscustomobject]@{
+    Writes = @(foreach ($index in 0..4) {
+        [pscustomobject]@{
+            Id = [Guid]::NewGuid().ToString('D'); Name = $names[$index]
+            Kind = if ($index -lt 3) { 'CustomApiRequestParameter' } else { 'CustomApiResponseProperty' }
+            Path = if ($index -lt 3) { 'customapirequestparameters' } else { 'customapiresponseproperties' }
+            Body = [pscustomobject]@{ uniquename = $names[$index] }
+        }
+    })
+}
+$partialJournal = [pscustomobject]@{
+    PlanSha256 = $ExpectedPlanSha256; ApiUniqueName = 'os_sr_cact'
+    Outcome = 'STOPPED_WITHOUT_RETRY'; AutomaticRetries = 0; MaximumPostDispatches = 5
+    RequestCounters = [pscustomobject]@{ POST = 4 }
+    Writes = @(foreach ($index in 0..4) {
+        [pscustomobject]@{
+            Name = $names[$index]; Kind = $script:Plan.Writes[$index].Kind; Id = $script:Plan.Writes[$index].Id
+            State = if ($index -lt 3) { 'GET_RECONCILED' } elseif ($index -eq 3) { 'ACKNOWLEDGED' } else { 'PLANNED' }
+            HttpStatus = if ($index -lt 4) { 204 } else { $null }
+        }
+    })
+}
+Assert-PartialJournal -PriorJournal $partialJournal -OriginalPlan $script:Plan
+Assert-Test $true 'Continuation accepts the exact four-dispatch partial journal'
+foreach ($mutation in @('plan', 'id', 'state', 'missing-dispatched', 'dispatch-count')) {
+    $altered = $partialJournal | ConvertTo-Json -Depth 20 | ConvertFrom-Json
+    switch ($mutation) {
+        'plan' { $altered.PlanSha256 = 'b' * 64 }
+        'id' { $altered.Writes[0].Id = [Guid]::NewGuid().ToString('D') }
+        'state' { $altered.Writes[3].State = 'PLANNED' }
+        'missing-dispatched' { $altered.Writes[4].HttpStatus = 204 }
+        'dispatch-count' { $altered.RequestCounters.POST = 5 }
+    }
+    $failure = $null
+    try { Assert-PartialJournal -PriorJournal $altered -OriginalPlan $script:Plan }
+    catch { $failure = $_.Exception.Message }
+    Assert-Test ([bool]$failure) "Continuation rejects prior journal mutation: $mutation"
+}
+$claim = Join-Path $temporaryRoot 'continuation-claim.json'
+Save-Json -Path $claim -Value @{ ContinuationId = 'synthetic' } -CreateNew
+$claimHash = (Get-FileHash -LiteralPath $claim -Algorithm SHA256).Hash
+$failure = $null
+try { Save-Json -Path $claim -Value @{ ContinuationId = 'replacement' } -CreateNew }
+catch { $failure = $_.Exception.Message }
+Assert-Test ([bool]$failure -and (Get-FileHash -LiteralPath $claim -Algorithm SHA256).Hash -ceq $claimHash) `
+    'Continuation claim cannot overwrite or reset a consumed identity'
+
+Remove-Variable -Name Mode
+$Mode = 'ContinuePartial'
+$script:OrganizationUrl = 'https://test.invalid'
+$script:ApiRoot = 'https://test.invalid/api/data/v9.2/'
+$script:AccessToken = 'synthetic-not-a-token'
+$script:SolutionUniqueName = 'synthetic'
+$script:RequestCounts = @{ GET = 0; POST = 0 }
+$script:MaximumReads = 160
+$script:WriteIndex = 0
+$script:Journal = [pscustomobject]@{ Writes = @($script:Plan.Writes | ForEach-Object {
+    [pscustomobject]@{ State = 'DISPATCH_RESERVED' }
+}) }
+$script:webRequests = 0
+function Invoke-WebRequest {
+    param($Uri, $Method, $Headers, $MaximumRetryCount, $MaximumRedirection, $TimeoutSec,
+        $SkipHttpErrorCheck, $Body, $ContentType)
+    $script:webRequests++
+    [pscustomobject]@{ StatusCode = 204; Content = '' }
+}
+foreach ($index in 0..3) {
+    $script:WriteIndex = $index
+    $failure = $null
+    try { $null = Get-Api -Method POST -Path $script:Plan.Writes[$index].Path -Body $script:Plan.Writes[$index].Body }
+    catch { $failure = $_.Exception.Message }
+    Assert-Test ([bool]$failure -and $script:webRequests -eq 0) "Continuation cannot replay prior metadata index $index"
+}
+$script:WriteIndex = 4
+$last = $script:Plan.Writes[4]
+$last | Add-Member -NotePropertyName PayloadSha256 -NotePropertyValue (
+    Get-Sha256 -Bytes ([Text.Encoding]::UTF8.GetBytes((ConvertTo-Json $last.Body -Compress))))
+$null = Get-Api -Method POST -Path $last.Path -Body $last.Body
+Assert-Test ($script:webRequests -eq 1 -and $script:RequestCounts.POST -eq 1) `
+    'Continuation dispatches only the original fifth payload exactly once'
+$failure = $null
+try { $null = Get-Api -Method POST -Path $last.Path -Body $last.Body }
+catch { $failure = $_.Exception.Message }
+Assert-Test ([bool]$failure -and $script:webRequests -eq 1) 'Continuation cannot resend an acknowledged or ambiguous dispatch'
+
+function Get-Api {
+    param($Method, $Path)
+    [pscustomobject]@{ versionnumber = '42'; '@odata.etag' = 'W/"42"' }
+}
+$component = [pscustomobject]@{ Id = $script:Plan.Writes[0].Id; Name = $names[0]; Version = '42'; ETag = 'W/"42"' }
+Assert-PreservedComponentVersions -Components @($component)
+$component.Version = '43'
+$failure = $null
+try { Assert-PreservedComponentVersions -Components @($component) } catch { $failure = $_.Exception.Message }
+Assert-Test ([bool]$failure) 'Continuation readback rejects a changed prior component version'
 
 "BsoRsCandidatePackageUpdater.Tests.ps1: $passed assertions passed."
 } finally {

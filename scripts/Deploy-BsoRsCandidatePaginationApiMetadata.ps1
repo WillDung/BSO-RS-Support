@@ -1,7 +1,7 @@
 #requires -Version 7.4
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidateSet('Preflight', 'Apply', 'Reconcile')][string]$Mode,
+    [Parameter(Mandatory)][ValidateSet('Preflight', 'Apply', 'Reconcile', 'PartialPreflight', 'ContinuePartial')][string]$Mode,
     [Parameter(Mandatory)][string]$EnvironmentName,
     [Parameter(Mandatory)][string]$OrganizationUrl,
     [Parameter(Mandatory)][string]$ExpectedEnvironmentId,
@@ -11,6 +11,10 @@ param(
     [Parameter(Mandatory)][string]$BaselinePath,
     [string]$ExpectedPlanSha256,
     [string]$EvidencePath,
+    [string]$PriorJournalPath,
+    [string]$ExpectedPriorJournalSha256,
+    [string]$ContinuationPlanPath,
+    [string]$ExpectedContinuationPlanSha256,
     [string]$PacPath = 'pac'
 )
 
@@ -25,12 +29,15 @@ $script:PublisherUniqueName = 'os_bso_rs_support'
 $script:AccessToken = $null
 $script:Plan = $null
 $script:Journal = $null
+$script:JournalOwned = $false
 $script:RequestCounts = @{ GET = 0; POST = 0 }
 $script:WriteIndex = 0
 $script:Manifest = $null
 $script:ExpectedDelta = @()
 $script:MaximumReads = 160
 $script:MaximumWrites = 5
+$script:IsPartialContinuation = $Mode -cin @('PartialPreflight', 'ContinuePartial')
+$script:EvidenceLocks = [Collections.Generic.List[IDisposable]]::new()
 
 if ($EnvironmentName -cne 'VN LMV IT' -or
     ([Uri]$script:OrganizationUrl).AbsoluteUri.TrimEnd('/') -cne 'https://org14938ec2.crm4.dynamics.com' -or
@@ -62,6 +69,31 @@ if ($Mode -ceq 'Reconcile' -and
         -not (Test-Path -LiteralPath $BaselinePath -PathType Leaf) -or
         -not (Test-Path -LiteralPath $EvidencePath -PathType Leaf))) {
     throw 'Reconcile requires the pinned plan, baseline, and consumed evidence.'
+}
+if ($script:IsPartialContinuation) {
+    if ($ExpectedPlanSha256 -cnotmatch '^[0-9a-f]{64}$' -or
+        $ExpectedPriorJournalSha256 -cnotmatch '^[0-9a-f]{64}$' -or
+        -not $PriorJournalPath -or -not $ContinuationPlanPath -or
+        -not (Test-Path -LiteralPath $PriorJournalPath -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $PlanPath -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $BaselinePath -PathType Leaf)) {
+        throw 'Partial continuation requires the original pinned plan, baseline and immutable journal.'
+    }
+    $claimPath = [IO.Path]::GetFullPath($PriorJournalPath) + '.scoped-total-count-continuation.json'
+    if (Test-Path -LiteralPath $claimPath) {
+        throw 'The one-shot continuation has already been reserved; reconcile without repeating it.'
+    }
+    if ($Mode -ceq 'PartialPreflight' -and (Test-Path -LiteralPath $ContinuationPlanPath)) {
+        throw 'Partial preflight requires a new continuation plan path.'
+    }
+    if ($Mode -ceq 'ContinuePartial' -and
+        ($ExpectedContinuationPlanSha256 -cnotmatch '^[0-9a-f]{64}$' -or
+         -not (Test-Path -LiteralPath $ContinuationPlanPath -PathType Leaf) -or
+         -not $EvidencePath -or
+         -not [string]::Equals([IO.Path]::GetFullPath($EvidencePath), $claimPath,
+             [StringComparison]::OrdinalIgnoreCase))) {
+        throw 'Continuation must use its pinned plan and unique prior-journal-derived claim path.'
+    }
 }
 if (-not (Test-Path -LiteralPath (Split-Path -Parent $PlanPath) -PathType Container) -or
     -not (Test-Path -LiteralPath (Split-Path -Parent $BaselinePath) -PathType Container)) {
@@ -124,11 +156,16 @@ function Get-Api {
         throw 'Dataverse request target failed the exact HTTPS origin check.'
     }
     if ($Method -ceq 'POST') {
-        if ($Mode -cne 'Apply' -or $null -eq $script:Plan -or
+        if ($Mode -cnotin @('Apply', 'ContinuePartial') -or $null -eq $script:Plan -or
             $script:WriteIndex -ge $script:Plan.Writes.Count) {
             throw 'Metadata POST is outside the pinned five-component Apply plan.'
         }
         $write = $script:Plan.Writes[$script:WriteIndex]
+        if ($Mode -ceq 'ContinuePartial' -and
+            ($script:WriteIndex -ne 4 -or $script:RequestCounts.POST -ne 0 -or
+             $write.Name -cne 'ScopedTotalCount' -or $write.Kind -cne 'CustomApiResponseProperty')) {
+            throw 'Continuation permits only one ScopedTotalCount POST; prior writes cannot be replayed.'
+        }
         $payloadHash = Get-Sha256 -Bytes ([Text.Encoding]::UTF8.GetBytes(
             (ConvertTo-Json -InputObject $Body -Depth 20 -Compress)
         ))
@@ -352,9 +389,17 @@ function Get-ApiSnapshot {
     }
     $api = $apis[0]
     $apiId = ConvertTo-CanonicalGuid ([string]$api.customapiid)
-    $inputs = @(Get-Rows -Path "customapirequestparameters?%24select=customapirequestparameterid,uniquename,type,isoptional,logicalentityname,_customapiid_value&%24filter=_customapiid_value eq $apiId&%24top=100")
-    $outputs = @(Get-Rows -Path "customapiresponseproperties?%24select=customapiresponsepropertyid,uniquename,type,_customapiid_value&%24filter=_customapiid_value eq $apiId&%24top=100")
+    $inputs = @(Get-Rows -Path "customapirequestparameters?%24select=customapirequestparameterid,uniquename,name,displayname,type,isoptional,logicalentityname,versionnumber,_customapiid_value&%24filter=_customapiid_value eq $apiId&%24top=100")
+    $outputs = @(Get-Rows -Path "customapiresponseproperties?%24select=customapiresponsepropertyid,uniquename,name,displayname,type,versionnumber,_customapiid_value&%24filter=_customapiid_value eq $apiId&%24top=100")
     $baseline = Get-BaselineContract
+    if ($script:IsPartialContinuation) {
+        $baseline.Requests = @($baseline.Requests) + @($script:ExpectedDelta |
+            Where-Object Kind -CEQ 'CustomApiRequestParameter' |
+            ForEach-Object { [pscustomobject]@{ Name = $_.Name; Type = $_.Type; IsOptional = $true } })
+        $baseline.Responses = @($baseline.Responses) + @($script:ExpectedDelta |
+            Where-Object Name -CEQ 'ScopedHasNextPage' |
+            ForEach-Object { [pscustomobject]@{ Name = $_.Name; Type = $_.Type } })
+    }
     foreach ($pair in @(
         [pscustomobject]@{ Actual = $inputs; Expected = $baseline.Requests; Kind = 'request' },
         [pscustomobject]@{ Actual = $outputs; Expected = $baseline.Responses; Kind = 'response' }
@@ -450,7 +495,7 @@ function Get-ApiSnapshot {
             @($table | Where-Object uniquename -ceq $item.Name).Count
         }
     )
-    if (@($present | Where-Object { $_ -ne 0 }).Count -gt 0) {
+    if (-not $script:IsPartialContinuation -and @($present | Where-Object { $_ -ne 0 }).Count -gt 0) {
         throw 'The live API is not at the exact 1.0.9 pre-delta baseline; partial additions are not repaired.'
     }
     $membershipLines = @($membership | ForEach-Object {
@@ -771,6 +816,210 @@ function Assert-CompleteMetadataContract {
     }
 }
 
+function Assert-PartialJournal {
+    param([Parameter(Mandatory)][object]$PriorJournal, [Parameter(Mandatory)][object]$OriginalPlan)
+    if ($PriorJournal.PlanSha256 -cne $ExpectedPlanSha256 -or
+        $PriorJournal.ApiUniqueName -cne 'os_sr_cact' -or
+        $PriorJournal.Outcome -cne 'STOPPED_WITHOUT_RETRY' -or
+        $PriorJournal.AutomaticRetries -ne 0 -or $PriorJournal.MaximumPostDispatches -ne 5 -or
+        $PriorJournal.RequestCounters.POST -ne 4 -or @($PriorJournal.Writes).Count -ne 5 -or
+        @($OriginalPlan.Writes).Count -ne 5) {
+        throw 'Prior journal is not the exact four-dispatch partial deployment.'
+    }
+    foreach ($index in 0..4) {
+        $entry = $PriorJournal.Writes[$index]
+        $write = $OriginalPlan.Writes[$index]
+        $expectedState = if ($index -lt 3) { 'GET_RECONCILED' }
+            elseif ($index -eq 3) { 'ACKNOWLEDGED' } else { 'PLANNED' }
+        if ($entry.Name -cne $write.Name -or $entry.Kind -cne $write.Kind -or
+            $entry.Id -cne $write.Id -or $entry.State -cne $expectedState -or
+            ($index -lt 4 -and $entry.HttpStatus -ne 204) -or
+            ($index -eq 4 -and $null -ne $entry.HttpStatus)) {
+            throw 'Prior journal differs from the original ordered component dispatches.'
+        }
+    }
+    if ($OriginalPlan.Writes[3].Name -cne 'ScopedHasNextPage' -or
+        $OriginalPlan.Writes[4].Name -cne 'ScopedTotalCount' -or
+        $OriginalPlan.Writes[4].Kind -cne 'CustomApiResponseProperty') {
+        throw 'Continuation is limited to the missing ScopedTotalCount response.'
+    }
+}
+
+function Get-PartialState {
+    param([Parameter(Mandatory)][object]$Snapshot)
+    $prior = Get-Content -LiteralPath $PriorJournalPath -Raw | ConvertFrom-Json
+    Assert-PartialJournal -PriorJournal $prior -OriginalPlan $script:Plan
+    $baseline = Get-Content -LiteralPath $BaselinePath -Raw | ConvertFrom-Json
+    if ($Snapshot.Assembly.version -cne [string]$baseline.Assembly.version -or
+        $Snapshot.Assembly.pluginassemblyid -ine [string]$baseline.Assembly.pluginassemblyid -or
+        $Snapshot.Package.pluginpackageid -ine [string]$baseline.Package.pluginpackageid -or
+        [string]$Snapshot.Package.modifiedon -cne [string]$baseline.Package.modifiedon -or
+        $Snapshot.Handler.plugintypeid -ine [string]$baseline.Handler.plugintypeid -or
+        $Snapshot.ApiId -ine [string]$baseline.Api.customapiid -or
+        $Snapshot.NormalCreateGate -cne [string]$baseline.NormalCreateGate -or
+        $Snapshot.Solution.solutionid -ine [string]$baseline.Solution.solutionid -or
+        $Snapshot.Solution.version -cne [string]$baseline.Solution.version -or
+        $Snapshot.App.appmoduleid -ine [string]$baseline.App.appmoduleid -or
+        $Snapshot.GuardSteps.Count -ne $baseline.Guards.LegacySteps -or
+        $Snapshot.ActiveGuardSteps -ne $baseline.Guards.ActiveLegacySteps -or
+        $Snapshot.DisabledGuardSteps -ne $baseline.Guards.DisabledLegacySteps) {
+        throw 'Package, handler or gate differs from the immutable original baseline.'
+    }
+    $versions = @(
+        foreach ($write in $script:Plan.Writes[0..3]) {
+            Assert-WriteReadback -Write $write
+            $rows = if ($write.Kind -ceq 'CustomApiRequestParameter') { $Snapshot.Inputs } else { $Snapshot.Outputs }
+            $row = @($rows | Where-Object { $_.uniquename -ceq $write.Name })
+            if ($row.Count -ne 1 -or -not $row[0].versionnumber -or
+                -not $row[0].PSObject.Properties['@odata.etag']) {
+                throw 'Partial component version is missing or ambiguous.'
+            }
+            [ordered]@{
+                Id = $write.Id; Name = $write.Name; Type = $write.Type
+                Version = [string]$row[0].versionnumber; ETag = [string]$row[0].'@odata.etag'
+            }
+        }
+    )
+    $missing = $script:Plan.Writes[4]
+    $conflicts = @(Get-Rows -Path ("customapiresponseproperties?%24select=customapiresponsepropertyid&" +
+        "%24filter=customapiresponsepropertyid eq $($missing.Id) or " +
+        "(_customapiid_value eq $($script:Plan.ApiId) and uniquename eq '$($missing.Name)')&%24top=2"))
+    if ($conflicts.Count -ne 0) { throw 'ScopedTotalCount is present or its planned ID conflicts; no POST is permitted.' }
+    $priorIds = @($script:Plan.Writes[0..3] | ForEach-Object Id)
+    $original = $Snapshot.PSObject.Copy()
+    $original.Inputs = @($Snapshot.Inputs | Where-Object { $_.uniquename -notin @($script:Plan.Writes[0..2].Name) })
+    $original.Outputs = @($Snapshot.Outputs | Where-Object uniquename -CNE 'ScopedHasNextPage')
+    $original.Membership = @($Snapshot.Membership | Where-Object { $_.objectid -notin $priorIds })
+    $original.MembershipLines = @($original.Membership | ForEach-Object {
+        '{0}|{1}|{2}' -f [int]$_.componenttype, ([string]$_.objectid).ToLowerInvariant(), [int]$_.rootcomponentbehavior
+    } | Sort-Object -CaseSensitive)
+    $original.MembershipSha256 = Get-Sha256 -Bytes ([Text.Encoding]::UTF8.GetBytes(
+        [string]::Join("`n", $original.MembershipLines)))
+    $original.ApiMetadataSha256 = Get-CanonicalApiHash -Api $Snapshot.Api -Inputs $original.Inputs -Outputs $original.Outputs
+    $rebuilt = (New-Plan -Snapshot $original).Plan
+    foreach ($property in @('BaselineSnapshotSha256', 'BaselineMembershipSha256',
+        'BaselineApiMetadataSha256', 'ExpectedApiMetadataSha256', 'ExpectedMembershipSha256')) {
+        if ([string]$rebuilt[$property] -cne [string]$script:Plan.$property) {
+            throw "Partial-state original plan reconstruction failed: $property."
+        }
+    }
+    if ((ConvertTo-Json -InputObject $rebuilt.Writes -Depth 20 -Compress) -cne
+        (ConvertTo-Json -InputObject $script:Plan.Writes -Depth 20 -Compress) -or
+        $Snapshot.Membership.Count -ne $original.Membership.Count + 4) {
+        throw 'Partial-state payloads or membership differ from the original release.'
+    }
+    [ordered]@{
+        ApiMetadataSha256 = $Snapshot.ApiMetadataSha256
+        ApiVersion = [string]$Snapshot.Api.'@odata.etag'
+        MembershipSha256 = $Snapshot.MembershipSha256
+        PackageVersion = [string]$Snapshot.Package.'@odata.etag'
+        AssemblyVersion = [string]$Snapshot.Assembly.'@odata.etag'
+        HandlerVersion = [string]$Snapshot.Handler.'@odata.etag'
+        SolutionVersion = [string]$Snapshot.Solution.'@odata.etag'
+        AppVersion = [string]$Snapshot.App.'@odata.etag'
+        NormalCreateGate = $Snapshot.NormalCreateGate
+        InstalledAssemblyVersion = $Snapshot.Assembly.version
+        PriorComponents = $versions
+        PriorJournalSha256 = (Get-FileHash -LiteralPath $PriorJournalPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        BaselineSha256 = (Get-FileHash -LiteralPath $BaselinePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    }
+}
+
+function Assert-PreservedComponentVersions {
+    param([Parameter(Mandatory)][object[]]$Components)
+    foreach ($component in $Components) {
+        $write = @($script:Plan.Writes[0..3] | Where-Object Id -CEQ $component.Id)
+        if ($write.Count -ne 1) { throw 'Preserved component is outside the original four additions.' }
+        $row = Get-Api -Method GET -Path "$($write[0].Path)($($component.Id))?%24select=versionnumber"
+        if ([string]$row.versionnumber -cne [string]$component.Version -or
+            [string]$row.'@odata.etag' -cne [string]$component.ETag) {
+            throw "A previously applied component changed version: $($component.Name)."
+        }
+    }
+}
+
+function Invoke-PartialContinuation {
+    $script:Plan = Get-Content -LiteralPath $PlanPath -Raw | ConvertFrom-Json
+    $script:Plan = Assert-Plan -Plan $script:Plan -ExpectedApiId $script:Plan.ApiId `
+        -ExpectedSolutionId $script:Plan.SolutionId
+    if ((Get-FileHash -LiteralPath $PriorJournalPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+        $ExpectedPriorJournalSha256) { throw 'The immutable prior journal hash does not match.' }
+    $state = Get-PartialState -Snapshot (Get-ApiSnapshot)
+    if ($Mode -ceq 'PartialPreflight') {
+        $continuation = [ordered]@{
+            ContinuationId = [Guid]::NewGuid().ToString('D')
+            OriginalPlanSha256 = $ExpectedPlanSha256
+            PriorJournalSha256 = $ExpectedPriorJournalSha256
+            ReleaseManifestSha256 = $script:Plan.ReleaseManifestSha256
+            PartialState = $state
+            MaximumPostDispatches = 1
+            Write = $script:Plan.Writes[4]
+        }
+        Save-Json -Path $ContinuationPlanPath -Value $continuation -CreateNew
+        return [pscustomobject]@{
+            Outcome = 'PARTIAL_METADATA_RECONCILED_CONTINUATION_READY'
+            ContinuationId = $continuation.ContinuationId
+            ContinuationPlanSha256 = (Get-FileHash -LiteralPath $ContinuationPlanPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            PriorComponents = $state.PriorComponents
+            MissingOutput = 'ScopedTotalCount'
+            RequestCounters = $script:RequestCounts
+        }
+    }
+    if ((Get-FileHash -LiteralPath $ContinuationPlanPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+        $ExpectedContinuationPlanSha256) { throw 'Continuation plan hash does not match.' }
+    $continuation = Get-Content -LiteralPath $ContinuationPlanPath -Raw | ConvertFrom-Json
+    $null = ConvertTo-CanonicalGuid $continuation.ContinuationId
+    if ($continuation.OriginalPlanSha256 -cne $ExpectedPlanSha256 -or
+        $continuation.PriorJournalSha256 -cne $ExpectedPriorJournalSha256 -or
+        $continuation.ReleaseManifestSha256 -cne $script:Plan.ReleaseManifestSha256 -or
+        $continuation.MaximumPostDispatches -ne 1 -or
+        (ConvertTo-Json -InputObject $continuation.PartialState -Depth 20 -Compress) -cne
+            (ConvertTo-Json -InputObject $state -Depth 20 -Compress) -or
+        (ConvertTo-Json -InputObject $continuation.Write -Depth 20 -Compress) -cne
+            (ConvertTo-Json -InputObject $script:Plan.Writes[4] -Depth 20 -Compress)) {
+        throw 'Continuation target, prior journal or fresh component versions differ from preflight.'
+    }
+    $freshState = Get-PartialState -Snapshot (Get-ApiSnapshot)
+    if ((ConvertTo-Json -InputObject $freshState -Depth 20 -Compress) -cne
+        (ConvertTo-Json -InputObject $state -Depth 20 -Compress)) {
+        throw 'Partial baseline changed immediately before continuation dispatch.'
+    }
+    $script:Journal = [ordered]@{
+        ContinuationId = $continuation.ContinuationId
+        ContinuationPlanSha256 = $ExpectedContinuationPlanSha256
+        PriorJournalSha256 = $ExpectedPriorJournalSha256
+        Writes = @($script:Plan.Writes | ForEach-Object {
+            [ordered]@{ Name = $_.Name; Id = $_.Id; State = 'PRESERVED_NOT_DISPATCHED' }
+        })
+        Outcome = 'DISPATCH_RESERVED'
+        AutomaticRetries = 0
+        RequestCounters = $script:RequestCounts
+    }
+    $script:Journal.Writes[4].State = 'DISPATCH_RESERVED'
+    Save-Json -Path $EvidencePath -Value $script:Journal -CreateNew
+    $script:JournalOwned = $true
+    $script:WriteIndex = 4
+    $write = $script:Plan.Writes[4]
+    $null = Get-Api -Method POST -Path $write.Path -Body $write.Body
+    $script:Journal.Writes[4].State = 'ACKNOWLEDGED'
+    Save-Json -Path $EvidencePath -Value $script:Journal
+    Assert-WriteReadback -Write $write
+    foreach ($prior in $script:Plan.Writes[0..3]) { Assert-WriteReadback -Write $prior }
+    Assert-PreservedComponentVersions -Components $state.PriorComponents
+    $script:Journal.Writes[4].State = 'GET_RECONCILED'
+    $script:Journal.FinalContract = Assert-CompleteMetadataContract
+    $script:Journal.Outcome = 'CANDIDATE_PAGINATION_API_METADATA_RECONCILED'
+    Save-Json -Path $EvidencePath -Value $script:Journal
+    [pscustomobject]@{
+        Outcome = $script:Journal.Outcome
+        ContinuationId = $continuation.ContinuationId
+        FinalContract = $script:Journal.FinalContract
+        RequestCounters = $script:RequestCounts
+        PriorJournalUnchanged = ((Get-FileHash -LiteralPath $PriorJournalPath -Algorithm SHA256).Hash.ToLowerInvariant() -ceq
+            $ExpectedPriorJournalSha256)
+    }
+}
+
 try {
     $helperPath = Join-Path $PSScriptRoot 'Provision-BsoRsCandidateChildTables.ps1'
     $tokens = $null
@@ -795,6 +1044,16 @@ try {
         throw 'Dataverse WhoAmI does not match the PAC identity and exact organization.'
     }
     $script:ExpectedDelta = Get-SourceDelta
+    if ($script:IsPartialContinuation) {
+        foreach ($path in @($PriorJournalPath, $PlanPath, $BaselinePath)) {
+            $script:EvidenceLocks.Add([IO.File]::Open($path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read))
+        }
+        if ($Mode -ceq 'ContinuePartial') {
+            $script:EvidenceLocks.Add([IO.File]::Open($ContinuationPlanPath, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read))
+        }
+        Invoke-PartialContinuation
+        return
+    }
     $snapshot = Get-ApiSnapshot
 
     if ($Mode -ceq 'Preflight') {
@@ -857,6 +1116,7 @@ try {
             Outcome = 'IN_PROGRESS'
         }
         Save-Json -Path $EvidencePath -Value $script:Journal -CreateNew
+        $script:JournalOwned = $true
         for ($index = 0; $index -lt $script:Plan.Writes.Count; $index++) {
             $write = $script:Plan.Writes[$index]
             $entitySet = [string]$write.Path
@@ -900,6 +1160,7 @@ try {
         $script:Journal.Writes.Count -ne 5) {
         throw 'The consumed metadata journal does not match the pinned one-shot plan.'
     }
+    $script:JournalOwned = $true
     foreach ($index in 0..($script:Plan.Writes.Count - 1)) {
         $write = $script:Plan.Writes[$index]
         try {
@@ -930,7 +1191,7 @@ try {
     }
 }
 catch {
-    if ($script:Journal -and $EvidencePath -and (Test-Path -LiteralPath $EvidencePath)) {
+    if ($script:JournalOwned -and $script:Journal -and $EvidencePath -and (Test-Path -LiteralPath $EvidencePath)) {
         $script:Journal.Outcome = 'STOPPED_WITHOUT_RETRY'
         $script:Journal.RequestCounters = $script:RequestCounts
         Save-Json -Path $EvidencePath -Value $script:Journal
@@ -938,6 +1199,7 @@ catch {
     throw "Candidate pagination metadata deployment stopped without retry. $($_.Exception.Message)"
 }
 finally {
+    foreach ($lock in $script:EvidenceLocks) { $lock.Dispose() }
     $script:AccessToken = $null
     [Environment]::SetEnvironmentVariable('BSO_RS_EXPECTED_USER_ID', $null, 'Process')
 }

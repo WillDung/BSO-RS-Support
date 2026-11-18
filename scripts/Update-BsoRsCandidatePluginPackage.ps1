@@ -139,8 +139,16 @@ function ConvertTo-CanonicalGuid {
 function Test-PackageModifiedOnMatchesBaseline {
     param(
         [Parameter(Mandatory)][object]$CurrentModifiedOn,
-        [Parameter(Mandatory)][object]$BaselineModifiedOn
+        [Parameter(Mandatory)][object]$BaselineModifiedOn,
+        [switch]$SerializedUtcBaseline
     )
+    if ($SerializedUtcBaseline -and $BaselineModifiedOn -is [string] -and
+        $BaselineModifiedOn -cmatch '^\d{2}/\d{2}/\d{4} \d{2}:\d{2}:\d{2}$') {
+        # The original pagination runner serialized a UTC DateTime without its offset.
+        $BaselineModifiedOn = [DateTimeOffset]::ParseExact(
+            $BaselineModifiedOn, 'MM/dd/yyyy HH:mm:ss', [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::AssumeUniversal)
+    }
     ([DateTimeOffset]$CurrentModifiedOn).ToUniversalTime() -eq
         ([DateTimeOffset]$BaselineModifiedOn).ToUniversalTime()
 }
@@ -2060,7 +2068,10 @@ function Assert-DevelopmentDeploymentBaseline {
     }
     $modifiedOnMatches = Test-PackageModifiedOnMatchesBaseline `
         -CurrentModifiedOn $PackageSnapshot.ModifiedOn `
-        -BaselineModifiedOn $baseline.Package.modifiedon
+        -BaselineModifiedOn $baseline.Package.modifiedon `
+        -SerializedUtcBaseline:($script:Manifest.PSObject.Properties['scope'] -and
+            $script:Manifest.scope -ceq 'CANDIDATE_LIST_PAGINATION_AND_ANSWERED_TO_SCHEDULING' -and
+            $ExpectedDevelopmentApiPlanSha256 -cmatch '^[0-9a-f]{64}$')
     $membership = Get-DevelopmentMembershipFingerprint -SolutionId ([string]$solutions[0].solutionid)
     $baselineMembershipLines = @($baseline.Memberships | ForEach-Object {
         '{0}|{1}|{2}' -f [int]$_.componenttype,
@@ -2231,10 +2242,10 @@ function Assert-DevelopmentDeploymentBaseline {
         BsoRoleDefinitionUnchanged = $true
         BsoProtectedDirectCreateWriteAbsent = $true
         ReferenceAdminRoleDefinitionUnchanged = $true
-        ReferenceAdminRoleUnassigned = if ($AssemblyOnlyPatch) {
+        ReferenceAdminRoleUnassigned = if ($AssemblyOnlyPatch -or (Test-SecurityPreservingDevelopmentUpdate)) {
             $security.Roles[1].UserIds.Count -eq 0 -and $security.Roles[1].TeamIds.Count -eq 0
         } else { $true }
-        SecurityBaselineUnchanged = [bool]$AssemblyOnlyPatch
+        SecurityBaselineUnchanged = $AssemblyOnlyPatch -or (Test-SecurityPreservingDevelopmentUpdate)
     }
 }
 

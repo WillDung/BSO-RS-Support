@@ -34,6 +34,8 @@ namespace os_sr_cact
                     action = inputAction;
                 var factory = (IOrganizationServiceFactory)serviceProvider.GetService(typeof(IOrganizationServiceFactory));
                 var callerService = factory.CreateOrganizationService(context.InitiatingUserId);
+                var availabilityProvider = new AsyncRound1AvailabilityProvider(
+                    callerService, context.InitiatingUserId);
                 SyntheticIsolation? isolation = null;
                 var requestedAction = context.InputParameters.TryGetValue("ActionType", out var actionInput)
                     ? actionInput as string : null;
@@ -135,23 +137,22 @@ namespace os_sr_cact
                         throw new OperationError("STALE_EXPECTED_STATUS");
                     if (request.Action == Round1Availability.CapabilitiesAction)
                         context.OutputParameters["ScopedData"] = "{\"schemaVersion\":1,\"providerOperational\":" +
-                            (Round1Availability.Provider.IsOperational ? "true" : "false") +
+                            (availabilityProvider.IsOperational ? "true" : "false") +
                             ",\"manualSchedulingOperational\":true}";
                     else
                     {
                         var selection = Round1Availability.FromRequest(request);
-                        var evidence = Round1Availability.Provider.Query(selection, DateTime.UtcNow);
                         context.OutputParameters["ScopedData"] =
-                            Round1Availability.Calculate(selection, evidence, DateTime.UtcNow).ToJson();
+                            availabilityProvider.StartOrRead(selection, DateTime.UtcNow).ToJson();
                     }
                     context.OutputParameters["ResultCode"] = "AvailabilityRead";
                     trace.Trace("os_sr_cact availability action={0} providerOperational={1}",
-                        action, Round1Availability.Provider.IsOperational);
+                        action, availabilityProvider.IsOperational);
                     return;
                 }
                 var systemService = factory.CreateOrganizationService(null);
                 var store = new DataverseStore(systemService, context, trace, request.Action,
-                    stage => createCandidateStage = stage, isolation);
+                    stage => createCandidateStage = stage, availabilityProvider, isolation);
                 var result = CandidateOperation.Execute(request, store);
                 if (action == "CreateCandidate") createCandidateStage = "RESPONSE";
                 context.OutputParameters["ResultCode"] = result.Replay ? "DuplicateReplay" : "Applied";
@@ -644,6 +645,7 @@ namespace os_sr_cact
         private readonly ITracingService trace;
         private readonly string action;
         private readonly Action<string> stageChanged;
+        private readonly IRound1AvailabilityProvider availabilityProvider;
         private readonly SyntheticIsolation? isolation;
 
         public DataverseStore(
@@ -651,13 +653,16 @@ namespace os_sr_cact
             IPluginExecutionContext context,
             ITracingService trace,
             string action,
-            Action<string> stageChanged, SyntheticIsolation? isolation = null)
+            Action<string> stageChanged,
+            IRound1AvailabilityProvider availabilityProvider,
+            SyntheticIsolation? isolation = null)
         {
             this.systemService = systemService;
             this.context = context;
             this.trace = trace;
             this.action = action;
             this.stageChanged = stageChanged;
+            this.availabilityProvider = availabilityProvider;
             this.isolation = isolation;
         }
 
@@ -1074,7 +1079,7 @@ namespace os_sr_cact
             if (isolation != null || request.Action != "MarkRound1Scheduled") return;
             Round1Availability.ValidateSave(Round1Availability.FromRequest(request),
                 (DateTime)request.Values["StartAt"]!, (DateTime)request.Values["EndAt"]!,
-                Round1Availability.Provider, () => DateTime.UtcNow);
+                availabilityProvider, () => DateTime.UtcNow);
         }
 
         private static void SetScheduleInputs(Entity row, ActionRequest request, Guid candidateId)

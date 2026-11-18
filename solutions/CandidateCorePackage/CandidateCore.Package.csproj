@@ -23,6 +23,7 @@
     <Compile Include="..\CandidateCore\SyntheticIsolation.cs" Link="SyntheticIsolation.cs" />
     <Compile Include="..\CandidateCore\NormalCreateAuthorization.cs" Link="NormalCreateAuthorization.cs" />
     <Compile Include="..\CandidateCore\Round1Availability.cs" Link="Round1Availability.cs" />
+    <Compile Include="..\CandidateCore\AsyncRound1AvailabilityProvider.cs" Link="AsyncRound1AvailabilityProvider.cs" />
     <PackageReference Include="Microsoft.CrmSdk.CoreAssemblies" Version="9.0.2.60" PrivateAssets="All" />
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="All" />
     <PackageReference Include="Microsoft.PowerApps.MSBuild.Plugin" Version="1.52.1" PrivateAssets="All" />

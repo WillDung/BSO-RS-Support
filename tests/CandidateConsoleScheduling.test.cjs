@@ -31,8 +31,10 @@ function harness(singleUserDev = false) {
       dispatch(type) { for (const listener of this.listeners.get(type) || []) listener({ target: this }); },
       reset() {}, focus() {}, scrollIntoView() {}
     });
+
     return elements.get(id);
   }
+  let correlationSequence = 0;
   const context = {
     busy: false, referencesReady: true, workspaceReady: true,
     referenceMode: singleUserDev ? "CONFIGURED" : "NORMAL",
@@ -44,9 +46,15 @@ function harness(singleUserDev = false) {
     scheduleMode: "new", scheduleRetryBlockedCandidateId: null,
     round1Availability: { generation: 0, capabilityGeneration: 0, providerOperational: false,
       manualSchedulingOperational: false, checking: false, evidence: null },
-    window: { clearTimeout() {}, setTimeout(fn) { timers.push(fn); return timers.length; } },
+    window: { clearTimeout() {}, setTimeout(fn, delay) {
+      if (delay === 2000) queueMicrotask(fn);
+      else timers.push(fn);
+      return timers.length + 1;
+    } },
+    AVAILABILITY_POLL_INTERVAL_MS: 2000,
+    AVAILABILITY_POLL_ATTEMPTS: 60,
     currentUserId: () => "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
-    newCorrelationId: () => "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+    newCorrelationId: () => `dddddddd-dddd-4ddd-8ddd-${String(++correlationSequence).padStart(12, "0")}`,
     $: element,
     document: { createElement: () => ({}), querySelectorAll: () => [element("save-schedule")] },
     showNotice: (...args) => notices.push(args), hideNotice() {},
@@ -83,7 +91,8 @@ function harness(singleUserDev = false) {
       "invalidateRound1Availability", "round1Selection", "selectedVerifiedRound1Slot",
       "updateRound1AvailabilityControls", "validateRound1Availability", "round1SelectionChanged",
       "selectRound1Slot"].map((name) => extract(`  function ${name}(`)),
-    ...["readRound1Availability", "loadRound1SchedulingCapabilities", "checkRound1Availability",
+    ...["readRound1Availability", "loadRound1SchedulingCapabilities", "pollRound1Availability",
+      "checkRound1Availability",
       "saveNormalRound1Schedule"].map((name) => extract(`  async function ${name}(`)),
     extract("  function configureSchedulingAvailability("),
     extract("  function setBusy("),
@@ -128,7 +137,7 @@ function readySelection(ui) {
 
 function envelope(selection, correlationId, slots = true) {
   const now = Date.now();
-  return { schemaVersion: 1, ...selection, correlationId,
+  return { schemaVersion: 1, state: "Ready", queryId: correlationId, ...selection, correlationId,
     evidenceId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
     observedAtUtc: new Date(now - 1000).toISOString(),
     expiresAtUtc: new Date(now + 60000).toISOString(),
@@ -166,7 +175,7 @@ test("loading, no-slots, provider-error and late-response states fail closed", a
   const pending = ui.context.checkRound1Availability();
   assert.equal(ui.element("scheduling-slot").disabled, true);
   assert.equal(ui.element("scheduling-check-availability").disabled, true);
-  assert.match(ui.element("scheduling-availability-status").textContent, /Loading/);
+  assert.match(ui.element("scheduling-availability-status").textContent, /Checking availability/);
   ui.element("scheduling-date").value = "";
   ui.context.round1SelectionChanged();
   release();
@@ -181,6 +190,52 @@ test("loading, no-slots, provider-error and late-response states fail closed", a
   await ui.context.checkRound1Availability();
   assert.match(ui.element("scheduling-availability-status").textContent, /provider error/);
   assert.equal(ui.context.round1Availability.evidence, null);
+});
+
+test("async availability polls one correlated request until Ready", async () => {
+  const ui = harness();
+  const selection = readySelection(ui);
+  const requests = [];
+  ui.context.reply = (action, inputs, correlationId) => {
+    requests.push({ action, inputs, correlationId });
+    return requests.length === 1
+      ? { schemaVersion: 1, state: "Pending", queryId: correlationId, slots: [] }
+      : envelope(selection, correlationId);
+  };
+  await ui.context.checkRound1Availability();
+  assert.equal(requests.length, 2);
+  assert.ok(requests.every((request) => request.action === "GetRound1Availability"));
+  assert.equal(requests[0].correlationId, requests[1].correlationId);
+  assert.equal(ui.context.round1Availability.evidence.queryId, requests[0].correlationId);
+  assert.equal(ui.element("scheduling-slot").disabled, false);
+});
+
+test("async availability displays provider failures and bounds Pending polling", async () => {
+  for (const state of ["Failed", "Expired"]) {
+    const ui = harness();
+    readySelection(ui);
+    ui.context.reply = (_, inputs, correlationId) => ({
+      schemaVersion: 1, state, queryId: correlationId,
+      errorCode: "AVAILABILITY_RESULT_UNTRUSTED", slots: []
+    });
+    await ui.context.checkRound1Availability();
+    assert.equal(ui.context.round1Availability.evidence, null);
+    assert.match(ui.element("scheduling-availability-status").textContent,
+      state === "Failed" ? /AVAILABILITY_RESULT_UNTRUSTED/ : /expired/);
+  }
+
+  const pending = harness();
+  readySelection(pending);
+  const requests = [];
+  pending.context.reply = (_, inputs, correlationId) => {
+    requests.push(correlationId);
+    return { schemaVersion: 1, state: "Pending", queryId: correlationId, slots: [] };
+  };
+  await pending.context.checkRound1Availability();
+  assert.equal(requests.length, 60);
+  assert.ok(requests.every((correlationId) => correlationId === requests[0]));
+  assert.match(pending.element("scheduling-availability-status").textContent, /timed out/);
+  assert.equal(pending.context.round1Availability.evidence, null);
 });
 
 test("Room/Date/TA changes do not discard an in-flight capability response for the same Candidate", async () => {
@@ -217,7 +272,11 @@ test("strict envelope rejects stale, mismatched, overlapping and partial slots",
 test("confirmed save sends exact refs, derived times and Notes, then verifies readback before one dialog", async () => {
   const ui = harness();
   const selection = readySelection(ui);
-  ui.context.reply = (_, inputs, correlationId) => envelope(selection, correlationId);
+  const availabilityRequests = [];
+  ui.context.reply = (action, inputs, correlationId) => {
+    availabilityRequests.push({ action, inputs, correlationId });
+    return envelope(selection, correlationId);
+  };
   await ui.context.checkRound1Availability();
   const slot = ui.context.round1Availability.evidence.slots[0];
   ui.element("scheduling-slot").value = slot.startUtc;
@@ -235,6 +294,9 @@ test("confirmed save sends exact refs, derived times and Notes, then verifies re
   };
   await ui.context.createSchedule({ preventDefault() {} });
   assert.equal(ui.requests.length, 1);
+  assert.equal(availabilityRequests.length, 2);
+  assert.notEqual(availabilityRequests[0].correlationId, availabilityRequests[1].correlationId);
+  assert.equal(ui.requests[0].correlationId, availabilityRequests[1].correlationId);
   assert.equal(ui.requests[0].inputs.Notes, "Synthetic <safe> notes");
   assert.equal(ui.requests[0].inputs.StartAt, slot.startUtc);
   assert.equal(ui.requests[0].inputs.InterviewerId, selection.taId);

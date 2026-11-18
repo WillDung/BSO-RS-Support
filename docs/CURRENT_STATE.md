@@ -14,6 +14,16 @@ The [validation release](CANDIDATE_MANUAL_SAVE_VALIDATION_RELEASE_MANIFEST.json)
 
 **Owner handback:** refresh the Console, select a Room and valid TA, and enter a future Start with later End. Save becomes available when the displayed field and workflow gates pass. The owner performs the actual persistence test; this release does not claim that an unobserved HTTP save failure has been resolved. No live Candidate reads/writes, Schedule writes, provider execution, Calendar/identity/security changes or automated lifecycle UAT occurred. Earlier sections below are historical release/diagnosis snapshots.
 
+## Async Outlook Free/Busy bridge source (2026-11-18)
+
+**Status: local adapter and Console polling source implemented, not deployed. Trusted Flow-result provenance remains BLOCKED; automatic availability and Save remain disabled.**
+
+The local [async provider](../solutions/CandidateCore/AsyncRound1AvailabilityProvider.cs) defines Pending, Ready, Failed and Expired response states, correlates requests to their row identity, and validates actor ownership, Room, TA, onsite mode, date/window, duration, result status, freshness and canonical slot data before passing results to the existing 30-minute intersection engine. Candidate Core capability remains false. While the result handoff is unverified, the server returns Failed without reading or creating AVQ rows; server-side automatic Save also rejects before Schedule, Candidate status, History or receipt writes. The [Console](../solutions/CandidateConsole/WebResources/os_/bso/candidate-console.js) has bounded same-correlation polling, accepts only a validated Ready response, invalidates evidence on selection changes/expiry and requests fresh evidence before automatic Save. It uses that fresh query correlation for the existing authorized scheduling operation. The separate Manual Scheduling path is unchanged.
+
+The active Flow's administrator-owned result connection does not independently prove that result data came from Outlook, and the live Flow definition materially differs from the local source. No restricted authenticated result handoff or full-coverage provenance was verified. Therefore the source remains fail-closed: no real Room/TA availability, common slots or automatic scheduling is claimed. No Flow, Candidate Core package or WebResource was deployed or published; no Candidate/Schedule test writes, lifecycle UAT, commit or push occurred.
+
+**Local validation:** Candidate Core package build succeeded; the focused SDK selector passed **154** synthetic checks; the focused Console scheduling suite passed **22** Node tests. These validate local behavior only, not a trusted Flow handoff or live availability. `CandidateConsole.Tests.ps1` also remains red on a fixed-API source-shape assertion expecting inline `body: JSON.stringify(request)` while the unchanged transport serializes to a local `body` variable first.
+
 ## Manual Save failure diagnosis and bounded feedback correction (2026-11-18)
 
 **Status: feedback/dispatch-tracking correction DEPLOYED and byte-verified; underlying Manual Save resolution remains BLOCKED.** This is a partial correction, not a claim that Schedule persistence now works.

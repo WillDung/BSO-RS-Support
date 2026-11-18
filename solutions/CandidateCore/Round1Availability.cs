@@ -101,7 +101,8 @@ namespace os_sr_cact
 
         public string ToJson()
         {
-            var result = new StringBuilder("{\"schemaVersion\":1,\"candidateId\":\"")
+            var result = new StringBuilder("{\"schemaVersion\":1,\"state\":\"Ready\",\"queryId\":\"")
+                .Append(Selection.Correlation.ToString("D")).Append("\",\"candidateId\":\"")
                 .Append(Selection.Candidate.ToString("D")).Append("\",\"actorId\":\"")
                 .Append(Selection.Actor.ToString("D")).Append("\",\"roomId\":\"")
                 .Append(Selection.Room.ToString("D")).Append("\",\"taId\":\"")

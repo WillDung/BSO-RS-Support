@@ -23,6 +23,8 @@
     candidateFailed: 100010005
   };
   const CANDIDATE_PAGE_SIZE = 10;
+  const AVAILABILITY_POLL_INTERVAL_MS = 2000;
+  const AVAILABILITY_POLL_ATTEMPTS = 60;
   // Mirrors the Candidate Core RecordCall transition; the server remains authoritative.
   function canRecordCall(status) {
     return status === STATUS.needCall;
@@ -1790,7 +1792,8 @@
     const utc = (value) => typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value) &&
       Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
     const now = Date.now();
-    if (["candidateId", "actorId", "roomId", "taId", "date"].some((key) => data[key] !== selection[key]) ||
+    if (data.state !== "Ready" || data.queryId !== correlationId ||
+        ["candidateId", "actorId", "roomId", "taId", "date"].some((key) => data[key] !== selection[key]) ||
         data.correlationId !== correlationId || normalizeGuid(data.evidenceId) !== data.evidenceId ||
         data.evidenceId === "00000000-0000-0000-0000-000000000000" ||
         !utc(data.observedAtUtc) || !utc(data.expiresAtUtc) ||
@@ -1815,6 +1818,29 @@
     return data;
   }
 
+  async function pollRound1Availability(selection, correlationId, generation) {
+    for (let attempt = 0; attempt < AVAILABILITY_POLL_ATTEMPTS; attempt++) {
+      if (generation !== round1Availability.generation) return null;
+      const data = await readRound1Availability("GetRound1Availability", {
+        CandidateId: selection.candidateId, ExpectedStatus: STATUS.waitingManualScheduling,
+        InterviewerId: selection.taId, LocationId: selection.roomId,
+        StartAt: selection.startUtc, EndAt: selection.endUtc
+      }, correlationId);
+      if (generation !== round1Availability.generation) return null;
+      if (data.state === "Ready") return validateRound1Availability(data, selection, correlationId);
+      if (data.state === "Failed") {
+        const code = typeof data.errorCode === "string" &&
+          /^[A-Z][A-Z0-9_]{0,39}$/.test(data.errorCode) ? data.errorCode : "AVAILABILITY_PROVIDER_UNAVAILABLE";
+        throw new Error(`AVAILABILITY_PROVIDER_FAILED:${code}`);
+      }
+      if (data.state === "Expired") throw new Error("AVAILABILITY_EVIDENCE_STALE");
+      if (data.state !== "Pending") throw new Error("AVAILABILITY_RESPONSE_INVALID");
+      $("scheduling-availability-status").textContent = "Checking availability...";
+      await new Promise((resolve) => window.setTimeout(resolve, AVAILABILITY_POLL_INTERVAL_MS));
+    }
+    throw new Error("AVAILABILITY_TIMEOUT");
+  }
+
   async function checkRound1Availability() {
     if (busy || round1Availability.checking || !round1Availability.providerOperational ||
         !requiresTrustedScheduleAvailability()) return;
@@ -1829,14 +1855,11 @@
     const generation = round1Availability.generation;
     const correlationId = newCorrelationId();
     round1Availability.checking = true;
-    $("scheduling-availability-status").textContent = "Loading Room + TA Outlook Free/Busy...";
+    $("scheduling-availability-status").textContent = "Checking availability...";
     updateRound1AvailabilityControls();
     try {
-      const data = validateRound1Availability(await readRound1Availability("GetRound1Availability", {
-        CandidateId: selection.candidateId, ExpectedStatus: STATUS.waitingManualScheduling,
-        InterviewerId: selection.taId, LocationId: selection.roomId,
-        StartAt: selection.startUtc, EndAt: selection.endUtc
-      }, correlationId), selection, correlationId);
+      const data = await pollRound1Availability(selection, correlationId, generation);
+      if (!data) return null;
       if (generation !== round1Availability.generation) return;
       round1Availability.evidence = data;
       setLookupPlaceholder($("scheduling-slot"), data.slots.length ? "Select a verified 30-minute slot" : "No common free slots");
@@ -1855,11 +1878,17 @@
         $("scheduling-availability-status").textContent = "Availability expired. Check Room + TA availability again.";
         updateRound1AvailabilityControls();
       }, Math.min(Date.parse(data.expiresAtUtc), ...data.slots.map((slot) => Date.parse(slot.startUtc))) - Date.now());
+      return data;
     } catch (error) {
       if (generation !== round1Availability.generation) return;
       logSafeFailure("ROUND1_AVAILABILITY_FAILED", error);
-      $("scheduling-availability-status").textContent =
-        "Outlook provider error or invalid/stale response. No slots are available to select. Check availability again to retry.";
+      const providerFailure = /^AVAILABILITY_PROVIDER_FAILED:([A-Z][A-Z0-9_]{0,39})$/.exec(error.message);
+      $("scheduling-availability-status").textContent = providerFailure
+        ? `Availability check failed (${providerFailure[1]}). No slots are available to select.`
+        : error.message === "AVAILABILITY_EVIDENCE_STALE" || error.message === "AVAILABILITY_TIMEOUT"
+          ? "Availability expired or timed out. No slots are available to select; check again."
+          : "Outlook provider error or invalid response. No slots are available to select. Check availability again to retry.";
+      return null;
     } finally {
       if (generation === round1Availability.generation) {
         round1Availability.checking = false;
@@ -2234,7 +2263,7 @@
 
   async function saveNormalRound1Schedule() {
     const manual = isManualRound1Scheduling();
-    const slot = manual ? null : selectedVerifiedRound1Slot();
+    let slot = manual ? null : selectedVerifiedRound1Slot();
     let selection;
     try { selection = manual ? manualRound1Selection() : round1Selection(); }
     catch (error) {
@@ -2254,9 +2283,19 @@
       return;
     }
     const action = manual ? "RecordManualRound1Schedule" : "MarkRound1Scheduled";
+    if (!manual) {
+      const selectedStart = slot.startUtc;
+      const refreshedEvidence = await checkRound1Availability();
+      slot = refreshedEvidence?.slots.find((candidate) => candidate.startUtc === selectedStart) || null;
+      if (!slot) {
+        showNotice("Schedule not saved. The selected slot is no longer available; select a current verified slot.", true);
+        return;
+      }
+      $("scheduling-slot").value = selectedStart;
+    }
     const timeWindow = manual ? selection : slot;
     const notes = manual ? $("scheduling-notes").value : $("scheduling-notes").value.trim();
-    const correlationId = newCorrelationId();
+    const correlationId = manual ? newCorrelationId() : round1Availability.evidence.queryId;
     let submitted = false;
     let confirmed = false;
     hideNotice();

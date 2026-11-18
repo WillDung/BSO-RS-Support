@@ -55,8 +55,10 @@ internal static partial class Program
                 slot.EvidenceCorrelation == selection.Correlation),
             "32 adjacent provider quarters produce exactly sixteen bound 30-minute UTC slots");
         Check(result.ToJson().Contains("\"date\":\"2026-11-16\"") &&
+            result.ToJson().Contains("\"state\":\"Ready\"") &&
+            result.ToJson().Contains("\"queryId\":\"" + selection.Correlation.ToString("D") + "\"") &&
             result.ToJson().Contains("\"evidenceCorrelationId\":\"" + selection.Correlation.ToString("D") + "\""),
-            "Availability wire envelope includes local date and evidence correlation");
+            "Ready availability wire envelope includes local date, query ID and evidence correlation");
         foreach (var unavailable in new[] { Round1BusyState.Busy, Round1BusyState.Tentative,
             Round1BusyState.OutOfOffice, Round1BusyState.Unknown, (Round1BusyState)99 })
         {
@@ -140,7 +142,15 @@ internal static partial class Program
             capability.Updates == 0 && capability.Receipt == null,
             "Production capability is server-controlled, explicitly false and read-only");
         var query = SchedulingHost(Round1Availability.QueryAction);
-        Reject(() => new ApplyCandidateAction().Execute(query), "AVAILABILITY_PROVIDER_UNAVAILABLE");
+        new ApplyCandidateAction().Execute(query);
+        var blockedQuery = (string)query.Output["ScopedData"];
+        Check((string)query.Output["ResultCode"] == "AvailabilityRead" &&
+            blockedQuery.Contains("\"state\":\"Failed\"") &&
+            blockedQuery.Contains("\"errorCode\":\"AVAILABILITY_PROVIDER_UNAVAILABLE\"") &&
+            blockedQuery.Contains("\"queryId\":\"" + ((Guid)query.Input["CorrelationId"]).ToString("D") + "\"") &&
+            query.ServiceOperations.All(operation => !operation.Contains("os_sr_avq")) &&
+            query.Updates == 0 && query.Receipt == null,
+            "Unverified availability returns Failed without reading or creating AVQ requests or Candidate writes");
         foreach (var promote in new[] { false, true })
         {
             var blockedSave = SchedulingHost("MarkRound1Scheduled");

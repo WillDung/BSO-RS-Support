@@ -44,6 +44,7 @@ namespace os_sr_cact
         public const int ScheduleActive = 100000001;
         public const int ScheduleCancelled = 100000002;
         public const int ScheduleSuperseded = 100000003;
+        public const string ManualScheduleAction = "RecordManualRound1Schedule";
         // Tolerates client/server clock skew only; ContactedAt is persisted and fingerprinted exactly as submitted.
         public static readonly TimeSpan MaxRecordCallFutureClockSkew = TimeSpan.FromSeconds(5);
         public Guid Actor { get; }
@@ -76,8 +77,11 @@ namespace os_sr_cact
 
         public static bool IsSupportedAction(string action) =>
             new[] { "CreateCandidate", "UpdateCandidate", "RecordCall", "ProceedToScheduling",
-                "MarkRound1Scheduled", "RecordPass", "RecordFail", "RequestReschedule",
+                "MarkRound1Scheduled", ManualScheduleAction, "RecordPass", "RecordFail", "RequestReschedule",
                 "CancelRound1", Round1Availability.QueryAction, Round1Availability.CapabilitiesAction }.Contains(action);
+
+        public static bool IsScheduleConfirmation(string? action) =>
+            action == "MarkRound1Scheduled" || action == ManualScheduleAction;
 
         public static IEnumerable<string> ApplicableInputNames(string action)
         {
@@ -91,7 +95,7 @@ namespace os_sr_cact
                     "ProfileFieldMask" });
             if (action == "RecordCall")
                 return common.Concat(new[] { "CandidateId", "ExpectedStatus", "CallOutcome", "ContactedAt", "Notes" });
-            if (action == "MarkRound1Scheduled" || action == "RequestReschedule")
+            if (IsScheduleConfirmation(action) || action == "RequestReschedule")
                 return common.Concat(new[] { "CandidateId", "ExpectedStatus", "InterviewerId", "LocationId",
                     "StartAt", "EndAt", "Notes" }).Concat(action == "RequestReschedule" ? new[] { "Reason" } : Array.Empty<string>());
             if (action == Round1Availability.QueryAction)
@@ -120,6 +124,9 @@ namespace os_sr_cact
             Action = Required<string>(input, "ActionType");
             if (!IsSupportedAction(Action))
                 throw new OperationError("INVALID_ACTION");
+            if (Action == ManualScheduleAction && input.TryGetValue("SyntheticScopeId", out var manualScope) &&
+                manualScope != null && (!(manualScope is Guid manualScopeId) || manualScopeId != Guid.Empty))
+                throw new OperationError("MANUAL_SCHEDULE_NORMAL_CONTEXT_REQUIRED");
             Correlation = Required<Guid>(input, "CorrelationId");
             if (Correlation == Guid.Empty) throw new OperationError("INVALID_CORRELATION");
             CandidateId = input.TryGetValue("CandidateId", out var target) && target is Guid id && id != Guid.Empty ? id : (Guid?)null;
@@ -186,7 +193,7 @@ namespace os_sr_cact
                     else
                     {
                         if (value != null && !(value is string)) throw new OperationError("INVALID_TEXT");
-                        value = Action == "RecordCall" && pair.Key == "Notes"
+                        value = (Action == "RecordCall" || Action == ManualScheduleAction) && pair.Key == "Notes"
                             ? (string.IsNullOrWhiteSpace(value as string) ? null : value)
                             : (value as string)?.Trim();
                         if (Action == "UpdateCandidate" && maskedProfileFields.Contains(pair.Key) &&
@@ -248,7 +255,7 @@ namespace os_sr_cact
             {
                 if (!values.ContainsKey("Reason")) throw new OperationError("REASON_REQUIRED");
             }
-            if (Action == "MarkRound1Scheduled" || Action == "RequestReschedule" || Action == Round1Availability.QueryAction)
+            if (IsScheduleConfirmation(Action) || Action == "RequestReschedule" || Action == Round1Availability.QueryAction)
             {
                 var interviewer = Required<Guid>(values, "InterviewerId");
                 var location = Required<Guid>(values, "LocationId");
@@ -257,7 +264,10 @@ namespace os_sr_cact
                 if (interviewer == Guid.Empty || location == Guid.Empty)
                     throw new OperationError("INVALID_SCHEDULE_REFERENCE");
                 if (start.Kind != DateTimeKind.Utc || end.Kind != DateTimeKind.Utc ||
-                    (Action != Round1Availability.QueryAction && start <= utcNow) || end <= start || start.Date != end.Date)
+                    (Action != Round1Availability.QueryAction && start <= utcNow) || end <= start ||
+                    (Action == ManualScheduleAction
+                        ? Round1Availability.LocalDate(start) != Round1Availability.LocalDate(end)
+                        : start.Date != end.Date))
                     throw new OperationError("INVALID_SCHEDULE_TIME");
             }
             ProfilePatch = new ReadOnlyDictionary<string, ProfileFieldPatch>(profilePatch);
@@ -420,6 +430,8 @@ namespace os_sr_cact
                     ["ProceedToScheduling"] = Array.AsReadOnly(new[] { "CANDIDATE_UPDATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE" }),
                     ["MarkRound1Scheduled"] = Array.AsReadOnly(new[] { "INTERVIEW_SCHEDULE_CREATE",
                         "INTERVIEW_SCHEDULE_UPDATE", "CANDIDATE_UPDATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE" }),
+                    [ActionRequest.ManualScheduleAction] = Array.AsReadOnly(new[] { "INTERVIEW_SCHEDULE_CREATE",
+                        "INTERVIEW_SCHEDULE_UPDATE", "CANDIDATE_UPDATE", "STATUS_HISTORY_CREATE", "RECEIPT_CREATE" }),
                     ["RecordPass"] = Array.AsReadOnly(new[] { "CANDIDATE_UPDATE", "INTERVIEW_SCHEDULE_UPDATE",
                         "STATUS_HISTORY_CREATE", "RECEIPT_CREATE" }),
                     ["RecordFail"] = Array.AsReadOnly(new[] { "CANDIDATE_UPDATE", "INTERVIEW_SCHEDULE_UPDATE",
@@ -441,7 +453,7 @@ namespace os_sr_cact
                 outcome >= ActionRequest.NeedCall && outcome <= ActionRequest.Waiting)
                 return outcome == ActionRequest.NeedCall ? ActionRequest.Answered : current;
             if (action == "ProceedToScheduling" && current == ActionRequest.Answered) return ActionRequest.Waiting;
-            if (action == "MarkRound1Scheduled" && current == ActionRequest.Waiting)
+            if (ActionRequest.IsScheduleConfirmation(action) && current == ActionRequest.Waiting)
                 return ActionRequest.Scheduled;
             if ((action == "RecordPass" || action == "RecordFail" || action == "RequestReschedule" ||
                 action == "CancelRound1") && current == ActionRequest.Scheduled)
@@ -504,7 +516,7 @@ namespace os_sr_cact
                 else
                 {
                     int? outcome = request.Values.TryGetValue("CallOutcome", out var raw) ? (int?)raw : null;
-                    if (request.Action == "MarkRound1Scheduled")
+                    if (ActionRequest.IsScheduleConfirmation(request.Action))
                     {
                         result.Current = Transition(request.Action, candidate.Status, outcome);
                         var activeSchedule = store.GetCurrentRound1Schedule(candidate.Id);

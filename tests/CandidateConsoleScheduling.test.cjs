@@ -36,7 +36,8 @@ function harness(singleUserDev = false) {
       _os_sr_cand_ta_value: taId },
     selectedSchedule: null, proposedSchedule: null, scheduleRows: [],
     scheduleMode: "new", scheduleRetryBlockedCandidateId: null,
-    round1Availability: { generation: 0, capabilityGeneration: 0, providerOperational: false, checking: false, evidence: null },
+    round1Availability: { generation: 0, capabilityGeneration: 0, providerOperational: false,
+      manualSchedulingOperational: false, checking: false, evidence: null },
     window: { clearTimeout() {}, setTimeout(fn) { timers.push(fn); return timers.length; } },
     currentUserId: () => "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
     newCorrelationId: () => "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
@@ -48,7 +49,7 @@ function harness(singleUserDev = false) {
     isActiveSchedule: () => true, updateCandidatePagination() {},
     logSafeFailure: (...args) => errors.push(args),
     xrm: () => ({ Navigation: { openAlertDialog: async (value) => dialogs.push(value.text) } }),
-    reply: () => ({ schemaVersion: 1, providerOperational: false }),
+    reply: () => ({ schemaVersion: 1, providerOperational: false, manualSchedulingOperational: true }),
     sendCandidateCoreRequest: async (...args) => {
       reads.push(args);
       return { result: { ResultCode: "AvailabilityRead", ScopedData: JSON.stringify(await context.reply(...args)) } };
@@ -68,11 +69,12 @@ function harness(singleUserDev = false) {
     extract("  function sameOptionalGuid("),
     extract("  function assertCandidateCoreStatus("),
     extract("  function requiresTrustedScheduleAvailability("),
-    ...["invalidateRound1Availability", "round1Selection", "selectedVerifiedRound1Slot",
+    ...["isManualRound1Scheduling", "manualRound1Selection", "round1SchedulingMethodChanged",
+      "invalidateRound1Availability", "round1Selection", "selectedVerifiedRound1Slot",
       "updateRound1AvailabilityControls", "validateRound1Availability", "round1SelectionChanged",
       "selectRound1Slot"].map((name) => extract(`  function ${name}(`)),
     ...["readRound1Availability", "loadRound1SchedulingCapabilities", "checkRound1Availability",
-      "saveVerifiedRound1Schedule"].map((name) => extract(`  async function ${name}(`)),
+      "saveNormalRound1Schedule"].map((name) => extract(`  async function ${name}(`)),
     extract("  function configureSchedulingAvailability("),
     extract("  function setBusy("),
     extract("  function showSchedulingPanel("),
@@ -177,7 +179,7 @@ test("Room/Date/TA changes do not discard an in-flight capability response for t
   ui.context.reply = () => new Promise((resolve) => { release = resolve; });
   const pending = ui.context.loadRound1SchedulingCapabilities();
   ui.context.round1SelectionChanged();
-  release({ schemaVersion: 1, providerOperational: true });
+  release({ schemaVersion: 1, providerOperational: true, manualSchedulingOperational: true });
   await pending;
   readySelection(ui);
   ui.context.updateRound1AvailabilityControls();
@@ -290,4 +292,95 @@ test("non-synthetic configured mode cannot bypass the NORMAL availability gate",
   assert.equal(ui.element("save-schedule").disabled, true);
   assert.equal(ui.requests.length, 0);
   assert.equal(ui.notices.length, 1);
+});
+
+test("manual fallback requires verified capability, explicit method and future SE Asia inputs", async () => {
+  const ui = harness();
+  readySelection(ui);
+  ui.context.round1Availability.providerOperational = false;
+  ui.element("scheduling-method").value = "manual";
+  ui.context.round1SchedulingMethodChanged();
+  ui.element("scheduling-time").value = "09:00";
+  ui.element("scheduling-end-time").value = "10:00";
+  ui.context.updateRound1AvailabilityControls();
+  assert.equal(ui.element("save-schedule").disabled, true);
+  await ui.context.loadRound1SchedulingCapabilities();
+  assert.equal(ui.element("scheduling-manual-warning").hidden, false);
+  assert.equal(ui.element("scheduling-availability").hidden, true);
+  assert.equal(ui.element("scheduling-slot-field").hidden, true);
+  assert.equal(ui.element("scheduling-time").required, true);
+  assert.equal(ui.element("save-schedule").disabled, false);
+  assert.equal(ui.element("scheduling-check-availability").disabled, true);
+  assert.equal(ui.context.round1Availability.evidence, null);
+  assert.equal(ui.context.manualRound1Selection().startUtc,
+    `${ui.element("scheduling-date").value}T02:00:00.000Z`);
+  ui.element("scheduling-end-time").value = "08:30";
+  ui.context.updateRound1AvailabilityControls();
+  assert.equal(ui.element("save-schedule").disabled, true);
+  await ui.context.createSchedule({ preventDefault() {} });
+  assert.equal(ui.requests.length, 0);
+  ui.element("scheduling-method").value = "automatic";
+  ui.context.round1SchedulingMethodChanged();
+  assert.equal(ui.element("scheduling-time").value, "");
+  assert.equal(ui.element("scheduling-time").disabled, true);
+  assert.equal(ui.element("save-schedule").disabled, true);
+});
+
+test("manual Save uses a distinct action, preserves Notes and confirms persistence before success", async () => {
+  const ui = harness();
+  const selection = readySelection(ui);
+  ui.context.round1Availability.providerOperational = false;
+  await ui.context.loadRound1SchedulingCapabilities();
+  ui.element("scheduling-method").value = "manual";
+  ui.context.round1SchedulingMethodChanged();
+  ui.element("scheduling-time").value = "09:00";
+  ui.element("scheduling-end-time").value = "10:00";
+  const notes = "  Synthetic manual notes\r\n<literal text>  ";
+  ui.element("scheduling-notes").value = notes;
+  let release;
+  ui.context.invokeCandidateCore = async (action, inputs, correlationId) => {
+    ui.requests.push({ action, inputs, correlationId });
+    await new Promise((resolve) => { release = resolve; });
+    return { result: { ResultCode: "Applied", CurrentStatus: 100010003, StatusHistoryId: ui.taId } };
+  };
+  ui.context.refreshCoreCandidate = async () => {
+    const inputs = ui.requests[0].inputs;
+    ui.context.selectedCandidate.os_sr_cand_stat = 100010003;
+    ui.context.scheduleRows = [{
+      _os_sr_intv_ta_value: selection.taId, _os_sr_intv_loc_value: selection.roomId,
+      os_sr_intv_strt: inputs.StartAt, os_sr_intv_end: inputs.EndAt, os_sr_intv_nts: notes
+    }];
+  };
+  const pending = ui.context.createSchedule({ preventDefault() {} });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(ui.element("scheduling-time").disabled, true);
+  await ui.context.createSchedule({ preventDefault() {} });
+  assert.equal(ui.requests.length, 1);
+  assert.equal(ui.dialogs.length, 0);
+  assert.equal(ui.requests[0].action, "RecordManualRound1Schedule");
+  assert.equal(ui.requests[0].inputs.Notes, notes);
+  assert.equal(ui.requests[0].inputs.StartAt, `${selection.date}T02:00:00.000Z`);
+  assert.equal(ui.requests[0].inputs.EndAt, `${selection.date}T03:00:00.000Z`);
+  release();
+  await pending;
+  assert.deepEqual(ui.dialogs, ["Schedule saved successfully."]);
+  assert.ok(ui.notices.some(([text]) => text.includes("Manual Scheduling \u2014 availability not checked")));
+  assert.equal(ui.reads.filter(([action]) => action === "GetRound1Availability").length, 0);
+});
+
+test("uncertain manual persistence never reports success or retries through the automatic path", async () => {
+  const ui = harness();
+  readySelection(ui);
+  ui.context.round1Availability.providerOperational = false;
+  await ui.context.loadRound1SchedulingCapabilities();
+  ui.element("scheduling-method").value = "manual";
+  ui.context.round1SchedulingMethodChanged();
+  ui.element("scheduling-time").value = "09:00";
+  ui.element("scheduling-end-time").value = "10:00";
+  await ui.context.createSchedule({ preventDefault() {} });
+  await ui.context.createSchedule({ preventDefault() {} });
+  assert.equal(ui.requests.length, 1);
+  assert.equal(ui.requests[0][0], "RecordManualRound1Schedule");
+  assert.equal(ui.dialogs.length, 0);
+  assert.equal(ui.element("save-schedule").disabled, true);
 });

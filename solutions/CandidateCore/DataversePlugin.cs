@@ -39,10 +39,12 @@ namespace os_sr_cact
                     ? actionInput as string : null;
                 var requestedScope = context.InputParameters.TryGetValue("SyntheticScopeId", out var scopeInput) &&
                     scopeInput is Guid scopeId && scopeId != Guid.Empty;
+                if (requestedAction == ActionRequest.ManualScheduleAction && requestedScope)
+                    throw new OperationError("MANUAL_SCHEDULE_NORMAL_CONTEXT_REQUIRED");
                 var normalCall = !requestedScope &&
                     (requestedAction == "RecordCall" || requestedAction == "ProceedToScheduling");
                 var normalScheduling = !requestedScope &&
-                    (requestedAction == "MarkRound1Scheduled" || Round1Availability.IsReadAction(requestedAction));
+                    (ActionRequest.IsScheduleConfirmation(requestedAction) || Round1Availability.IsReadAction(requestedAction));
                 var isSyntheticVerifier = requestedAction == SyntheticIsolation.VerifyAction;
                 var isSingleUserDevVerifier = requestedAction == SyntheticIsolation.VerifySingleUserDevAction;
                 var developmentOrganization = context.OrganizationId == DevCandidateSlice.DevelopmentOrganizationId;
@@ -133,7 +135,8 @@ namespace os_sr_cact
                         throw new OperationError("STALE_EXPECTED_STATUS");
                     if (request.Action == Round1Availability.CapabilitiesAction)
                         context.OutputParameters["ScopedData"] = "{\"schemaVersion\":1,\"providerOperational\":" +
-                            (Round1Availability.Provider.IsOperational ? "true" : "false") + "}";
+                            (Round1Availability.Provider.IsOperational ? "true" : "false") +
+                            ",\"manualSchedulingOperational\":true}";
                     else
                     {
                         var selection = Round1Availability.FromRequest(request);
@@ -915,6 +918,8 @@ namespace os_sr_cact
             row["os_sr_csh_cact"] = request.Action;
             row["ownerid"] = new EntityReference("systemuser", request.Actor);
             if (request.Values.TryGetValue("Reason", out var reason)) row["os_sr_csh_rsn"] = reason;
+            if (request.Action == ActionRequest.ManualScheduleAction)
+                row["os_sr_csh_rsn"] = "Manual Scheduling - availability not checked. No Outlook meeting or invitation created.";
             return Create(row, request.Action, "STATUS_HISTORY_CREATE", "CC_CREATE_STATUS_HISTORY");
         }
 
@@ -1005,7 +1010,7 @@ namespace os_sr_cact
             ActionRequest request, Guid candidateId, int scheduleStatus)
         {
             EnsureAllowedMutation(request.Action, "INTERVIEW_SCHEDULE_CREATE");
-            if (request.Action != "MarkRound1Scheduled" && request.Action != "RequestReschedule")
+            if (!ActionRequest.IsScheduleConfirmation(request.Action) && request.Action != "RequestReschedule")
                 throw new OperationError("UNSUPPORTED_MUTATION:" + request.Action + ":INTERVIEW_SCHEDULE_CREATE");
             if (scheduleStatus != ActionRequest.ScheduleActive &&
                 !(request.Action == "RequestReschedule" && scheduleStatus == ActionRequest.ScheduleProposed))
@@ -1031,7 +1036,7 @@ namespace os_sr_cact
 
             var row = new Entity("os_sr_intv", schedule.Id) { RowVersion = schedule.RowVersion };
             row["os_sr_intv_stat"] = new OptionSetValue(scheduleStatus);
-            if (request.Action == "MarkRound1Scheduled" &&
+            if (ActionRequest.IsScheduleConfirmation(request.Action) &&
                 schedule.Status == ActionRequest.ScheduleProposed &&
                 scheduleStatus == ActionRequest.ScheduleActive)
             {
@@ -1122,7 +1127,7 @@ namespace os_sr_cact
                     !state.ChangedAt.HasValue)
                     throw new OperationError("SCHEDULE_PERSISTENCE_NOT_CONFIRMED");
             }
-            if (request.Action == "MarkRound1Scheduled" ||
+            if (ActionRequest.IsScheduleConfirmation(request.Action) ||
                 (request.Action == "RequestReschedule" && expectedStatus == ActionRequest.ScheduleProposed))
             {
                 if (state.InterviewerId != (Guid)request.Values["InterviewerId"]! ||

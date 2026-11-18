@@ -1,5 +1,17 @@
 # Candidate Core server operations
 
+## NORMAL manual Round 1 fallback (1.0.13)
+
+The separately authorized `RecordManualRound1Schedule` action records an explicit manual decision; it does not fetch or attest Outlook availability. It reuses the existing 25-input/11-output API, enabled exact-organization policy, authenticated initiating actor, effective Read/Write on the exact Candidate, caller-visible Active TA/Location, Waiting Manual Scheduling transition, optimistic concurrency and atomic Schedule/Candidate/History/Receipt transaction. New rows belong to the caller; promoting a Proposed row preserves its ownership. Scoped requests cannot select this NORMAL-only action; SingleUserDev retains its existing scoped manual operation.
+
+Inputs are `CandidateId`, `ExpectedStatus`, `InterviewerId`, `LocationId`, explicit future UTC `StartAt`/`EndAt`, optional `Notes` and a stable `CorrelationId`. Both endpoints must be on the same **SE Asia Standard Time** date, including intervals that cross UTC midnight. Unlike the automatic grid, this manual path does not assert business-hour availability or a verified 30-minute slot. Notes preserve nonblank text exactly; explicitly blank Notes clear the value, while omission preserves existing Proposed-row Notes. Action-specific fingerprints prevent reuse of automatic/manual correlations. History and Receipt identify the manual action; History also records that availability was not checked and no Outlook meeting/invitation was created.
+
+Automatic `MarkRound1Scheduled` still requires fresh server-fetched provider evidence before either creation or promotion. Its unavailable provider remains fail-closed. Capability discovery adds `manualSchedulingOperational` alongside the existing `providerOperational`; no API metadata, permission, Flow or environment configuration changes are required.
+
+The Console requires the explicit **Manual Scheduling** method, labelled **availability not checked**, Room/TA/date and manual times labelled UTC+07:00. It verifies persisted references/times/Notes and Candidate status before success and blocks duplicate or uncertain resubmission. Source/package and technical deployment status are recorded in [Current State](../../docs/CURRENT_STATE.md) and the [1.0.13 manifest](../../docs/CANDIDATE_ROUND1_1.0.13_RELEASE_MANIFEST.json); these do not constitute owner functional acceptance.
+
+## Historical registration and earlier releases
+
 Source for Candidate Core plug-in code. Live Dataverse metadata read on 2026-11-12 links the existing `os_sr_cact` Custom API to the File Store assembly version `1.0.7.0`. This verifies the registered handler version, not byte-for-byte package contents; its current SingleUserDev verifier is blocked by `SYNTHETIC_OWNER_REJECTED`. This is authored .NET plug-in source, **not an exported/unpacked Solution**. The supported target is .NET Framework 4.6.2 with `Microsoft.CrmSdk.CoreAssemblies` pinned to 9.0.2.60; the SDK assembly is supplied by the Dataverse sandbox. No runtime dependency is merged/uploaded with the package assembly.
 
 ## Candidate pagination and Answered-to-scheduling (1.0.10; source-only)

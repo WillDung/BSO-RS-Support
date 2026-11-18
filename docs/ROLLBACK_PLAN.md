@@ -2,6 +2,17 @@
 
 **Status:** `ROLLBACK_PLAN_OFFLINE_READY`; the owner explicitly approved use of the existing LMV BI DEV pre-deployment checkpoint/recovery procedure for the bounded BSO-RS-Support Test rehearsal (`TEST_RECOVERY_PROCEDURE_APPROVED_FOR_BOUNDED_REHEARSAL`). This does not establish a safe bootstrap cleanup path or authorize routine whole-environment restore. No bootstrap import has occurred.
 
+## Manual Round 1 fallback 1.0.13 rollback
+
+**Status (2026-11-18):** `PROTECTED_PACKAGE_AND_PRIOR_CONSOLE_CAPTURED_RECOVERY_NOT_EXECUTED`. The [1.0.13 manifest](CANDIDATE_ROUND1_1.0.13_RELEASE_MANIFEST.json) pins protected 1.0.12 package SHA-256 `340e875749148ded13b44aa3a22a8a6b117bf46f700d155c404c26931666eaa6` and DLL `51125c7eba67cba936e39384496c0bfdbfd3810ef18cf8646eb615b59bc65f23`. The fresh immutable external baseline captured the immediately prior target HTML `3cc3b2650bc1b0060f4fb9b053e482a604db95878ed28b04ac3d7a22bb377681` and JavaScript `27bed7fb1c04d736d34b1c99721f5bbd06d740ec410684664a149c409be1ef5c` bytes before dispatch.
+
+1. Stop submissions and reconcile uncertain manual/automatic operations. Obtain a fresh exact-component recovery instruction, baseline and one-shot journal; never reset or replay a consumed journal.
+2. Restore the captured provider-blocked 1.0.12 Console pair using fresh individual-row ETags and exactly two-resource `PublishXml`; verify current/published/served hashes and cache token.
+3. If backend rollback is required, restore only the pinned 1.0.12 package through the guarded updater. It rejects `RecordManualRound1Schedule` as unsupported and still requires provider evidence for automatic `MarkRound1Scheduled`. A 1.0.13 Console against 1.0.12 fails capability validation closed; it does not gain a weaker automatic write.
+4. Preserve completed manual schedule rows, Candidate status, History/Receipts, all API/configuration metadata, handler identity, exact-org gate, Flow/connections, roles/teams and existing journals. There is no metadata delta or calendar side effect to undo.
+
+The deployed 1.0.13 package and served Console hashes were reconciled without business writes; see [Current State](CURRENT_STATE.md#separate-authorized-manual-round-1-fallback-1013-2026-11-18). This is a component recovery plan, not a rehearsed rollback or functional acceptance.
+
 ## Round 1 engine 1.0.12 rollback
 
 **Status (2026-11-18):** `PROTECTED_PACKAGE_AND_PRIOR_PROVIDER_BLOCKED_CONSOLE_CAPTURED_RECOVERY_NOT_EXECUTED`. The [1.0.12 manifest](CANDIDATE_ROUND1_1.0.12_RELEASE_MANIFEST.json) pins protected 1.0.11 rollback package SHA-256 `a65c179d3acc0cf4f548dcd204dfa820250ba95aee29c3e7c7245de04fc41cd6`, embedded DLL `a70290ea20a791a19fd150f3d366642c9454497781f1394566facac769277cf2`. A fresh external baseline captures the immediately prior provider-blocked target HTML (`9ada3e7127645952eb7a237f2f82d14ac034fee10c7f07b8e7da38e5016b11ae`) and JavaScript (`111da41ba1b63b040c9274b630fe2577a4be9b66905c91b36551de66277df848`) bytes.

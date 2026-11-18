@@ -135,7 +135,8 @@ internal static partial class Program
         var capability = SchedulingHost(Round1Availability.CapabilitiesAction);
         new ApplyCandidateAction().Execute(capability);
         Check((string)capability.Output["ResultCode"] == "AvailabilityRead" &&
-            (string)capability.Output["ScopedData"] == "{\"schemaVersion\":1,\"providerOperational\":false}" &&
+            (string)capability.Output["ScopedData"] ==
+                "{\"schemaVersion\":1,\"providerOperational\":false,\"manualSchedulingOperational\":true}" &&
             capability.Updates == 0 && capability.Receipt == null,
             "Production capability is server-controlled, explicitly false and read-only");
         var query = SchedulingHost(Round1Availability.QueryAction);
@@ -170,5 +171,70 @@ internal static partial class Program
         Check((string)replay.Output["ResultCode"] == "DuplicateReplay" && replay.ScheduleCreates == 0 &&
             replay.ScheduleUpdates == 0 && replay.Histories == 0,
             "Committed scheduling receipt replays without querying unavailable or expired provider evidence");
+
+        foreach (var promote in new[] { false, true })
+        {
+            var manual = SchedulingHost(ActionRequest.ManualScheduleAction);
+            manual.MainValues["OrganizationId"] = DevOrganization;
+            manual.NormalCreatePolicyOrganizationId = DevOrganization;
+            const string notes = "  Synthetic manual notes\r\n<literal text>  ";
+            manual.Input["Notes"] = notes;
+            var scheduleOwner = promote ? Guid.NewGuid() : Actor;
+            if (promote)
+            {
+                manual.ProposedRound1Schedule = ScheduleEntity(ActionRequest.ScheduleProposed);
+                manual.ProposedRound1Schedule["ownerid"] = new EntityReference("systemuser", scheduleOwner);
+            }
+            var previousId = manual.ProposedRound1Schedule?.Id;
+            new ApplyCandidateAction().Execute(manual);
+            Check(manual.Status == ActionRequest.Scheduled && manual.Histories == 1 &&
+                manual.ScheduleCreates == (promote ? 0 : 1) && manual.ScheduleUpdates == (promote ? 1 : 0) &&
+                manual.Round1Schedule!.GetAttributeValue<string>("os_sr_intv_nts") == notes &&
+                (!promote || manual.Round1Schedule.Id == previousId) &&
+                manual.Round1Schedule.GetAttributeValue<EntityReference>("ownerid")?.Id == scheduleOwner,
+                "Explicit manual operation persists exact Notes, caller ownership and canonical " +
+                (promote ? "proposed promotion" : "schedule creation"));
+            Check(manual.CreatedHistory!.GetAttributeValue<string>("os_sr_csh_cact") == ActionRequest.ManualScheduleAction &&
+                manual.CreatedHistory.GetAttributeValue<string>("os_sr_csh_rsn").Contains("availability not checked") &&
+                manual.Receipt!.GetAttributeValue<string>("os_sr_oprc_cact") == ActionRequest.ManualScheduleAction,
+                "Manual operation remains explicitly distinguishable in durable history and receipt");
+            new ApplyCandidateAction().Execute(manual);
+            Check((string)manual.Output["ResultCode"] == "DuplicateReplay" && manual.Histories == 1 &&
+                manual.ScheduleCreates + manual.ScheduleUpdates == 1,
+                "Manual replay does not duplicate a schedule, history or receipt");
+            manual.Input["ActionType"] = "MarkRound1Scheduled";
+            Reject(() => new ApplyCandidateAction().Execute(manual), "CORRELATION_CONFLICT");
+        }
+        foreach (var denial in new[] { "write", "read", "disabled", "organization", "scope", "ta", "room", "status", "time" })
+        {
+            var manual = SchedulingHost(ActionRequest.ManualScheduleAction);
+            string error;
+            switch (denial)
+            {
+                case "write": manual.CandidateWriteAccess = false; error = "NORMAL_SCHEDULE_WRITE_ACCESS_REQUIRED"; break;
+                case "read": manual.CallerReadDeniedTables.Add("os_sr_cand"); error = "NORMAL_SCHEDULE_WRITE_ACCESS_REQUIRED"; break;
+                case "disabled": manual.NormalCreatePolicyEnabled = false; error = "NORMAL_CREATE_DISABLED"; break;
+                case "organization": manual.NormalCreatePolicyOrganizationId = Guid.NewGuid(); error = "NORMAL_CREATE_ORGANIZATION_REJECTED"; break;
+                case "scope": manual.Input["SyntheticScopeId"] = Guid.NewGuid(); error = "MANUAL_SCHEDULE_NORMAL_CONTEXT_REQUIRED"; break;
+                case "ta": manual.InactiveReferenceTable = "os_sr_ta"; error = "REFERENCE_NOT_AVAILABLE:InterviewerId"; break;
+                case "room": manual.InactiveReferenceTable = "os_sr_loc"; error = "REFERENCE_NOT_AVAILABLE:LocationId"; break;
+                case "status": manual.Status = ActionRequest.Answered; error = "STALE_EXPECTED_STATUS"; break;
+                default: manual.Input["StartAt"] = DateTime.UtcNow.AddMinutes(-1); error = "INVALID_SCHEDULE_TIME"; break;
+            }
+            Reject(() => new ApplyCandidateAction().Execute(manual), error);
+            Check(manual.ScheduleCreates == 0 && manual.ScheduleUpdates == 0 && manual.Updates == 0 &&
+                manual.Histories == 0 && manual.Receipt == null, "Manual " + denial + " rejection occurs before writes");
+        }
+        foreach (var omit in new[] { false, true })
+        {
+            var manual = SchedulingHost(ActionRequest.ManualScheduleAction);
+            manual.ProposedRound1Schedule = ScheduleEntity(ActionRequest.ScheduleProposed);
+            manual.ProposedRound1Schedule["os_sr_intv_nts"] = "Existing synthetic notes";
+            if (omit) manual.Input.Remove("Notes"); else manual.Input["Notes"] = " \r\n ";
+            new ApplyCandidateAction().Execute(manual);
+            Check(manual.Round1Schedule!.GetAttributeValue<string>("os_sr_intv_nts") ==
+                (omit ? "Existing synthetic notes" : null),
+                "Manual notes distinguish an omitted field from an explicitly blank value");
+        }
     }
 }

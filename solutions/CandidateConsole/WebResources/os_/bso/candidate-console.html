@@ -8,7 +8,7 @@
   <script src="../../ClientGlobalContext.js.aspx"></script>
   <script defer src="candidate-console-environment.js?v=21ddcd925916"></script>
   <script defer src="candidate-console-policy.js?v=fbefadd65caa"></script>
-  <script defer src="candidate-console.js?v=27bed7fb1c04"></script>
+  <script defer src="candidate-console.js?v=fd19ee39ee8c"></script>
   <script defer src="candidate-console-availability.js?v=7df0706fcbe1"></script>
 </head>
 <body>
@@ -333,6 +333,17 @@
           </div>
         </div>
         <form id="scheduling-form" class="form-grid">
+          <label id="scheduling-method-field" class="field field-wide" hidden>
+            <span>Scheduling method <b aria-hidden="true">*</b></span>
+            <select id="scheduling-method">
+              <option value="automatic">Automatic Scheduling - verified Outlook availability required</option>
+              <option id="scheduling-manual-option" value="manual" disabled>Manual Scheduling &#8212; availability not checked</option>
+            </select>
+          </label>
+          <p id="scheduling-manual-warning" class="storage-warning field-wide" role="status" hidden>
+            Manual Scheduling &#8212; availability not checked. Enter times in SE Asia Standard Time (UTC+07:00).
+            This records your schedule decision in ATSugg only; it creates no Outlook meeting or invitation.
+          </p>
           <label class="field">
             <span>Candidate</span>
             <input id="scheduling-candidate" readonly>

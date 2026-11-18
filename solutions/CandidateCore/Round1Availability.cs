@@ -149,6 +149,8 @@ namespace os_sr_cact
         public static bool IsReadAction(string? action) =>
             action == CapabilitiesAction || action == QueryAction;
 
+        internal static DateTime LocalDate(DateTime utc) => TimeZoneInfo.ConvertTimeFromUtc(utc, Zone()).Date;
+
         private static TimeZoneInfo Zone()
         {
             try { return TimeZoneInfo.FindSystemTimeZoneById(TimeZoneId); }

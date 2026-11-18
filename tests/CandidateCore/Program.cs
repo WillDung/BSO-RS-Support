@@ -21,9 +21,9 @@ static class Program
         var input = new Dictionary<string, object?> { ["ActionType"] = action, ["CorrelationId"] = correlation ?? Guid.NewGuid() };
         if (action != "CreateCandidate") input["CandidateId"] = Candidate;
         if (action == "RecordCall") { input["ExpectedStatus"] = ActionRequest.NeedCall; input["CallOutcome"] = 100010000; input["ContactedAt"] = Now; }
-        if (action == "MarkRound1Scheduled" || action == "RequestReschedule")
+        if (ActionRequest.IsScheduleConfirmation(action) || action == "RequestReschedule")
         {
-            input["ExpectedStatus"] = action == "MarkRound1Scheduled" ? ActionRequest.Waiting : ActionRequest.Scheduled;
+            input["ExpectedStatus"] = ActionRequest.IsScheduleConfirmation(action) ? ActionRequest.Waiting : ActionRequest.Scheduled;
             input["InterviewerId"] = Guid.Parse("00000000-0000-0000-0000-000000000003");
             input["LocationId"] = Guid.Parse("00000000-0000-0000-0000-000000000004");
             input["StartAt"] = Now.AddDays(1);
@@ -94,6 +94,38 @@ static class Program
             proposedStore.ProposedSchedule == null && proposedStore.ScheduleCreates == 0 &&
             proposedStore.ScheduleUpdates == 1,
             "Round 1 scheduling explicitly confirms an existing Proposed row without duplication");
+
+        foreach (var promote in new[] { false, true })
+        {
+            var manualInput = Input(ActionRequest.ManualScheduleAction);
+            manualInput["StartAt"] = Now.Date.AddDays(1).AddHours(23).AddMinutes(30);
+            manualInput["EndAt"] = ((DateTime)manualInput["StartAt"]!).AddHours(1);
+            var manualStore = new MemoryStore { Status = ActionRequest.Waiting };
+            if (promote) manualStore.SeedProposedSchedule();
+            var manualResult = manualStore.Atomic(Request(manualInput));
+            Check(manualResult.Current == ActionRequest.Scheduled && manualStore.Histories == 1 &&
+                manualStore.ActiveSchedule?.Status == ActionRequest.ScheduleActive &&
+                manualStore.ScheduleCreates + manualStore.ScheduleUpdates == 1,
+                "Manual confirmation uses SE Asia local date across UTC midnight and the canonical transaction");
+            Check(manualStore.Atomic(Request(manualInput)).Replay &&
+                manualStore.ScheduleCreates + manualStore.ScheduleUpdates == 1, "Manual receipt replays without writes");
+            var automaticReuse = Input("MarkRound1Scheduled", (Guid)manualInput["CorrelationId"]!);
+            Reject(() => manualStore.Atomic(Request(automaticReuse)), "CORRELATION_CONFLICT");
+            foreach (var fail in new[] { 1, 2, 3, 4 })
+            {
+                var failing = new MemoryStore { Status = ActionRequest.Waiting, FailMutation = fail };
+                if (promote) failing.SeedProposedSchedule();
+                Reject(() => failing.Atomic(Request(Input(ActionRequest.ManualScheduleAction))), "SYNTHETIC_MUTATION_FAILURE");
+                Check(failing.Status == ActionRequest.Waiting && failing.ActiveSchedule == null &&
+                    (failing.ProposedSchedule != null) == promote && failing.ScheduleCreates == 0 &&
+                    failing.ScheduleUpdates == 0 && failing.Histories == 0 && failing.Receipts.Count == 0,
+                    "Manual schedule, Candidate, History and Receipt all roll back at each failing effect");
+            }
+        }
+        var overnightManual = Input(ActionRequest.ManualScheduleAction);
+        overnightManual["StartAt"] = Now.Date.AddDays(1).AddHours(16).AddMinutes(30);
+        overnightManual["EndAt"] = ((DateTime)overnightManual["StartAt"]!).AddHours(1);
+        Reject(() => Request(overnightManual), "INVALID_SCHEDULE_TIME");
 
         foreach (var action in new[] { "RecordPass", "RecordFail" })
         {
@@ -871,7 +903,7 @@ static class Program
             else if (ActiveSchedule?.Id == schedule.Id) target = ActiveSchedule;
             else throw new OperationError("ACTIVE_SCHEDULE_REQUIRED");
 
-            if (request.Action == "MarkRound1Scheduled")
+            if (ActionRequest.IsScheduleConfirmation(request.Action))
             {
                 target.Status = scheduleStatus;
                 target.InterviewerId = (Guid)request.Values["InterviewerId"]!;

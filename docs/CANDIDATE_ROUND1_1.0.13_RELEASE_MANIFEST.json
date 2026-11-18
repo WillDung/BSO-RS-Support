@@ -1,0 +1,161 @@
+{
+  "manifestVersion": 1,
+  "scope": "ROUND1_AUTHORIZED_MANUAL_FALLBACK_1.0.13",
+  "release": {
+    "name": "Separate authorized manual Round 1 scheduling; automatic Outlook path remains blocked",
+    "artifactVersion": "1.0.13",
+    "assemblyVersion": "1.0.13.0",
+    "status": "SOURCE_AND_PACKAGE_READY_MANUAL_ENABLED_AUTOMATIC_PROVIDER_BLOCKED",
+    "reportedBaseline": { "candidateCoreVersion": "1.0.12.0", "normalCreateEnabled": true }
+  },
+  "solution": { "uniqueName": "os_sr_bso_rs_support", "version": "1.0.0.1" },
+  "releaseTooling": { "pacCliVersion": "2.13.1+g251dee1" },
+  "patchDeployment": {
+    "operation": "EXISTING_PLUGINPACKAGE_ASSEMBLY_REPLACEMENT",
+    "securityMetadataWrites": 0,
+    "allowedMutations": ["EXISTING_PLUGINPACKAGE_CONTENT"],
+    "securityBaselineSha256": "1cb88bf132899c6feec4101bc1290acfbaaa25a0161d8c36a628c55efaa2e26c"
+  },
+  "candidateCore": {
+    "packageFileName": "os_sr_cact_pkg.1.0.13.nupkg",
+    "packageUniqueName": "os_sr_cact_pkg",
+    "registeredPackageRecordVersion": "1.0.0",
+    "artifactPackageVersion": "1.0.13",
+    "packageSha256": "8615d30b01f3f6355b4b6e9af9d7bd63d33aeb6782d001a4998125c0dd85f2a5",
+    "embeddedAssemblyTypeName": "os_sr_cact.ApplyCandidateAction",
+    "embeddedAssemblySha256": "6cc51afd285a3023565f03066c533121e07c20f8135956320e176fc71378cc23",
+    "assemblyVersion": "1.0.13.0",
+    "fileVersion": "1.0.13.0",
+    "productVersion": "1.0.13+414ea3d9471e26e2df063f00ea45c97a9e6c5369",
+    "publicKeyToken": null,
+    "customApiHandlerTypeName": "os_sr_cact.ApplyCandidateAction",
+    "expectedPluginTypes": [
+      "os_sr_cact.ApplyCandidateAction", "os_sr_cact.ProtectCandidateCore",
+      "os_sr_cact.SyntheticIsolationGuard", "os_sr_cact.SyntheticIsolationReadGuard"
+    ],
+    "rollbackArtifact": {
+      "fileName": "os_sr_cact_pkg.1.0.12.nupkg",
+      "artifactPackageVersion": "1.0.12",
+      "assemblyVersion": "1.0.12.0",
+      "fileVersion": "1.0.12.0",
+      "productVersion": "1.0.12+5bbac1db3728f3db8b274d981c3aff4d98069d9c",
+      "packageSha256": "340e875749148ded13b44aa3a22a8a6b117bf46f700d155c404c26931666eaa6",
+      "embeddedAssemblySha256": "51125c7eba67cba936e39384496c0bfdbfd3810ef18cf8646eb615b59bc65f23"
+    }
+  },
+  "customApiChanges": 0,
+  "environmentConfigurationChanges": 0,
+  "flowChanges": 0,
+  "securityMetadataChanges": 0,
+  "customApi": {
+    "uniqueName": "os_sr_cact",
+    "metadataSha256": "1a941478d04b335e6eb4aa6ea89fac813e233225f847713cd99231661db23fc1",
+    "changeDecision": {
+      "action": "NO_CHANGE",
+      "metadataWrites": 0,
+      "reason": "A distinct RecordManualRound1Schedule ActionType and additive manualSchedulingOperational capability reuse existing typed inputs and ScopedData. No provider flags, extra step, handler or execute-privilege change."
+    },
+    "requestParameters": [
+      { "name": "ProfileFieldMask", "type": 10, "isOptional": true },
+      { "name": "CandidateSearchText", "type": 10, "isOptional": true },
+      { "name": "ActionType", "type": 10, "isOptional": false },
+      { "name": "ContactedAt", "type": 1, "isOptional": true },
+      { "name": "CandidateEmail", "type": 10, "isOptional": true },
+      { "name": "AssignedTaId", "type": 12, "isOptional": true },
+      { "name": "CandidatePhone", "type": 10, "isOptional": true },
+      { "name": "CorrelationId", "type": 12, "isOptional": false },
+      { "name": "CandidateCvUrl", "type": 10, "isOptional": true },
+      { "name": "EndAt", "type": 1, "isOptional": true },
+      { "name": "LocationId", "type": 12, "isOptional": true },
+      { "name": "CandidateStatusFilter", "type": 10, "isOptional": true },
+      { "name": "PositionId", "type": 12, "isOptional": true },
+      { "name": "CallOutcome", "type": 7, "isOptional": true },
+      { "name": "InterviewerId", "type": 12, "isOptional": true },
+      { "name": "Notes", "type": 10, "isOptional": true },
+      { "name": "SyntheticScopeId", "type": 12, "isOptional": true },
+      { "name": "ResultNotes", "type": 10, "isOptional": true },
+      { "name": "CandidateName", "type": 10, "isOptional": true },
+      { "name": "ExpectedStatus", "type": 7, "isOptional": true },
+      { "name": "CandidateSourceId", "type": 12, "isOptional": true },
+      { "name": "CandidateId", "type": 12, "isOptional": true },
+      { "name": "StartAt", "type": 1, "isOptional": true },
+      { "name": "Reason", "type": 10, "isOptional": true },
+      { "name": "CandidatePageNumber", "type": 7, "isOptional": true }
+    ],
+    "responseProperties": [
+      { "name": "IsolationContract", "type": 10 }, { "name": "PreviousStatus", "type": 7 },
+      { "name": "CallLogId", "type": 12 }, { "name": "CurrentStatus", "type": 7 },
+      { "name": "ResultCode", "type": 10 }, { "name": "StatusHistoryId", "type": 12 },
+      { "name": "ScopedData", "type": 10 }, { "name": "CandidateNumber", "type": 10 },
+      { "name": "CreatedCandidateId", "type": 12 }, { "name": "ScopedHasNextPage", "type": 0 },
+      { "name": "ScopedTotalCount", "type": 7 }
+    ]
+  },
+  "resources": [
+    {
+      "name": "os_/bso/candidate-console.html",
+      "sha256": "EXTERNAL_TARGET_HTML",
+      "templateSha256": "479e6c463a7a419b80f7486a94186d056f561e48b3ad02f4e5aa66e0f450aaf2",
+      "previousSha256": "EXTERNAL_TARGET_BASELINE",
+      "previousTemplateSha256": "186175c2d361edca57b18c39da4ea6b1742d904c5c9bacce490178a18595f344"
+    },
+    {
+      "name": "os_/bso/candidate-console.js",
+      "sha256": "fd19ee39ee8c3fe9592f4137d6983307abb3cab5587e0c16e1fa9fd8f141f9f7",
+      "previousSha256": "27bed7fb1c04d736d34b1c99721f5bbd06d740ec410684664a149c409be1ef5c"
+    }
+  ],
+  "normalScheduling": {
+    "providerTrust": "BLOCKED",
+    "availabilityRequestsEnabled": false,
+    "scheduleSaveEnabled": false,
+    "capabilityReadEnabled": true,
+    "slotDurationMinutes": 30,
+    "timezone": "SE Asia Standard Time",
+    "businessHours": "Monday-Friday 09:00-17:00",
+    "maximumEvidenceAgeSeconds": 120,
+    "manualScheduling": {
+      "enabled": true,
+      "action": "RecordManualRound1Schedule",
+      "label": "Manual Scheduling \u2014 availability not checked",
+      "authority": "Owner-requested fallback and MASTER_PRODUCTION_RULES Phase 5A manual decision scope.",
+      "authorization": "Authenticated initiating actor, enabled exact-organization policy, effective Read and Write on the exact Candidate, Active caller-visible TA/Location; no nonempty SyntheticScopeId.",
+      "inputs": "Explicit Room, TA, date and future start/end on the same SE Asia local date; optional exact Notes. No availability assertion or client provider evidence.",
+      "persistence": "Canonical transactional new Active schedule or Proposed-to-Active promotion, optimistic concurrency, Candidate Waiting-to-Scheduled, one History and action-fingerprinted Receipt. New schedule caller ownership; promotion ownership unchanged. Replay does not duplicate.",
+      "notes": "Nonblank text preserved exactly; explicitly blank clears, omitted Notes preserve existing Proposed-row Notes.",
+      "audit": "History and Receipt persist the separate action; History states availability not checked and no Outlook meeting/invitation created.",
+      "console": "Explicit manual method, UTC+07:00 input labels, required references/date/times, capability gating, duplicate/ambiguous-outcome blocking and exact persisted readback before one success dialog."
+    },
+    "automaticSaveBoundary": "Unchanged MarkRound1Scheduled requires fresh server-fetched evidence before both creation and promotion. No manual flag or client Free/Busy input can bypass it. SingleUserDev retains the existing scoped operation.",
+    "technicalDependency": "No supported authenticated runtime delegation/invocation adapter from the current WebResource/Dataverse server to the existing Outlook connection is established. The webhook Flow returns meeting suggestions through the elevated result writer, not complete server-trusted Room/TA coverage. Implement and verify that adapter and complete correlated coverage without SAS/Anyone, new identities or elevated result-writer attestation."
+  },
+  "deployment": {
+    "order": [
+      "Capture fresh exact-target 1.0.12 baseline and prior Console bytes; verify unchanged security/gate/API/membership/Flow.",
+      "Guarded existing-package replacement to pinned 1.0.13 with a fresh one-shot journal and protected 1.0.12 rollback.",
+      "Conditional HTML/JavaScript updates with fresh individual ETags and exactly two-resource PublishXml.",
+      "Verify installed assembly/handler and unchanged baselines, current/published/authenticated served bytes, and exported package/DLL hashes without opening the app."
+    ],
+    "candidateBusinessReads": 0,
+    "candidateBusinessWrites": 0,
+    "providerInvocations": 0,
+    "automatedLifecycleUat": false,
+    "outlookMeetingsOrInvitations": 0,
+    "ownerManualAcceptance": "PENDING"
+  },
+  "rollback": {
+    "backend": "Restore only protected pinned 1.0.12 through a fresh guarded baseline/journal. It rejects the new manual action and keeps automatic saves provider-blocked.",
+    "console": "Restore the immediately prior 1.0.12 target HTML/JavaScript captured externally, fresh ETags and two-resource PublishXml. Leave all API/configuration metadata and business records intact.",
+    "journals": "Never reset, overwrite or replay consumed journals. Reconcile uncertain outcomes before a separate recovery."
+  },
+  "validation": {
+    "releaseBuild": "PASS_ZERO_WARNINGS_ZERO_ERRORS",
+    "focusedAvailabilityManualAndIsolationSdkChecks": 154,
+    "operationEngineAssertions": 276,
+    "recordCallSdkChecks": 17,
+    "focusedNodeTests": 18,
+    "referenceRuntimeChecks": 31,
+    "javascriptAndDeploymentSyntax": "PASS",
+    "liveFunctionalAndProviderAcceptance": "NOT_EXECUTED"
+  }
+}

@@ -147,7 +147,8 @@
   let referenceMode = "CONFIGURED";
   let referenceGeneration = 0;
   const round1Availability = {
-    generation: 0, capabilityGeneration: 0, providerOperational: false, checking: false, evidence: null, expiryTimer: null
+    generation: 0, capabilityGeneration: 0, providerOperational: false, manualSchedulingOperational: false,
+    checking: false, evidence: null, expiryTimer: null
   };
   const referenceRequests = new WeakMap();
   let referencesReady = false;
@@ -155,7 +156,7 @@
   let environmentPolicy = Object.freeze({ allowed: false, reason: "CONFIGURATION_MISSING" });
   const CORE_API_ACTIONS = new Set([
     "CreateCandidate", "UpdateCandidate", "RecordCall", "ProceedToScheduling",
-    "MarkRound1Scheduled", "RecordPass", "RecordFail", "RequestReschedule", "CancelRound1",
+    "MarkRound1Scheduled", "RecordManualRound1Schedule", "RecordPass", "RecordFail", "RequestReschedule", "CancelRound1",
     "GetRound1SchedulingCapabilities", "GetRound1Availability"
   ]);
   const SINGLE_USER_DEV_READ_ACTIONS = Object.freeze({
@@ -404,7 +405,7 @@
         (button.id === "record-interview-result-button" &&
           (button.hidden || !canRecordInterviewResult())) ||
         (button.id === "save-schedule" &&
-          ((requiresTrustedScheduleAvailability() && !selectedVerifiedRound1Slot()) || !selectedCandidate ||
+          ((requiresTrustedScheduleAvailability() && !isManualRound1Scheduling() && !selectedVerifiedRound1Slot()) || !selectedCandidate ||
             (scheduleMode === "reschedule"
               ? !canManageSchedule()
               : selectedCandidate[TABLES.candidate.status] !== STATUS.waitingManualScheduling ||
@@ -1557,6 +1558,37 @@
     return referenceMode === "NORMAL" || environmentPolicy.syntheticDataOnly === false;
   }
 
+  function isManualRound1Scheduling() {
+    return requiresTrustedScheduleAvailability() && $("scheduling-method").value === "manual";
+  }
+
+  function manualRound1Selection() {
+    const selection = round1Selection();
+    const times = ["scheduling-time", "scheduling-end-time"].map((id) => {
+      const time = $(id).value;
+      if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time)) throw new Error("MANUAL_SCHEDULE_TIME_INVALID");
+      return new Date(`${selection.date}T${time}:00+07:00`);
+    });
+    if (times[0].getTime() <= Date.now() || times[1] <= times[0]) throw new Error("MANUAL_SCHEDULE_TIME_INVALID");
+    return { ...selection, startUtc: times[0].toISOString(), endUtc: times[1].toISOString() };
+  }
+
+  function round1SchedulingMethodChanged() {
+    if (!requiresTrustedScheduleAvailability()) return;
+    invalidateRound1Availability();
+    const manual = isManualRound1Scheduling();
+    for (const id of ["scheduling-time", "scheduling-end-time"]) {
+      $(`${id}-field`).hidden = !manual;
+      $(id).required = manual;
+      $(id).disabled = busy || !manual;
+    }
+    $("scheduling-manual-warning").hidden = !manual;
+    $("scheduling-availability").hidden = manual;
+    $("scheduling-slot-field").hidden = manual;
+    $("scheduling-slot").required = !manual;
+    updateRound1AvailabilityControls();
+  }
+
   function invalidateRound1Availability(resetCapabilities = false) {
     round1Availability.generation++;
     round1Availability.checking = false;
@@ -1564,6 +1596,7 @@
     if (resetCapabilities) {
       round1Availability.capabilityGeneration++;
       round1Availability.providerOperational = false;
+      round1Availability.manualSchedulingOperational = false;
     }
     window.clearTimeout(round1Availability.expiryTimer);
     round1Availability.expiryTimer = null;
@@ -1608,21 +1641,28 @@
 
   function updateRound1AvailabilityControls() {
     if (!requiresTrustedScheduleAvailability()) return;
+    const manual = isManualRound1Scheduling();
     let valid = false;
     if (selectedCandidate && selectedCandidate[TABLES.candidate.status] === STATUS.waitingManualScheduling) {
-      try { round1Selection(); valid = true; }
+      try { if (manual) manualRound1Selection(); else round1Selection(); valid = true; }
       catch (error) {
-        if (error.message !== "DEV_DIRECT_WRITE_INVALID_RECORD_REFERENCE" && !error.message.startsWith("AVAILABILITY_")) throw error;
+        if (error.message !== "DEV_DIRECT_WRITE_INVALID_RECORD_REFERENCE" &&
+            error.message !== "MANUAL_SCHEDULE_TIME_INVALID" && !error.message.startsWith("AVAILABILITY_")) throw error;
       }
     }
+    for (const id of ["scheduling-location", "scheduling-date", "scheduling-ta", "scheduling-method", "scheduling-notes"]) {
+      $(id).disabled = busy;
+    }
+    for (const id of ["scheduling-time", "scheduling-end-time"]) $(id).disabled = busy || !manual;
+    $("scheduling-manual-option").disabled = !round1Availability.manualSchedulingOperational;
     $("scheduling-check-availability").disabled = busy || !workspaceReady || !referencesReady ||
-      !round1Availability.providerOperational || round1Availability.checking || !valid;
-    $("scheduling-slot").disabled = busy || round1Availability.checking ||
+      manual || !round1Availability.providerOperational || round1Availability.checking || !valid;
+    $("scheduling-slot").disabled = busy || manual || round1Availability.checking ||
       !round1Availability.evidence || round1Availability.evidence.slots.length === 0;
     $("save-schedule").disabled = busy || !workspaceReady || !referencesReady || !isCandidateCoreEnabled() ||
       !selectedCandidate || selectedCandidate[TABLES.candidate.status] !== STATUS.waitingManualScheduling ||
       Boolean(selectedSchedule) || scheduleRetryBlockedCandidateId === selectedCandidate[TABLES.candidate.id] ||
-      !selectedVerifiedRound1Slot();
+      (manual ? !round1Availability.manualSchedulingOperational || !valid : !selectedVerifiedRound1Slot());
   }
 
   async function readRound1Availability(action, inputs, correlationId) {
@@ -1644,16 +1684,21 @@
         ExpectedStatus: selectedCandidate[TABLES.candidate.status]
       }, newCorrelationId());
       if (generation !== round1Availability.capabilityGeneration) return;
-      if (typeof data.providerOperational !== "boolean") throw new Error("AVAILABILITY_RESPONSE_INVALID");
+      if (typeof data.providerOperational !== "boolean" ||
+          typeof data.manualSchedulingOperational !== "boolean") throw new Error("AVAILABILITY_RESPONSE_INVALID");
       round1Availability.providerOperational = data.providerOperational;
+      round1Availability.manualSchedulingOperational = data.manualSchedulingOperational;
       $("scheduling-availability-status").textContent = data.providerOperational
         ? "Select Meeting Room, Interview Date and TA, then check availability."
-        : "Authenticated Outlook transport is unavailable. No provider-backed slots exist; Check Availability and Save Schedule remain disabled.";
+        : "Authenticated Outlook transport is unavailable. Automatic availability and saving remain disabled. " +
+          (data.manualSchedulingOperational ? "Choose Manual Scheduling to record an explicit schedule without checking availability."
+            : "Manual scheduling is not enabled.");
       updateRound1AvailabilityControls();
     } catch (error) {
       if (generation !== round1Availability.capabilityGeneration) return;
       logSafeFailure("ROUND1_CAPABILITY_READ_FAILED", error);
       round1Availability.providerOperational = false;
+      round1Availability.manualSchedulingOperational = false;
       $("scheduling-availability-status").textContent =
         "Scheduling service capability could not be verified. No availability or saving is enabled. Reopen Schedule Round 1 to retry.";
       updateRound1AvailabilityControls();
@@ -1748,7 +1793,7 @@
     invalidateRound1Availability();
     $("scheduling-availability-status").textContent = round1Availability.providerOperational
       ? "Selection changed. Check Room + TA availability for the current selection."
-      : "Authenticated Outlook transport is unavailable. Availability and saving remain disabled.";
+      : "Authenticated Outlook transport is unavailable. Automatic availability and saving remain disabled; manual scheduling does not check availability.";
     updateRound1AvailabilityControls();
     if (recalculate && !$("scheduling-check-availability").disabled) void checkRound1Availability();
   }
@@ -1763,6 +1808,9 @@
 
   function configureSchedulingAvailability() {
     const required = requiresTrustedScheduleAvailability();
+    $("scheduling-method").value = "automatic";
+    $("scheduling-method-field").hidden = !required;
+    $("scheduling-manual-warning").hidden = true;
     invalidateRound1Availability(true);
     $("scheduling-time-field").hidden = required;
     $("scheduling-end-time-field").hidden = required;
@@ -2102,18 +2150,28 @@
     }
   }
 
-  async function saveVerifiedRound1Schedule() {
-    const slot = selectedVerifiedRound1Slot();
-    if (!slot || !isCandidateCoreEnabled() || !workspaceReady || !referencesReady ||
+  async function saveNormalRound1Schedule() {
+    const manual = isManualRound1Scheduling();
+    const slot = manual ? null : selectedVerifiedRound1Slot();
+    let selection;
+    try { selection = manual ? manualRound1Selection() : round1Selection(); }
+    catch (error) {
+      logSafeFailure("ROUND1_SELECTION_INVALID", error);
+      showNotice("Schedule not saved. Select Room, Date and TA, with valid future start/end times for manual scheduling.", true);
+      return;
+    }
+    if ((manual ? !round1Availability.manualSchedulingOperational : !slot) ||
+        !isCandidateCoreEnabled() || !workspaceReady || !referencesReady ||
         !selectedCandidate || !isCandidateAllowedByDataMode(selectedCandidate) ||
         selectedCandidate[TABLES.candidate.status] !== STATUS.waitingManualScheduling ||
         Boolean(selectedSchedule) || scheduleMode === "reschedule" ||
         scheduleRetryBlockedCandidateId === selectedCandidate[TABLES.candidate.id]) {
-      showNotice("Schedule not saved. Select a current verified Room + TA slot; provider availability and authorized server validation are required.", true);
+      showNotice("Schedule not saved. Select a current verified Room + TA slot, or explicitly choose authorized Manual Scheduling with valid times.", true);
       return;
     }
-    const selection = round1Selection();
-    const notes = $("scheduling-notes").value.trim();
+    const action = manual ? "RecordManualRound1Schedule" : "MarkRound1Scheduled";
+    const timeWindow = manual ? selection : slot;
+    const notes = manual ? $("scheduling-notes").value : $("scheduling-notes").value.trim();
     const correlationId = newCorrelationId();
     let submitted = false;
     let confirmed = false;
@@ -2124,12 +2182,18 @@
         getActiveReference("os_sr_ta", selection.taId),
         getActiveReference("os_sr_loc", selection.roomId)
       ]);
-      if (selectedVerifiedRound1Slot() !== slot) throw new Error("AVAILABILITY_SELECTION_CHANGED");
+      if (manual) {
+        const current = manualRound1Selection();
+        if (!isManualRound1Scheduling() || ["candidateId", "roomId", "taId", "date", "startUtc", "endUtc"]
+            .some((key) => current[key] !== selection[key])) throw new Error("MANUAL_SCHEDULE_SELECTION_CHANGED");
+      } else if (isManualRound1Scheduling() || selectedVerifiedRound1Slot() !== slot) {
+        throw new Error("AVAILABILITY_SELECTION_CHANGED");
+      }
       submitted = true;
-      const { result } = await invokeCandidateCore("MarkRound1Scheduled", {
+      const { result } = await invokeCandidateCore(action, {
         CandidateId: selection.candidateId, ExpectedStatus: STATUS.waitingManualScheduling,
         InterviewerId: selection.taId, LocationId: selection.roomId,
-        StartAt: slot.startUtc, EndAt: slot.endUtc, Notes: notes
+        StartAt: timeWindow.startUtc, EndAt: timeWindow.endUtc, Notes: notes
       }, correlationId);
       assertCandidateCoreStatus(result, STATUS.round1Scheduled);
       normalizeGuid(result.StatusHistoryId);
@@ -2140,20 +2204,22 @@
           selectedCandidate[TABLES.candidate.status] !== STATUS.round1Scheduled || saved.length !== 1 ||
           !sameOptionalGuid(saved[0][interview.ta], selection.taId) ||
           !sameOptionalGuid(saved[0][interview.location], selection.roomId) ||
-          Date.parse(saved[0][interview.start]) !== Date.parse(slot.startUtc) ||
-          Date.parse(saved[0][interview.end]) !== Date.parse(slot.endUtc) ||
-          (saved[0][interview.notes] || "") !== notes) throw new Error("SCHEDULE_PERSISTENCE_NOT_CONFIRMED");
+          Date.parse(saved[0][interview.start]) !== Date.parse(timeWindow.startUtc) ||
+          Date.parse(saved[0][interview.end]) !== Date.parse(timeWindow.endUtc) ||
+          (saved[0][interview.notes] || "") !== (notes.trim() ? notes : "")) throw new Error("SCHEDULE_PERSISTENCE_NOT_CONFIRMED");
       confirmed = true;
       invalidateRound1Availability(true);
       $("scheduling-form").reset();
       $("scheduling-panel").hidden = true;
       scheduleMode = "new";
-      showNotice("Round 1 Scheduled. ATSugg record saved; no Outlook meeting or invitation was created.");
+      showNotice(manual
+        ? "Manual Scheduling \u2014 availability not checked. Round 1 Scheduled in ATSugg only; no Outlook meeting or invitation was created."
+        : "Round 1 Scheduled. ATSugg record saved; no Outlook meeting or invitation was created.");
     } catch (error) {
       if (submitted) scheduleRetryBlockedCandidateId = selection.candidateId;
-      await reportCandidateCoreFailure("MarkRound1Scheduled", selection.candidateId, error,
+      await reportCandidateCoreFailure(action, selection.candidateId, error,
         submitted ? "Schedule persistence or refresh could not be confirmed. Reconcile the current Schedule and Status History before retrying."
-          : "Schedule was not submitted. Selection changed or expired, or an active reference could not be verified. Check availability again.");
+          : "Schedule was not submitted. Selection changed or expired, or an active reference could not be verified. Review the scheduling inputs.");
     } finally {
       setBusy(false);
     }
@@ -2174,7 +2240,7 @@
     event.preventDefault();
     if (busy || !selectedCandidate) return;
     if (requiresTrustedScheduleAvailability()) {
-      return saveVerifiedRound1Schedule();
+      return saveNormalRound1Schedule();
     }
     if (scheduleMode === "reschedule" && !canManageSchedule()) return;
     hideNotice();
@@ -2240,7 +2306,7 @@
     if (requiresTrustedScheduleAvailability()) {
       event.preventDefault();
       if (busy || !selectedCandidate) return;
-      return saveVerifiedRound1Schedule();
+      return saveNormalRound1Schedule();
     }
     if (!isDevFallbackEnabled()) return createScheduleThroughCore(event);
     event.preventDefault();
@@ -3549,6 +3615,10 @@
       $(id).addEventListener("change", round1SelectionChanged);
     }
     $("scheduling-slot").addEventListener("change", selectRound1Slot);
+    $("scheduling-method").addEventListener("change", round1SchedulingMethodChanged);
+    for (const id of ["scheduling-time", "scheduling-end-time"]) {
+      $(id).addEventListener("input", updateRound1AvailabilityControls);
+    }
     $("cancellation-form").addEventListener("submit", cancelRound1);
     $("interview-result-form").addEventListener("submit", recordInterviewResult);
     $("candidate-search").addEventListener("input", () => {

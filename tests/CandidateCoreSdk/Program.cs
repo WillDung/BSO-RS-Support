@@ -176,6 +176,12 @@ internal static partial class Program
 
     private static void Main(string[] args)
     {
+        if (args.Length == 1 && args[0] == "--record-call")
+        {
+            TestNormalRecordCall();
+            Console.WriteLine("Record Call SDK checks passed: " + passed);
+            return;
+        }
         if (args.Length == 1 && args[0] == "--persistent-profile")
         {
             TestPersistentDevProfile();
@@ -1669,6 +1675,53 @@ internal static partial class Program
             Proxy<ITracingService>(call => null)));
     }
 
+    private static void TestNormalRecordCall()
+    {
+        var host = new Host(ActionRequest.NeedCall);
+        host.MainValues["OrganizationId"] = DevOrganization;
+        host.NormalCreatePolicyOrganizationId = DevOrganization;
+        const string notes = "  Synthetic comments\r\n<script>literal text</script>  ";
+        host.Input["Notes"] = notes;
+        new ApplyCandidateAction().Execute(host);
+        Check(host.Calls == 1 && host.Status == ActionRequest.Answered &&
+            host.Histories == 1 && host.Receipt != null &&
+            host.CreatedCall!.GetAttributeValue<string>("os_sr_call_nts") == notes &&
+            host.Output.Contains("CallLogId"), "NORMAL Call preserves exact comments and Answered history");
+
+        var scheduling = new Host(ActionRequest.Answered);
+        scheduling.MainValues["OrganizationId"] = DevOrganization;
+        scheduling.NormalCreatePolicyOrganizationId = DevOrganization;
+        scheduling.Input["ActionType"] = "ProceedToScheduling";
+        scheduling.Status = ActionRequest.Answered;
+        scheduling.Input["ExpectedStatus"] = ActionRequest.Answered;
+        scheduling.Input.Remove("CallOutcome");
+        scheduling.Input.Remove("ContactedAt");
+        new ApplyCandidateAction().Execute(scheduling);
+        Check(scheduling.Status == ActionRequest.Waiting && scheduling.Histories == 1 &&
+            scheduling.Calls == 0 && scheduling.Receipt != null,
+            "NORMAL supported scheduling transition persists history without another Call");
+
+        foreach (var denial in new[] { "write", "disabled", "organization" })
+        {
+            var denied = new Host(ActionRequest.NeedCall);
+            denied.MainValues["OrganizationId"] = DevOrganization;
+            denied.NormalCreatePolicyOrganizationId = DevOrganization;
+            if (denial == "write") denied.CandidateWriteAccess = false;
+            if (denial == "disabled") denied.NormalCreatePolicyEnabled = false;
+            if (denial == "organization") denied.NormalCreatePolicyOrganizationId = Guid.NewGuid();
+            Reject(() => new ApplyCandidateAction().Execute(denied), denial == "write"
+                ? "NORMAL_CALL_WRITE_ACCESS_REQUIRED" : denial == "disabled"
+                ? "NORMAL_CREATE_DISABLED" : "NORMAL_CREATE_ORGANIZATION_REJECTED");
+            Check(denied.Calls == 0 && denied.Updates == 0 && denied.Histories == 0 && denied.Receipt == null,
+                "NORMAL Call rejects " + denial + " before writes");
+        }
+        var blank = new Host(ActionRequest.NeedCall);
+        blank.Input["Notes"] = " \r\n ";
+        new ApplyCandidateAction().Execute(blank);
+        Check(blank.CreatedCall!.GetAttributeValue<string>("os_sr_call_nts") == null,
+            "Blank comments persist as null on a new Call");
+    }
+
     private sealed class Host : IServiceProvider
     {
         public ParameterCollection Input = new ParameterCollection(), Output = new ParameterCollection(), Shared = new ParameterCollection();
@@ -1679,6 +1732,7 @@ internal static partial class Program
             OrganizationReads, CallerProtectedWriteAttempts, Status = 100010000;
         public bool OrganizationAuditEnabled = true, TamperTarget, TamperCreateReadback;
         public bool CandidateNumberWasSupplied;
+        public bool CandidateWriteAccess = true;
         public bool NormalCreatePolicyPresent = true, NormalCreatePolicyEnabled = true,
             NormalCreatePrivilege = true;
         public Guid NormalCreatePolicyOrganizationId = Organization;
@@ -1991,7 +2045,8 @@ internal static partial class Program
                         Results = new ParameterCollection
                         {
                             ["AccessRights"] = CallerReadDeniedTables.Contains(accessRequest.Target.LogicalName)
-                                ? AccessRights.None : AccessRights.ReadAccess
+                                ? AccessRights.None : AccessRights.ReadAccess |
+                                    (CandidateWriteAccess ? AccessRights.WriteAccess : AccessRights.None)
                         }
                     };
                 }

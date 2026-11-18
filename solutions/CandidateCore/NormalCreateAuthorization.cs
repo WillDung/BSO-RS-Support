@@ -14,11 +14,7 @@ namespace os_sr_cact
 
         public static void Require(IOrganizationService service, Guid organizationId, Guid actorId)
         {
-            var policy = ReadPolicy(service);
-            if (policy.OrganizationId != organizationId)
-                throw new OperationError("NORMAL_CREATE_ORGANIZATION_REJECTED");
-            if (!policy.Enabled)
-                throw new OperationError("NORMAL_CREATE_DISABLED");
+            RequireEnabledPolicy(service, organizationId);
 
             var privilegeQuery = new QueryExpression("privilege")
             {
@@ -42,6 +38,29 @@ namespace os_sr_cact
                 !effective.RolePrivileges.Any(privilege =>
                     privilege.PrivilegeId == privileges.Entities[0].Id))
                 throw new OperationError("NORMAL_CREATE_PRIVILEGE_REQUIRED");
+        }
+
+        public static void RequireCall(IOrganizationService service, Guid organizationId,
+            Guid actorId, Guid candidateId)
+        {
+            RequireEnabledPolicy(service, organizationId);
+            var access = (RetrievePrincipalAccessResponse)service.Execute(new RetrievePrincipalAccessRequest
+            {
+                Principal = new EntityReference("systemuser", actorId),
+                Target = new EntityReference("os_sr_cand", candidateId)
+            });
+            var required = AccessRights.ReadAccess | AccessRights.WriteAccess;
+            if ((access.AccessRights & required) != required)
+                throw new OperationError("NORMAL_CALL_WRITE_ACCESS_REQUIRED");
+        }
+
+        private static void RequireEnabledPolicy(IOrganizationService service, Guid organizationId)
+        {
+            var policy = ReadPolicy(service);
+            if (policy.OrganizationId != organizationId)
+                throw new OperationError("NORMAL_CREATE_ORGANIZATION_REJECTED");
+            if (!policy.Enabled)
+                throw new OperationError("NORMAL_CREATE_DISABLED");
         }
 
         private static (bool Enabled, Guid OrganizationId) ReadPolicy(IOrganizationService service)

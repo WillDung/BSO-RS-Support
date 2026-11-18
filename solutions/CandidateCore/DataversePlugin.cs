@@ -39,6 +39,8 @@ namespace os_sr_cact
                     ? actionInput as string : null;
                 var requestedScope = context.InputParameters.TryGetValue("SyntheticScopeId", out var scopeInput) &&
                     scopeInput is Guid scopeId && scopeId != Guid.Empty;
+                var normalCall = !requestedScope &&
+                    (requestedAction == "RecordCall" || requestedAction == "ProceedToScheduling");
                 var isSyntheticVerifier = requestedAction == SyntheticIsolation.VerifyAction;
                 var isSingleUserDevVerifier = requestedAction == SyntheticIsolation.VerifySingleUserDevAction;
                 var developmentOrganization = context.OrganizationId == DevCandidateSlice.DevelopmentOrganizationId;
@@ -63,7 +65,7 @@ namespace os_sr_cact
                         context.OutputParameters["IsolationContract"] = isolation.Contract();
                         return;
                     }
-                    if (requestedAction == "CreateCandidate" && !requestedScope)
+                    if ((requestedAction == "CreateCandidate" && !requestedScope) || normalCall)
                     {
                         isolation = null;
                     }
@@ -113,6 +115,9 @@ namespace os_sr_cact
                     NormalCreateAuthorization.Require(service: factory.CreateOrganizationService(null),
                         organizationId: context.OrganizationId, actorId: context.InitiatingUserId);
                 }
+                if (normalCall)
+                    NormalCreateAuthorization.RequireCall(factory.CreateOrganizationService(null),
+                        context.OrganizationId, context.InitiatingUserId, request.CandidateId!.Value);
                 var systemService = factory.CreateOrganizationService(null);
                 var store = new DataverseStore(systemService, context, trace, request.Action,
                     stage => createCandidateStage = stage, isolation);

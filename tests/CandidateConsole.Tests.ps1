@@ -150,7 +150,8 @@ Assert-Test ($script.Contains('invokeCandidateCore("RecordCall"') -and
     $script.Contains('invokeCandidateCore("ProceedToScheduling"') -and
     $script.Contains('newCorrelationId());') -and
     $script.Contains('showSchedulingPanelAfterSave') -and
-    $script.Contains('The Answered Call and Candidate Answered history were saved')) `
+    $script.Contains('The Call and comments were saved, but') -and
+    $script.Contains('callSchedulingCorrelations.set(candidateId.toLowerCase(), schedulingCorrelationId)')) `
     'Sequence Answered call and scheduling transitions with distinct correlations and explicit partial failure'
 Assert-Test ($html.Contains('id="call-entry-panel"') -and
     $html.Contains('id="call-form"') -and
@@ -159,7 +160,8 @@ Assert-Test ($script -match 'function canRecordCall\(status\) \{\r?\n\s+return s
     $script.Contains('call.hidden = !canRecordCall(candidate[TABLES.candidate.status]);') -and
     $script.Contains('$("call-entry-panel").hidden = !callAllowed;') -and
     $script.Contains('$("submit-call").disabled = busy || !callAllowed;') -and
-    $script.Contains('(!selectedCandidate || !canRecordCall(selectedCandidate[TABLES.candidate.status]))') -and
+    $script.Contains('(!selectedCandidate || !canRecordCall(selectedCandidate[TABLES.candidate.status]) ||') -and
+    $script.Contains('callRetryBlockedCandidates.has(candidateId.toLowerCase())') -and
     ([regex]::Matches($script, 'if \(!canRecordCall\(').Count -eq 2) -and
     -not $script.Contains('const terminal = [STATUS.offerExtended, STATUS.candidateFailed]')) `
     'Gate every Record Call surface on the Need Call Candidate state only'
@@ -622,7 +624,10 @@ Assert-Test ($deployment.Contains('[switch]$DevelopmentSourceAhead') -and
 Assert-Test ($deployment.Contains('[string]$CandidatePaginationReleaseManifestPath') -and
     $deployment.Contains('docs\CANDIDATE_CORE_PAGINATION_1.0.10_RELEASE_MANIFEST.json') -and
     $deployment.Contains("'CANDIDATE_LIST_PAGINATION_AND_ANSWERED_TO_SCHEDULING'") -and
-    $deployment.Contains('$candidatePaginationRelease.customApiChanges -ne 5') -and
+    $deployment.Contains('$candidatePaginationRelease.customApiChanges -ne $expectedApiChanges') -and
+    $deployment.Contains('$expectedApiChanges = if ($recordCallPatch) { 0 } else { 5 }') -and
+    $deployment.Contains('docs\CANDIDATE_CORE_RECORD_CALL_1.0.11_RELEASE_MANIFEST.json') -and
+    $deployment.Contains("'RECORD_CALL_CORRECTION_1.0.11'") -and
     $deployment.Contains('CANDIDATE_PAGINATION_CONFIGURATION_NOT_PRESERVED') -and
     $deployment.Contains('CANDIDATE_CONSOLE_PAGINATION_RELEASE_PREFLIGHT_READY') -and
     $deployment.Contains('CANDIDATE_CONSOLE_PAGINATION_RELEASE_PUBLISHED') -and
@@ -653,6 +658,11 @@ $paginationTemplateHash = (Get-FileHash -LiteralPath (
     Join-Path $root 'solutions\CandidateConsole\WebResources\os_\bso\candidate-console.html'
 ) -Algorithm SHA256).Hash.ToLowerInvariant()
 $paginationScriptHash = (Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$recordCallManifest = Get-Content -LiteralPath (
+    Join-Path $root 'docs\CANDIDATE_CORE_RECORD_CALL_1.0.11_RELEASE_MANIFEST.json'
+) -Raw | ConvertFrom-Json
+$recordCallResources = @{}
+foreach ($resource in $recordCallManifest.resources) { $recordCallResources[$resource.name] = $resource }
 $paginationArtifactPath = Join-Path $root 'solutions\CandidateCorePackage\bin\Release\os_sr_cact_pkg.1.0.10.nupkg'
 $paginationArtifactHash = (Get-FileHash -LiteralPath $paginationArtifactPath -Algorithm SHA256).Hash.ToLowerInvariant()
 Assert-Test ($paginationManifest.release.artifactVersion -ceq '1.0.10' -and
@@ -661,12 +671,22 @@ Assert-Test ($paginationManifest.release.artifactVersion -ceq '1.0.10' -and
     $paginationManifest.release.targetIdentityVerifiedThisTurn -is [bool] -and
     [string]::Join('|', $paginationResourceNames) -ceq
         'os_/bso/candidate-console.html|os_/bso/candidate-console.js' -and
-    $paginationResourceMap['os_/bso/candidate-console.html'].sourceSha256 -ceq $paginationTemplateHash -and
-    $paginationResourceMap['os_/bso/candidate-console.js'].sourceSha256 -ceq $paginationScriptHash -and
+    $paginationResourceMap['os_/bso/candidate-console.html'].sourceSha256 -ceq
+        $recordCallResources['os_/bso/candidate-console.html'].previousTemplateSha256 -and
+    $paginationResourceMap['os_/bso/candidate-console.js'].sourceSha256 -ceq
+        $recordCallResources['os_/bso/candidate-console.js'].previousSha256 -and
     $paginationManifest.build.packageSha256 -ceq $paginationArtifactHash -and
     $paginationManifest.customApiContract.existingExecutePrivilege -ceq 'prvReados_sr_cand' -and
     $paginationManifest.rollback.sequence.Count -ge 4) `
     'Pin the 1.0.10 package, exact two-resource delta, additive API contract, and compatible rollback'
+Assert-Test ($recordCallManifest.scope -ceq 'RECORD_CALL_CORRECTION_1.0.11' -and
+    $recordCallManifest.customApiChanges -eq 0 -and
+    $recordCallManifest.environmentConfigurationChanges -eq 0 -and
+    $recordCallManifest.customApi.changeDecision.action -ceq 'NO_CHANGE' -and
+    $recordCallResources.Count -eq 2 -and
+    $recordCallResources['os_/bso/candidate-console.html'].templateSha256 -ceq $paginationTemplateHash -and
+    $recordCallResources['os_/bso/candidate-console.js'].sha256 -ceq $paginationScriptHash) `
+    'Pin the Record Call patch source while preserving the immutable 1.0.10 baseline'
 
 $hash = (Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $version = [regex]::Match($html, 'candidate-console\.js\?v=([0-9a-f]+)')

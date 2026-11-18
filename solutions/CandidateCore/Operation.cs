@@ -182,7 +182,9 @@ namespace os_sr_cact
                     else
                     {
                         if (value != null && !(value is string)) throw new OperationError("INVALID_TEXT");
-                        value = (value as string)?.Trim();
+                        value = Action == "RecordCall" && pair.Key == "Notes"
+                            ? (string.IsNullOrWhiteSpace(value as string) ? null : value)
+                            : (value as string)?.Trim();
                         if (Action == "UpdateCandidate" && maskedProfileFields.Contains(pair.Key) &&
                             (pair.Key == "CandidatePhone" || pair.Key == "CandidateCvUrl") &&
                             value is string optionalText && string.IsNullOrWhiteSpace(optionalText))

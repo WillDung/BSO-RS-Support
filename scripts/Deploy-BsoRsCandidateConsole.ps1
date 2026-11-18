@@ -8,7 +8,7 @@ param(
     [switch]$DevelopmentSourceAhead,
     [string]$NormalReferenceSelectorsReleaseManifestPath,
     [string]$NormalModeReleaseManifestPath,
-    [string]$CandidatePaginationReleaseManifestPath,
+    [Alias('RecordCallReleaseManifestPath')][string]$CandidatePaginationReleaseManifestPath,
     [switch]$PublishOnly,
     [switch]$ReconcilePublishOnly,
     [switch]$CreateNewResources,
@@ -272,8 +272,11 @@ if (-not [string]::IsNullOrWhiteSpace($NormalModeReleaseManifestPath)) {
 }
 if (-not [string]::IsNullOrWhiteSpace($CandidatePaginationReleaseManifestPath)) {
     $expectedManifestPath = Join-Path $repositoryRoot 'docs\CANDIDATE_CORE_PAGINATION_1.0.10_RELEASE_MANIFEST.json'
+    $recordCallManifestPath = Join-Path $repositoryRoot 'docs\CANDIDATE_CORE_RECORD_CALL_1.0.11_RELEASE_MANIFEST.json'
+    $recordCallPatch = [IO.Path]::GetFullPath($CandidatePaginationReleaseManifestPath) -ceq $recordCallManifestPath
     if (-not $DevelopmentSourceAhead -or
-        [IO.Path]::GetFullPath($CandidatePaginationReleaseManifestPath) -cne $expectedManifestPath -or
+        (-not $recordCallPatch -and
+            [IO.Path]::GetFullPath($CandidatePaginationReleaseManifestPath) -cne $expectedManifestPath) -or
         -not [string]::IsNullOrWhiteSpace($NormalReferenceSelectorsReleaseManifestPath) -or
         -not [string]::IsNullOrWhiteSpace($NormalModeReleaseManifestPath)) {
         throw 'CANDIDATE_PAGINATION_RELEASE_AUTHORIZATION_REQUIRED'
@@ -281,8 +284,12 @@ if (-not [string]::IsNullOrWhiteSpace($CandidatePaginationReleaseManifestPath)) 
     $candidatePaginationRelease = Get-Content -LiteralPath $CandidatePaginationReleaseManifestPath -Raw | ConvertFrom-Json
     $paginationResourceNames = @('os_/bso/candidate-console.html', 'os_/bso/candidate-console.js') |
         Sort-Object -CaseSensitive
-    if ($candidatePaginationRelease.scope -cne 'CANDIDATE_LIST_PAGINATION_AND_ANSWERED_TO_SCHEDULING' -or
-        $candidatePaginationRelease.customApiChanges -ne 5 -or
+    $expectedScope = if ($recordCallPatch) { 'RECORD_CALL_CORRECTION_1.0.11' } else {
+        'CANDIDATE_LIST_PAGINATION_AND_ANSWERED_TO_SCHEDULING'
+    }
+    $expectedApiChanges = if ($recordCallPatch) { 0 } else { 5 }
+    if ($candidatePaginationRelease.scope -cne $expectedScope -or
+        $candidatePaginationRelease.customApiChanges -ne $expectedApiChanges -or
         $candidatePaginationRelease.environmentConfigurationChanges -ne 0 -or
         @($candidatePaginationRelease.resources).Count -ne 2 -or
         [string]::Join('|', @($candidatePaginationRelease.resources.name | Sort-Object -CaseSensitive)) -cne

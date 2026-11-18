@@ -131,6 +131,8 @@
   let scheduleMode = "new";
   let scheduleRetryBlockedCandidateId = null;
   let resultRetryBlockedCandidateId = null;
+  const callRetryBlockedCandidates = new Set();
+  const callSchedulingCorrelations = new Map();
   let currentRows = [];
   let candidatePageRequests = [null];
   let candidatePageNumber = 1;
@@ -387,7 +389,8 @@
     document.querySelectorAll("button[data-action]").forEach((button) => {
       button.disabled = value || !referencesReady || !workspaceReady || !isCandidateCoreEnabled() ||
         (button.id === "submit-call" &&
-          (!selectedCandidate || !canRecordCall(selectedCandidate[TABLES.candidate.status]))) ||
+          (!selectedCandidate || !canRecordCall(selectedCandidate[TABLES.candidate.status]) ||
+            callRetryBlockedCandidates.has(selectedCandidate[TABLES.candidate.id].toLowerCase()))) ||
         (button.id === "waiting-status-button" && button.hidden) ||
         (button.id === "schedule-round1-button" &&
           (button.hidden || !selectedCandidate ||
@@ -1152,7 +1155,7 @@
       const row = document.createElement("tr");
       appendCell(row, formatDate(call[c.contactedAt]));
       appendCell(row, choiceLabel(call, c.outcome, OUTCOME_LABELS));
-      appendCell(row, call[c.notes]);
+      appendCell(row, call[c.notes]).style.whiteSpace = "pre-wrap";
       body.appendChild(row);
     }
   }
@@ -2824,58 +2827,99 @@
       showNotice("Record Call is available only when the Candidate status is Need Call Candidate.", true);
       return;
     }
+    if (callRetryBlockedCandidates.has(candidateId.toLowerCase())) {
+      showNotice("A previous Call submission failed or is uncertain. Reconcile Call history before recording another Call; do not resubmit.", true);
+      return;
+    }
     const outcome = Number($("call-outcome").value);
     if (![OUTCOME.noAnswer, OUTCOME.answered, OUTCOME.callBackRequested].includes(outcome)) {
       showNotice("Choose a supported call outcome.", true);
       return;
     }
+    const notes = $("call-notes").value;
     const currentStatus = selectedCandidate[c.status];
     const expectedStatus = outcome === OUTCOME.answered && currentStatus === STATUS.needCall
       ? STATUS.answered
       : currentStatus;
     let showSchedulingPanelAfterSave = false;
+    let confirmedSuccess = false;
+    let callConfirmed = false;
+    let action = "RecordCall";
+    const correlationId = newCorrelationId();
+    const schedulingCorrelationId = newCorrelationId();
     setBusy(true);
+    callRetryBlockedCandidates.add(candidateId.toLowerCase());
     try {
       const { result } = await invokeCandidateCore("RecordCall", {
         CandidateId: candidateId,
         ExpectedStatus: currentStatus,
         CallOutcome: outcome,
         ContactedAt: new Date().toISOString(),
-        Notes: $("call-notes").value.trim() || undefined
-      });
+        Notes: notes.trim() ? notes : undefined
+      }, correlationId);
       assertCandidateCoreStatus(result, expectedStatus);
-      $("call-form").reset();
-      let schedulingTransitionFailed = false;
+      await verifyRecordedCall(candidateId, correlationId, result, outcome, notes);
+      callConfirmed = true;
       if (outcome === OUTCOME.answered && currentStatus === STATUS.needCall) {
-        try {
-          const schedulingResult = await invokeCandidateCore("ProceedToScheduling", {
-            CandidateId: candidateId,
-            ExpectedStatus: STATUS.answered
-          }, newCorrelationId());
-          assertCandidateCoreStatus(schedulingResult.result, STATUS.waitingManualScheduling);
-        } catch (error) {
-          await reportCandidateCoreFailure("ProceedToScheduling", candidateId, error,
-            "The Answered Call and Candidate Answered history were saved, but moving to Waiting Manual Scheduling failed or is uncertain. If the refreshed Candidate is still Candidate Answered, use Move to Waiting Manual Scheduling.");
-          schedulingTransitionFailed = true;
-          showSchedulingPanelAfterSave =
-            selectedCandidate && selectedCandidate[c.status] === STATUS.waitingManualScheduling;
-        }
+        action = "ProceedToScheduling";
+        callSchedulingCorrelations.set(candidateId.toLowerCase(), schedulingCorrelationId);
+        const schedulingResult = await invokeCandidateCore("ProceedToScheduling", {
+          CandidateId: candidateId,
+          ExpectedStatus: STATUS.answered
+        }, schedulingCorrelationId);
+        assertCandidateCoreStatus(schedulingResult.result, STATUS.waitingManualScheduling);
       }
-      if (!schedulingTransitionFailed) {
-        await refreshCoreCandidate(candidateId);
-        showSchedulingPanelAfterSave = outcome === OUTCOME.answered &&
-          currentStatus === STATUS.needCall &&
-          selectedCandidate && selectedCandidate[c.status] === STATUS.waitingManualScheduling;
-        showNotice(showSchedulingPanelAfterSave
-          ? "Call recorded; Candidate moved to Waiting Manual Scheduling through Candidate Core."
-          : "Call recorded through Candidate Core.");
-      }
+      await refreshCoreCandidate(candidateId);
+      if (outcome === OUTCOME.answered &&
+          (!selectedCandidate || selectedCandidate[c.status] !== STATUS.waitingManualScheduling))
+        throw new Error("CALL_SCHEDULING_STATUS_READBACK_MISMATCH");
+      showSchedulingPanelAfterSave = outcome === OUTCOME.answered;
+      $("call-form").reset();
+      callRetryBlockedCandidates.delete(candidateId.toLowerCase());
+      callSchedulingCorrelations.delete(candidateId.toLowerCase());
+      confirmedSuccess = true;
+      showNotice(showSchedulingPanelAfterSave
+        ? "Candidate moved to Waiting Manual Scheduling; Call and comments verified."
+        : "Call and comments verified.");
     } catch (error) {
-      await reportCandidateCoreFailure("RecordCall", candidateId, error);
+      await reportCandidateCoreFailure(action, candidateId, error, callConfirmed
+        ? "The Call and comments were saved, but the workflow refresh or scheduling transition failed or is uncertain. Do not record the Call again. If the refreshed status is Candidate Answered, use Move to Waiting Manual Scheduling."
+        : "Call persistence could not be confirmed. Comments remain in the form. Reconcile Call history before retrying; do not submit another Call blindly.");
     } finally {
       setBusy(false);
     }
     if (showSchedulingPanelAfterSave) showSchedulingPanel();
+    if (confirmedSuccess) {
+      setBusy(true);
+      try {
+        await xrm().Navigation.openAlertDialog({ text: "Call saved successfully." });
+      } catch (error) {
+        logSafeFailure("CALL_SUCCESS_DIALOG_FAILED", error);
+        showNotice("Call saved successfully, but the success dialog could not be displayed.", true);
+      } finally {
+        setBusy(false);
+      }
+    }
+  }
+
+  async function verifyRecordedCall(candidateId, correlationId, result, outcome, notes) {
+    const call = TABLES.call;
+    const callId = normalizeGuid(result.CallLogId);
+    const rows = await retrieveAll(call.logicalName,
+      `?$select=${[call.id, call.candidate, call.correlation, call.outcome, call.notes].join(",")}` +
+      `&$filter=${encodeURIComponent(relatedCandidateFilter(call, candidateId,
+        `${call.id} eq ${callId}`))}&$top=2`);
+    const matches = rows.filter((row) =>
+      String(row[call.id]).toLowerCase() === callId.toLowerCase() &&
+      String(row[call.candidate]).toLowerCase() === candidateId.toLowerCase() &&
+      (environmentPolicy.candidateOperationMode === "SingleUserDev" ||
+        String(row[call.correlation]).toLowerCase() === correlationId.toLowerCase()) &&
+      row[call.outcome] === outcome);
+    const expectedNotes = notes.trim() ? notes : "";
+    if (matches.length !== 1 ||
+        String(matches[0][call.notes] ?? "").replace(/\r\n/g, "\n") !==
+          expectedNotes.replace(/\r\n/g, "\n"))
+      throw new Error("CALL_COMMENTS_READBACK_MISMATCH");
   }
 
   async function recordCall(event) {
@@ -2997,12 +3041,18 @@
     }
     setBusy(true);
     try {
+      const key = candidateId.toLowerCase();
+      const correlationId = callSchedulingCorrelations.get(key) || newCorrelationId();
+      callSchedulingCorrelations.set(key, correlationId);
       const { result } = await invokeCandidateCore("ProceedToScheduling", {
         CandidateId: candidateId,
         ExpectedStatus: STATUS.answered
-      });
+      }, correlationId);
       assertCandidateCoreStatus(result, STATUS.waitingManualScheduling);
       await refreshCoreCandidate(candidateId);
+      if (!selectedCandidate || selectedCandidate[c.status] !== STATUS.waitingManualScheduling)
+        throw new Error("CALL_SCHEDULING_STATUS_READBACK_MISMATCH");
+      callSchedulingCorrelations.delete(key);
       showNotice("Candidate moved to Waiting Manual Scheduling through Candidate Core.");
     } catch (error) {
       await reportCandidateCoreFailure("ProceedToScheduling", candidateId, error);

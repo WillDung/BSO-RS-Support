@@ -1,0 +1,148 @@
+{
+  "manifestVersion": 1,
+  "scope": "RECORD_CALL_CORRECTION_1.0.11",
+  "release": {
+    "name": "Record Call confirmation, comments and NORMAL scheduling correction",
+    "artifactVersion": "1.0.11",
+    "assemblyVersion": "1.0.11.0",
+    "status": "SOURCE_AND_PACKAGE_READY_NOT_DEPLOYED",
+    "reportedBaseline": {
+      "candidateCoreVersion": "1.0.10.0",
+      "normalCreateEnabled": true
+    }
+  },
+  "solution": {
+    "uniqueName": "os_sr_bso_rs_support",
+    "version": "1.0.0.1"
+  },
+  "releaseTooling": { "pacCliVersion": "2.13.1+g251dee1" },
+  "patchDeployment": {
+    "operation": "EXISTING_PLUGINPACKAGE_ASSEMBLY_REPLACEMENT",
+    "securityMetadataWrites": 0,
+    "allowedMutations": ["EXISTING_PLUGINPACKAGE_CONTENT"],
+    "securityBaselineSha256": "1cb88bf132899c6feec4101bc1290acfbaaa25a0161d8c36a628c55efaa2e26c"
+  },
+  "candidateCore": {
+    "packageFileName": "os_sr_cact_pkg.1.0.11.nupkg",
+    "packageUniqueName": "os_sr_cact_pkg",
+    "registeredPackageRecordVersion": "1.0.0",
+    "artifactPackageVersion": "1.0.11",
+    "packageSha256": "a65c179d3acc0cf4f548dcd204dfa820250ba95aee29c3e7c7245de04fc41cd6",
+    "embeddedAssemblyTypeName": "os_sr_cact.ApplyCandidateAction",
+    "embeddedAssemblySha256": "a70290ea20a791a19fd150f3d366642c9454497781f1394566facac769277cf2",
+    "assemblyVersion": "1.0.11.0",
+    "fileVersion": "1.0.11.0",
+    "productVersion": "1.0.11+5199642233927a749b489880ec99a2bfd285a1a6",
+    "publicKeyToken": null,
+    "customApiHandlerTypeName": "os_sr_cact.ApplyCandidateAction",
+    "expectedPluginTypes": [
+      "os_sr_cact.ApplyCandidateAction",
+      "os_sr_cact.ProtectCandidateCore",
+      "os_sr_cact.SyntheticIsolationGuard",
+      "os_sr_cact.SyntheticIsolationReadGuard"
+    ],
+    "rollbackArtifact": {
+      "fileName": "os_sr_cact_pkg.1.0.10.nupkg",
+      "artifactPackageVersion": "1.0.10",
+      "assemblyVersion": "1.0.10.0",
+      "fileVersion": "1.0.10.0",
+      "productVersion": "1.0.10+e1e43cae8db0c33ed3dc43166267af5ebeea3187",
+      "packageSha256": "fa0716a401f887b28bc2c7b1fb71f5264ece4490c084fb99697a0063c9263404",
+      "embeddedAssemblySha256": "569e24423aa1e3352ef227c59fd1802ca78cb9cd3d509b94384f6572e4d5832f"
+    }
+  },
+  "customApiChanges": 0,
+  "environmentConfigurationChanges": 0,
+  "customApi": {
+    "uniqueName": "os_sr_cact",
+    "metadataSha256": "1a941478d04b335e6eb4aa6ea89fac813e233225f847713cd99231661db23fc1",
+    "changeDecision": {
+      "action": "NO_CHANGE",
+      "metadataWrites": 0,
+      "reason": "Notes is already an optional String parameter mapped to the existing Call Log multiline text column. Retain the exact 25-input/11-output contract, execute privilege and handler identity."
+    },
+    "requestParameters": [
+      { "name": "ProfileFieldMask", "type": 10, "isOptional": true },
+      { "name": "CandidateSearchText", "type": 10, "isOptional": true },
+      { "name": "ActionType", "type": 10, "isOptional": false },
+      { "name": "ContactedAt", "type": 1, "isOptional": true },
+      { "name": "CandidateEmail", "type": 10, "isOptional": true },
+      { "name": "AssignedTaId", "type": 12, "isOptional": true },
+      { "name": "CandidatePhone", "type": 10, "isOptional": true },
+      { "name": "CorrelationId", "type": 12, "isOptional": false },
+      { "name": "CandidateCvUrl", "type": 10, "isOptional": true },
+      { "name": "EndAt", "type": 1, "isOptional": true },
+      { "name": "LocationId", "type": 12, "isOptional": true },
+      { "name": "CandidateStatusFilter", "type": 10, "isOptional": true },
+      { "name": "PositionId", "type": 12, "isOptional": true },
+      { "name": "CallOutcome", "type": 7, "isOptional": true },
+      { "name": "InterviewerId", "type": 12, "isOptional": true },
+      { "name": "Notes", "type": 10, "isOptional": true },
+      { "name": "SyntheticScopeId", "type": 12, "isOptional": true },
+      { "name": "ResultNotes", "type": 10, "isOptional": true },
+      { "name": "CandidateName", "type": 10, "isOptional": true },
+      { "name": "ExpectedStatus", "type": 7, "isOptional": true },
+      { "name": "CandidateSourceId", "type": 12, "isOptional": true },
+      { "name": "CandidateId", "type": 12, "isOptional": true },
+      { "name": "StartAt", "type": 1, "isOptional": true },
+      { "name": "Reason", "type": 10, "isOptional": true },
+      { "name": "CandidatePageNumber", "type": 7, "isOptional": true }
+    ],
+    "responseProperties": [
+      { "name": "IsolationContract", "type": 10 },
+      { "name": "PreviousStatus", "type": 7 },
+      { "name": "CallLogId", "type": 12 },
+      { "name": "CurrentStatus", "type": 7 },
+      { "name": "ResultCode", "type": 10 },
+      { "name": "StatusHistoryId", "type": 12 },
+      { "name": "ScopedData", "type": 10 },
+      { "name": "CandidateNumber", "type": 10 },
+      { "name": "CreatedCandidateId", "type": 12 },
+      { "name": "ScopedHasNextPage", "type": 0 },
+      { "name": "ScopedTotalCount", "type": 7 }
+    ]
+  },
+  "resources": [
+    {
+      "name": "os_/bso/candidate-console.html",
+      "sha256": "EXTERNAL_TARGET_HTML",
+      "templateSha256": "1ab36c9af984c46374bf0fdf5667bc3c66cdf0ba6fbdb6df111b61a91c92adf7",
+      "previousSha256": "EXTERNAL_TARGET_BASELINE",
+      "previousTemplateSha256": "048ffcc33862cd42400b147abc021ac25e595c34fd444c1783db645f46703855"
+    },
+    {
+      "name": "os_/bso/candidate-console.js",
+      "sha256": "ae973d67820a6c8ab9a5ce3bb52442a6aaee635f8086d80e6c46f82799b7dfac",
+      "previousSha256": "b6a87078ca7bb840e80060b86e6891660bb98b44ad013d75c4516cc01daf9803"
+    }
+  ],
+  "behavior": {
+    "authorization": "Only unscoped NORMAL RecordCall and ProceedToScheduling bypass synthetic routing. They require the existing enabled exact-organization configuration and initiating-user effective ReadAccess plus WriteAccess on the exact Candidate. The API Read execute privilege alone cannot authorize either operation. Requests carrying SyntheticScopeId retain the existing isolation path. NORMAL Create privilege checks are unchanged.",
+    "comments": "Preserve nonblank RecordCall Notes up to 4000 characters, including leading/trailing whitespace and line breaks; whitespace-only Notes become null on a new Call. No old Call is updated. Read back returned CallLogId, Candidate, outcome, comments and NORMAL correlation before advancing. Scoped SingleUserDev readback retains its existing restricted column contract. Render via textContent with pre-wrap.",
+    "scheduling": "Keep the supported two-operation state machine: RecordCall atomically saves Call/Answered/history/receipt; ProceedToScheduling separately saves Waiting/history/receipt. Reuse the scheduling correlation for explicit recovery. Block blind Call resubmission after failures or uncertainty, preserve form comments, and report partial outcomes explicitly.",
+    "notification": "Display exactly one native Dataverse success dialog with Call saved successfully. only after Call readback, required transition and detail/list refresh succeed. Never report success on HTTP, readback or transition failure."
+  },
+  "deployment": {
+    "order": [
+      "Fresh exact-target identity, installed 1.0.10 package/API/security/gate and resource versions/hashes; preserve all consumed journals.",
+      "Use the existing assembly-only guarded updater with the pinned 1.0.10 rollback, fresh immutable baseline and unique one-shot journal.",
+      "Conditionally PATCH only the two pinned Console resources and issue a two-resource scoped PublishXml.",
+      "Verify 1.0.11 assembly and handler binding, unchanged 25/11 API/security/gate, current/published/authenticated served bytes and cache token; reconcile exported package bytes."
+    ],
+    "candidateBusinessReads": 0,
+    "candidateBusinessWrites": 0,
+    "automatedLifecycleUat": false,
+    "ownerManualAcceptance": "PENDING"
+  },
+  "rollback": {
+    "backend": "Restore the pinned protected 1.0.10 package through a fresh guarded baseline/journal. Its NORMAL call routing fails closed again; Create remains protected.",
+    "console": "Restore the captured 1.0.10 HTML/JavaScript pair using fresh ETags and scoped PublishXml. Leave all API definitions and configuration intact.",
+    "journals": "Never reset, overwrite or replay a consumed journal; reconcile ambiguity before a separately authorized recovery."
+  },
+  "validation": {
+    "build": "PASS_ZERO_WARNINGS_ZERO_ERRORS",
+    "focusedSdkAssertions": 17,
+    "focusedConsoleTests": 4,
+    "liveFunctionalTesting": "NOT_EXECUTED_OWNER_MANUAL_TESTING"
+  }
+}

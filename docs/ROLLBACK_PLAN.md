@@ -2,6 +2,17 @@
 
 **Status:** `ROLLBACK_PLAN_OFFLINE_READY`; the owner explicitly approved use of the existing LMV BI DEV pre-deployment checkpoint/recovery procedure for the bounded BSO-RS-Support Test rehearsal (`TEST_RECOVERY_PROCEDURE_APPROVED_FOR_BOUNDED_REHEARSAL`). This does not establish a safe bootstrap cleanup path or authorize routine whole-environment restore. No bootstrap import has occurred.
 
+## Record Call 1.0.11 rollback
+
+**Status (2026-11-18):** `PACKAGE_AND_CONSOLE_BYTES_VERIFIED_ROLLBACK_NOT_EXECUTED`. The [1.0.11 manifest](CANDIDATE_CORE_RECORD_CALL_1.0.11_RELEASE_MANIFEST.json) pins the protected 1.0.10 package: SHA-256 `fa0716a401f887b28bc2c7b1fb71f5264ece4490c084fb99697a0063c9263404`, embedded assembly `569e24423aa1e3352ef227c59fd1802ca78cb9cd3d509b94384f6572e4d5832f`. The fresh external Console journal retains the exact prior HTML/JavaScript bytes; decoded current/published rollback payloads were verified against HTML `377d9996c2518d2c5b45b307cf44c2ed21362e1457c128a09c38fdd7ab2e95c3` and JavaScript `b6a87078ca7bb840e80060b86e6891660bb98b44ad013d75c4516cc01daf9803`.
+
+1. Stop submissions and reconcile uncertain Call/transition outcomes; never record another Call merely to repair a scheduling transition. Obtain a component-scoped recovery instruction and fresh baseline/journal.
+2. Restore only the captured 1.0.10 HTML/JavaScript pair with fresh individual-row ETags and scoped two-resource `PublishXml`; verify current/published/served hashes.
+3. If backend rollback is required, restore the pinned 1.0.10 package through the guarded existing-package updater. Its previous NORMAL call routing rejects unscoped calls again; it does not introduce a weaker callable write boundary. NORMAL Create remains protected.
+4. Leave the unchanged 25/11 API contract, existing enabled exact-org configuration, environment/policy resources, roles, Candidate/Call/history/receipt data and consumed journals intact. There is no metadata delta to remove. An authorization incident needs separately authorized exact-org gate-disable containment, not a role or global-guard change.
+
+The exported 1.0.11 solution is reconciliation evidence, not the rollback package. No rollback or Candidate mutation was executed.
+
 ## Candidate Core NORMAL Create 1.0.9 rollback
 
 **Status:** `SERVER_GATE_DISABLE_READY_UI_RESTORE_NOT_REHEARSED`. Candidate Core 1.0.9.0 was deployed with NORMAL Create enabled; the subsequent 1.0.10 deployment preserves that gate and its authorization boundary. The external integrated bundle contains the protected 1.0.9 assembly package, hash-pinned prior Console payloads, target-bound configuration, and durable journals. The [1.0.9 release manifest](CANDIDATE_CORE_NORMAL_CREATE_1.0.9_RELEASE_MANIFEST.json) records sanitized evidence. The full solution export is source reconciliation only, not the rollback artifact.

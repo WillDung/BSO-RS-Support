@@ -1,0 +1,60 @@
+{
+  "manifestVersion": 1,
+  "scope": "MANUAL_SAVE_FEEDBACK_ONLY_CORE_UNCHANGED_1.0.13",
+  "release": {
+    "name": "Manual Save actionable failure feedback and accurate dispatch tracking",
+    "status": "CONSOLE_CORRECTION_READY_UNDERLYING_SAVE_FAILURE_NOT_ESTABLISHED",
+    "reportedBaseline": { "candidateCoreVersion": "1.0.13.0", "normalCreateEnabled": true }
+  },
+  "backendChanges": 0,
+  "customApiChanges": 0,
+  "environmentConfigurationChanges": 0,
+  "flowChanges": 0,
+  "securityMetadataChanges": 0,
+  "resources": [
+    {
+      "name": "os_/bso/candidate-console.html",
+      "sha256": "EXTERNAL_TARGET_HTML",
+      "templateSha256": "3c72d90f76b20bd4562bec9ff56332cdd0bff546f282443521fb1a7de4a6c34d",
+      "previousSha256": "EXTERNAL_TARGET_BASELINE",
+      "previousTemplateSha256": "479e6c463a7a419b80f7486a94186d056f561e48b3ad02f4e5aa66e0f450aaf2"
+    },
+    {
+      "name": "os_/bso/candidate-console.js",
+      "sha256": "f4194615b48cf6828e031b06178d60f0242a60c255de12ffd66625863f2f718f",
+      "previousSha256": "fd19ee39ee8c3fe9592f4137d6983307abb3cab5587e0c16e1fa9fd8f141f9f7"
+    }
+  ],
+  "normalScheduling": {
+    "providerTrust": "BLOCKED",
+    "availabilityRequestsEnabled": false,
+    "scheduleSaveEnabled": false,
+    "manualScheduling": {
+      "enabled": true,
+      "action": "RecordManualRound1Schedule",
+      "authorizationAndPersistence": "Unchanged installed 1.0.13 contract; no provider-evidence bypass."
+    }
+  },
+  "verifiedDefects": [
+    "Console discarded scheduling-specific safe server errors and HTTP status, including non-JSON failures.",
+    "Console marked a mutation as submitted before transport preflight, falsely blocking even a request never dispatched."
+  ],
+  "unresolved": {
+    "underlyingManualSaveRootCause": "NOT_ESTABLISHED",
+    "ownerHttpFailure": "NOT_CAPTURED",
+    "submittedRoomTaAndTimes": "NOT_CAPTURED",
+    "manualFunctionalAcceptance": "BLOCKED_PENDING_OWNER_DIAGNOSTIC"
+  },
+  "deployment": {
+    "allowedWrites": "Exactly two conditional WebResource content updates and one two-resource PublishXml.",
+    "candidateOrScheduleTestWrites": 0,
+    "automatedLifecycleUat": false,
+    "rollback": "Restore captured immediately preceding 1.0.13 HTML/JavaScript with fresh ETags and scoped PublishXml; leave backend, API, security, configuration and business records unchanged.",
+    "journals": "Fresh evidence and journal only; never reset or reuse consumed journals."
+  },
+  "validation": {
+    "focusedSchedulingAndRecordCallNodeTests": 21,
+    "javascriptAndDeploymentSyntax": "PASS",
+    "liveManualSaveAcceptance": "NOT_EXECUTED"
+  }
+}

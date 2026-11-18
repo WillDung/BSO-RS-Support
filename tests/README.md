@@ -1,5 +1,11 @@
 # Tests
 
+## Manual Save transport feedback
+
+Run `node --test .\tests\CandidateConsoleScheduling.test.cjs .\tests\CandidateConsoleRecordCall.test.cjs` for **21** focused offline tests. Four added regressions execute the actual Console transport/invocation/error-reporting functions with a synthetic `fetch`: exact manual payload and UTC+07:00 conversion, safe HTTP/stage/code/correlation, pre-dispatch rejection without a false ambiguous lock, non-JSON/privacy handling, and network ambiguity without automatic retry. The three initial regressions failed before the correction. These fixtures do not submit any request to Dataverse and cannot establish the root cause or resolution of the owner's live Save failure.
+
+Including `.\tests\CandidateConsoleReferences.Tests.js` in the same Node command passes **22 tests**, including **31 reference runtime checks**.
+
 ## Round 1 manual fallback and evidence-bound automatic save
 
 ```powershell
@@ -10,7 +16,7 @@ node --test .\tests\CandidateConsoleScheduling.test.cjs .\tests\CandidateConsole
 
 The focused SDK selector passes **154** synthetic checks: adjacent provider quarters, full-slot intersection, unavailable/incomplete/stale/mismatched evidence, UTC overnight conversion, past/weekend exclusion, server recheck timing and fail-closed automatic creation/promotion. It also covers the distinct authorized manual action, exact-org/gate/Read/Write rejection, scoped-context denial, inactive TA/Room, stale status and invalid time, caller/preserved ownership, exact and blank/omitted Notes, durable manual History/Receipt and replay/action-conflict behavior. Scoped SingleUserDev remains covered.
 
-The combined Node command passes **18 tests**, including **31 reference runtime checks**. Scheduling tests exercise capability-gated explicit manual selection, UTC+07:00 time conversion, exact Notes, duplicate prevention, confirmed persistence before one dialog, uncertain manual outcomes without automatic fallback, and unchanged automatic loading/error/expiry/binding checks. All provider responses are synthetic in-memory fixtures; none is submitted to Dataverse or presented as live availability. These are not lifecycle UAT or proof of Outlook connectivity. The provider remains unavailable; only the separate manual action is enabled by the [1.0.13 manifest](../docs/CANDIDATE_ROUND1_1.0.13_RELEASE_MANIFEST.json).
+The historical 1.0.13 combined Node run passed **18 tests**, including **31 reference runtime checks**. Scheduling tests exercise capability-gated explicit manual selection, UTC+07:00 time conversion, exact Notes, duplicate prevention, confirmed persistence before one dialog, uncertain manual outcomes without automatic fallback, and unchanged automatic loading/error/expiry/binding checks. All provider responses are synthetic in-memory fixtures; none is submitted to Dataverse or presented as live availability. These are not lifecycle UAT or proof of Outlook connectivity. The provider remains unavailable; only the separate manual action is enabled by the [1.0.13 manifest](../docs/CANDIDATE_ROUND1_1.0.13_RELEASE_MANIFEST.json).
 
 The pure operation harness explicitly links both shared source files and passes **276 assertions**, including failure at each effect of manual creation/promotion with complete in-memory rollback, receipt conflicts and same-local-date validation across UTC midnight. Automatic unscoped `MarkRound1Scheduled` remains provider-bound; the explicitly separate manual action does not weaken it.
 

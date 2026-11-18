@@ -461,7 +461,7 @@
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
   }
 
-  async function sendCandidateCoreRequest(action, values, correlationId) {
+  async function sendCandidateCoreRequest(action, values, correlationId, onDispatch) {
     if (referenceMode === "NORMAL" &&
         (environmentPolicy.syntheticDataOnly || Object.hasOwn(values, "SyntheticScopeId") ||
           !CORE_API_ACTIONS.has(action))) {
@@ -494,6 +494,8 @@
     }
     if (request.CandidateId) request.CandidateId = normalizeGuid(request.CandidateId);
     // Xrm.WebApi.online.execute emits an undefined Edm.Guid for this action when optional inputs are omitted.
+    const body = JSON.stringify(request);
+    if (onDispatch) onDispatch();
     const response = await fetch("/api/data/v9.2/os_sr_cact", {
       method: "POST",
       credentials: "same-origin",
@@ -503,17 +505,20 @@
         "OData-MaxVersion": "4.0",
         "OData-Version": "4.0"
       },
-      body: JSON.stringify(request)
+      body
     });
     const responseText = await response.text();
     let result;
     try {
       result = responseText ? JSON.parse(responseText) : null;
     } catch {
-      throw new Error("CANDIDATE_CORE_RESPONSE_INVALID");
+      const error = new Error("CANDIDATE_CORE_RESPONSE_INVALID");
+      error.httpStatus = response.status;
+      throw error;
     }
     if (!response.ok) {
       const error = new Error("CANDIDATE_CORE_REQUEST_REJECTED");
+      error.httpStatus = response.status;
       const errorCode = result && result.error && result.error.code;
       if (typeof errorCode === "string" && /^0x[0-9a-f]{8}$/i.test(errorCode)) {
         error.errorCode = Number.parseInt(errorCode.slice(2), 16);
@@ -528,14 +533,20 @@
           : operationFailure[2];
         error.operationFailure = `${operationFailure[1]}:${safeCode}`;
       }
+      if (action === "RecordManualRound1Schedule" || action === "MarkRound1Scheduled") {
+        const safeSchedulingFailure = typeof errorMessage === "string" &&
+          (/^(?:DATAVERSE_OPERATION_REJECTED|CANDIDATE_CORE_FAILURE):CC_(?:READ_RECEIPT|READ_CANDIDATE|CHECK_PROTECTED_READ_ACCESS|READ_INTERVIEW_SCHEDULE_IDS|READ_INTERVIEW_SCHEDULE|CREATE_INTERVIEW_SCHEDULE|UPDATE_INTERVIEW_SCHEDULE|VERIFY_INTERVIEW_SCHEDULE|UPDATE_CANDIDATE|CREATE_STATUS_HISTORY|CREATE_RECEIPT):(?:0x[0-9a-f]{8}|TIMEOUT|PLUGIN_EXECUTION|INVALID_OPERATION|SERVICE_FAULT|OTHER)$/i.test(errorMessage) ||
+            /^(?:NORMAL_CREATE_DISABLED|NORMAL_CREATE_ORGANIZATION_REJECTED|NORMAL_CREATE_CONFIGURATION_REJECTED|NORMAL_SCHEDULE_WRITE_ACCESS_REQUIRED|CALLER_READ_ACCESS_REQUIRED|STALE_EXPECTED_STATUS|INVALID_TRANSITION|INVALID_SCHEDULE_REFERENCE|INVALID_SCHEDULE_TIME|MANUAL_SCHEDULE_NORMAL_CONTEXT_REQUIRED|ACTIVE_SCHEDULE_CONFLICT|SCHEDULE_STATE_AMBIGUOUS|SCHEDULE_INTEGRITY_FAILURE|SCHEDULE_PERSISTENCE_NOT_CONFIRMED|CORRELATION_CONFLICT|CORRELATION_OR_KEY_CONFLICT|RECEIPT_INTEGRITY_FAILURE|ROW_VERSION_CONFLICT|ROW_VERSION_UNAVAILABLE|AVAILABILITY_PROVIDER_UNAVAILABLE|DATAVERSE_OPERATION_REJECTED|REFERENCE_NOT_AVAILABLE:(?:InterviewerId|LocationId))$/.test(errorMessage));
+        if (safeSchedulingFailure) error.operationFailure = errorMessage;
+      }
       throw error;
     }
     return { correlationId, result };
   }
 
-  async function invokeCandidateCore(action, values = {}, correlationId = newCorrelationId()) {
+  async function invokeCandidateCore(action, values = {}, correlationId = newCorrelationId(), onDispatch) {
     if (!CORE_API_ACTIONS.has(action)) throw new Error("CANDIDATE_CORE_ACTION_INVALID");
-    const { result } = await sendCandidateCoreRequest(action, values, correlationId);
+    const { result } = await sendCandidateCoreRequest(action, values, correlationId, onDispatch);
     if (!result || !["Applied", "DuplicateReplay"].includes(result.ResultCode)) {
       throw new Error("CANDIDATE_CORE_RESULT_INVALID");
     }
@@ -637,19 +648,28 @@
     }
   }
 
-  async function reportCandidateCoreFailure(action, candidateId, error, partialFailureMessage = "") {
+  async function reportCandidateCoreFailure(action, candidateId, error, partialFailureMessage = "", correlationId = "") {
     logSafeFailure(`CANDIDATE_CORE_${action}_FAILED`, error);
+    const details = [];
+    if (error && Number.isInteger(error.httpStatus) && error.httpStatus >= 100 && error.httpStatus <= 599) {
+      details.push(`HTTP ${error.httpStatus}`);
+    }
+    if (error && Number.isInteger(error.errorCode)) {
+      details.push(`0x${(error.errorCode >>> 0).toString(16).padStart(8, "0").toUpperCase()}`);
+    }
+    if (error && typeof error.operationFailure === "string") details.push(error.operationFailure);
+    if (/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(correlationId)) {
+      details.push(`Correlation ${correlationId}`);
+    }
+    const diagnostic = details.length ? ` (${details.join("; ")})` : "";
     try {
       await refreshCandidates();
       if (candidateId) await openCandidate(candidateId);
     } catch (reconcileError) {
       logSafeFailure("CANDIDATE_CORE_RECONCILIATION_FAILED", reconcileError);
-      showNotice(`${action} failed or its outcome is uncertain. Current server state could not be fully refreshed; do not retry until it is reconciled.`, true);
+      showNotice(`${action} failed or its outcome is uncertain. Current server state could not be fully refreshed; do not retry until it is reconciled.${diagnostic}`, true);
       return;
     }
-    const operationFailure = error && typeof error.operationFailure === "string"
-      ? ` (${error.operationFailure})`
-      : "";
     if (action === "CreateCandidate" && error &&
         typeof error.operationFailure === "string" &&
         error.operationFailure.startsWith("AUTHORIZATION:")) {
@@ -658,7 +678,7 @@
     }
     const message = partialFailureMessage ||
       `${action} failed or its outcome is uncertain. Current server state was refreshed; verify it before retrying.`;
-    showNotice(`${message}${operationFailure}`, true);
+    showNotice(`${message}${diagnostic}`, true);
   }
 
   function assertCandidateCoreStatus(result, expectedStatus) {
@@ -2189,12 +2209,11 @@
       } else if (isManualRound1Scheduling() || selectedVerifiedRound1Slot() !== slot) {
         throw new Error("AVAILABILITY_SELECTION_CHANGED");
       }
-      submitted = true;
       const { result } = await invokeCandidateCore(action, {
         CandidateId: selection.candidateId, ExpectedStatus: STATUS.waitingManualScheduling,
         InterviewerId: selection.taId, LocationId: selection.roomId,
         StartAt: timeWindow.startUtc, EndAt: timeWindow.endUtc, Notes: notes
-      }, correlationId);
+      }, correlationId, () => { submitted = true; });
       assertCandidateCoreStatus(result, STATUS.round1Scheduled);
       normalizeGuid(result.StatusHistoryId);
       await refreshCoreCandidate(selection.candidateId);
@@ -2219,7 +2238,8 @@
       if (submitted) scheduleRetryBlockedCandidateId = selection.candidateId;
       await reportCandidateCoreFailure(action, selection.candidateId, error,
         submitted ? "Schedule persistence or refresh could not be confirmed. Reconcile the current Schedule and Status History before retrying."
-          : "Schedule was not submitted. Selection changed or expired, or an active reference could not be verified. Review the scheduling inputs.");
+          : "Schedule was not submitted. Review the selection, active references and application authorization before trying again.",
+        correlationId);
     } finally {
       setBusy(false);
     }

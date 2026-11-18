@@ -56,7 +56,11 @@ function harness(singleUserDev = false) {
     },
     getActiveReference: async () => ({}), refreshCoreCandidate: async () => {},
     reportCandidateCoreFailure: async (...args) => errors.push(args),
-    invokeCandidateCore: async (...args) => { requests.push(args); throw new Error("UNEXPECTED_WRITE"); }
+    invokeCandidateCore: async (...args) => {
+      if (args[3]) args[3]();
+      requests.push(args);
+      throw new Error("UNEXPECTED_WRITE");
+    }
   };
   vm.createContext(context);
   vm.runInContext([
@@ -242,7 +246,8 @@ test("HTTP failure or mismatched persisted schedule never shows success and bloc
     ui.context.reply = (_, inputs, correlationId) => envelope(selection, correlationId);
     await ui.context.checkRound1Availability();
     ui.element("scheduling-slot").value = ui.context.round1Availability.evidence.slots[0].startUtc;
-    ui.context.invokeCandidateCore = async () => {
+    ui.context.invokeCandidateCore = async (_action, _inputs, _correlationId, onDispatch) => {
+      onDispatch();
       if (failedResponse) throw new Error("HTTP_ERROR");
       return { result: { CurrentStatus: 100010003, StatusHistoryId: ui.taId } };
     };
@@ -383,4 +388,94 @@ test("uncertain manual persistence never reports success or retries through the 
   assert.equal(ui.requests[0][0], "RecordManualRound1Schedule");
   assert.equal(ui.dialogs.length, 0);
   assert.equal(ui.element("save-schedule").disabled, true);
+});
+
+async function manualTransportHarness(response) {
+  const ui = harness();
+  const selection = readySelection(ui);
+  await ui.context.loadRound1SchedulingCapabilities();
+  ui.element("scheduling-method").value = "manual";
+  ui.context.round1SchedulingMethodChanged();
+  ui.element("scheduling-time").value = "09:00";
+  ui.element("scheduling-end-time").value = "10:00";
+  ui.context.environmentPolicy.candidateOperationMode = "NORMAL";
+  ui.context.refreshCandidates = async () => {};
+  ui.context.openCandidate = async () => true;
+  ui.context.fetch = async (url, options) => {
+    assert.equal(url, "/api/data/v9.2/os_sr_cact");
+    ui.requests.push(JSON.parse(options.body));
+    if (response instanceof Error) throw response;
+    return response;
+  };
+  vm.runInContext([
+    extract("  const CORE_API_ACTIONS = new Set([", "\n  ]);"),
+    extract("  const CORE_API_PARAMETER_NAMES = new Set([", "\n  ]);"),
+    extract("  async function sendCandidateCoreRequest("),
+    extract("  async function invokeCandidateCore("),
+    extract("  async function reportCandidateCoreFailure(")
+  ].join("\n"), ui.context);
+  return { ...ui, selection };
+}
+
+test("real manual transport retains HTTP, safe schedule stage and correlation without retrying", async () => {
+  const ui = await manualTransportHarness({
+    ok: false, status: 400,
+    text: async () => JSON.stringify({ error: {
+      code: "0x80040265",
+      message: "DATAVERSE_OPERATION_REJECTED:CC_CREATE_INTERVIEW_SCHEDULE:0x80040265"
+    } })
+  });
+  await ui.context.createSchedule({ preventDefault() {} });
+  assert.equal(ui.requests.length, 1);
+  assert.equal(ui.requests[0].ActionType, "RecordManualRound1Schedule");
+  assert.equal(ui.requests[0].CandidateId, ui.selection.candidateId);
+  assert.equal(ui.requests[0].LocationId, ui.selection.roomId);
+  assert.equal(ui.requests[0].InterviewerId, ui.selection.taId);
+  assert.equal(ui.requests[0].StartAt, `${ui.selection.date}T02:00:00.000Z`);
+  assert.equal(ui.requests[0].EndAt, `${ui.selection.date}T03:00:00.000Z`);
+  const message = ui.notices.at(-1)[0];
+  assert.match(message, /HTTP 400/);
+  assert.match(message, /CC_CREATE_INTERVIEW_SCHEDULE:0x80040265/);
+  assert.ok(message.includes(ui.requests[0].CorrelationId));
+  assert.equal(ui.dialogs.length, 0);
+  assert.equal(ui.context.scheduleRetryBlockedCandidateId, ui.selection.candidateId);
+  await ui.context.createSchedule({ preventDefault() {} });
+  assert.equal(ui.requests.length, 1);
+});
+
+test("real transport preflight rejection does not falsely mark a manual mutation as dispatched", async () => {
+  const ui = await manualTransportHarness();
+  ui.context.environmentPolicy.syntheticDataOnly = true;
+  await ui.context.createSchedule({ preventDefault() {} });
+  assert.equal(ui.requests.length, 0);
+  assert.equal(ui.context.scheduleRetryBlockedCandidateId, null);
+  assert.match(ui.notices.at(-1)[0], /Schedule was not submitted/);
+  assert.equal(ui.dialogs.length, 0);
+});
+
+test("manual failure feedback excludes raw provider text and preserves non-JSON HTTP status", async () => {
+  for (const rawMessage of ["Synthetic private name synthetic@example.invalid", null]) {
+    const ui = await manualTransportHarness({
+      ok: false, status: 503,
+      text: async () => rawMessage === null ? "<html>private upstream failure</html>"
+        : JSON.stringify({ error: { code: "0x80040265", message: rawMessage } })
+    });
+    await ui.context.createSchedule({ preventDefault() {} });
+    const message = ui.notices.at(-1)[0];
+    assert.match(message, /HTTP 503/);
+    assert.doesNotMatch(message, /synthetic@example|private|<html>/);
+    assert.equal(ui.dialogs.length, 0);
+    assert.equal(ui.context.scheduleRetryBlockedCandidateId, ui.selection.candidateId);
+  }
+});
+
+test("real manual transport network failure remains ambiguous and never resubmits automatically", async () => {
+  const ui = await manualTransportHarness(new Error("Synthetic private upstream connection detail"));
+  await ui.context.createSchedule({ preventDefault() {} });
+  assert.equal(ui.context.scheduleRetryBlockedCandidateId, ui.selection.candidateId);
+  assert.match(ui.notices.at(-1)[0], /Reconcile/);
+  assert.doesNotMatch(ui.notices.at(-1)[0], /private upstream/);
+  assert.equal(ui.dialogs.length, 0);
+  await ui.context.createSchedule({ preventDefault() {} });
+  assert.equal(ui.requests.length, 1);
 });

@@ -2,6 +2,12 @@
 
 **Status:** `ROLLBACK_PLAN_OFFLINE_READY`; the owner explicitly approved use of the existing LMV BI DEV pre-deployment checkpoint/recovery procedure for the bounded BSO-RS-Support Test rehearsal (`TEST_RECOVERY_PROCEDURE_APPROVED_FOR_BOUNDED_REHEARSAL`). This does not establish a safe bootstrap cleanup path or authorize routine whole-environment restore. No bootstrap import has occurred.
 
+## Manual Save feedback-only correction rollback
+
+The [feedback-only manifest](CANDIDATE_MANUAL_SAVE_FEEDBACK_RELEASE_MANIFEST.json) permits only HTML/JavaScript updates. Capture the immediately preceding published and unpublished 1.0.13 bytes before dispatch; refuse drift. Recovery restores those two resources using fresh individual ETags and exactly two-resource `PublishXml`, with fresh evidence rather than resetting or replaying a consumed journal. Backend 1.0.13, API, authorization, configuration and business records remain unchanged. This restores the older opaque error feedback; it does not resolve or prove the underlying manual Save failure.
+
+**Deployment status (2026-11-18):** preceding target HTML `dcb0bc6f0eb2bf837469f9baf4d270ca72ea3155134b999fb5ed8ab11a3a97a2` and JavaScript `fd19ee39ee8c3fe9592f4137d6983307abb3cab5587e0c16e1fa9fd8f141f9f7` were captured before the two-resource correction and retained externally. Recovery was not executed. See the [actual deployment receipt](CURRENT_STATE.md#manual-save-failure-diagnosis-and-bounded-feedback-correction-2026-11-18).
+
 ## Manual Round 1 fallback 1.0.13 rollback
 
 **Status (2026-11-18):** `PROTECTED_PACKAGE_AND_PRIOR_CONSOLE_CAPTURED_RECOVERY_NOT_EXECUTED`. The [1.0.13 manifest](CANDIDATE_ROUND1_1.0.13_RELEASE_MANIFEST.json) pins protected 1.0.12 package SHA-256 `340e875749148ded13b44aa3a22a8a6b117bf46f700d155c404c26931666eaa6` and DLL `51125c7eba67cba936e39384496c0bfdbfd3810ef18cf8646eb615b59bc65f23`. The fresh immutable external baseline captured the immediately prior target HTML `3cc3b2650bc1b0060f4fb9b053e482a604db95878ed28b04ac3d7a22bb377681` and JavaScript `27bed7fb1c04d736d34b1c99721f5bbd06d740ec410684664a149c409be1ef5c` bytes before dispatch.

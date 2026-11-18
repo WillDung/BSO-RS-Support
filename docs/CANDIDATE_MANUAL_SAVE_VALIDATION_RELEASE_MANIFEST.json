@@ -1,0 +1,61 @@
+{
+  "manifestVersion": 1,
+  "scope": "MANUAL_SAVE_INPUT_VALIDATION_CORE_UNCHANGED_1.0.13",
+  "release": {
+    "name": "Manual Save field feedback and immediate disabled-state recalculation",
+    "status": "SOURCE_VALIDATION_PASSED_OWNER_PERSISTENCE_TEST_PENDING",
+    "reportedBaseline": { "candidateCoreVersion": "1.0.13.0", "normalCreateEnabled": true }
+  },
+  "backendChanges": 0,
+  "customApiChanges": 0,
+  "environmentConfigurationChanges": 0,
+  "flowChanges": 0,
+  "securityMetadataChanges": 0,
+  "resources": [
+    {
+      "name": "os_/bso/candidate-console.html",
+      "sha256": "EXTERNAL_TARGET_HTML",
+      "templateSha256": "2ea6d584d3efec6c7c83fd6e4fafeb3626335b9fe82fcec82239cc0266787df5",
+      "previousSha256": "EXTERNAL_TARGET_BASELINE",
+      "previousTemplateSha256": "3c72d90f76b20bd4562bec9ff56332cdd0bff546f282443521fb1a7de4a6c34d"
+    },
+    {
+      "name": "os_/bso/candidate-console.js",
+      "sha256": "5beb8f216ae4e17cebd902932ad078a31519119b9ccd0948c8957c58b609ae89",
+      "previousSha256": "f4194615b48cf6828e031b06178d60f0242a60c255de12ffd66625863f2f718f"
+    }
+  ],
+  "normalScheduling": {
+    "providerTrust": "BLOCKED",
+    "availabilityRequestsEnabled": false,
+    "scheduleSaveEnabled": false,
+    "manualScheduling": {
+      "enabled": true,
+      "action": "RecordManualRound1Schedule",
+      "authorizationAndPersistence": "Unchanged installed 1.0.13 contract; no provider-evidence bypass."
+    }
+  },
+  "verifiedDefects": [
+    "Disabled Manual Save did not identify missing fields, invalid times or workflow gates.",
+    "Manual selection reused automatic selection validation.",
+    "Room, Date and TA changes cleared explicit manual times and lacked immediate input-event recalculation."
+  ],
+  "manualRules": [
+    "Valid Candidate, Room, TA and interview date; explicit future Start and later End on the same UTC+07:00 date.",
+    "Existing Candidate status, data-mode, readiness, authorization capability, active-Schedule, in-flight and reconciliation gates remain enforced.",
+    "No Outlook proof, automatic business-hours, weekday, slot-grid or thirty-minute-duration requirement."
+  ],
+  "deployment": {
+    "allowedWrites": "Exactly two conditional WebResource content updates and one two-resource PublishXml.",
+    "candidateOrScheduleTestWrites": 0,
+    "automatedLifecycleUat": false,
+    "rollback": "Restore captured immediately preceding feedback-only HTML/JavaScript with fresh ETags and scoped PublishXml; preserve backend, API, security, configuration and business records.",
+    "journals": "Fresh evidence and journal only; never reset or reuse consumed journals."
+  },
+  "validation": {
+    "focusedSchedulingReferenceAndRecordCallNodeTests": 25,
+    "referenceRuntimeChecks": 31,
+    "javascriptAndDeploymentSyntax": "PASS",
+    "liveManualSaveAcceptance": "NOT_EXECUTED"
+  }
+}

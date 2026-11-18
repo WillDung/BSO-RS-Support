@@ -2,6 +2,14 @@
 
 **Status:** `ROLLBACK_PLAN_OFFLINE_READY`; the owner explicitly approved use of the existing LMV BI DEV pre-deployment checkpoint/recovery procedure for the bounded BSO-RS-Support Test rehearsal (`TEST_RECOVERY_PROCEDURE_APPROVED_FOR_BOUNDED_REHEARSAL`). This does not establish a safe bootstrap cleanup path or authorize routine whole-environment restore. No bootstrap import has occurred.
 
+## Manual Save input validation correction rollback
+
+The [validation manifest](CANDIDATE_MANUAL_SAVE_VALIDATION_RELEASE_MANIFEST.json) permits only the HTML/JavaScript pair. The immediately preceding feedback-only target HTML `2ceefc64cd6ab58a1d2007909e5fee679a81cead23f86121f08ac319d2db4dc8` and JavaScript `f4194615b48cf6828e031b06178d60f0242a60c255de12ffd66625863f2f718f` were captured before dispatch with current/published agreement and a genuine solution export.
+
+Recovery requires a fresh exact-component instruction, baseline and one-shot journal. Restore only those captured bytes with fresh individual-row ETags and exactly two-resource `PublishXml`; verify current/published/served hashes and cache token. Do not reset or replay the consumed validation-release journal. Preserve Core 1.0.13, API, authorization, exact-org gate, configuration, Flow/connections, roles/guards, business records and prior operation receipts. This restores the older disabled-state UX and time-clearing behavior, not a different server scheduling contract.
+
+**Status (2026-11-18):** `PRIOR_CONSOLE_PAIR_CAPTURED_RECOVERY_NOT_EXECUTED`. See the [actual deployment receipt](CURRENT_STATE.md#manual-save-input-validation-correction-2026-11-18). Owner functional persistence acceptance remains pending.
+
 ## Manual Save feedback-only correction rollback
 
 The [feedback-only manifest](CANDIDATE_MANUAL_SAVE_FEEDBACK_RELEASE_MANIFEST.json) permits only HTML/JavaScript updates. Capture the immediately preceding published and unpublished 1.0.13 bytes before dispatch; refuse drift. Recovery restores those two resources using fresh individual ETags and exactly two-resource `PublishXml`, with fresh evidence rather than resetting or replaying a consumed journal. Backend 1.0.13, API, authorization, configuration and business records remain unchanged. This restores the older opaque error feedback; it does not resolve or prove the underlying manual Save failure.

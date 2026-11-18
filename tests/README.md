@@ -1,10 +1,16 @@
 # Tests
 
+## Manual Save disabled-state validation
+
+Run `node --test .\tests\CandidateConsoleScheduling.test.cjs .\tests\CandidateConsoleReferences.Tests.js .\tests\CandidateConsoleRecordCall.test.cjs` for **25** focused offline tests, including **31 reference runtime checks**. Three added regressions reproduce missing Room and past Start feedback; cover every required field, Candidate/status/data-mode, capability, readiness, in-flight and reconciliation gate; and execute actual input/change event registrations. Valid future manual times enable Save with no provider evidence, including non-grid weekend times across UTC midnight. Changing Room/Date/TA preserves explicit manual times while invalidating automatic evidence. Switching method still clears times, and automatic Save remains evidence-bound.
+
+The three new tests failed before the correction. No fixture sends a request to Dataverse, creates a Schedule or establishes live persistence acceptance. See the [bounded validation release](../docs/CANDIDATE_MANUAL_SAVE_VALIDATION_RELEASE_MANIFEST.json).
+
 ## Manual Save transport feedback
 
-Run `node --test .\tests\CandidateConsoleScheduling.test.cjs .\tests\CandidateConsoleRecordCall.test.cjs` for **21** focused offline tests. Four added regressions execute the actual Console transport/invocation/error-reporting functions with a synthetic `fetch`: exact manual payload and UTC+07:00 conversion, safe HTTP/stage/code/correlation, pre-dispatch rejection without a false ambiguous lock, non-JSON/privacy handling, and network ambiguity without automatic retry. The three initial regressions failed before the correction. These fixtures do not submit any request to Dataverse and cannot establish the root cause or resolution of the owner's live Save failure.
+At the feedback-only release, `node --test .\tests\CandidateConsoleScheduling.test.cjs .\tests\CandidateConsoleRecordCall.test.cjs` passed **21** focused offline tests. Four added regressions execute the actual Console transport/invocation/error-reporting functions with a synthetic `fetch`: exact manual payload and UTC+07:00 conversion, safe HTTP/stage/code/correlation, pre-dispatch rejection without a false ambiguous lock, non-JSON/privacy handling, and network ambiguity without automatic retry. The three initial regressions failed before the correction. These fixtures do not submit any request to Dataverse and cannot establish the root cause or resolution of the owner's live Save failure.
 
-Including `.\tests\CandidateConsoleReferences.Tests.js` in the same Node command passes **22 tests**, including **31 reference runtime checks**.
+Including `.\tests\CandidateConsoleReferences.Tests.js` in that historical run passed **22 tests**, including **31 reference runtime checks**.
 
 ## Round 1 manual fallback and evidence-bound automatic save
 

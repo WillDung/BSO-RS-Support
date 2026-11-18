@@ -8,7 +8,7 @@
   <script src="../../ClientGlobalContext.js.aspx"></script>
   <script defer src="candidate-console-environment.js?v=21ddcd925916"></script>
   <script defer src="candidate-console-policy.js?v=fbefadd65caa"></script>
-  <script defer src="candidate-console.js?v=f4194615b48c"></script>
+  <script defer src="candidate-console.js?v=5beb8f216ae4"></script>
   <script defer src="candidate-console-availability.js?v=7df0706fcbe1"></script>
 </head>
 <body>
@@ -394,8 +394,10 @@
             <span>Reschedule Reason <b aria-hidden="true">*</b></span>
             <textarea id="scheduling-reason" maxlength="1000" rows="3"></textarea>
           </label>
+          <p id="scheduling-validation-status" class="storage-warning field-wide" role="status" aria-live="polite" hidden></p>
           <div class="form-actions field-wide">
-            <button id="save-schedule" class="button button-primary" type="submit" data-action>
+            <button id="save-schedule" class="button button-primary" type="submit"
+              aria-describedby="scheduling-validation-status scheduling-dev-note" data-action>
               Save Schedule
             </button>
             <span id="scheduling-dev-note" class="storage-warning" role="status">

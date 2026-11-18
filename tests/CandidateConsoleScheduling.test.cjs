@@ -23,6 +23,12 @@ function harness(singleUserDev = false) {
       id, value: "", children: [], hidden: false, disabled: false,
       replaceChildren() { this.children = []; this.value = ""; },
       appendChild(child) { this.children.push(child); },
+      listeners: new Map(),
+      addEventListener(type, listener) {
+        if (!this.listeners.has(type)) this.listeners.set(type, []);
+        this.listeners.get(type).push(listener);
+      },
+      dispatch(type) { for (const listener of this.listeners.get(type) || []) listener({ target: this }); },
       reset() {}, focus() {}, scrollIntoView() {}
     });
     return elements.get(id);
@@ -478,4 +484,99 @@ test("real manual transport network failure remains ambiguous and never resubmit
   assert.equal(ui.dialogs.length, 0);
   await ui.context.createSchedule({ preventDefault() {} });
   assert.equal(ui.requests.length, 1);
+});
+
+test("manual disabled feedback identifies missing Room and past Start without automatic validation", async () => {
+  const ui = await manualTransportHarness();
+  ui.context.Date = class extends Date {
+    static now() { return Date.parse("2026-11-18T05:36:36.815Z"); }
+  };
+  ui.element("scheduling-date").value = "2026-11-18";
+  ui.element("scheduling-time").value = "12:33";
+  ui.element("scheduling-end-time").value = "13:33";
+  ui.element("scheduling-location").value = "";
+  ui.context.updateRound1AvailabilityControls();
+  assert.equal(ui.element("save-schedule").disabled, true);
+  assert.match(ui.element("scheduling-validation-status").textContent, /Meeting Room/);
+  assert.match(ui.element("scheduling-validation-status").textContent, /Start Time.*future/);
+  ui.element("scheduling-location").value = ui.selection.roomId;
+  ui.element("scheduling-time").value = "13:03";
+  ui.element("scheduling-end-time").value = "13:20";
+  ui.context.round1Selection = () => { throw new Error("AUTOMATIC_VALIDATION_MUST_NOT_RUN"); };
+  ui.context.updateRound1AvailabilityControls();
+  assert.equal(ui.element("save-schedule").disabled, false);
+  assert.match(ui.element("scheduling-validation-status").textContent, /Ready.*availability not checked/);
+  assert.equal(ui.context.round1Availability.providerOperational, false);
+  assert.equal(ui.context.round1Availability.evidence, null);
+  assert.equal(ui.requests.length, 0);
+});
+
+test("each manual field and workflow gate explains why Save is disabled", async () => {
+  const cases = [
+    [(ui) => { ui.element("scheduling-location").value = ""; }, /Meeting Room/],
+    [(ui) => { ui.element("scheduling-location").value = "invalid"; }, /Meeting Room/],
+    [(ui) => { ui.element("scheduling-ta").value = "00000000-0000-0000-0000-000000000000"; }, /TA/],
+    [(ui) => { ui.element("scheduling-date").value = "2030-02-31"; }, /Interview Date/],
+    [(ui) => { ui.element("scheduling-time").value = ""; }, /Start Time/],
+    [(ui) => { ui.element("scheduling-end-time").value = ""; }, /End Time/],
+    [(ui) => { ui.element("scheduling-end-time").value = "09:00"; }, /End Time.*later/],
+    [(ui) => { ui.context.selectedCandidate.os_sr_candid = "invalid"; }, /Candidate/],
+    [(ui) => { ui.context.selectedCandidate.os_sr_cand_stat = 100010003; }, /Waiting Manual Scheduling/],
+    [(ui) => { ui.context.isCandidateAllowedByDataMode = () => false; }, /Candidate.*data mode/],
+    [(ui) => { ui.context.scheduleMode = "reschedule"; }, /Reschedule/],
+    [(ui) => { ui.context.selectedSchedule = {}; }, /active Round 1 Schedule/],
+    [(ui) => { ui.context.scheduleRetryBlockedCandidateId = ui.selection.candidateId; }, /reconcil/],
+    [(ui) => { ui.context.round1Availability.manualSchedulingOperational = false; }, /server.*manual scheduling/i],
+    [(ui) => { ui.context.busy = true; }, /request.*progress/],
+    [(ui) => { ui.context.workspaceReady = false; }, /workspace/],
+    [(ui) => { ui.context.referencesReady = false; }, /references/],
+    [(ui) => { ui.context.isCandidateCoreEnabled = () => false; }, /Candidate Core/]
+  ];
+  for (const [invalidate, expected] of cases) {
+    const ui = await manualTransportHarness();
+    invalidate(ui);
+    ui.context.updateRound1AvailabilityControls();
+    assert.equal(ui.element("save-schedule").disabled, true, String(expected));
+    assert.match(ui.element("scheduling-validation-status").textContent, expected);
+    assert.equal(ui.requests.length, 0);
+  }
+});
+
+test("actual required-field events recalculate manual Save without erasing explicit times", async () => {
+  const ui = await manualTransportHarness();
+  ui.context.Date = class extends Date {
+    static now() { return Date.parse("2026-11-18T05:36:36.815Z"); }
+  };
+  const start = source.indexOf('    $("scheduling-form").addEventListener');
+  const end = source.indexOf('    $("cancellation-form").addEventListener', start);
+  assert.ok(start >= 0 && end > start);
+  vm.runInContext(source.slice(start, end), ui.context);
+  ui.element("scheduling-location").value = "";
+  ui.context.updateRound1AvailabilityControls();
+  assert.equal(ui.element("save-schedule").disabled, true);
+  ui.element("scheduling-location").value = ui.selection.roomId;
+  ui.element("scheduling-location").dispatch("input");
+  assert.equal(ui.element("save-schedule").disabled, false);
+  ui.element("scheduling-location").dispatch("change");
+  assert.equal(ui.element("scheduling-time").value, "09:00");
+  assert.equal(ui.element("scheduling-end-time").value, "10:00");
+  ui.element("scheduling-date").value = "";
+  ui.element("scheduling-date").dispatch("input");
+  assert.equal(ui.element("save-schedule").disabled, true);
+  ui.element("scheduling-date").value = "2026-11-21";
+  ui.element("scheduling-date").dispatch("change");
+  ui.element("scheduling-ta").dispatch("change");
+  ui.element("scheduling-time").value = "00:05";
+  ui.element("scheduling-time").dispatch("input");
+  ui.element("scheduling-end-time").value = "00:22";
+  ui.element("scheduling-end-time").dispatch("input");
+  assert.equal(ui.element("save-schedule").disabled, false);
+  assert.equal(ui.context.manualRound1Selection().startUtc, "2026-11-20T17:05:00.000Z");
+  assert.equal(ui.context.manualRound1Selection().endUtc, "2026-11-20T17:22:00.000Z");
+  assert.equal(ui.reads.filter(([action]) => action === "GetRound1Availability").length, 0);
+  ui.element("scheduling-method").value = "automatic";
+  ui.element("scheduling-method").dispatch("change");
+  assert.equal(ui.element("scheduling-time").value, "");
+  assert.equal(ui.element("save-schedule").disabled, true);
+  assert.equal(ui.requests.length, 0);
 });

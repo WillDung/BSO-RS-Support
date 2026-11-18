@@ -277,11 +277,13 @@ if (-not [string]::IsNullOrWhiteSpace($CandidatePaginationReleaseManifestPath)) 
     $schedulingEngineManifestPath = Join-Path $repositoryRoot 'docs\CANDIDATE_ROUND1_1.0.12_RELEASE_MANIFEST.json'
     $manualSchedulingManifestPath = Join-Path $repositoryRoot 'docs\CANDIDATE_ROUND1_1.0.13_RELEASE_MANIFEST.json'
     $manualSaveFeedbackManifestPath = Join-Path $repositoryRoot 'docs\CANDIDATE_MANUAL_SAVE_FEEDBACK_RELEASE_MANIFEST.json'
+    $manualSaveValidationManifestPath = Join-Path $repositoryRoot 'docs\CANDIDATE_MANUAL_SAVE_VALIDATION_RELEASE_MANIFEST.json'
     $recordCallPatch = [IO.Path]::GetFullPath($CandidatePaginationReleaseManifestPath) -ceq $recordCallManifestPath
     $schedulingUiPatch = [IO.Path]::GetFullPath($CandidatePaginationReleaseManifestPath) -ceq $schedulingUiManifestPath
     $schedulingEnginePatch = [IO.Path]::GetFullPath($CandidatePaginationReleaseManifestPath) -ceq $schedulingEngineManifestPath
     $manualSaveFeedbackPatch = [IO.Path]::GetFullPath($CandidatePaginationReleaseManifestPath) -ceq $manualSaveFeedbackManifestPath
-    $manualSchedulingPatch = $manualSaveFeedbackPatch -or
+    $manualSaveValidationPatch = [IO.Path]::GetFullPath($CandidatePaginationReleaseManifestPath) -ceq $manualSaveValidationManifestPath
+    $manualSchedulingPatch = $manualSaveValidationPatch -or $manualSaveFeedbackPatch -or
         [IO.Path]::GetFullPath($CandidatePaginationReleaseManifestPath) -ceq $manualSchedulingManifestPath
     if (-not $DevelopmentSourceAhead -or
         (-not $recordCallPatch -and -not $schedulingUiPatch -and -not $schedulingEnginePatch -and -not $manualSchedulingPatch -and
@@ -293,7 +295,7 @@ if (-not [string]::IsNullOrWhiteSpace($CandidatePaginationReleaseManifestPath)) 
     $candidatePaginationRelease = Get-Content -LiteralPath $CandidatePaginationReleaseManifestPath -Raw | ConvertFrom-Json
     $paginationResourceNames = @('os_/bso/candidate-console.html', 'os_/bso/candidate-console.js') |
         Sort-Object -CaseSensitive
-    $expectedScope = if ($manualSaveFeedbackPatch) { 'MANUAL_SAVE_FEEDBACK_ONLY_CORE_UNCHANGED_1.0.13' } elseif ($manualSchedulingPatch) { 'ROUND1_AUTHORIZED_MANUAL_FALLBACK_1.0.13' } elseif ($schedulingEnginePatch) { 'ROUND1_ENGINE_AND_UI_PROVIDER_BLOCKED_1.0.12' } elseif ($schedulingUiPatch) { 'ROOM_TA_SCHEDULING_UI_PROVIDER_BLOCKED' } elseif ($recordCallPatch) {
+    $expectedScope = if ($manualSaveValidationPatch) { 'MANUAL_SAVE_INPUT_VALIDATION_CORE_UNCHANGED_1.0.13' } elseif ($manualSaveFeedbackPatch) { 'MANUAL_SAVE_FEEDBACK_ONLY_CORE_UNCHANGED_1.0.13' } elseif ($manualSchedulingPatch) { 'ROUND1_AUTHORIZED_MANUAL_FALLBACK_1.0.13' } elseif ($schedulingEnginePatch) { 'ROUND1_ENGINE_AND_UI_PROVIDER_BLOCKED_1.0.12' } elseif ($schedulingUiPatch) { 'ROOM_TA_SCHEDULING_UI_PROVIDER_BLOCKED' } elseif ($recordCallPatch) {
         'RECORD_CALL_CORRECTION_1.0.11'
     } else {
         'CANDIDATE_LIST_PAGINATION_AND_ANSWERED_TO_SCHEDULING'

@@ -1,5 +1,15 @@
 # Current State
 
+## Read-only Recruitment Dashboard deployed (2026-11-19)
+
+**Status: Recruitment Dashboard WebResources and the `srapp` navigation increment are DEPLOYED.** The signed-in Dataverse `Xrm.WebApi` read-only query path, KPI definitions, filter controls, pipeline, and pending-action queue are implemented. The live records/data-binding behavior and KPI values remain pending owner read-only functional verification; offline tests are not live data acceptance.
+
+The deployment created `os_/bso/recruitment-dashboard.html` and `os_/bso/recruitment-dashboard.js`, updated only the existing navigation item previously pointing to `os_atsugground1availability_4d2f7`, and published exactly those two resources plus `srapp` with one scoped `PublishXml`. A fresh unmanaged solution export/unpack confirmed the resources, sitemap target, and solution membership; published resource byte readback matched local source. No Candidate or Schedule records were read or written during deployment. The legacy Custom Page component remains present, and no Flow, Candidate Console, booking, role, or identity component was changed.
+
+The approved KPI windows and denominators are documented in [Recruitment Dashboard](RECRUITMENT_DASHBOARD.md). Run `node --test .\tests\RecruitmentDashboard.test.cjs` for its seven focused offline tests. The owner should open Recruitment Dashboard and verify all six panels and filters against existing authorized read-only views. The repository solution manifest now includes the retained Custom Page and the two Dashboard roots; other live solution roots and the Candidate Console HTML remain ahead of the repository snapshot, so this release used scoped WebResource/sitemap writes rather than packing and importing the entire local solution.
+
+Unified Booking remains unimplemented. A fresh export shows the existing Custom Page still uses hardcoded Room/TA email defaults, has no Candidate/Schedule context or Dataverse data source, and calls the existing availability bridge without an interview-type mode. The Power Platform CLI has no Canvas upload command; owner-only Studio edits and a supported Flow update path are required before conditional Online/Offline availability can be deployed. Create/Reschedule/Cancel, Teams events, room reservations, and Reception/Security notifications remain blocked pending the booking contracts and configured dependencies listed in the [Studio handoff](RECRUITMENT_DASHBOARD.md#unified-booking-studio-handoff-not-deployed).
+
 ## Manual Save input validation correction (2026-11-18)
 
 **Status: Console-only correction DEPLOYED and served-byte verified; valid manual input enables Save in focused offline checks. Owner persistence acceptance remains pending. Candidate Core stays 1.0.13.0; automatic Outlook availability and automatic Save remain BLOCKED.**

@@ -8,7 +8,7 @@
   <script src="../../ClientGlobalContext.js.aspx"></script>
   <script defer src="candidate-console-environment.js?v=21ddcd925916"></script>
   <script defer src="candidate-console-policy.js?v=fbefadd65caa"></script>
-  <script defer src="candidate-console.js?v=e75debd7bf87"></script>
+  <script defer src="candidate-console.js?v=0fd9fae5005f"></script>
 </head>
 <body>
   <main class="shell">
@@ -16,22 +16,23 @@
       <div>
         <p class="eyebrow">BSO-RS-Support</p>
         <h1>Candidate Management</h1>
+        <div class="page-badges">
+          <span id="workflow-path-badge" class="dev-badge">CANDIDATE CORE PATH</span>
+          <span id="environment-mode-badge" class="dev-badge">ENVIRONMENT CONFIGURATION REQUIRED</span>
+          <span id="real-data-badge" class="dev-badge">SYNTHETIC DATA ONLY</span>
+        </div>
       </div>
-      <div class="page-badges">
-        <span id="workflow-path-badge" class="dev-badge">CANDIDATE CORE PATH</span>
-        <span id="environment-mode-badge" class="dev-badge">ENVIRONMENT CONFIGURATION REQUIRED</span>
-        <span id="real-data-badge" class="dev-badge">SYNTHETIC DATA ONLY</span>
-      </div>
+      <button id="open-create-candidate" class="button button-primary" type="button" data-action
+        aria-controls="candidate-create-panel" style="align-self: flex-start; white-space: nowrap" disabled>Create Candidate</button>
     </header>
     <p id="notice" class="notice" role="status" aria-live="polite" hidden></p>
 
-    <section class="panel" aria-labelledby="create-heading">
+    <section id="candidate-create-panel" class="panel" aria-labelledby="create-heading" hidden>
       <div class="section-heading">
         <div>
           <p class="eyebrow" data-workflow-label>Candidate Core / os_sr_cact</p>
           <h2 id="create-heading">New Candidate</h2>
         </div>
-        <button id="refresh-references" class="button button-secondary" type="button">Refresh reference options</button>
       </div>
       <form id="candidate-form" class="form-grid">
         <label class="field field-wide">
@@ -70,18 +71,23 @@
         </label>
         <div class="form-actions field-wide">
           <button id="create-button" class="button button-primary" type="submit" data-action disabled>Create Candidate</button>
+          <button id="close-create-candidate" class="button button-secondary" type="button">Cancel</button>
           <span id="create-help" class="muted">Candidate Core enforces server-side authorization for Candidate operations.</span>
         </div>
       </form>
     </section>
 
+    <div id="candidate-browse-view">
     <section class="panel" aria-labelledby="list-heading">
       <div class="section-heading">
         <div>
           <p class="eyebrow">Recently created first</p>
-          <h2 id="list-heading">Candidates</h2>
+          <h2 id="list-heading" tabindex="-1">Candidates</h2>
         </div>
-        <button id="refresh-button" class="button button-secondary" type="button" data-action>Refresh</button>
+        <div>
+          <button id="refresh-references" class="button button-secondary" type="button">Refresh reference options</button>
+          <button id="refresh-button" class="button button-secondary" type="button" data-action>Refresh</button>
+        </div>
       </div>
       <div class="list-filters">
         <label class="field">
@@ -388,6 +394,7 @@
         </form>
       </section>
     </section>
+    </div>
   </main>
 
 </body>

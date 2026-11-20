@@ -2,6 +2,8 @@
 
 ## Status
 
+**2026-11-20 filter layout follow-up deployed.** The filter bar keeps Year, Position, Source, and Assigned TA paired with their dropdowns in four, two, or one column depending on viewport width. Refresh is right-aligned below the filters. Existing filter bindings, reads, error handling, and KPI calculations are unchanged.
+
 **2026-11-20 repair deployed.** The Dashboard now resolves browser `window.Xrm` (or its model-driven parent) and uses the Dataverse Position title column, `os_sr_pos_ttl`. All six live read queries and four filter predicates succeeded under the checked identity. The browser harness verifies KPI rendering, filters, pending queue continuation, and read-failure handling. Owner testing in the actual app is still pending. See the [deployment receipt](CURRENT_STATE.md#recruitment-dashboard-repair-and-obsolete-console-panel-removal-2026-11-20).
 
 **DEPLOYED to the live `srapp` model-driven app on 2026-11-19.** The Dashboard is a read-only model-driven WebResource, not an edited copy of the live Canvas Custom Page. It uses the signed-in user's `Xrm.WebApi` context and existing Dataverse read permissions. It never writes Candidate, Interview Schedule, or other business records and does not invoke Outlook or booking operations.

@@ -32,7 +32,7 @@
     }
 
     .filters {
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       align-items: end;
       margin: 24px 0;
       padding: 16px;
@@ -41,7 +41,9 @@
       border-radius: 8px;
     }
 
-    label { display: grid; gap: 6px; font-weight: 600; }
+    .filter-field { display: grid; gap: 6px; min-width: 0; font-weight: 600; }
+    .filter-field select { width: 100%; min-width: 0; }
+    .filter-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; }
 
     select, button {
       min-height: 40px;
@@ -112,8 +114,13 @@
 
     @media (max-width: 900px) {
       body { padding: 16px; }
+      .filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .content { grid-template-columns: 1fr; }
       .queue-row { grid-template-columns: 1fr 1fr; }
+    }
+
+    @media (max-width: 560px) {
+      .filters { grid-template-columns: minmax(0, 1fr); }
     }
   </style>
   <script src="../../ClientGlobalContext.js.aspx"></script>
@@ -128,15 +135,23 @@
     </header>
 
     <form id="filters" class="filters">
-      <label for="filter-year">Year</label>
-      <select id="filter-year"></select>
-      <label for="filter-position">Position</label>
-      <select id="filter-position"><option value="">All positions</option></select>
-      <label for="filter-source">Source</label>
-      <select id="filter-source"><option value="">All sources</option></select>
-      <label for="filter-ta">Assigned TA</label>
-      <select id="filter-ta"><option value="">All TAs</option></select>
-      <button id="refresh" type="submit">Refresh</button>
+      <label class="filter-field">
+        <span>Year</span>
+        <select id="filter-year"></select>
+      </label>
+      <label class="filter-field">
+        <span>Position</span>
+        <select id="filter-position"><option value="">All positions</option></select>
+      </label>
+      <label class="filter-field">
+        <span>Source</span>
+        <select id="filter-source"><option value="">All sources</option></select>
+      </label>
+      <label class="filter-field">
+        <span>Assigned TA</span>
+        <select id="filter-ta"><option value="">All TAs</option></select>
+      </label>
+      <div class="filter-actions"><button id="refresh" type="submit">Refresh</button></div>
     </form>
 
     <p id="status" class="status" role="status" aria-live="polite">Loading dashboard data…</p>

@@ -373,6 +373,7 @@
     $("candidate-search").disabled = value;
     $("candidate-status-filter").disabled = value;
     $("refresh-references").disabled = value || environmentPolicy.allowed !== true;
+    $("close-create-candidate").disabled = value;
     document.querySelectorAll("button[data-action]").forEach((button) => {
       button.disabled = value || !referencesReady || !workspaceReady || !isCandidateCoreEnabled() ||
         (button.id === "submit-call" &&
@@ -2975,9 +2976,27 @@
     }
   }
 
+  function showCandidateCreateForm() {
+    if (busy || $("open-create-candidate").disabled) return;
+    hideNotice();
+    $("candidate-browse-view").hidden = true;
+    $("open-create-candidate").hidden = true;
+    $("candidate-create-panel").hidden = false;
+    $("candidate-name").focus();
+  }
+
+  function returnToCandidateList() {
+    $("candidate-form").reset();
+    $("candidate-create-panel").hidden = true;
+    $("candidate-browse-view").hidden = false;
+    $("open-create-candidate").hidden = false;
+    const focusTarget = $("open-create-candidate").disabled ? "list-heading" : "open-create-candidate";
+    $(focusTarget).focus();
+  }
+
   async function createCandidateThroughCore(event) {
     event.preventDefault();
-    if (busy) return;
+    if (busy || $("candidate-create-panel").hidden || $("create-button").disabled) return;
     hideNotice();
     const candidateName = $("candidate-name").value.trim();
     const candidateEmail = $("candidate-email").value.trim();
@@ -3027,10 +3046,22 @@
           !result.CandidateNumber.trim() || result.CandidateNumber.length > 100) {
         throw new Error("CANDIDATE_CORE_CREATE_RESPONSE_INVALID");
       }
-      $("candidate-form").reset();
+      returnToCandidateList();
       $("candidate-search").value = "";
       $("candidate-status-filter").value = "";
-      await refreshCoreCandidate(candidateId);
+      if (referenceMode !== "NORMAL") {
+        await refreshCoreCandidate(candidateId);
+        showNotice(`Candidate ${result.CandidateNumber} created successfully through Candidate Core.`);
+        return;
+      }
+      $("detail-panel").hidden = true;
+      try {
+        await refreshCandidates({ resetPage: true });
+      } catch (error) {
+        logSafeFailure("CANDIDATE_CORE_CREATE_LIST_REFRESH_FAILED", error);
+        showNotice(`Candidate ${result.CandidateNumber} was created, but the list could not be refreshed. Use Refresh to reload the list.`, true);
+        return;
+      }
       showNotice(`Candidate ${result.CandidateNumber} created successfully through Candidate Core.`);
     } catch (error) {
       if (coreInvoked) {
@@ -3047,7 +3078,7 @@
   async function createCandidate(event) {
     if (!isDevFallbackEnabled()) return createCandidateThroughCore(event);
     event.preventDefault();
-    if (busy) return;
+    if (busy || $("candidate-create-panel").hidden || $("create-button").disabled) return;
     hideNotice();
     const candidateName = $("candidate-name").value.trim();
     const candidateEmail = $("candidate-email").value.trim();
@@ -3119,7 +3150,7 @@
           !candidate[c.number]) {
         throw new Error("DEV_DIRECT_WRITE_CANDIDATE_READBACK_INVALID");
       }
-      $("candidate-form").reset();
+      returnToCandidateList();
       $("candidate-search").value = "";
       $("candidate-status-filter").value = "";
       category = "CANDIDATE_LIST_REFRESH_FAILED";
@@ -3663,6 +3694,12 @@
     forceSubmit("confirm-cancellation", "cancellation-form");
     forceSubmit("save-interview-result", "interview-result-form");
 
+    $("open-create-candidate").addEventListener("click", showCandidateCreateForm);
+    $("close-create-candidate").addEventListener("click", () => {
+      if (busy || $("candidate-create-panel").hidden) return;
+      hideNotice();
+      returnToCandidateList();
+    });
     $("candidate-form").addEventListener("submit", createCandidate);
     $("edit-candidate-button").addEventListener("click", showEditCandidatePanel);
     $("edit-candidate-form").addEventListener("submit", updateCandidateThroughCore);

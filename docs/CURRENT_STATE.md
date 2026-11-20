@@ -1,5 +1,13 @@
 # Current State
 
+## Dashboard filter layout and Candidate Create navigation (2026-11-20)
+
+**Deployed to `srapp`.** The Dashboard keeps each label above its control in four desktop, two tablet, or one narrow-screen column, with Refresh right-aligned on a separate row. Dashboard JavaScript, query bindings, KPIs, and error handling are unchanged. Candidate Management now opens on the list. The header's **Create Candidate** button opens the existing form; **Cancel** clears the form and returns to the list without changing its filters or page. A confirmed NORMAL Create returns to the list, clears filters, and refreshes page one. If that refresh fails after confirmation, the Console reports that the Candidate was created and asks the user to refresh the list rather than resubmit.
+
+Pre-change deployed versions matched source (with the environment configuration reference bound for the target) and were captured for rollback. The release used three conditional PATCHes and one scoped `PublishXml`, all HTTP 204, with no retries. Current, published and served bytes match for `candidate-console.html` (version `15694821`, SHA-256 `7af2d61dc11ce00996e6a8f8da7a19cad1cecac6a7f68b683004431569d8cd5f`), `candidate-console.js` (version `15694811`, `0fd9fae5005f5b1f13d88df99209b6236453a8826a9d2a6ea7414ba038c6f060`), and `recruitment-dashboard.html` (version `15694816`, `8865a5433f990c37ea2c434c1b6be6188b3549ac30c049bf2221d5dea2ad9e4d`). Console CSS and Dashboard JS remained byte-identical.
+
+Local Chromium measured aligned filter controls at 1200, 768 and 390 pixels. The focused offline suite passed 37 tests, including synthetic Create confirmation, rejection and list-refresh failure. The separate legacy isolation suite reproduced the same 13 failures against the pre-change Console JavaScript. No Candidate or Schedule test writes, lifecycle UAT, security changes or Custom Page/Flow publication occurred. The post-change solution export shows only the intended WebResource payload changes and the recurring Canvas connection-identifier difference noted below; no release request targeted those bindings. Owner live acceptance remains pending.
+
 ## Recruitment Dashboard repair and obsolete Console panel removal (2026-11-20)
 
 **Deployed and served-byte verified.** Candidate Management no longer shows or loads the obsolete standalone Calendar Availability panel. Its JavaScript WebResource, backend APIs, and configuration remain installed; the current Console workflow JavaScript is unchanged. The local configuration generator no longer allows opting into the retired panel. This does not retire the separate ATSugg Round 1 Availability Custom Page or the Console's Round 1 scheduling workflow.

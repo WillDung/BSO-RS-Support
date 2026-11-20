@@ -8,7 +8,7 @@
   <script src="../../ClientGlobalContext.js.aspx"></script>
   <script defer src="candidate-console-environment.js?v=21ddcd925916"></script>
   <script defer src="candidate-console-policy.js?v=fbefadd65caa"></script>
-  <script defer src="candidate-console.js?v=0fd9fae5005f"></script>
+  <script defer src="candidate-console.js?v=94fc532e7c85"></script>
 </head>
 <body>
   <main class="shell">
@@ -142,6 +142,8 @@
           <h2 id="detail-heading">Candidate</h2>
         </div>
         <div class="form-actions">
+          <button id="open-booking-context" class="button button-secondary" type="button" data-action
+            aria-haspopup="dialog" aria-controls="booking-context" hidden disabled>Round 1 Booking</button>
           <button id="edit-candidate-button" class="button button-primary" type="button" data-action hidden>Edit Candidate</button>
           <button id="close-detail" class="button button-secondary" type="button" data-action>Close</button>
         </div>
@@ -395,6 +397,37 @@
       </section>
     </section>
     </div>
+    <dialog id="booking-context" class="panel" aria-labelledby="booking-context-heading" style="max-width: min(760px, 94vw)">
+      <div class="section-heading">
+        <h2 id="booking-context-heading">Round 1 Booking</h2>
+        <button id="close-booking-context" class="button button-secondary" type="button" autofocus>Close</button>
+      </div>
+      <dl id="booking-context-details" class="detail-grid"></dl>
+      <div class="form-grid">
+        <label class="field"><span>Operation</span>
+          <select id="booking-operation"></select>
+        </label>
+        <label class="field" id="booking-interview-type-field"><span>Interview Type</span>
+          <select id="booking-interview-type">
+            <option value="">Select interview type</option>
+            <option value="online">Online - Microsoft Teams</option>
+            <option value="offline">Offline - At Factory</option>
+          </select>
+        </label>
+        <label class="field" id="booking-room-field" hidden><span>Meeting Room (required offline)</span>
+          <select id="booking-room" disabled></select>
+        </label>
+        <label class="field field-wide" id="booking-reason-field" hidden>
+          <span id="booking-reason-label">Reason (required)</span>
+          <textarea id="booking-reason" maxlength="1000" rows="2" disabled></textarea>
+        </label>
+      </div>
+      <p class="storage-warning" id="booking-context-status" role="status"></p>
+      <div class="form-actions" aria-describedby="booking-context-status">
+        <button id="booking-check" class="button button-secondary" type="button" aria-describedby="booking-context-status" disabled>Check Availability</button>
+        <button id="booking-confirm" class="button button-primary" type="button" aria-describedby="booking-context-status" disabled>Create Schedule</button>
+      </div>
+    </dialog>
   </main>
 
 </body>

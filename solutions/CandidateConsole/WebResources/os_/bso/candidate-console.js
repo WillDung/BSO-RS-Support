@@ -1323,6 +1323,7 @@
   async function openCandidate(candidateId) {
     hideNotice();
     invalidateRound1Availability(true);
+    $("open-booking-context").hidden = true;
     try {
       const candidate = currentRows.find((row) => row[TABLES.candidate.id] === candidateId) ||
         await retrieveCandidateRecord(candidateId);
@@ -1363,6 +1364,7 @@
         renderStatusHistory(candidateId),
         renderSchedulingDetails(candidateId)
       ]);
+      $("open-booking-context").hidden = referenceMode !== "NORMAL" || environmentPolicy.syntheticDataOnly;
       $("interview-result-panel").hidden = true;
       $("detail-panel").scrollIntoView({ behavior: "smooth", block: "start" });
       return true;
@@ -2976,6 +2978,107 @@
     }
   }
 
+  function updateBookingContextControls() {
+    const operation = $("booking-operation").value;
+    const cancel = operation === "cancel";
+    const interviewType = $("booking-interview-type").value;
+    const offline = !cancel && interviewType === "offline";
+    const reasonRequired = operation === "reschedule" || cancel;
+    $("booking-interview-type-field").hidden = cancel;
+    $("booking-room-field").hidden = !offline;
+    $("booking-room").disabled = !offline;
+    $("booking-room").required = offline;
+    if (!offline) $("booking-room").value = "";
+    $("booking-reason-field").hidden = !reasonRequired;
+    $("booking-reason").disabled = !reasonRequired;
+    $("booking-reason").required = reasonRequired;
+    $("booking-reason-label").textContent = cancel ? "Cancellation Reason (required)" : "Reschedule Reason (required)";
+    $("booking-check").hidden = cancel;
+    $("booking-confirm").textContent = operation === "reschedule" ? "Reschedule" : cancel ? "Cancel Booking" : "Create Schedule";
+    $("booking-context-status").textContent = cancel
+      ? "External cancellation is not connected. No calendar or Candidate records will change here."
+      : `${offline ? "Offline requires Assigned TA and Meeting Room." : interviewType === "online"
+        ? "Online requires Assigned TA only." : "Select Online or Offline. Both require Assigned TA."} ` +
+        "Availability has not been checked. External booking is disabled; use the existing manual workflow if needed.";
+  }
+
+  async function showBookingContext() {
+    if (busy || !workspaceReady || !referencesReady || !isCandidateCoreEnabled() ||
+        referenceMode !== "NORMAL" || environmentPolicy.syntheticDataOnly || !selectedCandidate) return;
+    const selected = selectedCandidate;
+    const c = TABLES.candidate;
+    const i = TABLES.interview;
+    hideNotice();
+    setBusy(true);
+    try {
+      const id = normalizeGuid(selected[c.id]).toLowerCase();
+      const [candidate, schedules] = await Promise.all([
+        retrieveCandidateRecord(id, `?$select=${[c.id, c.number, c.name, c.email, c.assignedTa, c.status, "statecode"].join(",")}`),
+        retrieveAll(i.logicalName,
+          `?$select=${[i.id, i.candidate, i.location, i.start, i.end, i.status, i.result].join(",")}` +
+          `&$filter=${encodeURIComponent(`${relatedCandidateFilter(i, id, `${i.round} eq ${i.round1}`)} and statecode eq 0`)}`)
+      ]);
+      if (selected !== selectedCandidate || !isCandidateAllowedByDataMode(candidate) ||
+          normalizeGuid(candidate[c.id]).toLowerCase() !== id || candidate.statecode !== 0 ||
+          schedules.some((row) => normalizeGuid(row[i.candidate]).toLowerCase() !== id || !isKnownScheduleState(row))) {
+        throw new Error("BOOKING_CONTEXT_MISMATCH");
+      }
+      const active = schedules.filter(isActiveSchedule);
+      const proposed = schedules.filter((row) => row[i.status] === SCHEDULE_STATUS.proposed);
+      const canCreate = candidate[c.status] === STATUS.waitingManualScheduling && !active.length && proposed.length <= 1;
+      const canManage = candidate[c.status] === STATUS.round1Scheduled && active.length === 1 &&
+        !proposed.length && isPendingInterviewResult(active[0]);
+      if (!canCreate && !canManage) {
+        showNotice("Booking context requires a Candidate waiting for scheduling or exactly one current Round 1 schedule with a pending result.", true);
+        return;
+      }
+      const schedule = canManage ? active[0] : proposed[0];
+      const ta = candidate[c.assignedTa];
+      const [taName, roomName] = await Promise.all([
+        ta ? getActiveReference("os_sr_ta", ta).then(() => getLookupName("os_sr_ta", ta)) : "",
+        schedule && schedule[i.location] ? getLookupName("os_sr_loc", schedule[i.location]) : ""
+      ]);
+      if (selected !== selectedCandidate) throw new Error("BOOKING_CONTEXT_SELECTION_CHANGED");
+      const details = $("booking-context-details");
+      details.replaceChildren();
+      for (const [label, value] of [
+        ["Candidate ID", id], ["Candidate Number", candidate[c.number]], ["Candidate Name", candidate[c.name]],
+        ["Candidate Email", candidate[c.email]], ["Assigned TA", taName || "Not assigned"],
+        ["Schedule ID", schedule ? normalizeGuid(schedule[i.id]) : "No existing schedule"],
+        ["Schedule Status", schedule ? scheduleStatusLabel(schedule) : ""],
+        ["Schedule Start", schedule ? formatDate(schedule[i.start]) : ""],
+        ["Schedule End", schedule ? formatDate(schedule[i.end]) : ""], ["Existing Room", roomName]
+      ]) {
+        const item = document.createElement("div");
+        item.className = "detail-item";
+        const term = document.createElement("dt");
+        const description = document.createElement("dd");
+        term.textContent = label;
+        description.textContent = value || "-";
+        item.append(term, description);
+        details.append(item);
+      }
+      const operations = $("booking-operation");
+      operations.replaceChildren();
+      if (canManage) {
+        addOption(operations, "reschedule", "Reschedule");
+        addOption(operations, "cancel", "Cancel");
+      } else {
+        addOption(operations, "create", "Create Schedule");
+      }
+      $("booking-interview-type").value = "";
+      $("booking-room").replaceChildren(...Array.from($("scheduling-location").options,
+        (option) => option.cloneNode(true)));
+      updateBookingContextControls();
+      $("booking-context").showModal();
+    } catch (error) {
+      logSafeFailure("BOOKING_CONTEXT_READ_FAILED", error);
+      showNotice("Booking context could not be verified. Reload the Candidate details and check that Assigned TA and the current schedule are accessible.", true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function showCandidateCreateForm() {
     if (busy || $("open-create-candidate").disabled) return;
     hideNotice();
@@ -3664,6 +3767,17 @@
   }
 
   function bindEvents() {
+    $("open-booking-context").addEventListener("click", showBookingContext);
+    $("close-booking-context").addEventListener("click", () => $("booking-context").close());
+    $("booking-context").addEventListener("close", () => {
+      $("booking-context-details").replaceChildren();
+      $("booking-reason").value = "";
+    });
+    $("booking-operation").addEventListener("change", () => {
+    $("booking-reason").value = "";
+    updateBookingContextControls();
+    });
+    $("booking-interview-type").addEventListener("change", updateBookingContextControls);
     $("refresh-references").addEventListener("click", async () => {
       if (busy) return;
       setBusy(true);

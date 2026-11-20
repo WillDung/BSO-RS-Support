@@ -1,5 +1,13 @@
 # Current State
 
+## Unified Round 1 Booking context preview (2026-11-20)
+
+**Deployed to `srapp`:** Candidate Details now opens one read-only **Round 1 Booking** dialog in NORMAL mode. It re-reads the selected Candidate under the caller's existing access and shows the matching Round 1 record when present. The dialog offers Create for an eligible waiting Candidate or Reschedule/Cancel for a uniquely matched current schedule with a pending result. Online shows the Assigned TA requirement without a Room; Offline requires a Room. Reschedule and Cancel show a reason field. The dialog cannot check availability or submit an operation. Existing manual actions are unchanged.
+
+Exactly two conditional WebResource updates and one scoped `PublishXml` succeeded. Current, published and authenticated served bytes match: Console HTML version `15695115`, SHA-256 `11e87c73005cdae155ec2e43e453e3b484815714a63638d2569575965a713e65`; Console JS version `15695110`, SHA-256 `94fc532e7c85a0b20e08a1edf31105cafc4205440b707df5159508bfd8fd0719`. The independent solution export differs only in those two resources and the recurring Canvas bridge identifiers in `ConnectionReferences` (workflow name hints and shared connection ID). The Custom Page payload is identical and no write targeted the page or Flow. A pre-release export is retained for a two-resource rollback using fresh ETags and scoped publication.
+
+The focused offline suite passed 39 tests, including 31 reference runtime checks within its reference test file. No Candidate or Schedule test writes, provider calls, invitations or lifecycle UAT occurred. Owner live acceptance is pending. The [Studio and provider handoff](RECRUITMENT_DASHBOARD.md#unified-booking-studio-handoff-not-deployed) covers the remaining Candidate binding on the existing page, Online/Offline availability and external operations.
+
 ## Dashboard filter layout and Candidate Create navigation (2026-11-20)
 
 **Deployed to `srapp`.** The Dashboard keeps each label above its control in four desktop, two tablet, or one narrow-screen column, with Refresh right-aligned on a separate row. Dashboard JavaScript, query bindings, KPIs, and error handling are unchanged. Candidate Management now opens on the list. The header's **Create Candidate** button opens the existing form; **Cancel** clears the form and returns to the list without changing its filters or page. A confirmed NORMAL Create returns to the list, clears filters, and refreshes page one. If that refresh fails after confirmation, the Console reports that the Candidate was created and asks the user to refresh the list rather than resubmit.

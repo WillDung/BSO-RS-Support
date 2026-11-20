@@ -331,27 +331,21 @@ try {
             "Reject release profile with $($case.Name)"
     }
 
-    & $generatorPath `
-        -Mode DEV `
-        -OrganizationUrl 'https://dev.example.invalid' `
-        -EnvironmentId '11111111-1111-4111-8111-111111111111' `
-        -OrganizationId '22222222-2222-4222-8222-222222222222' `
-        -OutputConfigurationPath $availabilityOutputPath `
-        -OutputHtmlPath $availabilityHtmlPath `
-        -AvailabilityEnabled | Out-Null
-    $availabilityText = [IO.File]::ReadAllText($availabilityOutputPath)
-    $availabilityMatch = [regex]::Match($availabilityText, '(?s)const configuration = (?<json>\{.*?\});')
-    $availabilityConfiguration = $availabilityMatch.Groups['json'].Value | ConvertFrom-Json
-    $availabilityHtml = [IO.File]::ReadAllText($availabilityHtmlPath)
-    $availabilityHash = (Get-FileHash -LiteralPath $availabilityOutputPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    $availabilityScriptPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'solutions\CandidateConsole\WebResources\os_\bso\candidate-console-availability.js'
-    $availabilityScriptHash = (Get-FileHash -LiteralPath $availabilityScriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    Assert-Test ($availabilityMatch.Success -and $availabilityConfiguration.availabilityEnabled -eq $true -and
-        $availabilityConfiguration.syntheticDataOnly -eq $true -and $availabilityConfiguration.mode -ceq 'DEV') `
-        'Generate explicit synthetic-only DEV availability opt-in without changing the checked-in gate'
-    Assert-Test ($availabilityHtml.Contains("candidate-console-environment.js?v=$($availabilityHash.Substring(0, 12))") -and
-        $availabilityHtml.Contains("candidate-console-availability.js?v=$($availabilityScriptHash.Substring(0, 12))")) `
-        'Cache-bust enabled configuration and the actual availability script from their bytes'
+    $retiredPanelRejected = $false
+    try {
+        & $generatorPath `
+            -Mode DEV `
+            -OrganizationUrl 'https://dev.example.invalid' `
+            -EnvironmentId '11111111-1111-4111-8111-111111111111' `
+            -OrganizationId '22222222-2222-4222-8222-222222222222' `
+            -OutputConfigurationPath $availabilityOutputPath `
+            -OutputHtmlPath $availabilityHtmlPath `
+            -AvailabilityEnabled | Out-Null
+    } catch {
+        $retiredPanelRejected = $_.Exception.Message -like '*panel has been retired*'
+    }
+    Assert-Test ($retiredPanelRejected -and -not (Test-Path -LiteralPath $availabilityOutputPath) -and
+        -not (Test-Path -LiteralPath $availabilityHtmlPath)) 'Reject the retired standalone panel switch without emitting files'
 
     foreach ($case in @(
         @{ Name = 'TEST'; Options = @{ Mode = 'TEST' } },

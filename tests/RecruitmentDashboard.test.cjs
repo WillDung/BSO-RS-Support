@@ -1,5 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const { readFileSync } = require("node:fs");
+const vm = require("node:vm");
 const dashboard = require("../solutions/RecruitmentDashboard/WebResources/os_/bso/recruitment-dashboard.js");
 
 const RANGE = {
@@ -61,6 +63,7 @@ test("pipeline aggregates preserve known statuses and count unknown statuses sep
   assert.equal(result.otherCount, 1);
   assert.equal(result.counts[100010002], 0);
   assert.throws(() => dashboard.summarizePipeline([{ status: 100010000, candidateCount: -1 }]), /INVALID_AGGREGATE/);
+  assert.throws(() => dashboard.summarizePipeline([{ status: 100010000, candidateCount: null }]), /INVALID_AGGREGATE/);
 });
 
 test("candidate filters are limited to validated YTD, status, and lookup values", () => {
@@ -144,4 +147,89 @@ test("schedule query stays read-only and selects only scheduling and filter fiel
   assert.match(decoded, /_os_sr_intv_ta_value eq bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb/);
   assert.match(decoded, /\$expand=os_sr_intv_cand/);
   assert.doesNotMatch(decoded, /PATCH|POST|os_sr_cand_eml|os_sr_cand_phn|cvurl/);
+});
+
+test("browser without a Node global loads Dataverse data and applies all four filters", async () => {
+  const source = readFileSync(require.resolve("../solutions/RecruitmentDashboard/WebResources/os_/bso/recruitment-dashboard.js"), "utf8");
+  const elements = new Map();
+  function element() {
+    return {
+      value: "", children: [], events: {}, style: {},
+      replaceChildren(...children) { this.children = children; this.value = children[0]?.value || ""; },
+      add(child) { if (!this.children.length) this.value = child.value; this.children.push(child); },
+      append(...children) { this.children.push(...children); },
+      addEventListener(name, callback) { this.events[name] = callback; }
+    };
+  }
+  const doc = element();
+  doc.getElementById = (id) => {
+    if (!elements.has(id)) elements.set(id, element());
+    return elements.get(id);
+  };
+  doc.createElement = element;
+  const $ = doc.getElementById;
+  const calls = [];
+  let pipelineFails = false;
+  const WebApi = {
+    async retrieveMultipleRecords(table, options, size) {
+      calls.push({ table, options, size });
+      if (table === "os_sr_pos") {
+        assert.match(options, /\$select=os_sr_posid,os_sr_pos_ttl/);
+        return { entities: [{ os_sr_posid: POSITION_ID, os_sr_pos_ttl: "Synthetic position" }] };
+      }
+      if (table === "os_sr_csrc") return { entities: [{ os_sr_csrcid: SOURCE_ID, os_sr_csrc_nm: "Synthetic source" }] };
+      if (table === "os_sr_ta") return { entities: [{ os_sr_taid: TA_ID, os_sr_ta_nm: "Synthetic TA" }] };
+      if (table === "os_sr_intv") return { entities: [schedule(candidate())] };
+      if (options.startsWith("?fetchXml=")) {
+        assert.match(options, /^\?fetchXml=<fetch/);
+        if (pipelineFails) throw new Error("Read rejected");
+        return { entities: [{ status: 100010000, candidateCount: 2 }, { status: 100010003, candidateCount: 1 }] };
+      }
+      assert.equal(size, 50);
+      assert.doesNotMatch(options, /\$top=/);
+      const continuation = "?$skiptoken=%3Ccookie%3E";
+      if (options.includes("$skiptoken")) assert.equal(options, continuation);
+      return {
+        entities: [{
+          os_sr_candid: options === continuation ? SOURCE_ID : CANDIDATE_ID,
+          os_sr_cand_nm: "Synthetic candidate", os_sr_cand_cnum: "TEST-001", os_sr_cand_stat: 100010000
+        }],
+        nextLink: options === continuation ? null : `https://example.invalid/api/data/v9.2/os_sr_cands${continuation}`
+      };
+    }
+  };
+  vm.runInNewContext(source, {
+    document: doc, window: { parent: { Xrm: { WebApi } } },
+    Option: class { constructor(text, value) { Object.assign(this, { text, value }); } },
+    Date: class extends Date { constructor(...args) { super(...(args.length ? args : ["2026-06-01T05:00:00Z"])); } }
+  });
+  doc.events.DOMContentLoaded();
+  await new Promise(setImmediate);
+  assert.match($("status").textContent, /^Updated/);
+  assert.equal($("metric-candidates").textContent, "3");
+  assert.equal($("metric-pending").textContent, "2");
+  assert.equal($("metric-scheduled").textContent, "1");
+  assert.equal($("metric-lead-time").textContent, "4.0 days");
+  assert.equal($("pipeline").children.length, 6);
+  await $("load-more").events.click();
+  assert.match($("queue-summary").textContent, /Showing 2 of 2/);
+
+  for (const [id, value] of [["year", "2025"], ["position", POSITION_ID], ["source", SOURCE_ID], ["ta", TA_ID]]) {
+    if (id !== "year") assert.equal($(`filter-${id}`).children[1].value, value);
+    $(`filter-${id}`).value = value;
+    await $(`filter-${id}`).events.change();
+  }
+  const [pipeline, interviews, queue] = calls.slice(-3);
+  assert.match(pipeline.options, /2024-12-31T17:00:00/);
+  for (const id of [POSITION_ID, SOURCE_ID, TA_ID]) {
+    assert.ok(pipeline.options.includes(id));
+    assert.ok(decodeURIComponent(queue.options).includes(id));
+  }
+  assert.ok(decodeURIComponent(interviews.options).includes(TA_ID));
+
+  pipelineFails = true;
+  await $("filter-ta").events.change();
+  assert.match($("status").textContent, /could not be verified/);
+  assert.equal($("metric-candidates").textContent, "—");
+  assert.equal($("queue").children.length, 0);
 });

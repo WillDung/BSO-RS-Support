@@ -37,7 +37,7 @@
       start: "os_sr_intv_strt",
       status: "os_sr_intv_stat"
     },
-    position: { logicalName: "os_sr_pos", id: "os_sr_posid", name: "os_sr_pos_nm" },
+    position: { logicalName: "os_sr_pos", id: "os_sr_posid", name: "os_sr_pos_ttl" },
     source: { logicalName: "os_sr_csrc", id: "os_sr_csrcid", name: "os_sr_csrc_nm" },
     ta: { logicalName: "os_sr_ta", id: "os_sr_taid", name: "os_sr_ta_nm" }
   });
@@ -188,7 +188,7 @@
     ].join(",");
     const filter = encodeURIComponent(buildCandidateODataFilter(filters, range, true));
     return `?$select=${select}&$filter=${filter}` +
-      `&$orderby=createdon asc,${TABLE.candidate.id} asc&$top=${QUEUE_PAGE_SIZE}`;
+      `&$orderby=createdon asc,${TABLE.candidate.id} asc`;
   }
 
   function buildScheduleOptions(filters) {
@@ -224,6 +224,9 @@
   }
 
   function parseCount(value) {
+    if (typeof value !== "number" && (typeof value !== "string" || !/^\d+$/.test(value))) {
+      throw new Error("INVALID_AGGREGATE");
+    }
     const count = typeof value === "number" ? value : Number(value);
     if (!Number.isSafeInteger(count) || count < 0) throw new Error("INVALID_AGGREGATE");
     return count;
@@ -300,9 +303,15 @@
   }
 
   function getXrm() {
-    if (global.parent && global.parent.Xrm && global.parent.Xrm.WebApi) return global.parent.Xrm;
-    if (global.Xrm && global.Xrm.WebApi) return global.Xrm;
+    if (window.Xrm?.WebApi) return window.Xrm;
+    if (window.parent.Xrm?.WebApi) return window.parent.Xrm;
     throw new Error("CONTEXT_UNAVAILABLE");
+  }
+
+  function continuationOptions(nextLink) {
+    const queryStart = typeof nextLink === "string" ? nextLink.indexOf("?") : -1;
+    if (queryStart < 0 || !nextLink.slice(queryStart + 1)) throw new Error("INVALID_RESPONSE");
+    return nextLink.slice(queryStart);
   }
 
   async function retrieveAll(api, tableName, options, generation) {
@@ -314,14 +323,13 @@
       records.push(...response.entities);
       if (records.length > MAX_RESULT_ROWS) throw new Error("RESULT_LIMIT_EXCEEDED");
       if (!response.nextLink) return records;
-      if (typeof response.nextLink !== "string") throw new Error("INVALID_RESPONSE");
-      response = await api.retrieveMultipleRecords(tableName, response.nextLink, 5000);
+      response = await api.retrieveMultipleRecords(tableName, continuationOptions(response.nextLink), 5000);
     }
   }
 
   async function loadReference(api, reference, generation) {
     const options = `?$select=${reference.id},${reference.name}` +
-      `&$filter=${encodeURIComponent("statecode eq 0")}&$orderby=${reference.name} asc`;
+      `&$filter=${encodeURIComponent("statecode eq 0")}&$orderby=${reference.name} asc,${reference.id} asc`;
     const rows = await retrieveAll(api, reference.logicalName, options, generation);
     if (rows === null) return null;
     return rows.map((row) => {
@@ -344,10 +352,12 @@
   async function loadPipeline(api, filters, range, generation) {
     const xml = buildPipelineFetchXml(filters, range);
     const result = await api.retrieveMultipleRecords(
-      TABLE.candidate.logicalName, `?fetchXml=${encodeURIComponent(xml)}`
+      TABLE.candidate.logicalName, `?fetchXml=${xml}`
     );
     if (generation !== state.generation) return null;
-    if (!result || !Array.isArray(result.entities)) throw new Error("INVALID_RESPONSE");
+    if (!result || !Array.isArray(result.entities) || result.nextLink || result.fetchXmlPagingCookie) {
+      throw new Error("INVALID_RESPONSE");
+    }
     return summarizePipeline(result.entities);
   }
 
@@ -370,7 +380,7 @@
   }
 
   async function loadQueuePage(api, filters, range, nextLink, generation) {
-    const options = nextLink || buildQueueOptions(filters, range);
+    const options = nextLink ? continuationOptions(nextLink) : buildQueueOptions(filters, range);
     const response = await api.retrieveMultipleRecords(TABLE.candidate.logicalName, options, QUEUE_PAGE_SIZE);
     if (generation !== state.generation) return null;
     if (!response || !Array.isArray(response.entities) ||
@@ -567,6 +577,7 @@
   async function refreshDashboard(event) {
     if (event) event.preventDefault();
     const generation = ++state.generation;
+    state.queueLoading = false;
     clearDashboard();
     $("refresh").disabled = true;
     $("load-more").disabled = true;
@@ -611,31 +622,30 @@
     } catch (error) {
       if (generation === state.generation) setStatus(readErrorMessage(error), "error");
     } finally {
-      state.queueLoading = false;
-      if (generation === state.generation) $("load-more").disabled = !state.queueNextLink;
+      if (generation === state.generation) {
+        state.queueLoading = false;
+        $("load-more").disabled = !state.queueNextLink;
+      }
     }
   }
 
   async function initialize() {
     state.xrm = getXrm();
     fillYearFilter();
+    $("refresh").disabled = true;
+    const generation = ++state.generation;
+    setStatus("Loading filters…");
+    const references = await loadReferences(state.xrm.WebApi, generation);
+    if (generation !== state.generation || references === null) return;
+    fillReferenceFilter("filter-position", references.positions, "All positions");
+    fillReferenceFilter("filter-source", references.sources, "All sources");
+    fillReferenceFilter("filter-ta", references.tas, "All TAs");
     $("filters").addEventListener("submit", refreshDashboard);
     for (const id of ["filter-year", "filter-position", "filter-source", "filter-ta"]) {
       $(id).addEventListener("change", refreshDashboard);
     }
     $("load-more").addEventListener("click", loadMoreQueue);
-    const generation = ++state.generation;
-    try {
-      setStatus("Loading filters…");
-      const references = await loadReferences(state.xrm.WebApi, generation);
-      if (generation !== state.generation || references === null) return;
-      fillReferenceFilter("filter-position", references.positions, "All positions");
-      fillReferenceFilter("filter-source", references.sources, "All sources");
-      fillReferenceFilter("filter-ta", references.tas, "All TAs");
-      await refreshDashboard();
-    } catch (error) {
-      if (generation === state.generation) setStatus(readErrorMessage(error), "error");
-    }
+    await refreshDashboard();
   }
 
   const api = Object.freeze({
@@ -654,7 +664,7 @@
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   if (typeof document !== "undefined") {
     document.addEventListener("DOMContentLoaded", () => {
-      initialize().catch((error) => setStatus(readErrorMessage(error), "error"));
+      initialize().catch((error) => setStatus(`${readErrorMessage(error)} Reload the page to retry initialization.`, "error"));
     });
   }
 })();

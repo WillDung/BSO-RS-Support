@@ -21,10 +21,8 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $releaseNeutral = $Mode -ceq 'UNCONFIGURED'
-if ($AvailabilityEnabled -and
-    ($Mode -cne 'DEV' -or -not $SyntheticDataOnly -or
-     -not $CandidateCoreEnabled -or $ReleaseProfile)) {
-    throw 'Availability can be enabled only for bound synthetic-only DEV with Candidate Core enabled and no release profile. Generation does not authorize deployment or activation.'
+if ($AvailabilityEnabled) {
+    throw 'The standalone Candidate Console availability panel has been retired. This option cannot enable it.'
 }
 if ($Mode -ne 'PROD' -and -not $SyntheticDataOnly) {
     throw 'DEV and TEST configurations must remain synthetic-only.'
@@ -35,14 +33,14 @@ if ($Mode -ne 'DEV' -and $DevDirectWriteFallbackEnabled) {
 if ($CandidateOperationMode -ceq 'SingleUserDev' -and
     ($Mode -cne 'DEV' -or -not $CandidateCoreEnabled -or -not $SyntheticDataOnly -or
      $DevDirectWriteFallbackEnabled -or $DiagnosticsMode -cne 'OFF' -or
-     $ReleaseProfile -or $AvailabilityEnabled)) {
+     $ReleaseProfile)) {
     throw 'SingleUserDev requires bound synthetic-only DEV, Candidate Core enabled, fallback disabled, diagnostics Off, no release profile, and Calendar disabled.'
 }
 if ($NormalModeEnabled -and
     ($Mode -cne 'DEV' -or $CandidateOperationMode -cne 'SingleUserDev' -or
      -not $CandidateCoreEnabled -or -not $SyntheticDataOnly -or
      $DevDirectWriteFallbackEnabled -or $DiagnosticsMode -cne 'OFF' -or
-     $ReleaseProfile -or $AvailabilityEnabled)) {
+     $ReleaseProfile)) {
     throw 'NORMAL mode requires explicit DEV SingleUserDev configuration, synthetic configured mode, Candidate Core enabled, fallback disabled, diagnostics Off, and Calendar disabled.'
 }
 if ($releaseNeutral -and
@@ -126,9 +124,6 @@ $configuration = [ordered]@{
     devDirectWriteFallbackEnabled = [bool]$DevDirectWriteFallbackEnabled
     diagnosticsMode = $DiagnosticsMode
 }
-if ($AvailabilityEnabled) {
-    $configuration.availabilityEnabled = $true
-}
 if ($CandidateOperationMode -ceq 'SingleUserDev') {
     $configuration.candidateOperationMode = $CandidateOperationMode
 }
@@ -162,19 +157,6 @@ $generatedHtml = [regex]::Replace(
     $configScriptPattern,
     "candidate-console-environment.js?v=$($hash.Substring(0, 12))"
 )
-if ($AvailabilityEnabled) {
-    $availabilityScriptPattern = 'candidate-console-availability\.js\?v=[0-9a-z-]+'
-    if ([regex]::Matches($generatedHtml, $availabilityScriptPattern).Count -ne 1) {
-        throw 'Candidate Console HTML must contain exactly one versioned availability script.'
-    }
-    $availabilityPath = Join-Path $repositoryRoot 'solutions\CandidateConsole\WebResources\os_\bso\candidate-console-availability.js'
-    $availabilityHash = (Get-FileHash -LiteralPath $availabilityPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    $generatedHtml = [regex]::Replace(
-        $generatedHtml,
-        $availabilityScriptPattern,
-        "candidate-console-availability.js?v=$($availabilityHash.Substring(0, 12))"
-    )
-}
 [IO.File]::WriteAllBytes($configurationFullPath, $sourceBytes)
 [IO.File]::WriteAllText($htmlFullPath, $generatedHtml, [Text.UTF8Encoding]::new($false))
 

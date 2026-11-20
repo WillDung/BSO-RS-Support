@@ -1,5 +1,15 @@
 # Current State
 
+## Recruitment Dashboard repair and obsolete Console panel removal (2026-11-20)
+
+**Deployed and served-byte verified.** Candidate Management no longer shows or loads the obsolete standalone Calendar Availability panel. Its JavaScript WebResource, backend APIs, and configuration remain installed; the current Console workflow JavaScript is unchanged. The local configuration generator no longer allows opting into the retired panel. This does not retire the separate ATSugg Round 1 Availability Custom Page or the Console's Round 1 scheduling workflow.
+
+The published Dashboard failed before making API requests because it used the Node `global` variable in a browser. Once browser context is resolved, the old Position query separately fails with Dataverse HTTP 400 `0x80060888`: `os_sr_pos_nm` does not exist. The corrected query uses the live `os_sr_pos_ttl` column. The Dashboard retains signed-in Dataverse reads, applies all four filters, follows queue continuations without a total-row cap of 50, and displays unavailable rather than zero on read failure. Corrected live probes returned HTTP 200 for all six datasets and all four filter predicates, and returned data for all four KPIs. Browser rendering and filtering were covered by synthetic tests; the signed-in owner still needs to confirm live rendering.
+
+Three conditional WebResource PATCHes and one three-resource `PublishXml` returned HTTP 204 with no retries. Current, published and served SHA-256 values match: Candidate Console HTML `eeab82abaeff904ef3e0c268cea41b3f0d033754f65d778d80ec2fcdd1d990dc`, Dashboard HTML `9bd15095439a78475c9922df7acc4fb586b97911af466ce2273c5fe4db99140a`, Dashboard JS `b5fa6201492de0aca7332536cf8885dc61a837a9dd78011b3a9c6f823cc0bb28`. Rollback bytes are retained in the pre-change export; restore only that trio using fresh ETags and scoped publication if separately authorized. No business writes, lifecycle UAT, security changes or sitemap publication.
+
+The post-change export matches the baseline for the Custom Page payload, sitemap, installed backend and packaged Flow. The Custom Page's export metadata differs only in the bridge workflow-name and shared-connection identifiers, with the same workflow entity and connection reference logical name. No requests from this release changed the Custom Page, Flow or bindings. Verify the separate page on its existing entry point without publishing or altering bindings as part of this release.
+
 ## Read-only Recruitment Dashboard deployed (2026-11-19)
 
 **Status: Recruitment Dashboard WebResources and the `srapp` navigation increment are DEPLOYED.** The signed-in Dataverse `Xrm.WebApi` read-only query path, KPI definitions, filter controls, pipeline, and pending-action queue are implemented. The live records/data-binding behavior and KPI values remain pending owner read-only functional verification; offline tests are not live data acceptance.

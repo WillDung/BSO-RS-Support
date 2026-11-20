@@ -2,13 +2,15 @@
 
 ## Status
 
+**2026-11-20 repair deployed.** The Dashboard now resolves browser `window.Xrm` (or its model-driven parent) and uses the Dataverse Position title column, `os_sr_pos_ttl`. All six live read queries and four filter predicates succeeded under the checked identity. The browser harness verifies KPI rendering, filters, pending queue continuation, and read-failure handling. Owner testing in the actual app is still pending. See the [deployment receipt](CURRENT_STATE.md#recruitment-dashboard-repair-and-obsolete-console-panel-removal-2026-11-20).
+
 **DEPLOYED to the live `srapp` model-driven app on 2026-11-19.** The Dashboard is a read-only model-driven WebResource, not an edited copy of the live Canvas Custom Page. It uses the signed-in user's `Xrm.WebApi` context and existing Dataverse read permissions. It never writes Candidate, Interview Schedule, or other business records and does not invoke Outlook or booking operations.
 
 The exact `srapp` navigation item formerly pointing to `os_atsugground1availability_4d2f7` now points to Recruitment Dashboard. The legacy Custom Page remains in the solution and app component inventory; only its navigation item was replaced. The Dashboard is not a replacement booking experience.
 
 The scoped deployment created `os_/bso/recruitment-dashboard.html` and `os_/bso/recruitment-dashboard.js`, updated the sitemap once with a fresh ETag, and issued one `PublishXml` for exactly those resources plus `srapp`. A fresh unmanaged solution export/unpack confirmed both resource components and the updated sitemap. Published resource content readback matched the local source hashes. No Console, Flow, Custom Page, Candidate, Schedule, role, or booking component was changed.
 
-The queries are deployed but live data/runtime behavior has not been owner-validated. The owner should open Recruitment Dashboard, verify all six panels and the Year/Position/Source/TA filters load, and confirm the authorized results look correct. This check is read-only; do not create or alter Candidates or Schedules for it.
+The owner should open Recruitment Dashboard, verify all six panels and the Year/Position/Source/TA filters load, and confirm the authorized results look correct. This check is read-only; do not create or alter Candidates or Schedules for it.
 
 ## Unified Booking Studio handoff (not deployed)
 

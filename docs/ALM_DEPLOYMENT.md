@@ -1,5 +1,11 @@
 # ALM and Deployment
 
+## Phase 2.2A controlled Candidate Console UI release (2026-11-25)
+
+**Deployment succeeded; owner browser acceptance remains pending.** During the owner-confirmed exclusive window, exactly the three existing Candidate Console HTML, CSS, and JavaScript WebResources were conditionally updated and published. Each PATCH and the one WebResource-only `PublishXml` returned HTTP 204; independent PAC and authenticated readbacks verified current, published, and served bytes against the [Phase 2.2A manifest](CANDIDATE_CONSOLE_PHASE_2_2A_RELEASE_MANIFEST.json). No Publish All, Site Map, Flow, Custom Page, schema, role, or business-record change occurred. Availability, booking confirmation, and Online schedule writes remain disabled.
+
+An external three-resource backup and deployment journal retain the original bytes, IDs, hashes, versions, and operation results. The rollback payload and scoped three-ID publish body were dry-run checked, not applied; an actual LIVE rollback remains untested and requires separate approval plus fresh ETags. See the [release receipt and owner acceptance checklist](CURRENT_STATE.md#phase-22a-controlled-ui-release-2026-11-25).
+
 ## NORMAL-only owner-facing Candidate Console (2026-11-18)
 
 The [NORMAL-only release manifest](CANDIDATE_CONSOLE_NORMAL_ONLY_RELEASE_MANIFEST.json) records the owner request to remove the Candidate data-mode selector and DEV direct-write fallback, initialize the Console in NORMAL mode, and preserve the existing server authorization boundary.

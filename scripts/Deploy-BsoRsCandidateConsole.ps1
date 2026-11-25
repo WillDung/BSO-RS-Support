@@ -52,6 +52,7 @@ $target = [ordered]@{
 $acceptedPublicationHashes = @{
     'os_/bso/candidate-console-environment.js' = '94a26871f7149458b2d7930049f2e06c2c3914d280ca40bcfc543fbfb9a00117'
     'os_/bso/candidate-console.html' = 'f28b26fa4b7c72ce7cd3fa08d9f25d831334633f0e411fe715d5aa4c7393ef79'
+    'os_/bso/candidate-console-policy.js' = 'fbefadd65caa40f2e7f50aaeeb06be2b499822a0e7bc8522ebd131c14f61c0fd'
 }
 $allResources = @(
     [pscustomobject]@{
@@ -470,7 +471,8 @@ if ($DevelopmentSourceAhead) {
         (-not $phase22AUiRelease -and
             ([string]::IsNullOrWhiteSpace($EnvironmentConfigurationPath) -or
              [string]::IsNullOrWhiteSpace($EnvironmentHtmlPath))) -or
-        -not [string]::IsNullOrWhiteSpace($BaselineSnapshotPath)) {
+        ($null -eq $phase22AUiRelease -and
+            -not [string]::IsNullOrWhiteSpace($BaselineSnapshotPath))) {
         if ($phase22AUiRelease) {
             throw 'Phase 2.2A source-ahead refresh requires the exact reviewed three-resource set and no external configuration replacement.'
         }
@@ -610,13 +612,17 @@ if ($ReleaseNeutralProfile -and -not $PublishOnly -and -not $ReconcilePublishOnl
 if (-not [string]::IsNullOrWhiteSpace($BaselineSnapshotPath)) {
     $baselineFullPath = [IO.Path]::GetFullPath($BaselineSnapshotPath)
     $relativeBaselinePath = [IO.Path]::GetRelativePath($repositoryRoot, $baselineFullPath)
-    if (-not $ReleaseNeutralProfile -or -not $RefreshExisting -or $Apply -or $Continue -or
+    $phase22ABaselineCapture = $null -ne $phase22AUiRelease -and
+        $DevelopmentSourceAhead -and $RefreshExisting -and -not $Apply -and -not $Continue -and
+        $resources.Count -eq 3
+    if ((-not $ReleaseNeutralProfile -and -not $phase22ABaselineCapture) -or
+        -not $RefreshExisting -or $Apply -or $Continue -or
         $relativeBaselinePath -eq '.' -or
         (-not [IO.Path]::IsPathRooted($relativeBaselinePath) -and
          $relativeBaselinePath -notmatch '^\.\.(\\|$)') -or
         (Test-Path -LiteralPath $baselineFullPath) -or
         -not (Test-Path -LiteralPath (Split-Path -Parent $baselineFullPath) -PathType Container)) {
-        throw 'Baseline snapshot capture requires a new external path and a read-only release-neutral existing-resource preflight.'
+        throw 'Baseline snapshot capture requires a new external path and a read-only release-neutral or exact Phase 2.2A existing-resource preflight.'
     }
 }
 if ($CreateNewResources) {
@@ -1113,6 +1119,9 @@ function Get-ExactWebResourceState {
         }
     }
     [pscustomobject]@{
+        Name = $Resource.Name
+        DisplayName = $Resource.DisplayName
+        Type = $Resource.Type
         WebResourceId = $ResourceId
         WebResourceIdUnique = [string]$published.webresourceidunique
         CurrentReadPath = $current.ReadPath
@@ -1590,7 +1599,8 @@ try {
             }
             $publishedHash = $null
             $publishedMatchesCurrent = $null
-            if (-not [string]::IsNullOrWhiteSpace($BaselineSnapshotPath)) {
+            if (-not [string]::IsNullOrWhiteSpace($BaselineSnapshotPath) -and
+                $null -eq $phase22AUiRelease) {
                 $published = Get-DataverseJson -Path (
                     "$($target.WebResourceEntitySet)($resourceId)?" +
                     "%24select=webresourceid,name,displayname,webresourcetype,content,componentstate,modifiedon"
@@ -1818,18 +1828,30 @@ try {
         if ($RefreshExisting) {
             $baselineVersionsMatch = $true
             if (-not [string]::IsNullOrWhiteSpace($BaselineSnapshotPath)) {
+                $snapshotResourceCount = if ($null -ne $phase22AUiRelease) { 3 } else { 2 }
                 $snapshot = [ordered]@{
                     SchemaVersion = 1
-                    CapturePurpose = 'VN LMV IT release-neutral Candidate Console source baseline'
+                    CapturePurpose = if ($null -ne $phase22AUiRelease) {
+                        'Read-only LIVE Phase 2.2A Candidate Console WebResource rollback capture'
+                    } else {
+                        'VN LMV IT release-neutral Candidate Console source baseline'
+                    }
                     Environment = $target.EnvironmentName
                     SolutionUniqueName = $target.SolutionUniqueName
                     AppUniqueName = $target.AppUniqueName
                     CapturedOnUtc = [DateTime]::UtcNow.ToString('o')
                     AutomaticRetries = 0
+                    NoProductionWrites = $true
                     Resources = @($script:RefreshBaselineResources)
+                    RestoreProcedure = @(
+                        'After separate owner approval only, re-read each resource by original WebResourceId and obtain a fresh individual-row ETag.',
+                        'Conditionally PATCH only the approved WebResourceIds with the captured original content; stop on any ETag or hash mismatch.',
+                        'Publish once with a WebResource-only PublishXml containing only the captured resource IDs; never use Publish All.',
+                        'Read back current, published, and served bytes and verify each against the captured SHA-256 values.'
+                    )
                 }
-                if (@($snapshot.Resources).Count -ne 2) {
-                    throw 'Baseline snapshot did not capture both exact selected resources.'
+                if (@($snapshot.Resources).Count -ne $snapshotResourceCount) {
+                    throw 'Baseline snapshot did not capture the exact selected resource count.'
                 }
                 $baselineVersionsMatch = @(
                     $snapshot.Resources | Where-Object {

@@ -473,6 +473,7 @@ Assert-Test ($deployment.Contains('[switch]$PublishOnly') -and
     $deployment.Contains('($PublishOnly -and (-not $Apply -or -not $RefreshExisting -or -not $ReleaseNeutralProfile') -and
     $deployment.Contains("'os_/bso/candidate-console-environment.js' = '94a26871f7149458b2d7930049f2e06c2c3914d280ca40bcfc543fbfb9a00117'") -and
     $deployment.Contains("'os_/bso/candidate-console.html' = 'f28b26fa4b7c72ce7cd3fa08d9f25d831334633f0e411fe715d5aa4c7393ef79'") -and
+    $deployment.Contains("'os_/bso/candidate-console-policy.js' = 'fbefadd65caa40f2e7f50aaeeb06be2b499822a0e7bc8522ebd131c14f61c0fd'") -and
     $deployment.Contains("'docs\SOLUTION_COMPONENT_INVENTORY.json'") -and
     $deployment.Contains("'docs\RELEASE_INPUT_MANIFEST.json'") -and
     $deployment.Contains("'solutions\Other\Solution.xml'") -and
@@ -573,7 +574,7 @@ Assert-Test ($deployment.Contains('[switch]$ReleaseNeutralProfile') -and
     $deployment.Contains('$environmentConfiguration.diagnosticsMode -cne ''OFF''')) `
     'Permit only the exact fail-closed release-neutral configuration and HTML refresh'
 Assert-Test ($deployment.Contains('[string]$BaselineSnapshotPath') -and
-    $deployment.Contains('Baseline snapshot capture requires a new external path and a read-only release-neutral existing-resource preflight.') -and
+    $deployment.Contains('Baseline snapshot capture requires a new external path and a read-only release-neutral or exact Phase 2.2A existing-resource preflight.') -and
     $deployment.Contains('PublishedContentBase64 = [Convert]::ToBase64String($publishedBytes)') -and
 $deployment.Contains('CurrentContentBase64 = [Convert]::ToBase64String($remoteBytes)') -and
 $deployment.Contains('PublishedMatchesCurrent') -and
@@ -704,6 +705,13 @@ Assert-Test ($deployment.Contains('[string]$CandidateConsolePhase22AReleaseManif
     $deployment.Contains('ServedSha256 = $state.EffectiveSha256') -and
     $deployment.Contains('PostPublishState = [ordered]@{}')) `
     'Require previous-baseline matching and current/published/served versioned readback for Phase 2.2A'
+Assert-Test ($deployment.Contains('$phase22ABaselineCapture = $null -ne $phase22AUiRelease') -and
+    $deployment.Contains('$resources.Count -eq 3') -and
+    $deployment.Contains('Read-only LIVE Phase 2.2A Candidate Console WebResource rollback capture') -and
+    $deployment.Contains('if (@($snapshot.Resources).Count -ne $snapshotResourceCount)') -and
+    $deployment.Contains('NoProductionWrites = $true') -and
+    $deployment.Contains('After separate owner approval only, re-read each resource by original WebResourceId')) `
+    'Capture an exact three-resource Phase 2.2A rollback snapshot only during read-only preflight'
 Assert-Test ($deployment.Contains('[string]$CandidatePaginationReleaseManifestPath') -and
     $deployment.Contains('docs\CANDIDATE_CORE_PAGINATION_1.0.10_RELEASE_MANIFEST.json') -and
     $deployment.Contains("'CANDIDATE_LIST_PAGINATION_AND_ANSWERED_TO_SCHEDULING'") -and

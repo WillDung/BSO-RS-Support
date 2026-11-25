@@ -481,7 +481,8 @@ Assert-Test ($deployment.Contains('[switch]$PublishOnly') -and
     $deployment.Contains('$canonicalCandidateConsoleNames.Count -ne 5') -and
     $deployment.Contains('CANDIDATE_CONSOLE_RESOURCE_INVENTORY_DRIFT') -and
     $deployment.Contains('Publish-only mode does not accept replacement content or a baseline snapshot path.') -and
-    $deployment.Contains('if (-not ($PublishOnly -or $ReconcilePublishOnly) -and ($hasEnvironmentResource -or $hasHtmlResource))') -and
+    $deployment.Contains('if (-not ($PublishOnly -or $ReconcilePublishOnly) -and') -and
+    $deployment.Contains('($hasEnvironmentResource -or $hasHtmlResource) -and -not $phase22AUiRelease') -and
     $deployment.Contains('$runtimeCandidateConsoleNames') -and
     $deployment.Contains('Get-ChildItem -LiteralPath') -and
     $publishOnlyBlock -and
@@ -646,9 +647,11 @@ Assert-Test ($deployment.Contains('docs\CANDIDATE_CONSOLE_NORMAL_ONLY_RELEASE_MA
     $normalOnlyHtmlPin.Count -eq 1 -and
     $normalOnlyHtmlPin[0].sha256 -ceq 'EXTERNAL_TARGET_HTML' -and
     $normalOnlyHtmlPin[0].templateSha256 -ceq
-        (Get-FileHash -LiteralPath $htmlPath -Algorithm SHA256).Hash.ToLowerInvariant() -and
+        'f34010688d14f556a277775622efed4c0271a2c04e95719b17e98eebcce117c1' -and
     $normalOnlyScriptPin.Count -eq 1 -and
-    $normalOnlyScriptPin[0].sha256 -ceq $currentScriptHash -and
+    $normalOnlyScriptPin[0].sha256 -ceq
+        'e75debd7bf87847dc0d96df3e9a16290a9c7915fd1480d18242ac70759114bae' -and
+    $normalOnlyScriptPin[0].sha256 -ceq $normalOnlyScriptPin[0].deployedSha256 -and
     $normalOnlyManifest.uiContract.dataModeSelectorRemoved -eq $true -and
     $normalOnlyManifest.uiContract.defaultReferenceMode -ceq 'NORMAL' -and
     $normalOnlyManifest.uiContract.devDirectWriteFallbackEnabled -eq $false -and
@@ -657,11 +660,55 @@ Assert-Test ($deployment.Contains('docs\CANDIDATE_CONSOLE_NORMAL_ONLY_RELEASE_MA
     $normalOnlyManifest.outlookAvailability.automaticScheduleSaveEnabled -eq $false -and
     $html.Contains("candidate-console.js?v=$($currentScriptHash.Substring(0, 12))")) `
     'Pin the NORMAL-only two-resource release, preserve blocked availability, and cache-bust the changed Console script'
+$phase22AManifestPath = Join-Path $root 'docs\CANDIDATE_CONSOLE_PHASE_2_2A_RELEASE_MANIFEST.json'
+$phase22AManifest = Get-Content -LiteralPath $phase22AManifestPath -Raw | ConvertFrom-Json
+$phase22AResourceMap = @{}
+foreach ($resource in $phase22AManifest.resources) {
+    $phase22AResourceMap[[string]$resource.name] = $resource
+}
+$phase22AResourceNames = @($phase22AResourceMap.Keys | Sort-Object -CaseSensitive)
+$currentHtmlHash = (Get-FileHash -LiteralPath $htmlPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$currentStyleHash = (Get-FileHash -LiteralPath $stylePath -Algorithm SHA256).Hash.ToLowerInvariant()
+Assert-Test ($phase22AManifest.scope -ceq 'PHASE_2_2A_UNIFIED_ROUND1_UI' -and
+    $phase22AManifest.environmentName -ceq 'VN LMV IT' -and
+    $phase22AManifest.appUniqueName -ceq 'srapp' -and
+    $phase22AManifest.solutionUniqueName -ceq 'os_sr_bso_rs_support' -and
+    $phase22AManifest.ownerAuthorization -ceq 'APPROVED_IN_DEPLOYMENT_REQUEST' -and
+    @($phase22AManifest.resources).Count -eq 3 -and
+    [string]::Join('|', $phase22AResourceNames) -ceq
+        'os_/bso/candidate-console.css|os_/bso/candidate-console.html|os_/bso/candidate-console.js' -and
+    $phase22AResourceMap['os_/bso/candidate-console.html'].sha256 -ceq $currentHtmlHash -and
+    $phase22AResourceMap['os_/bso/candidate-console.css'].sha256 -ceq $currentStyleHash -and
+    $phase22AResourceMap['os_/bso/candidate-console.js'].sha256 -ceq $currentScriptHash -and
+    $phase22AManifest.deployment.resourceCount -eq 3 -and
+    $phase22AManifest.deployment.publishAllXml -eq 0 -and
+    $phase22AManifest.deployment.candidateOrScheduleWrites -eq 0 -and
+    $phase22AManifest.deployment.providerCalls -eq 0 -and
+    $phase22AManifest.deployment.invitations -eq 0 -and
+    $phase22AManifest.normalScheduling.providerTrust -ceq 'BLOCKED' -and
+    $phase22AManifest.normalScheduling.availabilityRequestsEnabled -eq $false -and
+    $phase22AManifest.normalScheduling.confirmBookingEnabled -eq $false -and
+    $phase22AManifest.normalScheduling.onlineScheduleWritesEnabled -eq $false) `
+    'Pin the exact three-resource Phase 2.2A release and its no-provider/no-booking contract'
+Assert-Test ($deployment.Contains('[string]$CandidateConsolePhase22AReleaseManifestPath') -and
+    $deployment.Contains('CANDIDATE_CONSOLE_PHASE_2_2A_RELEASE_PREFLIGHT_READY') -and
+    $deployment.Contains('CANDIDATE_CONSOLE_PHASE_2_2A_RELEASE_PUBLISHED') -and
+    $deployment.Contains('Get-ServedWebResourceState') -and
+    $deployment.Contains('"?v=$($expectedHash.Substring(0, 12))"') -and
+    $deployment.Contains('$state.CurrentSha256 -cne $pin[0].previousSha256') -and
+    $deployment.Contains('$state.PublishedSha256 -cne $pin[0].previousSha256') -and
+    $deployment.Contains('$state.EffectiveSha256 -cne $pin[0].previousSha256') -and
+    $deployment.Contains('CURRENT_PUBLISHED_SERVED_GET_RECONCILED') -and
+    $deployment.Contains('CurrentVersionNumber = $state.CurrentVersionNumber') -and
+    $deployment.Contains('PublishedVersionNumber = $state.PublishedVersionNumber') -and
+    $deployment.Contains('ServedSha256 = $state.EffectiveSha256') -and
+    $deployment.Contains('PostPublishState = [ordered]@{}')) `
+    'Require previous-baseline matching and current/published/served versioned readback for Phase 2.2A'
 Assert-Test ($deployment.Contains('[string]$CandidatePaginationReleaseManifestPath') -and
     $deployment.Contains('docs\CANDIDATE_CORE_PAGINATION_1.0.10_RELEASE_MANIFEST.json') -and
     $deployment.Contains("'CANDIDATE_LIST_PAGINATION_AND_ANSWERED_TO_SCHEDULING'") -and
     $deployment.Contains('$candidatePaginationRelease.customApiChanges -ne $expectedApiChanges') -and
-    $deployment.Contains('$expectedApiChanges = if ($recordCallPatch) { 0 } else { 5 }') -and
+    $deployment.Contains('$expectedApiChanges = if ($recordCallPatch -or $schedulingUiPatch -or $schedulingEnginePatch -or $manualSchedulingPatch) { 0 } else { 5 }') -and
     $deployment.Contains('docs\CANDIDATE_CORE_RECORD_CALL_1.0.11_RELEASE_MANIFEST.json') -and
     $deployment.Contains("'RECORD_CALL_CORRECTION_1.0.11'") -and
     $deployment.Contains('CANDIDATE_PAGINATION_CONFIGURATION_NOT_PRESERVED') -and
@@ -690,10 +737,6 @@ $paginationResources = @($paginationManifest.exactComponentDelta | Where-Object 
 $paginationResourceNames = @($paginationResources | ForEach-Object uniqueName | Sort-Object)
 $paginationResourceMap = @{}
 foreach ($resource in $paginationResources) { $paginationResourceMap[$resource.uniqueName] = $resource }
-$paginationTemplateHash = (Get-FileHash -LiteralPath (
-    Join-Path $root 'solutions\CandidateConsole\WebResources\os_\bso\candidate-console.html'
-) -Algorithm SHA256).Hash.ToLowerInvariant()
-$paginationScriptHash = (Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $recordCallManifest = Get-Content -LiteralPath (
     Join-Path $root 'docs\CANDIDATE_CORE_RECORD_CALL_1.0.11_RELEASE_MANIFEST.json'
 ) -Raw | ConvertFrom-Json
@@ -720,13 +763,19 @@ Assert-Test ($recordCallManifest.scope -ceq 'RECORD_CALL_CORRECTION_1.0.11' -and
     $recordCallManifest.environmentConfigurationChanges -eq 0 -and
     $recordCallManifest.customApi.changeDecision.action -ceq 'NO_CHANGE' -and
     $recordCallResources.Count -eq 2 -and
-    $recordCallResources['os_/bso/candidate-console.html'].templateSha256 -ceq $paginationTemplateHash -and
-    $recordCallResources['os_/bso/candidate-console.js'].sha256 -ceq $paginationScriptHash) `
+    $recordCallResources['os_/bso/candidate-console.html'].templateSha256 -ceq
+        '1ab36c9af984c46374bf0fdf5667bc3c66cdf0ba6fbdb6df111b61a91c92adf7' -and
+    $recordCallResources['os_/bso/candidate-console.js'].sha256 -ceq
+        'ae973d67820a6c8ab9a5ce3bb52442a6aaee635f8086d80e6c46f82799b7dfac') `
     'Pin the Record Call patch source while preserving the immutable 1.0.10 baseline'
 
 $hash = (Get-FileHash -LiteralPath $scriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
 $version = [regex]::Match($html, 'candidate-console\.js\?v=([0-9a-f]+)')
 Assert-Test ($version.Success -and $hash.StartsWith($version.Groups[1].Value)) 'Keep the script cache version tied to its content'
+$styleHash = (Get-FileHash -LiteralPath $stylePath -Algorithm SHA256).Hash.ToLowerInvariant()
+$styleVersion = [regex]::Match($html, 'candidate-console\.css\?v=([0-9a-f]{12})')
+Assert-Test ($styleVersion.Success -and $styleHash.StartsWith($styleVersion.Groups[1].Value)) `
+    'Keep the stylesheet cache version tied to its content'
 $resourceVersions = @(
     @{ Path = $policyPath; Name = 'candidate-console-policy.js' }
 )
@@ -744,10 +793,11 @@ $siteMapPath = Join-Path $root 'solutions\AppModuleSiteMaps\srapp\AppModuleSiteM
 $siteMapXml = [xml](Get-Content -LiteralPath $siteMapPath -Raw)
 $siteMapSubAreas = @($siteMapXml.AppModuleSiteMap.SiteMap.Area.Group.SubArea)
 $siteMapTitles = @($siteMapSubAreas | ForEach-Object { $_.Titles.Title.Title })
-Assert-Test ($siteMapSubAreas.Count -eq 5 -and
+Assert-Test ($siteMapSubAreas.Count -eq 6 -and
     $siteMapSubAreas[0].Id -ceq 'subarea_bso_candidate_management' -and
     $siteMapSubAreas[0].Url -ceq '$webresource:os_/bso/candidate-console.html' -and
-    [string]::Join('|', $siteMapTitles) -ceq 'Candidate Management|TA Directory|Positions|Candidate Sources|Locations') `
-    'Open srapp on Candidate Management first while preserving every reference page'
+    [string]::Join('|', $siteMapTitles) -ceq
+        'Candidate Management|TA Directory|Positions|Candidate Sources|Locations|Recruitment Dashboard') `
+    'Open srapp on Candidate Management first while preserving every reference page and dashboard'
 
 Write-Output "Candidate Console static checks passed: $passed"

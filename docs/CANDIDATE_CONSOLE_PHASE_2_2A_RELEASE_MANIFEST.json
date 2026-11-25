@@ -1,0 +1,77 @@
+{
+  "manifestVersion": 1,
+  "scope": "PHASE_2_2A_UNIFIED_ROUND1_UI",
+  "environmentName": "VN LMV IT",
+  "appUniqueName": "srapp",
+  "solutionUniqueName": "os_sr_bso_rs_support",
+  "ownerAuthorization": "APPROVED_IN_DEPLOYMENT_REQUEST",
+  "customApiChanges": 0,
+  "environmentConfigurationChanges": 0,
+  "flowChanges": 0,
+  "backendChanges": 0,
+  "schemaChanges": 0,
+  "securityMetadataChanges": 0,
+  "uiContract": {
+    "fieldOrder": [
+      "Interview Type",
+      "Interview Date",
+      "Meeting Room",
+      "Interviewer / TA",
+      "Availability status",
+      "30-minute time blocks",
+      "Confirm Booking"
+    ],
+    "dateControlCount": 1,
+    "onlineHidesAndClearsRoom": true,
+    "offlineRequiresRoom": true,
+    "authorizedCandidateAndTAContextPreserved": true,
+    "unverifiedAvailabilitySelectable": false,
+    "staleAvailabilityInvalidatedOnInputChange": true,
+    "manualSchedulingPreserved": true,
+    "candidateDashboardAndHistoryPreserved": true
+  },
+  "normalScheduling": {
+    "providerTrust": "BLOCKED",
+    "availabilityRequestsEnabled": false,
+    "slotSelectionEnabled": false,
+    "automaticScheduleSaveEnabled": false,
+    "confirmBookingEnabled": false,
+    "onlineScheduleWritesEnabled": false
+  },
+  "resources": [
+    {
+      "name": "os_/bso/candidate-console.html",
+      "sha256": "674a070297198672eaad5e36d6e304fe81459f7a635cff923529fd852124d658",
+      "previousSha256": "11e87c73005cdae155ec2e43e453e3b484815714a63638d2569575965a713e65"
+    },
+    {
+      "name": "os_/bso/candidate-console.css",
+      "sha256": "9878bdb7fa25c172b80557534827a68edbd28c169f9f75ea543abef6d3ece629",
+      "previousSha256": "6681994a0d57e46ed1b3f0be291556fba37be262f822c8b483d31d00f1130fde"
+    },
+    {
+      "name": "os_/bso/candidate-console.js",
+      "sha256": "10dbff924e529cfa526f2e8992c88a21c41f279231849a4e2f8a5716d2d9fb7f",
+      "previousSha256": "94fc532e7c85a0b20e08a1edf31105cafc4205440b707df5159508bfd8fd0719"
+    }
+  ],
+  "unchangedComponents": [
+    "Candidate Core and Custom APIs",
+    "Candidate Console environment configuration and policy",
+    "Round 1 Availability Custom Page",
+    "Power Automate Flows and Outlook connections",
+    "Dataverse schema and business records",
+    "Entra identities and security roles",
+    "Manual Scheduling backend contract"
+  ],
+  "deployment": {
+    "resourceCount": 3,
+    "allowedWrites": "Conditional content PATCHes only for the three listed existing WebResources, followed by one scoped PublishXml containing only their WebResource IDs.",
+    "publishAllXml": 0,
+    "siteMapChanges": 0,
+    "automaticRetries": 0,
+    "candidateOrScheduleWrites": 0,
+    "providerCalls": 0,
+    "invitations": 0
+  }
+}

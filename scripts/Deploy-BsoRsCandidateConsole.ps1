@@ -8,6 +8,7 @@ param(
     [switch]$DevelopmentSourceAhead,
     [string]$NormalReferenceSelectorsReleaseManifestPath,
     [string]$NormalModeReleaseManifestPath,
+    [string]$CandidateConsolePhase22AReleaseManifestPath,
     [Alias('RecordCallReleaseManifestPath', 'SchedulingUiReleaseManifestPath', 'Round1SchedulingReleaseManifestPath')][string]$CandidatePaginationReleaseManifestPath,
     [switch]$PublishOnly,
     [switch]$ReconcilePublishOnly,
@@ -187,9 +188,11 @@ $normalReferenceRelease = $null
 $normalOnlyRelease = $false
 $normalModeRelease = $null
 $candidatePaginationRelease = $null
+$phase22AUiRelease = $null
 $sourceAheadRelease = $null
 if (-not [string]::IsNullOrWhiteSpace($NormalReferenceSelectorsReleaseManifestPath)) {
     if (-not [string]::IsNullOrWhiteSpace($NormalModeReleaseManifestPath) -or
+        -not [string]::IsNullOrWhiteSpace($CandidateConsolePhase22AReleaseManifestPath) -or
         -not [string]::IsNullOrWhiteSpace($CandidatePaginationReleaseManifestPath)) {
         throw 'CANDIDATE_CONSOLE_RELEASE_MANIFEST_AMBIGUOUS'
     }
@@ -258,6 +261,7 @@ if (-not [string]::IsNullOrWhiteSpace($NormalModeReleaseManifestPath)) {
     if (-not $DevelopmentSourceAhead -or
         [IO.Path]::GetFullPath($NormalModeReleaseManifestPath) -cne $expectedManifestPath -or
         -not [string]::IsNullOrWhiteSpace($NormalReferenceSelectorsReleaseManifestPath) -or
+        -not [string]::IsNullOrWhiteSpace($CandidateConsolePhase22AReleaseManifestPath) -or
         -not [string]::IsNullOrWhiteSpace($CandidatePaginationReleaseManifestPath)) {
         throw 'NORMAL_MODE_RELEASE_AUTHORIZATION_REQUIRED'
     }
@@ -321,7 +325,8 @@ if (-not [string]::IsNullOrWhiteSpace($CandidatePaginationReleaseManifestPath)) 
         (-not $recordCallPatch -and -not $schedulingUiPatch -and -not $schedulingEnginePatch -and -not $manualSchedulingPatch -and
             [IO.Path]::GetFullPath($CandidatePaginationReleaseManifestPath) -cne $expectedManifestPath) -or
         -not [string]::IsNullOrWhiteSpace($NormalReferenceSelectorsReleaseManifestPath) -or
-        -not [string]::IsNullOrWhiteSpace($NormalModeReleaseManifestPath)) {
+        -not [string]::IsNullOrWhiteSpace($NormalModeReleaseManifestPath) -or
+        -not [string]::IsNullOrWhiteSpace($CandidateConsolePhase22AReleaseManifestPath)) {
         throw 'CANDIDATE_PAGINATION_RELEASE_AUTHORIZATION_REQUIRED'
     }
     $candidatePaginationRelease = Get-Content -LiteralPath $CandidatePaginationReleaseManifestPath -Raw | ConvertFrom-Json
@@ -380,6 +385,74 @@ if (-not [string]::IsNullOrWhiteSpace($CandidatePaginationReleaseManifestPath)) 
     $sourceAheadRelease = $candidatePaginationRelease
     $developmentSourceAheadUnchangedNames += 'os_/bso/candidate-console-policy.js'
 }
+if (-not [string]::IsNullOrWhiteSpace($CandidateConsolePhase22AReleaseManifestPath)) {
+    $expectedManifestPath = Join-Path $repositoryRoot 'docs\CANDIDATE_CONSOLE_PHASE_2_2A_RELEASE_MANIFEST.json'
+    $expectedNames = @(
+        'os_/bso/candidate-console.css',
+        'os_/bso/candidate-console.html',
+        'os_/bso/candidate-console.js'
+    )
+    $phase22AUiRelease = Get-Content -LiteralPath $CandidateConsolePhase22AReleaseManifestPath -Raw |
+        ConvertFrom-Json
+    $actualNames = @($phase22AUiRelease.resources | ForEach-Object { [string]$_.name } | Sort-Object -CaseSensitive)
+    if (-not $DevelopmentSourceAhead -or
+        [IO.Path]::GetFullPath($CandidateConsolePhase22AReleaseManifestPath) -cne $expectedManifestPath -or
+        -not [string]::IsNullOrWhiteSpace($NormalReferenceSelectorsReleaseManifestPath) -or
+        -not [string]::IsNullOrWhiteSpace($NormalModeReleaseManifestPath) -or
+        -not [string]::IsNullOrWhiteSpace($CandidatePaginationReleaseManifestPath) -or
+        $phase22AUiRelease.manifestVersion -ne 1 -or
+        $phase22AUiRelease.scope -cne 'PHASE_2_2A_UNIFIED_ROUND1_UI' -or
+        $phase22AUiRelease.environmentName -cne $target.EnvironmentName -or
+        $phase22AUiRelease.appUniqueName -cne $target.AppUniqueName -or
+        $phase22AUiRelease.solutionUniqueName -cne $target.SolutionUniqueName -or
+        $phase22AUiRelease.ownerAuthorization -cne 'APPROVED_IN_DEPLOYMENT_REQUEST' -or
+        $phase22AUiRelease.customApiChanges -ne 0 -or
+        $phase22AUiRelease.environmentConfigurationChanges -ne 0 -or
+        $phase22AUiRelease.flowChanges -ne 0 -or
+        $phase22AUiRelease.backendChanges -ne 0 -or
+        $phase22AUiRelease.schemaChanges -ne 0 -or
+        $phase22AUiRelease.securityMetadataChanges -ne 0 -or
+        @($phase22AUiRelease.resources).Count -ne 3 -or
+        [string]::Join('|', $actualNames) -cne [string]::Join('|', $expectedNames) -or
+        [string]::Join('|', @($phase22AUiRelease.uiContract.fieldOrder)) -cne
+            'Interview Type|Interview Date|Meeting Room|Interviewer / TA|Availability status|30-minute time blocks|Confirm Booking' -or
+        $phase22AUiRelease.uiContract.dateControlCount -ne 1 -or
+        $phase22AUiRelease.uiContract.onlineHidesAndClearsRoom -ne $true -or
+        $phase22AUiRelease.uiContract.offlineRequiresRoom -ne $true -or
+        $phase22AUiRelease.uiContract.authorizedCandidateAndTAContextPreserved -ne $true -or
+        $phase22AUiRelease.uiContract.unverifiedAvailabilitySelectable -ne $false -or
+        $phase22AUiRelease.uiContract.staleAvailabilityInvalidatedOnInputChange -ne $true -or
+        $phase22AUiRelease.uiContract.manualSchedulingPreserved -ne $true -or
+        $phase22AUiRelease.uiContract.candidateDashboardAndHistoryPreserved -ne $true -or
+        $phase22AUiRelease.normalScheduling.providerTrust -cne 'BLOCKED' -or
+        $phase22AUiRelease.normalScheduling.availabilityRequestsEnabled -ne $false -or
+        $phase22AUiRelease.normalScheduling.slotSelectionEnabled -ne $false -or
+        $phase22AUiRelease.normalScheduling.automaticScheduleSaveEnabled -ne $false -or
+        $phase22AUiRelease.normalScheduling.confirmBookingEnabled -ne $false -or
+        $phase22AUiRelease.normalScheduling.onlineScheduleWritesEnabled -ne $false -or
+        $phase22AUiRelease.deployment.resourceCount -ne 3 -or
+        $phase22AUiRelease.deployment.publishAllXml -ne 0 -or
+        $phase22AUiRelease.deployment.siteMapChanges -ne 0 -or
+        $phase22AUiRelease.deployment.automaticRetries -ne 0 -or
+        $phase22AUiRelease.deployment.candidateOrScheduleWrites -ne 0 -or
+        $phase22AUiRelease.deployment.providerCalls -ne 0 -or
+        $phase22AUiRelease.deployment.invitations -ne 0) {
+        throw 'CANDIDATE_CONSOLE_PHASE_2_2A_RELEASE_AUTHORIZATION_REQUIRED'
+    }
+    $developmentSourceAheadHashes = @{}
+    foreach ($resource in $phase22AUiRelease.resources) {
+        if ($resource.sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+            $resource.previousSha256 -cnotmatch '^[0-9a-f]{64}$') {
+            throw 'CANDIDATE_CONSOLE_PHASE_2_2A_RELEASE_AUTHORIZATION_REQUIRED'
+        }
+        $developmentSourceAheadHashes[[string]$resource.name] = [string]$resource.sha256
+    }
+    $developmentSourceAheadUnchangedNames = @(
+        'os_/bso/candidate-console-environment.js',
+        'os_/bso/candidate-console-policy.js'
+    )
+    $sourceAheadRelease = $phase22AUiRelease
+}
 if (-not $candidatePaginationRelease -and -not [string]::IsNullOrWhiteSpace($PreviousEnvironmentHtmlPath)) {
     throw 'Previous HTML evidence is accepted only for the Candidate pagination release.'
 }
@@ -391,9 +464,16 @@ if ($DevelopmentSourceAhead) {
         $RefreshResourceNames.Count -ne $allowedDevelopmentNames.Count -or
         [string]::Join('|', $selectedDevelopmentNames) -cne
             [string]::Join('|', $allowedDevelopmentNames) -or
-        [string]::IsNullOrWhiteSpace($EnvironmentConfigurationPath) -or
-        [string]::IsNullOrWhiteSpace($EnvironmentHtmlPath) -or
+        ($phase22AUiRelease -and
+            (-not [string]::IsNullOrWhiteSpace($EnvironmentConfigurationPath) -or
+             -not [string]::IsNullOrWhiteSpace($EnvironmentHtmlPath))) -or
+        (-not $phase22AUiRelease -and
+            ([string]::IsNullOrWhiteSpace($EnvironmentConfigurationPath) -or
+             [string]::IsNullOrWhiteSpace($EnvironmentHtmlPath))) -or
         -not [string]::IsNullOrWhiteSpace($BaselineSnapshotPath)) {
+        if ($phase22AUiRelease) {
+            throw 'Phase 2.2A source-ahead refresh requires the exact reviewed three-resource set and no external configuration replacement.'
+        }
         throw 'Development source-ahead refresh requires the exact reviewed resource set and matching external DEV configuration.'
     }
     foreach ($resourceName in $allowedDevelopmentNames) {
@@ -410,6 +490,20 @@ if ($DevelopmentSourceAhead) {
             throw 'CANDIDATE_CONSOLE_SOURCE_CONTENT_DRIFT'
         }
         $expectedCandidateConsoleHashes[$resourceName] = $sourceHash
+    }
+    if ($phase22AUiRelease) {
+        $html = [IO.File]::ReadAllText(
+            [string]@($allResources | Where-Object Name -CEQ 'os_/bso/candidate-console.html')[0].Path
+        )
+        $jsHash = [string]$developmentSourceAheadHashes['os_/bso/candidate-console.js']
+        $cssHash = [string]$developmentSourceAheadHashes['os_/bso/candidate-console.css']
+        $jsTokens = [regex]::Matches($html, 'candidate-console\.js\?v=([0-9a-f]{12})')
+        $cssTokens = [regex]::Matches($html, 'candidate-console\.css\?v=([0-9a-f]{12})')
+        if ($jsTokens.Count -ne 1 -or $cssTokens.Count -ne 1 -or
+            [string]$jsTokens[0].Groups[1].Value -cne $jsHash.Substring(0, 12) -or
+            [string]$cssTokens[0].Groups[1].Value -cne $cssHash.Substring(0, 12)) {
+            throw 'CANDIDATE_CONSOLE_PHASE_2_2A_CACHE_TOKEN_MISMATCH'
+        }
     }
 }
 foreach ($resourceName in $canonicalCandidateConsoleNames) {
@@ -439,7 +533,7 @@ foreach ($resourceName in $canonicalCandidateConsoleNames) {
 $script:ApiRoot = $target.OrganizationUrl + '/api/data/v9.2/'
 $relativeEvidencePath = [IO.Path]::GetRelativePath($repositoryRoot, [IO.Path]::GetFullPath($EvidencePath))
 $script:AccessToken = $null
-$script:Counts = @{ GET = 0; POST = 0; PATCH = 0 }
+$script:Counts = @{ GET = 0; POST = 0; PATCH = 0; SERVED_GET = 0 }
 $script:Journal = $null
 $script:JournalPath = $EvidencePath
 $script:RefreshContentChecks = [System.Collections.Generic.List[object]]::new()
@@ -555,7 +649,8 @@ $hasEnvironmentResource = $resources.Name -ccontains 'os_/bso/candidate-console-
 $hasHtmlResource = $resources.Name -ccontains 'os_/bso/candidate-console.html'
 $environmentConfiguration = $null
 $configurationHash = $null
-if (-not ($PublishOnly -or $ReconcilePublishOnly) -and ($hasEnvironmentResource -or $hasHtmlResource)) {
+if (-not ($PublishOnly -or $ReconcilePublishOnly) -and
+    ($hasEnvironmentResource -or $hasHtmlResource) -and -not $phase22AUiRelease) {
     if ([string]::IsNullOrWhiteSpace($EnvironmentConfigurationPath)) {
         throw 'The selected configuration or HTML refresh requires an externally generated environment configuration.'
     }
@@ -662,7 +757,8 @@ if (-not ($PublishOnly -or $ReconcilePublishOnly) -and ($hasEnvironmentResource 
     -not [string]::IsNullOrWhiteSpace($EnvironmentConfigurationPath)) {
     throw 'An external environment configuration is accepted only for its resource or its matching HTML refresh.'
 }
-if (-not ($PublishOnly -or $ReconcilePublishOnly) -and $hasHtmlResource) {
+if (-not ($PublishOnly -or $ReconcilePublishOnly) -and $hasHtmlResource -and
+    -not $phase22AUiRelease) {
     if ([string]::IsNullOrWhiteSpace($EnvironmentHtmlPath)) {
         throw 'The HTML refresh requires an externally generated cache-busted HTML file.'
     }
@@ -830,11 +926,52 @@ function Get-DataverseJson {
     $response.Content | ConvertFrom-Json
 }
 
+function Get-ServedWebResourceState {
+    param([Parameter(Mandatory)][pscustomobject]$Resource)
+    $expectedHash = [string]$expectedCandidateConsoleHashes[$Resource.Name]
+    $query = if ($expectedHash -match '^[0-9a-f]{64}$') {
+        "?v=$($expectedHash.Substring(0, 12))"
+    } else {
+        ''
+    }
+    $uri = [Uri]("$($target.OrganizationUrl.TrimEnd('/'))/WebResources/$($Resource.Name)$query")
+    if ($uri.Scheme -cne 'https' -or
+        $uri.Authority -ine ([Uri]$target.OrganizationUrl).Authority -or
+        $uri.AbsolutePath -cne "/WebResources/$($Resource.Name)" -or
+        $uri.UserInfo -or $uri.Fragment) {
+        throw 'Candidate Console served-resource request is outside the verified VN LMV IT origin.'
+    }
+    try {
+        $response = Invoke-WebRequest -Uri $uri -Method GET -Headers @{
+            Authorization = "Bearer $script:AccessToken"
+            'Cache-Control' = 'no-cache'
+        } -MaximumRetryCount 0 -MaximumRedirection 0 -TimeoutSec 120 -SkipHttpErrorCheck
+    } catch {
+        throw 'Candidate Console served-resource read failed.'
+    }
+    $script:Counts.SERVED_GET++
+    if ([int]$response.StatusCode -lt 200 -or [int]$response.StatusCode -ge 300) {
+        throw 'Candidate Console served-resource read returned an unsuccessful status.'
+    }
+    $bytes = [byte[]]$response.RawContentStream.ToArray()
+    if ($bytes.Length -eq 0) {
+        throw 'Candidate Console served-resource response was empty.'
+    }
+    [pscustomobject]@{
+        Sha256 = [Convert]::ToHexString(
+            [Security.Cryptography.SHA256]::HashData($bytes)
+        ).ToLowerInvariant()
+        CacheControl = [string]$response.Headers['Cache-Control']
+        ETag = [string]$response.Headers['ETag']
+        LastModified = [string]$response.Headers['Last-Modified']
+    }
+}
+
 function Get-CurrentWebResource {
     param([Parameter(Mandatory)][string]$ResourceId)
     $currentVersions = Get-DataverseJson -Path (
         "$($target.WebResourceEntitySet)/Microsoft.Dynamics.CRM.RetrieveUnpublishedMultiple()?" +
-        "%24select=webresourceid,webresourceidunique,name,displayname,webresourcetype,content,componentstate,modifiedon&" +
+        "%24select=webresourceid,webresourceidunique,name,displayname,webresourcetype,content,componentstate,modifiedon,versionnumber&" +
         "%24filter=webresourceid%20eq%20$ResourceId"
     )
     $currentRows = @($currentVersions.value | Where-Object {
@@ -930,7 +1067,7 @@ function Get-ExactWebResourceState {
     $current = Get-CurrentWebResource -ResourceId $ResourceId
     $published = Get-DataverseJson -Path (
         "$($target.WebResourceEntitySet)($ResourceId)?" +
-        "%24select=webresourceid,webresourceidunique,name,displayname,webresourcetype,content,componentstate,modifiedon"
+        "%24select=webresourceid,webresourceidunique,name,displayname,webresourcetype,content,componentstate,modifiedon,versionnumber"
     )
     if ($null -eq $published) {
         throw 'Published Candidate Console web resource evidence is missing.'
@@ -962,16 +1099,32 @@ function Get-ExactWebResourceState {
     $publishedSha256 = [Convert]::ToHexString(
         [Security.Cryptography.SHA256]::HashData($publishedBytes)
     ).ToLowerInvariant()
+    $effectiveSha256 = $null
+    $effectiveEvidence = 'NOT_VERIFIED'
+    $servedHeaders = $null
+    if ($null -ne $phase22AUiRelease) {
+        $served = Get-ServedWebResourceState -Resource $Resource
+        $effectiveSha256 = $served.Sha256
+        $effectiveEvidence = 'AUTHENTICATED_DIRECT_WEBRESOURCE_GET'
+        $servedHeaders = [ordered]@{
+            CacheControl = $served.CacheControl
+            ETag = $served.ETag
+            LastModified = $served.LastModified
+        }
+    }
     [pscustomobject]@{
         WebResourceId = $ResourceId
         WebResourceIdUnique = [string]$published.webresourceidunique
         CurrentReadPath = $current.ReadPath
         CurrentSha256 = $currentSha256
         PublishedSha256 = $publishedSha256
-        EffectiveSha256 = $null
-        EffectiveEvidence = 'NOT_VERIFIED'
+        EffectiveSha256 = $effectiveSha256
+        EffectiveEvidence = $effectiveEvidence
+        ServedHeaders = $servedHeaders
         CurrentComponentState = $current.Row.componentstate
         PublishedComponentState = $published.componentstate
+        CurrentVersionNumber = [string]$current.Row.versionnumber
+        PublishedVersionNumber = [string]$published.versionnumber
         CurrentModifiedOn = $current.Row.modifiedon
         PublishedModifiedOn = $published.modifiedon
         CurrentContentBase64 = [Convert]::ToBase64String($currentBytes)
@@ -1019,13 +1172,46 @@ function Assert-PublishedWebResourceReadback {
             Save-Journal
             throw "Scoped publication was accepted but published web resource readback differs: $($resource.Name)"
         }
-        $entries[0].State = 'PUBLISHED_GET_RECONCILED'
+        if ($null -ne $phase22AUiRelease) {
+            $state = Get-ExactWebResourceState -Resource $resource -ResourceId $resourceId
+            $expectedSha256 = [Convert]::ToHexString(
+                [Security.Cryptography.SHA256]::HashData([IO.File]::ReadAllBytes($resource.Path))
+            ).ToLowerInvariant()
+            if ($state.CurrentSha256 -cne $expectedSha256 -or
+                $state.PublishedSha256 -cne $expectedSha256 -or
+                $state.EffectiveSha256 -cne $expectedSha256 -or
+                [int]$state.CurrentComponentState -ne 0 -or
+                [int]$state.PublishedComponentState -ne 0 -or
+                [string]::IsNullOrWhiteSpace($state.CurrentVersionNumber) -or
+                [string]::IsNullOrWhiteSpace($state.PublishedVersionNumber)) {
+                $entries[0].State = 'CURRENT_PUBLISHED_SERVED_GET_RECONCILIATION_FAILED'
+                $script:Journal.Result = 'PUBLISH_ACCEPTED_RECONCILIATION_FAILED'
+                Save-Journal
+                throw "Published, current, or served Phase 2.2A resource readback differs: $($resource.Name)"
+            }
+            $script:Journal.PostPublishState[$resource.Name] = [ordered]@{
+                WebResourceId = $resourceId
+                CurrentVersionNumber = $state.CurrentVersionNumber
+                PublishedVersionNumber = $state.PublishedVersionNumber
+                CurrentComponentState = $state.CurrentComponentState
+                PublishedComponentState = $state.PublishedComponentState
+                CurrentSha256 = $state.CurrentSha256
+                PublishedSha256 = $state.PublishedSha256
+                ServedSha256 = $state.EffectiveSha256
+                ServedEvidence = $state.EffectiveEvidence
+                ServedHeaders = $state.ServedHeaders
+                ExpectedSha256 = $expectedSha256
+            }
+            $entries[0].State = 'CURRENT_PUBLISHED_SERVED_GET_RECONCILED'
+        } else {
+            $entries[0].State = 'PUBLISHED_GET_RECONCILED'
+        }
         Save-Journal
     }
 }
 
 function Assert-PacTarget {
-    $output = @(& pac org who --json 2>&1)
+    $output = @(& pac org who --environment $target.OrganizationUrl --json 2>&1)
     if ($LASTEXITCODE -ne 0) {
         if ($PublishOnly) { throw 'MANAGED_ARTIFACT_SOURCE_QUALIFICATION_FAILED' }
         throw 'PAC identity check failed; no sign-in or environment switch was attempted.'
@@ -1114,7 +1300,7 @@ function Assert-ExistingSiteMapNode {
     $candidateTitle = if ($candidateNodes.Count -eq 1) {
         $candidateNodes[0].SelectSingleNode("./*[local-name()='Titles']/*[local-name()='Title'][@LCID='1033']")
     }
-    if ($subareas.Count -ne 5 -or $candidateNodes.Count -ne 1 -or
+    if ($subareas.Count -ne 6 -or $candidateNodes.Count -ne 1 -or
         $candidateNodes[0].GetAttribute('Url') -cne '$webresource:os_/bso/candidate-console.html' -or
         $null -eq $candidateTitle -or $candidateTitle.GetAttribute('Title') -cne 'Candidate Management') {
         throw 'Existing Candidate Management sitemap navigation is missing or differs from the expected web resource.'
@@ -1123,8 +1309,9 @@ function Assert-ExistingSiteMapNode {
         $title = $_.SelectSingleNode("./*[local-name()='Titles']/*[local-name()='Title'][@LCID='1033']")
         if ($title) { $title.GetAttribute('Title') } else { '' }
     })
-    if ([string]::Join('|', $existingTitles) -cne 'TA Directory|Positions|Candidate Sources|Locations') {
-        throw 'Existing srapp navigation differs from the verified four-page baseline.'
+    if ([string]::Join('|', $existingTitles) -cne
+        'TA Directory|Positions|Candidate Sources|Locations|Recruitment Dashboard') {
+        throw 'Existing srapp navigation differs from the verified reference pages and dashboard.'
     }
     $document
 }
@@ -1299,7 +1486,9 @@ try {
             $unchangedId = [string]$unchangedMatches[0].webresourceid
             $unchangedState = Get-ExactWebResourceState `
                 -Resource $unchangedResource[0] -ResourceId $unchangedId
-            $unchangedExpectedHash = if ($unchangedName -ceq 'os_/bso/candidate-console-environment.js') {
+            $unchangedExpectedHash = if ($null -ne $phase22AUiRelease) {
+                [string]$expectedCandidateConsoleHashes[$unchangedName]
+            } elseif ($unchangedName -ceq 'os_/bso/candidate-console-environment.js') {
                 [string]$configurationHash
             } else {
                 [Convert]::ToHexString(
@@ -1321,10 +1510,12 @@ try {
                 -CurrentSha256 $unchangedState.CurrentSha256 `
                 -ExpectedSha256 $unchangedExpectedHash
             if (-not $unchangedEquivalence.IsReconciled -or
+                ($null -ne $phase22AUiRelease -and
+                    $unchangedState.EffectiveSha256 -cne $unchangedExpectedHash) -or
                 [int]$unchangedState.CurrentComponentState -ne 0 -or
                 [int]$unchangedState.PublishedComponentState -ne 0 -or
                 $unchangedMembershipCount -ne 1) {
-                throw 'CANDIDATE_CONSOLE_SOURCE_BASELINE_UNRECONCILED'
+                throw "CANDIDATE_CONSOLE_SOURCE_BASELINE_UNRECONCILED:${unchangedName}:CURRENT=$($unchangedState.CurrentSha256):PUBLISHED=$($unchangedState.PublishedSha256):SERVED=$($unchangedState.EffectiveSha256):EXPECTED=${unchangedExpectedHash}:CURRENT_VERSION=$($unchangedState.CurrentVersionNumber):PUBLISHED_VERSION=$($unchangedState.PublishedVersionNumber):CURRENT_STATE=$($unchangedState.CurrentComponentState):PUBLISHED_STATE=$($unchangedState.PublishedComponentState):MEMBERSHIP=$unchangedMembershipCount"
             }
             $script:RefreshContentChecks.Add([ordered]@{
                 Name = $unchangedName
@@ -1333,6 +1524,9 @@ try {
                 ExpectedSha256 = $unchangedExpectedHash
                 CurrentSha256 = $unchangedState.CurrentSha256
                 PublishedSha256 = $unchangedState.PublishedSha256
+                ServedSha256 = $unchangedState.EffectiveSha256
+                CurrentVersionNumber = $unchangedState.CurrentVersionNumber
+                PublishedVersionNumber = $unchangedState.PublishedVersionNumber
                 PublishedMatchesCurrent = $unchangedState.PublishedMatchesCurrent
                 SolutionMembershipCount = $unchangedMembershipCount
             })
@@ -1376,6 +1570,7 @@ try {
             $localBytes = [IO.File]::ReadAllBytes($resource.Path)
             $remoteHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($remoteBytes)).ToLowerInvariant()
             $localHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($localBytes)).ToLowerInvariant()
+            $state = $null
             if ($null -ne $sourceAheadRelease) {
                 $pin = @($sourceAheadRelease.resources | Where-Object name -CEQ $resource.Name)
                 if ($pin.Count -ne 1) {
@@ -1383,7 +1578,12 @@ try {
                 }
                 $state = Get-ExactWebResourceState -Resource $resource -ResourceId $resourceId
                 if (-not $state.PublishedMatchesCurrent -or
-                    $state.CurrentSha256 -cne $pin[0].previousSha256) {
+                    $state.CurrentSha256 -cne $pin[0].previousSha256 -or
+                    $state.PublishedSha256 -cne $pin[0].previousSha256 -or
+                    [int]$state.CurrentComponentState -ne 0 -or
+                    [int]$state.PublishedComponentState -ne 0 -or
+                    ($null -ne $phase22AUiRelease -and
+                        $state.EffectiveSha256 -cne $pin[0].previousSha256)) {
                     throw "CANDIDATE_CONSOLE_SOURCE_BASELINE_UNRECONCILED:$($resource.Name):CURRENT=$($state.CurrentSha256):PUBLISHED_MATCHES_CURRENT=$($state.PublishedMatchesCurrent):EXPECTED_PREVIOUS=$($pin[0].previousSha256)"
                 }
                 $script:RefreshBaselineResources.Add($state)
@@ -1417,6 +1617,10 @@ try {
                     CurrentSha256 = $remoteHash
                     PublishedContentBase64 = [Convert]::ToBase64String($publishedBytes)
                     PublishedSha256 = $publishedHash
+                    ServedSha256 = $state.EffectiveSha256
+                    ServedEvidence = $state.EffectiveEvidence
+                    CurrentVersionNumber = $state.CurrentVersionNumber
+                    PublishedVersionNumber = $state.PublishedVersionNumber
                     PublishedMatchesCurrent = $publishedMatchesCurrent
                     CurrentComponentState = $effective.Row.componentstate
                     PublishedComponentState = $published.componentstate
@@ -1431,6 +1635,9 @@ try {
                 LocalSha256 = $localHash
                 CurrentSha256 = $remoteHash
                 PublishedSha256 = $publishedHash
+                ServedSha256 = if ($null -ne $state) { $state.EffectiveSha256 } else { $null }
+                CurrentVersionNumber = if ($null -ne $state) { $state.CurrentVersionNumber } else { $null }
+                PublishedVersionNumber = if ($null -ne $state) { $state.PublishedVersionNumber } else { $null }
                 PublishedMatchesCurrent = $publishedMatchesCurrent
             })
         }
@@ -1637,7 +1844,9 @@ try {
             }
             [ordered]@{
                 Result = if ($DevelopmentSourceAhead) {
-                    if ($normalOnlyRelease) {
+                        if ($phase22AUiRelease) {
+                            'CANDIDATE_CONSOLE_PHASE_2_2A_RELEASE_PREFLIGHT_READY'
+                        } elseif ($normalOnlyRelease) {
                         'CANDIDATE_CONSOLE_NORMAL_ONLY_RELEASE_PREFLIGHT_READY'
                     } elseif ($normalModeRelease) {
                         'CANDIDATE_CONSOLE_NORMAL_MODE_RELEASE_PREFLIGHT_READY'
@@ -1664,6 +1873,7 @@ try {
                 SourceAheadReleaseScope = [string]$sourceAheadRelease.scope
                 NormalOnlyRelease = [bool]$normalOnlyRelease
                 NormalModeRelease = [bool]$normalModeRelease
+                Phase22AUiRelease = $null -ne $phase22AUiRelease
                 Writes = 0
                 AutomaticRetries = 0
             } | ConvertTo-Json -Depth 8
@@ -1698,12 +1908,14 @@ try {
             SolutionUniqueName = $target.SolutionUniqueName
             DevelopmentSourceAhead = [bool]$DevelopmentSourceAhead
             SourceAheadReleaseScope = [string]$sourceAheadRelease.scope
+            Phase22AUiRelease = $null -ne $phase22AUiRelease
             NormalModeRelease = [bool]$normalModeRelease
             Dispatches = [System.Collections.Generic.List[object]]::new()
             ResourceIds = @()
             SiteMapPatch = 'NOT_DISPATCHED'
             PublishXml = 'NOT_DISPATCHED'
             PrePublishHashes = [ordered]@{}
+            PostPublishState = [ordered]@{}
             RequestCounts = $script:Counts
             AutomaticRetries = 0
         }
@@ -2108,11 +2320,17 @@ try {
         $publishEntry.State = "ACCEPTED:$($publish.StatusCode)"
         $script:Journal.PublishXml = "ACCEPTED:$($publish.StatusCode)"
         Assert-PublishedWebResourceReadback
-        $script:Journal.Result = 'CANDIDATE_CONSOLE_REFRESHED'
+        $script:Journal.Result = if ($null -ne $phase22AUiRelease) {
+            'CANDIDATE_CONSOLE_PHASE_2_2A_RELEASE_PUBLISHED'
+        } else {
+            'CANDIDATE_CONSOLE_REFRESHED'
+        }
         Save-Journal
         [ordered]@{
             Result = if ($DevelopmentSourceAhead) {
-                if ($normalOnlyRelease) {
+                if ($null -ne $phase22AUiRelease) {
+                    'CANDIDATE_CONSOLE_PHASE_2_2A_RELEASE_PUBLISHED'
+                } elseif ($normalOnlyRelease) {
                     'CANDIDATE_CONSOLE_NORMAL_ONLY_RELEASE_PUBLISHED'
                 } elseif ($normalModeRelease) {
                     'CANDIDATE_CONSOLE_NORMAL_MODE_RELEASE_PUBLISHED'
@@ -2131,13 +2349,20 @@ try {
             SourceAheadReleaseScope = [string]$sourceAheadRelease.scope
             NormalOnlyRelease = [bool]$normalOnlyRelease
             NormalModeRelease = [bool]$normalModeRelease
+            Phase22AUiRelease = $null -ne $phase22AUiRelease
             Resources = @($resources | ForEach-Object Name)
             WebResourcePatchCount = $script:Counts.PATCH
             SitemapPatchCount = 0
             PublishXmlCount = 1
             PublishXmlScope = "$($resources.Count) exact web resources"
             PublishAllXml = 0
-            PublishedWebResourceReadback = 'GET_RECONCILED'
+            PublishedWebResourceReadback = if ($null -ne $phase22AUiRelease) {
+                'CURRENT_PUBLISHED_SERVED_GET_RECONCILED'
+            } else {
+                'GET_RECONCILED'
+            }
+            ServedGetCount = $script:Counts.SERVED_GET
+            ResourceHashReadback = $script:Journal.PostPublishState
             AutomaticRetries = 0
             EvidencePath = $EvidencePath
         } | ConvertTo-Json -Depth 8

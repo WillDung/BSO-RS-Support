@@ -1,6 +1,20 @@
 # Current State
 
-## Phase 2.2A approved LIVE release reconciliation (2026-11-25)
+## Phase 2.2A approved production deployment preflight (2026-11-25)
+
+**Status: BLOCKED; no production writes or publication occurred.** PAC's exact-URL `org who` read matched VN LMV IT. The read-only deployment preflight also resolved the expected `srapp`, solution, and existing sitemap identities. Its old sitemap validator expected five subareas; the local helper was corrected to require the existing Candidate Management entry, four reference pages, and Recruitment Dashboard (six total), without changing the sitemap.
+
+The corrected preflight then stopped before reconciling the three selected release resources. It found an unresolved mismatch in the *unchanged* `candidate-console-environment.js`: current, published, and authenticated served SHA-256 are all `94a26871f7149458b2d7930049f2e06c2c3914d280ca40bcfc543fbfb9a00117` (version `14951666`, component state `0`, exact solution membership `1`), while the helper's previously accepted expected hash is `58e03dc262b790b7431f34ca5554422fc86f0d62f6e8b6160805a6b2d906335c`. No content was read into the report and no reason for this difference has been established. Do not repin or replace this environment-specific resource without owner reconciliation.
+
+The external three-resource backup from 2026-11-25 was re-read and its original HTML, JavaScript, and CSS bytes matched their captured current/published/served hashes and resource IDs. That validates the backup files and mapping, not a live restore or rollback. The deployment preflight did not reach a fresh read of the three target WebResources after the environment-resource mismatch; their earlier captured baseline is recorded in the historical reconciliation below and must be revalidated before any future write.
+
+Local release preparation now uses a separate exact three-WebResource Phase 2.2A manifest, a JavaScript and CSS content-hash cache token in HTML, and a scoped helper path. No Custom Page, Flow, schema, sitemap, Candidate/Schedule record, identity, role, provider, or invitation change was made. Availability requests, slot selection, Confirm Booking, and Online schedule writes remain disabled.
+
+Validation executed: `node --test .\tests\CandidateConsoleScheduling.test.cjs` (**28 passed**); `node --check` on the three Console JavaScript resources (**passed**); `pwsh -NoLogo -NoProfile -File .\tests\CandidateConsole.Tests.ps1` (**91 passed**); helper PowerShell parse and `git diff --check` (**passed**). `node --test .\tests\CandidateConsoleIsolation.test.cjs` remains **15/28**, with the same 13 failures previously documented against the pre-Phase-2.2A baseline. The broader `pwsh -NoLogo -NoProfile -File .\tests\BsoRsReleaseSource.Tests.ps1` still fails its unrelated frozen Solution root-count assertion; none of its files were changed here.
+
+**Decision: BLOCKED.** The owner must first establish whether the live environment-configuration hash is an intended update and reconcile the approved baseline; then re-run a fresh three-resource current/draft/published/served preflight and backup check. The documented exclusive publication window covering conditional PATCH, exact scoped `PublishXml`, and readback is also not established by the deployment authorization alone. Do not deploy until these gates pass. No commit or push was made.
+
+## Historical Phase 2.2A LIVE release reconciliation (2026-11-25; before deployment preparation)
 
 **Status: BLOCKED for deployment; read-only LIVE reconciliation and backup capture completed.** PAC identity and a delegated Dataverse `WhoAmI` matched the supplied target as VN LMV IT. Read-only metadata confirmed `srapp` and unmanaged solution `os_sr_bso_rs_support` version `1.0.0.1`. No business rows were read. No production resource was changed or published; no provider, booking, Flow, Custom Page, invitation, or rollback operation was executed.
 

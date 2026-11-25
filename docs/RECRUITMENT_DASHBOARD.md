@@ -1,5 +1,9 @@
 # Recruitment Dashboard
 
+## Phase 2.2A unified Round 1 UI release gate (2026-11-25)
+
+**BLOCKED; local Candidate Console source only, not deployed.** The unified scheduling UI is implemented in the existing Console and its focused offline tests pass, but exact current/draft/published/served hashes and recoverable backups for all three Console WebResources have not been reconciled for release. No Custom Page or Flow changes are in scope; provider availability, booking confirmation, and external booking operations remain disabled. See the [release-gate evidence](CURRENT_STATE.md#phase-22a-unified-round-1-ui-release-gate-2026-11-25).
+
 ## Status
 
 **Phase 2.1 checkpoint (2026-11-25): PARTIAL / exact target and fresh read-only LIVE reconciliation VERIFIED; Studio integration BLOCKED.** PAC matched `https://org14938ec2.crm4.dynamics.com` to VN LMV IT and confirmed `srapp` plus unmanaged solution `os_sr_bso_rs_support` version `1.0.0.1`. The Console verifier returned MATCH across source/current/draft/published/served content for all three WebResources. The existing Custom Page is Published at app version `2026-11-19T06:43:16Z`; its exported binary matches the 2026-11-20 baseline. Target-scoped generated schema types confirm the Candidate, Schedule, TA, and Location identifiers listed in the handoff. No business rows were read, and no Studio edit, publication, provider call, business write, or deployment occurred. Keep the existing preview as fallback and keep the Candidate Console launcher, availability, and external booking disabled. Focused offline tests cover the Console preview and availability UI only; they do not accept the Custom Page. See [Current State](CURRENT_STATE.md#phase-21-candidate-context-integration-checkpoint-2026-11-25).

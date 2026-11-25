@@ -56,7 +56,8 @@ Assert-Test ($html.IndexOf('candidate-console-environment.js') -ge 0 -and
     'Load environment configuration and policy before the console without embedding an environment URL'
 Assert-Test ($script.Contains('fetch("/api/data/v9.2/os_sr_cact"') -and
     $script.Contains('credentials: "same-origin"') -and
-    $script.Contains('body: JSON.stringify(request)') -and
+    $script.Contains('const body = JSON.stringify(request);') -and
+    $script.Contains('      body') -and
     $script.Contains('c.correlation')) 'Call the fixed Candidate Core API with a same-origin JSON request and resolve CreateCandidate by its correlation'
 $coreInvokeStart = $script.IndexOf('async function sendCandidateCoreRequest')
 $coreInvokeEnd = $script.IndexOf('async function invokeCandidateCore', $coreInvokeStart)

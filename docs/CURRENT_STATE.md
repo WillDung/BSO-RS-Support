@@ -1,5 +1,17 @@
 # Current State
 
+## Phase 2.2A unified Round 1 UI release gate (2026-11-25)
+
+**Status: BLOCKED; the UI is local source only and has not been deployed.** The approved Phase 2.2A implementation is present in the Candidate Console HTML, JavaScript, CSS, and offline scheduling tests. This gate corrected the JavaScript cache token in the HTML to match the local JavaScript SHA-256 prefix and repaired the stale PowerShell assertion for the equivalent request-body serialization. No provider, booking, Flow, Custom Page, business-record, or deployment operation was performed.
+
+Fresh read-only PAC checks confirmed VN LMV IT, `srapp`, and unmanaged solution `os_sr_bso_rs_support` version `1.0.0.1`. The three published WebResource records report HTML version `15695115`, JavaScript version `15695110`, and CSS version `14754315`, matching the previously recorded version metadata. Those version numbers do not establish current/unpublished, published-content, or served-byte hashes. The 2026-11-25 source/current/draft/published/served hash match predates the Phase 2.2A source edits; the modified local Console source is ahead of that baseline. Full fresh reconciliation is therefore **BLOCKED**, not passed.
+
+No verified recoverable backup for the exact three Console WebResources or verified rollback path was established. The existing deployer’s baseline-snapshot mode is limited to its two-resource release-neutral profile; its normal source pins still describe an earlier Console release. Neither is sufficient evidence for this three-resource release, and no deployment was attempted.
+
+Offline validation: the focused Candidate Console Node set passed **104 tests**, including **28 scheduling tests**; the synthetic Round 1 Candidate Core harness passed **154 checks**; Console configuration and DEV change-set PowerShell suites passed **35** and **24** checks. `CandidateConsole.Tests.ps1` now passes the corrected serialization assertion but stops at a separate existing assertion that rejects any `<dialog>` even though the pre-existing booking-context dialog is in the parent revision. The broader Node selection passed **119/132**; its **13 CandidateConsoleIsolation failures** match the pre-existing failure count recorded before the Phase 2.2A source change. JavaScript syntax, local JS cache-token equality, and `git diff --check` passed.
+
+**Decision: BLOCKED for owner-approved UI deployment.** Resume only after a read-only procedure reconciles exact source/current/draft/published/served content for all three resources and captures recoverable backups with an owner-verified rollback path. No LIVE component was written in this gate; the published version numbers observed match the prior baseline. The Custom Page and Flows are outside this UI-only scope. No commit or push was created in this gate.
+
 ## Phase 2.1 Candidate-context integration checkpoint (2026-11-25)
 
 **Status: PARTIAL; exact-target verification and fresh read-only LIVE reconciliation PASSED; Studio integration remains BLOCKED.** On 2026-11-25, PAC confirmed that `https://org14938ec2.crm4.dynamics.com` is VN LMV IT. The same target contains model-driven app `srapp` and unmanaged solution `os_sr_bso_rs_support` version `1.0.0.1`. No target-specific query was made before that exact match.

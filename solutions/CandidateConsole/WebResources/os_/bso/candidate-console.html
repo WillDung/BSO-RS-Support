@@ -4,11 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Candidate Management</title>
-  <link rel="stylesheet" href="candidate-console.css?v=9878bdb7fa25">
+  <link rel="stylesheet" href="candidate-console.css?v=b222deb57a2e">
   <script src="../../ClientGlobalContext.js.aspx"></script>
   <script defer src="candidate-console-environment.js?v=21ddcd925916"></script>
   <script defer src="candidate-console-policy.js?v=fbefadd65caa"></script>
-  <script defer src="candidate-console.js?v=10dbff924e52"></script>
+  <script defer src="candidate-console.js?v=998badeab4e5"></script>
 </head>
 <body>
   <main class="shell">
@@ -280,14 +280,21 @@
           <input id="scheduling-candidate" readonly>
         </label>
         <form id="scheduling-form" class="form-grid">
-          <label class="field">
-            <span>Interview Type <b aria-hidden="true">*</b></span>
-            <select id="scheduling-interview-type" required>
-              <option value="">Select Online or Offline</option>
-              <option value="online">Online</option>
-              <option value="offline">Offline</option>
-            </select>
-          </label>
+          <fieldset id="scheduling-interview-type" class="field scheduling-interview-type-group">
+            <legend>Interview Type <b aria-hidden="true">*</b></legend>
+            <div class="segmented-control">
+              <label class="segmented-option">
+                <input id="scheduling-interview-type-online" type="radio" name="scheduling-interview-type"
+                  value="online" required>
+                <span>Online</span>
+              </label>
+              <label class="segmented-option">
+                <input id="scheduling-interview-type-offline" type="radio" name="scheduling-interview-type"
+                  value="offline" required>
+                <span>Offline</span>
+              </label>
+            </div>
+          </fieldset>
           <label class="field">
             <span>Interview Date <b aria-hidden="true">*</b></span>
             <input id="scheduling-date" type="date" required>

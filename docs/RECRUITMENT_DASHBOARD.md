@@ -1,5 +1,9 @@
 # Recruitment Dashboard
 
+## Phase 2.2B local Candidate Console change (2026-11-25)
+
+The local Candidate Console now presents Interview Type as an accessible Online/Offline segmented radio group. This is **not deployed**: LIVE remains at the Phase 2.2A baseline, and its approved release manifest is unchanged. The edit retains Candidate/Date/TA context, clears and hides Room for Online, requires Room for Offline, invalidates availability evidence on mode changes, and does not enable provider queries, booking, or Online schedule writes. Existing Manual Scheduling and Dashboard/History behavior remain in scope only as regression checks. Availability is still blocked by the server's hard-false trusted-result-handoff gate; Flow publication and an Active connection reference do not establish runtime readiness. See [Phase 2.2B findings and validation](CURRENT_STATE.md#phase-22b-local-segmented-control-implementation-and-availability-gate-2026-11-25). Do not deploy this local source as part of the Phase 2.2A release.
+
 ## Phase 2.2A unified Round 1 UI deployment status (2026-11-25)
 
 **Deployment SUCCESS; owner-observed fresh-session UI acceptance pending.** The owner confirmed an exclusive publishing window. Only the three approved Candidate Console HTML/JS/CSS WebResources were conditionally updated and published; independent current/published/served hashes match the release manifest. Availability, Confirm Booking, and Online schedule writes remain disabled; no business writes, provider requests, invitations, Flow, or Custom Page changes occurred. Rollback payload is verified but LIVE restore remains untested and requires separate approval. See the [controlled release receipt](CURRENT_STATE.md#phase-22a-controlled-ui-release-2026-11-25).

@@ -8,6 +8,8 @@ const source = fs.readFileSync(path.join(__dirname, "..", "solutions", "Candidat
   "WebResources", "os_", "bso", "candidate-console.js"), "utf8");
 const html = fs.readFileSync(path.join(__dirname, "..", "solutions", "CandidateConsole",
   "WebResources", "os_", "bso", "candidate-console.html"), "utf8");
+const css = fs.readFileSync(path.join(__dirname, "..", "solutions", "CandidateConsole",
+  "WebResources", "os_", "bso", "candidate-console.css"), "utf8");
 
 function extract(startText, endText = "\n  }") {
   const start = source.indexOf(startText);
@@ -22,7 +24,7 @@ function harness(singleUserDev = false) {
   const taId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
   function element(id) {
     if (!elements.has(id)) elements.set(id, {
-      id, value: "", children: [], hidden: false, disabled: false,
+      id, value: "", checked: false, children: [], hidden: false, disabled: false,
       dataset: {}, replaceChildren(...children) { this.children = children; },
       appendChild(child) { this.children.push(child); },
       listeners: new Map(),
@@ -98,6 +100,7 @@ function harness(singleUserDev = false) {
     extract("  function sameOptionalGuid("),
     extract("  function assertCandidateCoreStatus("),
     extract("  function requiresTrustedScheduleAvailability("),
+    extract("  function selectedRound1InterviewType("),
     ...["round1GridIntervals", "renderRound1SlotGrid", "setRound1AvailabilityState",
       "isManualRound1Scheduling", "manualRound1Selection", "round1SchedulingMethodChanged",
       "invalidateRound1Availability", "round1Selection", "selectedVerifiedRound1Slot",
@@ -125,6 +128,21 @@ test("scheduling controls follow the unified order with one date and disabled bo
   assert.deepEqual(positions, [...positions].sort((a, b) => a - b));
   assert.equal((html.match(/type="date"/g) || []).length, 1);
   assert.match(html, /id="scheduling-booking-confirm"[^>]*disabled/);
+});
+
+test("Interview Type uses a required native radio group with visible selected and focus states", () => {
+  const group = html.match(/<fieldset id="scheduling-interview-type"[\s\S]*?<\/fieldset>/);
+  assert.ok(group);
+  assert.match(group[0], /<legend>Interview Type/);
+  assert.equal((group[0].match(/type="radio"/g) || []).length, 2);
+  assert.equal((group[0].match(/<label class="segmented-option">/g) || []).length, 2);
+  for (const value of ["online", "offline"]) {
+    assert.match(group[0], new RegExp(
+      `type="radio" name="scheduling-interview-type"[\\s\\S]*?value="${value}" required`));
+  }
+  assert.match(css, /\.segmented-option input:checked\s*\+\s*span/);
+  assert.match(css, /\.segmented-option input:focus-visible\s*\+\s*span/);
+  assert.match(source, /for \(const id of \["scheduling-interview-type-online", "scheduling-interview-type-offline"\]\)\s*\{\s*\$\(id\)\.addEventListener\("change", round1InterviewTypeChanged\)/);
 });
 
 test("NORMAL scheduling defaults assigned TA and disables manual times and unverified slots", () => {
@@ -155,12 +173,17 @@ test("NORMAL scheduling defaults assigned TA and disables manual times and unver
 function readySelection(ui) {
   const date = new Date(Date.now() + 2 * 86400000);
   while ([0, 6].includes(date.getUTCDay())) date.setUTCDate(date.getUTCDate() + 1);
-  ui.element("scheduling-interview-type").value = "offline";
+  setInterviewType(ui, "offline");
   ui.element("scheduling-date").value = date.toISOString().slice(0, 10);
   ui.element("scheduling-location").value = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
   ui.element("scheduling-ta").value = ui.taId;
   ui.context.round1Availability.providerOperational = true;
   return ui.context.round1Selection();
+}
+
+function setInterviewType(ui, type) {
+  ui.element("scheduling-interview-type-online").checked = type === "online";
+  ui.element("scheduling-interview-type-offline").checked = type === "offline";
 }
 
 function envelope(selection, correlationId, slots = true) {
@@ -230,32 +253,38 @@ test("loading, no-slots, provider-error and late-response states fail closed", a
 test("Online hides and clears Room, remains non-bookable, and Offline requires Room", async () => {
   const ui = harness();
   readySelection(ui);
+  const date = ui.element("scheduling-date").value;
+  const ta = ui.element("scheduling-ta").value;
   ui.element("scheduling-location").value = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
   ui.context.round1Availability.providerOperational = true;
   ui.context.round1InterviewTypeChanged();
-  ui.element("scheduling-interview-type").value = "online";
+  setInterviewType(ui, "online");
   ui.context.round1InterviewTypeChanged();
   assert.equal(ui.element("scheduling-location-field").hidden, true);
   assert.equal(ui.element("scheduling-location").required, false);
   assert.equal(ui.element("scheduling-location").value, "");
+  assert.equal(ui.element("scheduling-date").value, date);
+  assert.equal(ui.element("scheduling-ta").value, ta);
   assert.equal(ui.element("scheduling-check-availability").disabled, true);
   assert.equal(ui.element("scheduling-booking-confirm").disabled, true);
   const before = ui.reads.filter(([action]) => action === "GetRound1Availability").length;
   await ui.context.checkRound1Availability();
   assert.equal(ui.reads.filter(([action]) => action === "GetRound1Availability").length, before);
   assert.match(ui.element("scheduling-availability-status").textContent, /Online scheduling is disabled/);
-  ui.element("scheduling-interview-type").value = "offline";
+  setInterviewType(ui, "offline");
   ui.context.round1InterviewTypeChanged();
   assert.equal(ui.element("scheduling-location-field").hidden, false);
   assert.equal(ui.element("scheduling-location").required, true);
   assert.equal(ui.element("scheduling-location").value, "");
+  assert.equal(ui.element("scheduling-date").value, date);
+  assert.equal(ui.element("scheduling-ta").value, ta);
   assert.equal(ui.element("scheduling-check-availability").disabled, true);
 });
 
 test("Online submission is rejected before either scheduling write path", async () => {
   const ui = harness();
   readySelection(ui);
-  ui.element("scheduling-interview-type").value = "online";
+  setInterviewType(ui, "online");
   await ui.context.createSchedule({ preventDefault() {} });
   await ui.context.createScheduleThroughCore({ preventDefault() {} });
   assert.equal(ui.requests.length, 0);
@@ -297,7 +326,7 @@ test("only complete provider-verified Room and TA intersections are selectable; 
 test("type, date, Room and TA changes invalidate evidence and clear selected slots", async () => {
   const mutations = [
     (ui) => {
-      ui.element("scheduling-interview-type").value = "online";
+      setInterviewType(ui, "online");
       ui.context.round1InterviewTypeChanged();
     },
     (ui) => {
@@ -485,7 +514,7 @@ test("SingleUserDev retains the existing manual scheduling controls", () => {
   const ui = harness(true);
   ui.context.showSchedulingPanel();
   assert.equal(ui.element("save-schedule").disabled, true);
-  ui.element("scheduling-interview-type").value = "offline";
+  setInterviewType(ui, "offline");
   ui.context.round1InterviewTypeChanged();
   assert.equal(ui.element("scheduling-availability").hidden, true);
   assert.equal(ui.element("scheduling-slot-field").hidden, true);
@@ -759,13 +788,13 @@ test("actual required-field events recalculate manual Save without erasing expli
   const end = source.indexOf('    $("cancellation-form").addEventListener', start);
   assert.ok(start >= 0 && end > start);
   vm.runInContext(source.slice(start, end), ui.context);
-  ui.element("scheduling-interview-type").value = "online";
-  ui.element("scheduling-interview-type").dispatch("change");
+  setInterviewType(ui, "online");
+  ui.element("scheduling-interview-type-online").dispatch("change");
   assert.equal(ui.element("scheduling-location-field").hidden, true);
   assert.equal(ui.element("scheduling-location").value, "");
   assert.equal(ui.element("save-schedule").disabled, true);
-  ui.element("scheduling-interview-type").value = "offline";
-  ui.element("scheduling-interview-type").dispatch("change");
+  setInterviewType(ui, "offline");
+  ui.element("scheduling-interview-type-offline").dispatch("change");
   assert.equal(ui.element("scheduling-location-field").hidden, false);
   assert.equal(ui.element("scheduling-location").required, true);
   ui.element("scheduling-location").value = "";

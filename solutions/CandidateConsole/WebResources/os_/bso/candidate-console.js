@@ -1625,6 +1625,12 @@
     grid.replaceChildren(...buttons);
   }
 
+  function selectedRound1InterviewType() {
+    if ($("scheduling-interview-type-online").checked) return "online";
+    if ($("scheduling-interview-type-offline").checked) return "offline";
+    return "";
+  }
+
   function setRound1AvailabilityState(state, message) {
     if (!Object.values(ROUND1_AVAILABILITY_STATE).includes(state)) {
       throw new Error("ROUND1_AVAILABILITY_STATE_INVALID");
@@ -1643,7 +1649,7 @@
   function manualRound1Selection() {
     const selection = {};
     const messages = [];
-    const interviewType = $("scheduling-interview-type").value;
+    const interviewType = selectedRound1InterviewType();
     if (interviewType !== "offline") {
       messages.push(interviewType === "online"
         ? "Online scheduling is unavailable until its data-model and API contracts are approved."
@@ -1740,7 +1746,7 @@
 
   function round1Selection() {
     if (!selectedCandidate || scheduleMode === "reschedule") throw new Error("AVAILABILITY_CANDIDATE_INVALID");
-    if ($("scheduling-interview-type").value !== "offline") {
+    if (selectedRound1InterviewType() !== "offline") {
       throw new Error("AVAILABILITY_INTERVIEW_TYPE_INVALID");
     }
     const date = $("scheduling-date").value;
@@ -1783,7 +1789,7 @@
           ? !canManageSchedule()
           : selected[TABLES.candidate.status] !== STATUS.waitingManualScheduling || Boolean(selectedSchedule)) ||
         scheduleRetryBlockedCandidateId === (selected && selected[TABLES.candidate.id]);
-      $("save-schedule").disabled = busy || $("scheduling-interview-type").value !== "offline" || workflowBlocked;
+      $("save-schedule").disabled = busy || selectedRound1InterviewType() !== "offline" || workflowBlocked;
       $("scheduling-booking-confirm").disabled = true;
       renderRound1SlotGrid();
       return;
@@ -1800,14 +1806,15 @@
         } else if (manual || !error.message.startsWith("AVAILABILITY_")) throw error;
       }
     }
-    for (const id of ["scheduling-interview-type", "scheduling-location", "scheduling-date", "scheduling-ta", "scheduling-method", "scheduling-notes"]) {
+    for (const id of ["scheduling-interview-type-online", "scheduling-interview-type-offline",
+      "scheduling-location", "scheduling-date", "scheduling-ta", "scheduling-method", "scheduling-notes"]) {
       $(id).disabled = busy;
     }
-    $("scheduling-location").required = $("scheduling-interview-type").value === "offline";
+    $("scheduling-location").required = selectedRound1InterviewType() === "offline";
     for (const id of ["scheduling-time", "scheduling-end-time"]) $(id).disabled = busy || !manual;
     $("scheduling-manual-option").disabled = !round1Availability.manualSchedulingOperational;
     $("scheduling-check-availability").disabled = busy || !workspaceReady || !referencesReady ||
-      manual || $("scheduling-interview-type").value !== "offline" ||
+      manual || selectedRound1InterviewType() !== "offline" ||
       !round1Availability.providerOperational || round1Availability.checking || !valid;
     $("scheduling-slot").disabled = busy || manual || round1Availability.checking ||
       !round1Availability.evidence || round1Availability.evidence.slots.length === 0;
@@ -1866,7 +1873,7 @@
           typeof data.manualSchedulingOperational !== "boolean") throw new Error("AVAILABILITY_RESPONSE_INVALID");
       round1Availability.providerOperational = data.providerOperational;
       round1Availability.manualSchedulingOperational = data.manualSchedulingOperational;
-      const onlineSelected = $("scheduling-interview-type").value === "online";
+      const onlineSelected = selectedRound1InterviewType() === "online";
       setRound1AvailabilityState(ROUND1_AVAILABILITY_STATE.idle, onlineSelected
         ? "Online scheduling is disabled until the data-model and authorized booking contracts are approved."
         : data.providerOperational
@@ -1880,7 +1887,7 @@
       logSafeFailure("ROUND1_CAPABILITY_READ_FAILED", error);
       round1Availability.providerOperational = false;
       round1Availability.manualSchedulingOperational = false;
-      const onlineSelected = $("scheduling-interview-type").value === "online";
+      const onlineSelected = selectedRound1InterviewType() === "online";
       setRound1AvailabilityState(ROUND1_AVAILABILITY_STATE.failed, onlineSelected
         ? "Online scheduling is disabled until the data-model and authorized booking contracts are approved. Scheduling service capability could not be verified."
         : "Scheduling service capability could not be verified. No availability or saving is enabled. Reopen Schedule Round 1 to retry.");
@@ -1943,7 +1950,7 @@
 
   async function checkRound1Availability() {
     if (busy || round1Availability.checking || !round1Availability.providerOperational ||
-        !requiresTrustedScheduleAvailability() || $("scheduling-interview-type").value !== "offline") return;
+        !requiresTrustedScheduleAvailability() || selectedRound1InterviewType() !== "offline") return;
     let selection;
     try { selection = round1Selection(); }
     catch (error) {
@@ -1996,7 +2003,7 @@
   function round1SelectionChanged() {
     if (!requiresTrustedScheduleAvailability()) return;
     invalidateRound1Availability(false, isManualRound1Scheduling());
-    const interviewType = $("scheduling-interview-type").value;
+    const interviewType = selectedRound1InterviewType();
     $("scheduling-availability-status").textContent = interviewType === "online"
       ? "Online scheduling is disabled until the data-model and authorized booking contracts are approved."
       : round1Availability.providerOperational
@@ -2050,11 +2057,12 @@
   }
 
   function round1InterviewTypeChanged() {
-    const offline = $("scheduling-interview-type").value === "offline";
+    const offline = selectedRound1InterviewType() === "offline";
     $("scheduling-location-field").hidden = !offline;
     $("scheduling-location").required = offline;
     if (!offline) $("scheduling-location").value = "";
     if (!requiresTrustedScheduleAvailability()) {
+      invalidateRound1Availability(false, isManualRound1Scheduling());
       $("scheduling-dev-note").textContent = offline
         ? "Manual schedule evidence only. No calendar availability check or calendar booking is performed."
         : "Online scheduling is disabled until the data-model and authorized booking contracts are approved.";
@@ -2479,7 +2487,7 @@
   async function createScheduleThroughCore(event) {
     event.preventDefault();
     if (busy || !selectedCandidate) return;
-    if ($("scheduling-interview-type").value !== "offline") {
+    if (selectedRound1InterviewType() !== "offline") {
       showNotice("Schedule not saved. Online scheduling is disabled until its data-model and authorized booking contracts are approved.", true);
       return;
     }
@@ -2547,7 +2555,7 @@
   }
 
   async function createSchedule(event) {
-    if ($("scheduling-interview-type").value !== "offline") {
+    if (selectedRound1InterviewType() !== "offline") {
       event.preventDefault();
       showNotice("Schedule not saved. Online scheduling is disabled until its data-model and authorized booking contracts are approved.", true);
       return;
@@ -3963,7 +3971,9 @@
     $("call-form").addEventListener("submit", recordCall);
     $("scheduling-form").addEventListener("submit", createSchedule);
     $("scheduling-check-availability").addEventListener("click", checkRound1Availability);
-    $("scheduling-interview-type").addEventListener("change", round1InterviewTypeChanged);
+    for (const id of ["scheduling-interview-type-online", "scheduling-interview-type-offline"]) {
+      $(id).addEventListener("change", round1InterviewTypeChanged);
+    }
     for (const id of ["scheduling-location", "scheduling-date", "scheduling-ta"]) {
       $(id).addEventListener("input", updateRound1AvailabilityControls);
       $(id).addEventListener("change", round1SelectionChanged);

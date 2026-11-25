@@ -1,5 +1,25 @@
 # Current State
 
+## Phase 2 Custom Page and availability-Flow reconciliation (2026-11-20)
+
+**Read-only reconciliation; no Flow/app changes, availability requests, or Candidate/Schedule record reads or writes.** Candidate Console source (normalizing only its environment-specific HTML cache token), fresh solution export, current/unpublished content, published content, and authenticated served bytes match:
+
+| WebResource | Version | SHA-256 |
+|---|---:|---|
+| `candidate-console.html` | `15695115` | `11e87c73005cdae155ec2e43e453e3b484815714a63638d2569575965a713e65` |
+| `candidate-console.js` | `15695110` | `94fc532e7c85a0b20e08a1edf31105cafc4205440b707df5159508bfd8fd0719` |
+| `candidate-console.css` | `14754315` | `6681994a0d57e46ed1b3f0be291556fba37be262f822c8b483d31d00f1130fde` |
+
+The existing Custom Page `os_atsugground1availability_4d2f7` remains the 2026-11-19 app binary (40,208 bytes; SHA-256 `eafb8df84c0adfeebac537119f57a3d932058948939d84161d75a514afb29d60`). Its exported source has no `Param()` call; its `DatabaseReferences` is empty. The page calls `ATSuggAvailabilityBridge.Run` with one required string containing four required values (`roomEmail`, `taEmail`, `startDateTime`, `endDateTime`) and reads a string `resulttext`. The published bridge definition has no mode or correlation input and sends both Room and TA mailbox values through an HTTP `POST`. The external HTTP target's implementation was not independently verified, so this is not proof of an end-to-end Graph call or of which calendars that external service queries. The Page expects exactly two availability responses; its 96-character view is sliced six characters per nominal 30-minute slot, whose interval semantics were not verified. Thus the Page/bridge path does not establish Online TA-only or verified full-interval availability.
+
+A separate live `os_sr_avchk` definition is listed as Published (older repository notes say OFF; reconcile effective runtime state with its owner before use). Its Pending `os_sr_avq` trigger has no Candidate or Interview Schedule context. The definition reads TA by reference and conditionally reads Location for Onsite, uses TA as the Outlook `RequiredAttendees`, conditionally uses Location as `ResourceAttendees`, calls Office 365 `FindMeetingTimes_V2`, and completes through `os_sr_avq_complete`. This provides definition-level support for Online TA-only and Offline TA+Room with Dataverse mailbox resolution; no run was invoked or runtime accepted. Its connection-bound identity, effective caller privileges, DLP applicability, and successful output contract remain unverified. It is not connected to the existing Custom Page.
+
+The live metadata also confirms the relevant primary keys and fields: Candidate `os_sr_candid` (Candidate Number, Name, Email, Assigned TA, workflow status); Interview Schedule `os_sr_intvid` (Candidate, TA, required Location, Round, Start/End, scheduling status, result); TA Directory `os_sr_taid` (name/email); Location `os_sr_locid` (name/optional room mailbox). This is schema evidence only; intended non-admin record-level access was not tested.
+
+For model-driven navigation, the supported Custom Page context is one record: `entityName` plus `recordId`. Pass Candidate ID for Create (`entityName: "os_sr_cand"`); pass the exact Schedule ID for Reschedule/Cancel (`entityName: "os_sr_intv"`) and have the Page load and validate its Candidate. Custom Page navigation does not carry arbitrary `data`, so operation choice must be made explicitly within the Page. The current Console button still opens the context preview rather than navigating to the Page. The [Studio handoff](RECRUITMENT_DASHBOARD.md#fresh-live-bridge-and-page-reconciliation-2026-11-20) records the exact contract, smallest owner Studio changes, and blockers.
+
+The previous release/rollback helper and its pre-release snapshot were left untouched. A separate session-scoped verifier pinned to the fresh export supports only `Baseline` and `Verify`; both read-only stages passed for the three Console resources.
+
 ## Unified Round 1 Booking context preview (2026-11-20)
 
 **Deployed to `srapp`:** Candidate Details now opens one read-only **Round 1 Booking** dialog in NORMAL mode. It re-reads the selected Candidate under the caller's existing access and shows the matching Round 1 record when present. The dialog offers Create for an eligible waiting Candidate or Reschedule/Cancel for a uniquely matched current schedule with a pending result. Online shows the Assigned TA requirement without a Room; Offline requires a Room. Reschedule and Cancel show a reason field. The dialog cannot check availability or submit an operation. Existing manual actions are unchanged.

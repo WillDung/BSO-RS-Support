@@ -2,7 +2,7 @@
 
 ## Phase 2.2A unified Round 1 UI release gate (2026-11-25)
 
-**BLOCKED; local Candidate Console source only, not deployed.** The unified scheduling UI is implemented in the existing Console and its focused offline tests pass, but exact current/draft/published/served hashes and recoverable backups for all three Console WebResources have not been reconciled for release. No Custom Page or Flow changes are in scope; provider availability, booking confirmation, and external booking operations remain disabled. See the [release-gate evidence](CURRENT_STATE.md#phase-22a-unified-round-1-ui-release-gate-2026-11-25).
+**BLOCKED; local Candidate Console source only, not deployed.** Read-only reconciliation verified that LIVE current, published, and served bytes match the existing baseline for all three Console WebResources; the separate draft state is absent. A session-local backup was captured and hash-checked, and a local restore-payload dry-run validated resource mapping, but end-to-end rollback remains unverified because production writes were not authorized. The CSS URL has no cache token, the existing NORMAL-only release manifest does not pin the Phase 2.2A source, and 13 CandidateConsoleIsolation failures reproduce unchanged on the pre-Phase-2.2A baseline. No Custom Page or Flow changes are in scope; provider availability, booking confirmation, and external booking operations remain disabled. Hashes, backup evidence, test results, and blockers are in the [LIVE reconciliation report](CURRENT_STATE.md#phase-22a-approved-live-release-reconciliation-2026-11-25).
 
 ## Status
 

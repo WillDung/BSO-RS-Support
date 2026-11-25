@@ -261,8 +261,8 @@ Assert-Test ($script.Contains('scheduleRetryBlockedCandidateId') -and
     $script.Contains('No compensation or retry was performed')) 'Block duplicate submissions and report nontransactional partial failures without compensation'
 Assert-Test (-not $script.Contains('WebApi.deleteRecord') -and
     -not $script.Contains('PublishAllXml')) 'Do not compensate by deleting persisted schedules or publish globally'
-Assert-Test (-not $html.Contains('id="candidate-status"') -and
-    -not $html.Contains('<dialog') -and
+Assert-Test ($html.Contains('<dialog id="booking-context"') -and
+    -not $html.Contains('id="candidate-status"') -and
     -not $html.Contains('call-dialog')) 'Expose no arbitrary status editor or call debug dialog'
 Assert-Test ($html.Contains('id="record-interview-result-button"') -and
     $html.Contains('id="interview-result-form"') -and

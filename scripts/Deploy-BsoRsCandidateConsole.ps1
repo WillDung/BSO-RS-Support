@@ -50,7 +50,7 @@ $target = [ordered]@{
     NavigationId = 'subarea_bso_candidate_management'
 }
 $acceptedPublicationHashes = @{
-    'os_/bso/candidate-console-environment.js' = '58e03dc262b790b7431f34ca5554422fc86f0d62f6e8b6160805a6b2d906335c'
+    'os_/bso/candidate-console-environment.js' = '94a26871f7149458b2d7930049f2e06c2c3914d280ca40bcfc543fbfb9a00117'
     'os_/bso/candidate-console.html' = 'f28b26fa4b7c72ce7cd3fa08d9f25d831334633f0e411fe715d5aa4c7393ef79'
 }
 $allResources = @(

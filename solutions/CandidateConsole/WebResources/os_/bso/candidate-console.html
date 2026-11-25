@@ -275,31 +275,28 @@
             <h3 id="scheduling-heading">Schedule Round 1</h3>
           </div>
         </div>
+        <label class="field scheduling-candidate-context">
+          <span>Candidate</span>
+          <input id="scheduling-candidate" readonly>
+        </label>
         <form id="scheduling-form" class="form-grid">
-          <label id="scheduling-method-field" class="field field-wide" hidden>
-            <span>Scheduling method <b aria-hidden="true">*</b></span>
-            <select id="scheduling-method">
-              <option value="automatic">Automatic Scheduling - verified Outlook availability required</option>
-              <option id="scheduling-manual-option" value="manual" disabled>Manual Scheduling &#8212; availability not checked</option>
-            </select>
-          </label>
-          <p id="scheduling-manual-warning" class="storage-warning field-wide" role="status" hidden>
-            Manual Scheduling &#8212; availability not checked. Enter times in SE Asia Standard Time (UTC+07:00).
-            This records your schedule decision in ATSugg only; it creates no Outlook meeting or invitation.
-          </p>
           <label class="field">
-            <span>Candidate</span>
-            <input id="scheduling-candidate" readonly>
-          </label>
-          <label class="field">
-            <span><span id="scheduling-location-label">Location</span> <b aria-hidden="true">*</b></span>
-            <select id="scheduling-location" required>
-              <option value="">Select location</option>
+            <span>Interview Type <b aria-hidden="true">*</b></span>
+            <select id="scheduling-interview-type" required>
+              <option value="">Select Online or Offline</option>
+              <option value="online">Online</option>
+              <option value="offline">Offline</option>
             </select>
           </label>
           <label class="field">
             <span>Interview Date <b aria-hidden="true">*</b></span>
             <input id="scheduling-date" type="date" required>
+          </label>
+          <label id="scheduling-location-field" class="field" hidden>
+            <span><span id="scheduling-location-label">Meeting Room</span> <b aria-hidden="true">*</b></span>
+            <select id="scheduling-location">
+              <option value="">Select meeting room</option>
+            </select>
           </label>
           <label class="field">
             <span>Interviewer / TA <b aria-hidden="true">*</b></span>
@@ -307,6 +304,42 @@
               <option value="">Select interviewer</option>
             </select>
           </label>
+          <div id="scheduling-availability" class="field field-wide" hidden>
+            <p>30-minute slots, Monday-Friday 09:00-17:00, SE Asia Standard Time (UTC+07:00).</p>
+            <button id="scheduling-check-availability" class="button button-secondary" type="button"
+              aria-describedby="scheduling-availability-status" disabled>Verify availability</button>
+            <p id="scheduling-availability-status" class="storage-warning" role="status" aria-live="polite"
+              data-state="idle">Select an interview type, date and authorized interviewer. Availability is not verified.
+            </p>
+            <p class="muted" id="scheduling-availability-help">
+              Only complete, verified 30-minute intervals can be selected. Intervals without evidence remain Unknown;
+              the current backend cannot distinguish Busy from Unknown.
+            </p>
+          </div>
+          <div id="scheduling-slot-field" class="field field-wide" hidden>
+            <span>30-minute time blocks</span>
+            <div id="scheduling-slot-grid" class="round1-slot-grid" role="group"
+              aria-label="Round 1 time blocks in Asia/Ho_Chi_Minh"></div>
+            <input id="scheduling-slot" type="hidden" value="" disabled>
+          </div>
+          <div class="form-actions field-wide">
+            <button id="scheduling-booking-confirm" class="button button-primary" type="button"
+              aria-describedby="scheduling-booking-status" disabled>Confirm Booking</button>
+            <span id="scheduling-booking-status" class="storage-warning" role="status">
+              Booking is disabled until the Online/Offline data model and authorized booking API are approved.
+            </span>
+          </div>
+          <label id="scheduling-method-field" class="field field-wide" hidden>
+            <span>Scheduling method <b aria-hidden="true">*</b></span>
+            <select id="scheduling-method">
+              <option value="automatic">Automatic Scheduling - verified availability required</option>
+              <option id="scheduling-manual-option" value="manual" disabled>Manual Scheduling &#8212; availability not checked</option>
+            </select>
+          </label>
+          <p id="scheduling-manual-warning" class="storage-warning field-wide" role="status" hidden>
+            Manual Scheduling &#8212; availability not checked. Enter times in SE Asia Standard Time (UTC+07:00).
+            This records your schedule decision in ATSugg only; it creates no Outlook meeting or invitation.
+          </p>
           <label id="scheduling-time-field" class="field">
             <span>Start Time <b aria-hidden="true">*</b></span>
             <input id="scheduling-time" type="time" required>
@@ -314,20 +347,6 @@
           <label id="scheduling-end-time-field" class="field">
             <span>End Time <b aria-hidden="true">*</b></span>
             <input id="scheduling-end-time" type="time" required>
-          </label>
-          <div id="scheduling-availability" class="field field-wide" hidden>
-            <p>30-minute slots, Monday-Friday 09:00-17:00, SE Asia Standard Time (UTC+07:00).</p>
-            <button id="scheduling-check-availability" class="button button-secondary" type="button"
-              aria-describedby="scheduling-availability-status" disabled>Check Room + TA availability</button>
-            <p id="scheduling-availability-status" class="storage-warning" role="status" aria-live="polite">
-              Outlook availability is unavailable. No verified slots can be selected.
-            </p>
-          </div>
-          <label id="scheduling-slot-field" class="field field-wide" hidden>
-            <span>Available 30-minute slot <b aria-hidden="true">*</b></span>
-            <select id="scheduling-slot" aria-describedby="scheduling-availability-status" disabled>
-              <option value="">Availability unavailable - no verified slots</option>
-            </select>
           </label>
           <label class="field">
             <span>Notes</span>

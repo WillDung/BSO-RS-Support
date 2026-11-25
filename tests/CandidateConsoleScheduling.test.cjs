@@ -6,6 +6,8 @@ const vm = require("node:vm");
 
 const source = fs.readFileSync(path.join(__dirname, "..", "solutions", "CandidateConsole",
   "WebResources", "os_", "bso", "candidate-console.js"), "utf8");
+const html = fs.readFileSync(path.join(__dirname, "..", "solutions", "CandidateConsole",
+  "WebResources", "os_", "bso", "candidate-console.html"), "utf8");
 
 function extract(startText, endText = "\n  }") {
   const start = source.indexOf(startText);
@@ -21,7 +23,7 @@ function harness(singleUserDev = false) {
   function element(id) {
     if (!elements.has(id)) elements.set(id, {
       id, value: "", children: [], hidden: false, disabled: false,
-      replaceChildren() { this.children = []; this.value = ""; },
+      dataset: {}, replaceChildren(...children) { this.children = children; },
       appendChild(child) { this.children.push(child); },
       listeners: new Map(),
       addEventListener(type, listener) {
@@ -45,7 +47,7 @@ function harness(singleUserDev = false) {
     selectedSchedule: null, proposedSchedule: null, scheduleRows: [],
     scheduleMode: "new", scheduleRetryBlockedCandidateId: null,
     round1Availability: { generation: 0, capabilityGeneration: 0, providerOperational: false,
-      manualSchedulingOperational: false, checking: false, evidence: null },
+      manualSchedulingOperational: false, checking: false, evidence: null, correlationId: null, state: "Idle" },
     window: { clearTimeout() {}, setTimeout(fn, delay) {
       if (delay === 2000) queueMicrotask(fn);
       else timers.push(fn);
@@ -56,7 +58,15 @@ function harness(singleUserDev = false) {
     currentUserId: () => "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
     newCorrelationId: () => `dddddddd-dddd-4ddd-8ddd-${String(++correlationSequence).padStart(12, "0")}`,
     $: element,
-    document: { createElement: () => ({}), querySelectorAll: () => [element("save-schedule")] },
+    document: { createElement: (tag) => ({
+      tagName: tag.toUpperCase(), dataset: {}, listeners: new Map(), disabled: false,
+      addEventListener(type, listener) {
+        if (!this.listeners.has(type)) this.listeners.set(type, []);
+        this.listeners.get(type).push(listener);
+      },
+      setAttribute(name, value) { this[name] = value; },
+      dispatch(type) { for (const listener of this.listeners.get(type) || []) listener({ target: this }); }
+    }), querySelectorAll: () => [element("save-schedule")] },
     showNotice: (...args) => notices.push(args), hideNotice() {},
     isCandidateCoreEnabled: () => true, isCandidateAllowedByDataMode: () => true,
     isDevFallbackEnabled: () => true, canManageSchedule: () => false,
@@ -81,16 +91,18 @@ function harness(singleUserDev = false) {
     extract("  const STATUS = {", "\n  };"),
     extract("  const TABLES = {", "\n  };"),
     'TABLES.candidate.id = "os_sr_candid";',
+    extract("  const ROUND1_AVAILABILITY_STATE = Object.freeze({", "\n  });"),
     extract("  function addOption("),
     extract("  function setLookupPlaceholder("),
     extract("  function normalizeGuid("),
     extract("  function sameOptionalGuid("),
     extract("  function assertCandidateCoreStatus("),
     extract("  function requiresTrustedScheduleAvailability("),
-    ...["isManualRound1Scheduling", "manualRound1Selection", "round1SchedulingMethodChanged",
+    ...["round1GridIntervals", "renderRound1SlotGrid", "setRound1AvailabilityState",
+      "isManualRound1Scheduling", "manualRound1Selection", "round1SchedulingMethodChanged",
       "invalidateRound1Availability", "round1Selection", "selectedVerifiedRound1Slot",
       "updateRound1AvailabilityControls", "validateRound1Availability", "round1SelectionChanged",
-      "selectRound1Slot"].map((name) => extract(`  function ${name}(`)),
+      "selectRound1Slot", "round1InterviewTypeChanged"].map((name) => extract(`  function ${name}(`)),
     ...["readRound1Availability", "loadRound1SchedulingCapabilities", "pollRound1Availability",
       "checkRound1Availability",
       "saveNormalRound1Schedule"].map((name) => extract(`  async function ${name}(`)),
@@ -103,16 +115,31 @@ function harness(singleUserDev = false) {
   return { context, element, notices, requests, reads, dialogs, errors, timers, taId };
 }
 
+test("scheduling controls follow the unified order with one date and disabled booking confirmation", () => {
+  const positions = [
+    'id="scheduling-interview-type"', 'id="scheduling-date"', 'id="scheduling-location-field"',
+    'id="scheduling-ta"', 'id="scheduling-availability-status"', 'id="scheduling-slot-grid"',
+    'id="scheduling-booking-confirm"'
+  ].map((id) => html.indexOf(id));
+  assert.ok(positions.every((position) => position >= 0));
+  assert.deepEqual(positions, [...positions].sort((a, b) => a - b));
+  assert.equal((html.match(/type="date"/g) || []).length, 1);
+  assert.match(html, /id="scheduling-booking-confirm"[^>]*disabled/);
+});
+
 test("NORMAL scheduling defaults assigned TA and disables manual times and unverified slots", () => {
   const ui = harness();
   ui.context.showSchedulingPanel();
   assert.equal(ui.element("scheduling-ta").value, ui.taId);
   assert.equal(ui.element("scheduling-location-label").textContent, "Meeting Room");
+  assert.equal(ui.element("scheduling-location-field").hidden, true);
+  assert.equal(ui.element("scheduling-location").required, false);
   assert.equal(ui.element("scheduling-availability").hidden, false);
   assert.equal(ui.element("scheduling-slot-field").hidden, false);
   assert.equal(ui.element("scheduling-slot").disabled, true);
-  assert.deepEqual(ui.element("scheduling-slot").children.map((option) => option.value), [""]);
+  assert.equal(ui.element("scheduling-slot-grid").children.length, 0);
   assert.equal(ui.element("scheduling-check-availability").disabled, true);
+  assert.equal(ui.element("scheduling-booking-confirm").disabled, true);
   for (const id of ["scheduling-time", "scheduling-end-time"]) {
     assert.equal(ui.element(id).disabled, true);
     assert.equal(ui.element(id).required, false);
@@ -128,6 +155,7 @@ test("NORMAL scheduling defaults assigned TA and disables manual times and unver
 function readySelection(ui) {
   const date = new Date(Date.now() + 2 * 86400000);
   while ([0, 6].includes(date.getUTCDay())) date.setUTCDate(date.getUTCDate() + 1);
+  ui.element("scheduling-interview-type").value = "offline";
   ui.element("scheduling-date").value = date.toISOString().slice(0, 10);
   ui.element("scheduling-location").value = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
   ui.element("scheduling-ta").value = ui.taId;
@@ -153,11 +181,14 @@ test("provider-backed response enables one slot, derives times and invalidates o
   await ui.context.checkRound1Availability();
   assert.equal(ui.element("scheduling-slot").disabled, false);
   assert.equal(ui.element("save-schedule").disabled, true);
-  ui.element("scheduling-slot").value = ui.context.round1Availability.evidence.slots[0].startUtc;
-  ui.context.selectRound1Slot();
+  const availableButton = ui.element("scheduling-slot-grid").children.find((button) => !button.disabled);
+  assert.ok(availableButton);
+  assert.equal(availableButton.textContent, "09:00 - 09:30 (Available)");
+  availableButton.dispatch("click");
   assert.equal(ui.element("scheduling-time").value, "09:00");
   assert.equal(ui.element("scheduling-end-time").value, "09:30");
   assert.equal(ui.element("save-schedule").disabled, false);
+  assert.equal(ui.element("scheduling-booking-confirm").disabled, true);
   ui.timers.at(-1)();
   assert.equal(ui.element("save-schedule").disabled, true);
   assert.equal(ui.context.round1Availability.evidence, null);
@@ -176,6 +207,8 @@ test("loading, no-slots, provider-error and late-response states fail closed", a
   assert.equal(ui.element("scheduling-slot").disabled, true);
   assert.equal(ui.element("scheduling-check-availability").disabled, true);
   assert.match(ui.element("scheduling-availability-status").textContent, /Checking availability/);
+  assert.equal(ui.context.round1Availability.state, "Pending");
+  assert.ok(ui.element("scheduling-slot-grid").children.every((button) => button.dataset.state === "pending"));
   ui.element("scheduling-date").value = "";
   ui.context.round1SelectionChanged();
   release();
@@ -184,12 +217,119 @@ test("loading, no-slots, provider-error and late-response states fail closed", a
   readySelection(ui);
   ui.context.reply = (_, inputs, correlationId) => envelope(ui.context.round1Selection(), correlationId, false);
   await ui.context.checkRound1Availability();
-  assert.match(ui.element("scheduling-availability-status").textContent, /No common free/);
+  assert.match(ui.element("scheduling-availability-status").textContent, /No verified free intervals/);
   assert.equal(ui.element("scheduling-slot").disabled, true);
   ui.context.reply = () => { throw new Error("PROVIDER_FAILED"); };
   await ui.context.checkRound1Availability();
   assert.match(ui.element("scheduling-availability-status").textContent, /provider error/);
   assert.equal(ui.context.round1Availability.evidence, null);
+  assert.equal(ui.context.round1Availability.state, "Failed");
+  assert.ok(ui.element("scheduling-slot-grid").children.every((button) => button.disabled));
+});
+
+test("Online hides and clears Room, remains non-bookable, and Offline requires Room", async () => {
+  const ui = harness();
+  readySelection(ui);
+  ui.element("scheduling-location").value = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+  ui.context.round1Availability.providerOperational = true;
+  ui.context.round1InterviewTypeChanged();
+  ui.element("scheduling-interview-type").value = "online";
+  ui.context.round1InterviewTypeChanged();
+  assert.equal(ui.element("scheduling-location-field").hidden, true);
+  assert.equal(ui.element("scheduling-location").required, false);
+  assert.equal(ui.element("scheduling-location").value, "");
+  assert.equal(ui.element("scheduling-check-availability").disabled, true);
+  assert.equal(ui.element("scheduling-booking-confirm").disabled, true);
+  const before = ui.reads.filter(([action]) => action === "GetRound1Availability").length;
+  await ui.context.checkRound1Availability();
+  assert.equal(ui.reads.filter(([action]) => action === "GetRound1Availability").length, before);
+  assert.match(ui.element("scheduling-availability-status").textContent, /Online scheduling is disabled/);
+  ui.element("scheduling-interview-type").value = "offline";
+  ui.context.round1InterviewTypeChanged();
+  assert.equal(ui.element("scheduling-location-field").hidden, false);
+  assert.equal(ui.element("scheduling-location").required, true);
+  assert.equal(ui.element("scheduling-location").value, "");
+  assert.equal(ui.element("scheduling-check-availability").disabled, true);
+});
+
+test("Online submission is rejected before either scheduling write path", async () => {
+  const ui = harness();
+  readySelection(ui);
+  ui.element("scheduling-interview-type").value = "online";
+  await ui.context.createSchedule({ preventDefault() {} });
+  await ui.context.createScheduleThroughCore({ preventDefault() {} });
+  assert.equal(ui.requests.length, 0);
+  assert.equal(ui.reads.filter(([action]) => action === "GetRound1Availability").length, 0);
+  assert.equal(ui.notices.length, 2);
+  assert.ok(ui.notices.every(([message]) => /Online scheduling is disabled/.test(message)));
+});
+
+test("grid builds exactly sixteen Ho Chi Minh 30-minute weekday intervals", () => {
+  const ui = harness();
+  const intervals = ui.context.round1GridIntervals("2026-11-23");
+  assert.equal(intervals.length, 16);
+  assert.equal(JSON.stringify(intervals.slice(0, 2).map(({ startLabel, endLabel }) => [startLabel, endLabel])),
+    JSON.stringify([["09:00", "09:30"], ["09:30", "10:00"]]));
+  assert.deepEqual([intervals.at(-1).startLabel, intervals.at(-1).endLabel], ["16:30", "17:00"]);
+  assert.ok(intervals.every((interval) => Date.parse(interval.endUtc) - Date.parse(interval.startUtc) === 1800000));
+  assert.equal(ui.context.round1GridIntervals("2026-11-21").length, 0);
+  assert.equal(ui.context.round1GridIntervals("2026-02-31").length, 0);
+});
+
+test("only complete provider-verified Room and TA intersections are selectable; other intervals stay Unknown", async () => {
+  const ui = harness();
+  const selection = readySelection(ui);
+  const freeSlot = { startUtc: new Date(Date.parse(selection.startUtc) + 3600000).toISOString(),
+    endUtc: new Date(Date.parse(selection.startUtc) + 5400000).toISOString() };
+  ui.context.reply = (_, inputs, correlationId) => ({
+    ...envelope(selection, correlationId, false), slots: [{ ...freeSlot, evidenceCorrelationId: correlationId }]
+  });
+  await ui.context.checkRound1Availability();
+  const buttons = ui.element("scheduling-slot-grid").children;
+  assert.equal(buttons.length, 16);
+  assert.equal(buttons.filter((button) => button.dataset.state === "available").length, 1);
+  assert.equal(buttons.filter((button) => button.dataset.state === "unknown").length, 15);
+  assert.ok(buttons.filter((button) => button.dataset.state === "unknown").every((button) => button.disabled));
+  assert.equal(ui.context.round1Availability.state, "Available");
+  assert.equal(ui.element("scheduling-booking-confirm").disabled, true);
+});
+
+test("type, date, Room and TA changes invalidate evidence and clear selected slots", async () => {
+  const mutations = [
+    (ui) => {
+      ui.element("scheduling-interview-type").value = "online";
+      ui.context.round1InterviewTypeChanged();
+    },
+    (ui) => {
+      const nextDate = new Date(`${ui.element("scheduling-date").value}T12:00:00+07:00`);
+      nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+      ui.element("scheduling-date").value = nextDate.toISOString().slice(0, 10);
+      ui.context.round1SelectionChanged();
+    },
+    (ui) => {
+      ui.element("scheduling-location").value = "ffffffff-ffff-4fff-8fff-ffffffffffff";
+      ui.context.round1SelectionChanged();
+    },
+    (ui) => {
+      ui.element("scheduling-ta").value = "99999999-9999-4999-8999-999999999999";
+      ui.context.round1SelectionChanged();
+    }
+  ];
+  for (const mutate of mutations) {
+    const ui = harness();
+    readySelection(ui);
+    ui.context.reply = (_, inputs, correlationId) => envelope(ui.context.round1Selection(), correlationId);
+    await ui.context.checkRound1Availability();
+    ui.element("scheduling-slot").value = ui.context.round1Availability.evidence.slots[0].startUtc;
+    const generation = ui.context.round1Availability.generation;
+    mutate(ui);
+    assert.ok(ui.context.round1Availability.generation > generation);
+    assert.equal(ui.context.round1Availability.evidence, null);
+    assert.equal(ui.context.round1Availability.correlationId, null);
+    assert.equal(ui.element("scheduling-slot").value, "");
+    assert.equal(ui.element("scheduling-slot-grid").children.every((button) => button.disabled), true);
+    assert.equal(ui.element("scheduling-booking-confirm").disabled, true);
+  }
 });
 
 test("async availability polls one correlated request until Ready", async () => {
@@ -344,10 +484,16 @@ test("forced NORMAL Core or DEV-fallback form submission cannot bypass unavailab
 test("SingleUserDev retains the existing manual scheduling controls", () => {
   const ui = harness(true);
   ui.context.showSchedulingPanel();
+  assert.equal(ui.element("save-schedule").disabled, true);
+  ui.element("scheduling-interview-type").value = "offline";
+  ui.context.round1InterviewTypeChanged();
   assert.equal(ui.element("scheduling-availability").hidden, true);
   assert.equal(ui.element("scheduling-slot-field").hidden, true);
   assert.equal(ui.element("scheduling-dev-note").hidden, false);
-  assert.equal(ui.element("scheduling-location-label").textContent, "Location");
+  assert.equal(ui.element("scheduling-location-label").textContent, "Meeting Room");
+  assert.equal(ui.element("scheduling-location-field").hidden, false);
+  assert.equal(ui.element("scheduling-location").required, true);
+  assert.equal(ui.element("save-schedule").disabled, false);
   for (const id of ["scheduling-time", "scheduling-end-time"]) {
     assert.equal(ui.element(id).disabled, false);
     assert.equal(ui.element(id).required, true);
@@ -613,6 +759,15 @@ test("actual required-field events recalculate manual Save without erasing expli
   const end = source.indexOf('    $("cancellation-form").addEventListener', start);
   assert.ok(start >= 0 && end > start);
   vm.runInContext(source.slice(start, end), ui.context);
+  ui.element("scheduling-interview-type").value = "online";
+  ui.element("scheduling-interview-type").dispatch("change");
+  assert.equal(ui.element("scheduling-location-field").hidden, true);
+  assert.equal(ui.element("scheduling-location").value, "");
+  assert.equal(ui.element("save-schedule").disabled, true);
+  ui.element("scheduling-interview-type").value = "offline";
+  ui.element("scheduling-interview-type").dispatch("change");
+  assert.equal(ui.element("scheduling-location-field").hidden, false);
+  assert.equal(ui.element("scheduling-location").required, true);
   ui.element("scheduling-location").value = "";
   ui.context.updateRound1AvailabilityControls();
   assert.equal(ui.element("save-schedule").disabled, true);

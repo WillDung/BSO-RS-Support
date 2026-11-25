@@ -1,5 +1,28 @@
 # Current State
 
+## Phase 2.1 Candidate-context integration checkpoint (2026-11-25)
+
+**Status: PARTIAL; fresh LIVE reconciliation is BLOCKED before any target-specific read.** A read-only environment inventory found the environment matching the requested display name, but confirmation of its URL was unavailable. Therefore no `pac org who`, Dataverse metadata/role query, solution export, component version/hash readback, Candidate/Schedule read, or app/page inspection was run in that environment. The 2026-11-20 reconciliation below remains the latest documented LIVE evidence and must not be presented as a fresh 2026-11-25 verification.
+
+No page, Flow, Console, solution, record, role, or environment configuration was changed or deployed. The existing safe Console booking-context preview remains the intended fallback; Console navigation to the Custom Page, availability execution for this integration, and external booking operations remain disabled. The prior LIVE page/bridge state is not re-verified in this checkpoint.
+
+| Phase 2.1 item | Result in this checkpoint |
+|---|---|
+| Candidate Console LIVE baseline | **BLOCKED** — latest documented baseline is 2026-11-20; no fresh LIVE reconciliation |
+| Existing Custom Page context binding | **PREPARED, not deployed** — owner Studio changes remain outstanding |
+| Candidate resolution in the Custom Page | **BLOCKED** — no published page context or authorized-record test |
+| Schedule-to-Candidate resolution | **BLOCKED** — no published page context or relationship/ambiguity test |
+| Assigned TA resolution | **BLOCKED** — no page read or effective caller-access test |
+| Online/Offline requirements in the Custom Page | **PREPARED, not deployed** — the Console preview is not page acceptance |
+| Console navigation | **PREPARED / unchanged** — retain the booking preview; do not launch the unverified page |
+| Availability activation | **DISABLED for the Phase 2.1 path** — no provider/Flow request was made |
+| External booking operations | **DISABLED** |
+| Components deployed by this checkpoint | **None** |
+
+Focused offline validation passed: `node --test .\tests\CandidateConsoleBookingContext.test.cjs .\tests\CandidateConsoleAvailability.test.cjs` (**31 passed**). These tests exercise mocked Console preview and availability-panel behavior; they do not prove Custom Page `Param()` binding, LIVE authorization, page resolution, provider behavior, or a LIVE deployment. The local Candidate Console JavaScript SHA-256 is `94fc532e7c85a0b20e08a1edf31105cafc4205440b707df5159508bfd8fd0719`, matching the JavaScript source hash recorded in the 2026-11-20 reconciliation; this is not a current LIVE readback.
+
+**Exact blockers:** explicit confirmation of the target URL is pending; the existing page requires owner-only Studio work; Studio-generated Power Fx data-source/field identifiers and the current published page version were not verified in this checkpoint. The next LIVE step is a fresh read-only identity check and the existing scoped reconciliation after target confirmation. The owner must then bind and publish the existing page, test it with authorized synthetic context, and only later consider a separately approved Console launcher change. See the [Phase 2.1 Studio handoff](RECRUITMENT_DASHBOARD.md#phase-21-studio-handoff-and-acceptance-gates).
+
 ## Phase 2 Custom Page and availability-Flow reconciliation (2026-11-20)
 
 **Read-only reconciliation; no Flow/app changes, availability requests, or Candidate/Schedule record reads or writes.** Candidate Console source (normalizing only its environment-specific HTML cache token), fresh solution export, current/unpublished content, published content, and authenticated served bytes match:

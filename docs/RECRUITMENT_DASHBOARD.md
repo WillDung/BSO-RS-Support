@@ -2,6 +2,8 @@
 
 ## Status
 
+**Phase 2.1 checkpoint (2026-11-25): PARTIAL / fresh LIVE reconciliation BLOCKED.** The environment inventory matched the requested display name, but target-URL confirmation was unavailable. No target-specific LIVE reads, Studio edits, page/Console/Flow publication, availability calls, business-record reads/writes, or deployment were performed. The 2026-11-20 section below is the latest documented LIVE baseline, not a new verification. The local focused suites passed 31 tests for the Console preview and availability UI only; they do not accept the Custom Page. Keep the existing preview as fallback, keep the Candidate Console launcher unchanged, and do not activate availability or external booking. See [Current State](CURRENT_STATE.md#phase-21-candidate-context-integration-checkpoint-2026-11-25).
+
 **2026-11-20 filter layout follow-up deployed.** The filter bar keeps Year, Position, Source, and Assigned TA paired with their dropdowns in four, two, or one column depending on viewport width. Refresh is right-aligned below the filters. Existing filter bindings, reads, error handling, and KPI calculations are unchanged.
 
 **2026-11-20 repair deployed.** The Dashboard now resolves browser `window.Xrm` (or its model-driven parent) and uses the Dataverse Position title column, `os_sr_pos_ttl`. All six live read queries and four filter predicates succeeded under the checked identity. The browser harness verifies KPI rendering, filters, pending queue continuation, and read-failure handling. Owner testing in the actual app is still pending. See the [deployment receipt](CURRENT_STATE.md#recruitment-dashboard-repair-and-obsolete-console-panel-removal-2026-11-20).
@@ -52,10 +54,59 @@ The supported model-driven Custom Page context is one record at a time: `pageTyp
 - **Reschedule/Cancel:** navigate with `entityName: "os_sr_intv"` and the exact Schedule GUID as `recordId`; the page must load the related Candidate through the Schedule lookup and verify the relationship/state. There is no separate operation parameter, so the page must present an explicit operation choice for this schedule context.
 - Do not pass two IDs through undocumented URL parameters. Reject a missing, invalid, inaccessible, inactive, stale, or mismatched record context.
 
+### Phase 2.1 Studio handoff and acceptance gates
+
+**Prepared only; no Studio or LIVE page change is claimed.** The existing page is `os_atsugground1availability_4d2f7`, screen `Screen1`. The last LIVE evidence (2026-11-20) identifies these existing controls: `ddScheduleMode` (Available slots / Custom time only), `dpInterviewDate`, `txtTAEmail`, and `txtRoomEmail`. The latter two contain hardcoded address defaults and must not remain user-editable resource identity inputs. Keep the existing page; do not create or import a replacement.
+
+The local solution metadata provides these exact Dataverse table and schema identifiers for the Studio owner to match against the actual data sources:
+
+| Table | Primary ID | Context/display fields and lookups |
+|---|---|---|
+| Candidate `os_sr_cand` | `os_sr_candid` | Candidate Number `os_sr_cand_cnum`; Name `os_sr_cand_nm`; Email `os_sr_cand_eml`; Assigned TA lookup `os_sr_cand_ta`; workflow status `os_sr_cand_stat`; `statecode` |
+| Interview Schedule `os_sr_intv` | `os_sr_intvid` | Candidate lookup `os_sr_intv_cand`; TA lookup `os_sr_intv_ta`; Location lookup `os_sr_intv_loc`; Round `os_sr_intv_rnd`; Start/End `os_sr_intv_strt` / `os_sr_intv_end`; scheduling status `os_sr_intv_stat`; result `os_sr_intv_res`; `statecode` |
+| TA Directory `os_sr_ta` | `os_sr_taid` | TA Name `os_sr_ta_nm`; TA Email `os_sr_ta_eml`; `statecode` |
+| Location `os_sr_loc` | `os_sr_locid` | Location Name `os_sr_loc_nm`; Room/Resource Email `os_sr_loc_rmeml`; `statecode` |
+
+These are repository schema identifiers, not a fresh 2026-11-25 LIVE metadata read. The exact Power Apps data-source aliases, generated Power Fx column identifiers, lookup dereference syntax, choice symbols, and new control names cannot be verified without the owner’s Studio session; they are **unresolved**. Do not copy a display-name formula or invent those identifiers as if tested.
+
+Initialize on every page entry via `Screen1.OnVisible`, not only `App.OnStart`. This exact Power Fx reset/parameter-validation block must run before record reads:
+
+```powerfx
+Set(varContextLoading, true);
+Set(varContextError, Blank());
+Set(varContextEntity, Param("entityName"));
+Set(varContextIdRaw, Param("recordId"));
+Set(varContextId, IfError(GUID(varContextIdRaw), Blank()));
+Set(varCandidate, Blank());
+Set(varSchedule, Blank());
+Set(varAssignedTA, Blank());
+Set(varOperation, Blank());
+Set(varInterviewType, Blank());
+Set(varReason, Blank());
+Set(varAvailabilityState, "Disabled");
+Set(varAvailableSlots, Blank());
+If(
+    IsBlank(varContextId),
+    Set(varContextError, "A valid record context is required."),
+    If(
+        varContextEntity <> "os_sr_cand" && varContextEntity <> "os_sr_intv",
+        Set(varContextError, "Unsupported record context.")
+    )
+)
+```
+
+The illustrative lookup formula in the next section is **not a verified executable formula** until its data-source aliases and generated column/lookup names are matched in Studio. Move per-entry initialization from `App.OnStart` to `Screen1.OnVisible`; then complete and validate the lookups so they fail closed on missing/inaccessible records, data-source errors, inactive records, mismatched Candidate/Schedule/TA relationships, or stale context. Require an active Round 1 Schedule that belongs to the loaded Candidate and exactly one valid current schedule for Reschedule/Cancel. Resolve Assigned TA from the authorized Candidate read; for Schedule context verify the Schedule TA agrees and is active. Clear all previous Candidate/Schedule/TA, operation, interview-type, reason, availability, slot, and error state on each entry. Keep loading visible until reads finish; display explicit empty/unavailable, unauthorized, and error states without treating a parameter as proof of authorization.
+
+Display Candidate Number, Name, Email, Assigned TA, and the Round 1 Schedule/status where applicable. Create/Reschedule/Cancel may be offered only after context validation; all execution remains disabled. Reschedule/Cancel reasons are required but never submitted. Keep Online/Offline separate from `ddScheduleMode`: Online requires an active Assigned TA and hides/unrequires the Room; Offline requires an active authorized Location/Room. The existing controls `txtTAEmail` and `txtRoomEmail` must not supply provider identities. New operation, mode, reference-selector, reason, and state controls have no verified names yet; record their actual Studio names in the owner handoff after creation.
+
+**Owner publish and rollback sequence:** before editing, capture a recoverable copy of the exact existing page and record its current Studio/published version; no validated page backup or Studio restore procedure is present in this repository. Do not publish if the backup or owner rollback path is unavailable. Test the page with synthetic, caller-authorized Candidate and Schedule context first. Publish only the existing page from Studio and verify the published version and context behavior. Do not import a stale solution, replace the page, or change the Console sitemap/launcher as part of this page publish. If any acceptance check fails, restore the captured page version using the owner-verified Studio restore method and republish that page; keep the Console preview as fallback. A later Console launcher change is a separate scoped release after page acceptance.
+
+**Next LIVE acceptance tests (after target confirmation and Studio publish):** reconcile the Console and existing page published versions; verify the model-driven app passes the exact entity/record pair for Candidate Create and Schedule Reschedule/Cancel; test malformed/missing GUID, wrong entity, inaccessible/missing records, inactive Candidate/Schedule/TA/Room, mismatched Schedule-to-Candidate/TA, stale context, and multiple active Round 1 schedules; verify Online TA-only and Offline active Room requiredness; confirm required reasons with all submit/provider controls disabled; verify loading/empty/unauthorized/error states; and reconcile zero Candidate/Schedule writes, availability requests, Flow invocations, and Outlook/Teams invitations. Do not use real Candidate data or run lifecycle Playwright UAT.
+
 In the existing page in Power Apps Studio (not by replacing the exported `.msapp`), the owner must:
 
-1. Add Dataverse sources for Candidates, Interview Schedules, TA Directories, and Locations; add Availability Query only if the owner chooses the separate `os_sr_avchk` route.
-2. Set `App.OnStart` to clear prior state, validate `Param("recordId")` as a GUID, branch on the recognized `entityName`, and load the authorized Candidate or Schedule. The following is the bounded context-loading formula pattern using the verified primary-column display names; the owner must validate Studio-generated names and run OnStart after editing:
+1. Add the existing Dataverse tables Candidate (`os_sr_cand`), Interview Schedule (`os_sr_intv`), TA Directory (`os_sr_ta`), and Location (`os_sr_loc`). Add Availability Query (`os_sr_avq`) only if the owner chooses the separate `os_sr_avchk` route. The Studio-generated data-source aliases remain unresolved and must be recorded from the owner’s session.
+2. Put per-entry initialization on `Screen1.OnVisible`, not only `App.OnStart`; reset previous state and validate `Param("recordId")` and `Param("entityName")` before any read (see the Phase 2.1 handoff above). The following older bounded context-loading formula uses unverified Studio field/lookup names and is a reference only; the owner must validate those names and run the actual page in Studio before using it:
 
    ```powerfx
    Set(varContextError, Blank());

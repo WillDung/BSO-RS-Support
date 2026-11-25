@@ -2,7 +2,7 @@
 
 ## Status
 
-**Phase 2.1 checkpoint (2026-11-25): PARTIAL / fresh LIVE reconciliation BLOCKED.** The environment inventory matched the requested display name, but target-URL confirmation was unavailable. No target-specific LIVE reads, Studio edits, page/Console/Flow publication, availability calls, business-record reads/writes, or deployment were performed. The 2026-11-20 section below is the latest documented LIVE baseline, not a new verification. The local focused suites passed 31 tests for the Console preview and availability UI only; they do not accept the Custom Page. Keep the existing preview as fallback, keep the Candidate Console launcher unchanged, and do not activate availability or external booking. See [Current State](CURRENT_STATE.md#phase-21-candidate-context-integration-checkpoint-2026-11-25).
+**Phase 2.1 checkpoint (2026-11-25): PARTIAL / exact target and fresh read-only LIVE reconciliation VERIFIED; Studio integration BLOCKED.** PAC matched `https://org14938ec2.crm4.dynamics.com` to VN LMV IT and confirmed `srapp` plus unmanaged solution `os_sr_bso_rs_support` version `1.0.0.1`. The Console verifier returned MATCH across source/current/draft/published/served content for all three WebResources. The existing Custom Page is Published at app version `2026-11-19T06:43:16Z`; its exported binary matches the 2026-11-20 baseline. Target-scoped generated schema types confirm the Candidate, Schedule, TA, and Location identifiers listed in the handoff. No business rows were read, and no Studio edit, publication, provider call, business write, or deployment occurred. Keep the existing preview as fallback and keep the Candidate Console launcher, availability, and external booking disabled. Focused offline tests cover the Console preview and availability UI only; they do not accept the Custom Page. See [Current State](CURRENT_STATE.md#phase-21-candidate-context-integration-checkpoint-2026-11-25).
 
 **2026-11-20 filter layout follow-up deployed.** The filter bar keeps Year, Position, Source, and Assigned TA paired with their dropdowns in four, two, or one column depending on viewport width. Refresh is right-aligned below the filters. Existing filter bindings, reads, error handling, and KPI calculations are unchanged.
 
@@ -19,6 +19,23 @@ The owner should open Recruitment Dashboard, verify all six panels and the Year/
 ## Unified Booking Studio handoff (not deployed)
 
 **Phase 2 scope:** the Candidate Console context panel is independent of the Custom Page. It uses signed-in Dataverse reads to show the selected Candidate and matching Round 1 context; it does not launch the standalone page with parameters the page would ignore. Existing manual actions remain separate and available. Replace the interim panel with the contextual launcher only after the Studio changes and bridge contract pass the checks below.
+
+### Fresh LIVE target, version, and schema reconciliation (2026-11-25)
+
+This was read-only and ran only after the supplied URL matched the discovered VN LMV IT environment. PAC confirmed the `srapp` model-driven app and unmanaged `os_sr_bso_rs_support` solution (version `1.0.0.1`) in that environment.
+
+The existing scoped verifier returned **MATCH** for Candidate Console source/current/draft/published/served HTML, JavaScript, and CSS. Versions and hashes are unchanged from the table in the 2026-11-20 reconciliation below; no Console deployment was needed. The existing Custom Page `os_atsugground1availability_4d2f7` is Published with app version `2026-11-19T06:43:16Z`. Its 40,208-byte exported binary SHA-256 remains `eafb8df84c0adfeebac537119f57a3d932058948939d84161d75a514afb29d60`, so there is no page binary/version drift from the 2026-11-20 baseline. Its source still has no Candidate/Schedule `Param()` binding or Dataverse `DatabaseReferences`.
+
+PAC-generated types against the matched URL confirm these live logical identifiers and relationships:
+
+| Table | Primary ID | Verified context fields / lookups |
+|---|---|---|
+| Candidate `os_sr_cand` | `os_sr_candid` | `os_sr_cand_cnum`, `os_sr_cand_nm`, `os_sr_cand_eml`, `os_sr_cand_stat`, TA lookup `os_sr_cand_ta` to `os_sr_ta` |
+| Interview Schedule `os_sr_intv` | `os_sr_intvid` | Candidate `os_sr_intv_cand`, TA `os_sr_intv_ta`, Location `os_sr_intv_loc`, Round `os_sr_intv_rnd`, Start/End `os_sr_intv_strt` / `os_sr_intv_end`, status `os_sr_intv_stat`, result `os_sr_intv_res` |
+| TA Directory `os_sr_ta` | `os_sr_taid` | Name `os_sr_ta_nm`, Email `os_sr_ta_eml` |
+| Location `os_sr_loc` | `os_sr_locid` | Name `os_sr_loc_nm`, Room/Resource Email `os_sr_loc_rmeml` |
+
+This type-generation read confirms field/lookup/Choice identifiers, not field requiredness, Studio-generated data-source aliases, effective record-level access, or page behavior. No Candidate or Schedule business records were queried. Focused offline validation passed: `node --test .\tests\CandidateConsoleBookingContext.test.cjs .\tests\CandidateConsoleAvailability.test.cjs` (**31 passed**); those tests do not accept the Custom Page or prove LIVE authorization. The Console source still opens its safe booking-context preview; no navigation change was made.
 
 ### Fresh LIVE bridge and page reconciliation (2026-11-20)
 
@@ -67,7 +84,7 @@ The local solution metadata provides these exact Dataverse table and schema iden
 | TA Directory `os_sr_ta` | `os_sr_taid` | TA Name `os_sr_ta_nm`; TA Email `os_sr_ta_eml`; `statecode` |
 | Location `os_sr_loc` | `os_sr_locid` | Location Name `os_sr_loc_nm`; Room/Resource Email `os_sr_loc_rmeml`; `statecode` |
 
-These are repository schema identifiers, not a fresh 2026-11-25 LIVE metadata read. The exact Power Apps data-source aliases, generated Power Fx column identifiers, lookup dereference syntax, choice symbols, and new control names cannot be verified without the owner’s Studio session; they are **unresolved**. Do not copy a display-name formula or invent those identifiers as if tested.
+The 2026-11-25 target-scoped PAC type generation confirms that the listed primary IDs, context/display fields, lookups, and Choice fields exist with the shown logical names and lookup targets. It does not expose field requiredness or Studio-generated data-source aliases. The exact Power Apps data-source aliases, generated Power Fx column identifiers, lookup dereference syntax, choice symbols, and new control names still cannot be verified without the owner’s Studio session; they are **unresolved**. Do not copy a display-name formula or invent those identifiers as if tested.
 
 Initialize on every page entry via `Screen1.OnVisible`, not only `App.OnStart`. This exact Power Fx reset/parameter-validation block must run before record reads:
 

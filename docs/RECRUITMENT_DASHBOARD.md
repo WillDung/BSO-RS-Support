@@ -20,6 +20,8 @@ The owner should open Recruitment Dashboard, verify all six panels and the Year/
 
 **Phase 2 scope:** the Candidate Console context panel is independent of the Custom Page. It uses signed-in Dataverse reads to show the selected Candidate and matching Round 1 context; it does not launch the standalone page with parameters the page would ignore. Existing manual actions remain separate and available. Replace the interim panel with the contextual launcher only after the Studio changes and bridge contract pass the checks below.
 
+For the sequential owner-only Studio procedure, verified logical schema names, unresolved aliases/control identifiers, acceptance gates, and the post-acceptance navigation sketch, see [Phase 2.1B Studio Implementation Handoff](PHASE_2_1_STUDIO_IMPLEMENTATION.md).
+
 ### Fresh LIVE target, version, and schema reconciliation (2026-11-25)
 
 This was read-only and ran only after the supplied URL matched the discovered VN LMV IT environment. PAC confirmed the `srapp` model-driven app and unmanaged `os_sr_bso_rs_support` solution (version `1.0.0.1`) in that environment.
